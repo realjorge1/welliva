@@ -1,0 +1,35 @@
+{
+  "cli": {
+    "version": ">= 5.9.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://aisapqelfijpmqbpibqo.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFpc2FwcWVsZmlqcG1xYnBpYnFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzNjU2ODMsImV4cCI6MjA5OTk0MTY4M30.em8htUFOshpG3H-qp0yD62bXT01cZSH58WVmzD53gko"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://back-for-welliva.onrender.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://aisapqelfijpmqbpibqo.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFpc2FwcWVsZmlqcG1xYnBpYnFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzNjU2ODMsImV4cCI6MjA5OTk0MTY4M30.em8htUFOshpG3H-qp0yD62bXT01cZSH58WVmzD53gko"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://back-for-welliva.onrender.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://aisapqelfijpmqbpibqo.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFpc2FwcWVsZmlqcG1xYnBpYnFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzNjU2ODMsImV4cCI6MjA5OTk0MTY4M30.em8htUFOshpG3H-qp0yD62bXT01cZSH58WVmzD53gko"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

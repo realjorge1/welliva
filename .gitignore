@@ -9,6 +9,9 @@ dist/
 web-build/
 expo-env.d.ts
 
+# Phase D.4 — generated catalog JSON (built from diet_dictionary, uploaded to Storage)
+catalogs-dist/
+
 # Native
 .kotlin/
 *.orig.*
@@ -32,9 +35,14 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
 
 # typescript
 *.tsbuildinfo
+
+# Convex
+convex/_generated/
+.convex/
 
 app-example
 

@@ -5,6 +5,8 @@ const expoConfig = require('eslint-config-expo/flat');
 module.exports = defineConfig([
   expoConfig,
   {
-    ignores: ['dist/*'],
+    // `features/` is orphaned reference code from another app (Athemi) — it
+    // imports packages this project doesn't have and nothing here imports it.
+    ignores: ['dist/*', 'features/**'],
   },
 ]);
