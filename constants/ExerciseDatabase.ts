@@ -9,6 +9,27 @@
 import { Difficulty, ExerciseCategory } from "../models/exercise";
 import { MovementPattern } from "../models/workout";
 
+/*
+ * Cold-start probe (dev only). This module is ~190 KB of object literals; it
+ * must NOT be evaluated until a fitness screen actually needs it. Nine modules
+ * import it statically, so the deferral is done by `inlineRequires`
+ * (metro.config.js), not by any single `await import()`.
+ *
+ * How to read it: cold-start the app and land on Home. This line must NOT log.
+ * Navigate to a fitness screen and it should log then. If it fires during
+ * startup, inlineRequires isn't reaching this module and the 190 KB is back on
+ * the boot path. Stripped entirely from release builds.
+ */
+// `typeof` guard, not a bare `__DEV__`: this is a pure data module, so it is
+// also imported by the Node-based vitest suites and by build scripts, where the
+// React Native `__DEV__` global does not exist.
+if (typeof __DEV__ !== "undefined" && __DEV__) {
+  const start = (globalThis as { __APP_START__?: number }).__APP_START__;
+  console.log(
+    `[perf] ExerciseDatabase evaluated${start ? ` +${Date.now() - start}ms after app start` : ""}`,
+  );
+}
+
 export interface ExerciseDBEntry {
   id: string;
   name: string;

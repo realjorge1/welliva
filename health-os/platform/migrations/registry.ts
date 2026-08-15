@@ -6,9 +6,10 @@
  */
 import { migration001 } from "./001-backfill-timeline";
 import { migration002 } from "./002-seed-summaries";
+import { migration003 } from "./003-activity-level-scale";
 import type { Migration } from "./runner";
 
-export const REGISTRY: Migration[] = [migration001, migration002];
+export const REGISTRY: Migration[] = [migration001, migration002, migration003];
 
 export const LATEST_VERSION = REGISTRY.reduce(
   (max, m) => Math.max(max, m.version),

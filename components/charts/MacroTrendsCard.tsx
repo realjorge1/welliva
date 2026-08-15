@@ -40,6 +40,12 @@ export interface MacroRangeData {
   fullLabels: string[];
   /** macroKey → absolute values aligned to `labels` (null = untracked day). */
   values: Record<string, (number | null)[]>;
+  /**
+   * Beyond the viewer's tier window. Same contract as `TrendSeries.locked`:
+   * the tab still renders, can't become active, and routes taps to
+   * `onLockedRangePress`.
+   */
+  locked?: boolean;
 }
 
 export interface MacroTrendsCardProps {
@@ -48,6 +54,8 @@ export interface MacroTrendsCardProps {
   initialRangeKey?: string;
   chartHeight?: number;
   emptyHint?: string;
+  /** Tapped a range marked `locked` — typically opens the paywall. */
+  onLockedRangePress?: (key: string) => void;
 }
 
 function fmt(v: number): string {
@@ -68,13 +76,17 @@ export function MacroTrendsCard({
   initialRangeKey,
   chartHeight = 190,
   emptyHint = "Log a few days of meals and your macro trends appear here.",
+  onLockedRangePress,
 }: MacroTrendsCardProps) {
   const { colors } = useColors();
 
+  // Open on the first range the viewer can actually see — defaulting to a
+  // locked tab would render an empty chart and read as broken, not as an upsell.
+  const firstOpen = ranges.find((r) => !r.locked) ?? ranges[0];
   const [rangeKey, setRangeKey] = useState(
-    initialRangeKey ?? ranges[0]?.key ?? "",
+    initialRangeKey ?? firstOpen?.key ?? "",
   );
-  const range = ranges.find((r) => r.key === rangeKey) ?? ranges[0];
+  const range = ranges.find((r) => r.key === rangeKey && !r.locked) ?? firstOpen;
 
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [activeIdx, setActiveIdx] = useState(0);
@@ -141,29 +153,47 @@ export function MacroTrendsCard({
         {ranges.length > 1 && (
           <View style={styles.tabs}>
             {ranges.map((r) => {
-              const active = r.key === rangeKey;
+              const active = r.key === range?.key;
               return (
                 <Pressable
                   key={r.key}
                   onPress={() => {
+                    if (r.locked) {
+                      onLockedRangePress?.(r.key);
+                      return;
+                    }
                     setRangeKey(r.key);
                     setScrubbing(false);
                   }}
                   hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    r.locked ? `${r.label} — requires Welliva Pro` : r.label
+                  }
+                  accessibilityState={{ selected: active, disabled: r.locked }}
                   style={[
                     styles.tab,
                     { backgroundColor: active ? alpha(colors.primary, 0.16) : "transparent" },
                   ]}
                 >
-                  <AppText
-                    variant="caption"
-                    style={{
-                      fontWeight: "700",
-                      color: active ? colors.primary : colors.textTertiary,
-                    }}
-                  >
-                    {r.label}
-                  </AppText>
+                  <View style={styles.tabInner}>
+                    {r.locked && (
+                      <Ionicons name="lock-closed" size={9} color={colors.gold} />
+                    )}
+                    <AppText
+                      variant="caption"
+                      style={{
+                        fontWeight: "700",
+                        color: r.locked
+                          ? colors.gold
+                          : active
+                            ? colors.primary
+                            : colors.textTertiary,
+                      }}
+                    >
+                      {r.label}
+                    </AppText>
+                  </View>
                 </Pressable>
               );
             })}
@@ -273,6 +303,7 @@ const styles = StyleSheet.create({
   },
   tabs: { flexDirection: "row", gap: Spacing.xs, alignItems: "center" },
   tab: { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: Radius.pill },
+  tabInner: { flexDirection: "row", alignItems: "center", gap: 3 },
   chart: { marginTop: Spacing.xs },
   axis: {
     flexDirection: "row",

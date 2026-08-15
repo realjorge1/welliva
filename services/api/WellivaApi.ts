@@ -10,11 +10,15 @@
  * on-device deterministic engines.
  */
 import { supabase } from "@/lib/supabase";
+// Streaming-capable fetch. RN's global fetch polyfill exposes no `response.body`,
+// so this is the only way to render the coach's reply as it arrives.
+import { fetch as expoFetch } from "expo/fetch";
 import type { DaySchedule } from "@/models/diet";
 import type { NutritionTargets } from "@/models/nutrition";
 import type { UserBio } from "@/models/user";
 import type { GeneratedWorkoutPlan } from "@/models/workout";
 import { API_BASE_URL, isApiConfigured } from "./config";
+import { warmBackend } from "./warmup";
 
 export interface DietGenerateResponse {
   schedule: DaySchedule;
@@ -85,10 +89,33 @@ async function send(
   return res;
 }
 
-async function post<T>(path: string, body: unknown, timeoutMs = 30000): Promise<T> {
+/**
+ * Default request timeout.
+ *
+ * This was 30s, which collided with the backend's 30-50s cold start: the first
+ * call of a session timed out almost exactly when the instance finished waking.
+ * The primary fix is warming on foreground (services/api/warmup.ts) plus an
+ * always-on tier; this ceiling is the backstop for the case where a user beats
+ * the warm-up into the coach.
+ *
+ * 60s is only defensible because every caller degrades to a deterministic
+ * on-device engine and none of them blocks a screen on this promise. Do NOT
+ * raise it for a path that leaves a user watching a silent spinner — a fast
+ * failure with a fallback beats a long indeterminate wait.
+ */
+const DEFAULT_TIMEOUT_MS = 60_000;
+
+async function post<T>(
+  path: string,
+  body: unknown,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    // Cheap when already warm (memoized + TTL'd); on a cold instance this is
+    // what turns a guaranteed timeout into a slow success.
+    void warmBackend();
     let res = await send(path, body, await accessToken(), controller.signal);
 
     // A 401 after a long backgrounding usually means the cached token aged out
@@ -117,9 +144,129 @@ async function post<T>(path: string, body: unknown, timeoutMs = 30000): Promise<
   }
 }
 
+// ── Streaming: the Gozlin agent turn ───────────────────────────────
+
+/**
+ * One frame of the NDJSON coach-turn stream. `done` carries the FULL content
+ * array (text + thinking + tool_use blocks), because the agent loop has to echo
+ * those back verbatim on its next iteration.
+ */
+type CoachTurnFrame =
+  | { type: "delta"; text: string }
+  | {
+      type: "done";
+      content: unknown[];
+      stop_reason: string | null;
+      model?: string;
+      usage?: Record<string, number>;
+    }
+  | { type: "error"; message: string };
+
+export interface CoachTurnResult {
+  content: unknown[];
+  stop_reason: string | null;
+  model?: string;
+  usage?: Record<string, number>;
+}
+
+/**
+ * POST + consume an NDJSON stream.
+ *
+ * `expo/fetch` is used rather than the global fetch because React Native's
+ * whatwg-fetch polyfill has no `response.body` — without it there is no way to
+ * read bytes as they arrive, and the whole turn would land in one lump after
+ * several seconds of dead air. If a runtime still hands back a body-less
+ * response we degrade to buffering the whole payload rather than failing.
+ */
+async function postStream(
+  path: string,
+  body: unknown,
+  opts: { onDelta?: (text: string) => void; signal?: AbortSignal; timeoutMs?: number },
+): Promise<CoachTurnResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 60000);
+  const onAbort = () => controller.abort();
+  opts.signal?.addEventListener("abort", onAbort);
+
+  let done: CoachTurnResult | null = null;
+  let failure: string | null = null;
+
+  const handleLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let frame: CoachTurnFrame;
+    try {
+      frame = JSON.parse(trimmed) as CoachTurnFrame;
+    } catch {
+      return; // a partial or malformed line is not worth failing the turn over
+    }
+    if (frame.type === "delta") opts.onDelta?.(frame.text);
+    else if (frame.type === "done") done = frame;
+    else if (frame.type === "error") failure = frame.message;
+  };
+
+  try {
+    const token = await accessToken();
+    const res = await expoFetch(`${API_BASE_URL}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) throw new Error(`API error ${res.status}`);
+
+    if (res.body) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buffer.indexOf("\n")) >= 0) {
+          handleLine(buffer.slice(0, nl));
+          buffer = buffer.slice(nl + 1);
+        }
+      }
+      handleLine(buffer);
+    } else {
+      // No streaming support in this runtime — still correct, just not live.
+      for (const line of (await res.text()).split("\n")) handleLine(line);
+    }
+
+    if (failure) throw new Error(failure);
+    if (!done) throw new Error("Coach stream ended without a result");
+    return done;
+  } finally {
+    clearTimeout(timer);
+    opts.signal?.removeEventListener("abort", onAbort);
+  }
+}
+
 export const WellivaApi = {
   /** Whether a backend URL is configured (EXPO_PUBLIC_API_URL). */
   isConfigured: isApiConfigured,
+
+  /**
+   * One turn of the Gozlin agent loop. The loop lives on the device
+   * (services/gozlin/agent) — this only carries messages up and streams the
+   * model's reply back down.
+   *
+   * Timeout is generous because a turn legitimately includes thinking plus
+   * possibly several tool rounds; the caller aborts via `signal` when the user
+   * leaves the screen.
+   */
+  coachTurn(args: {
+    messages: unknown[];
+    promptVersion?: string;
+    onDelta?: (text: string) => void;
+    signal?: AbortSignal;
+  }): Promise<CoachTurnResult> {
+    const { messages, promptVersion, ...opts } = args;
+    return postStream("/v1/coach/turn", { messages, promptVersion }, { ...opts, timeoutMs: 60000 });
+  },
 
   /** Generate one day's AI meal plan tailored to the user. */
   generateDiet(args: {

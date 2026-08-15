@@ -33,6 +33,13 @@ export interface ButtonProps {
   disabled?: boolean;
   loading?: boolean;
   style?: StyleProp<ViewStyle>;
+  /**
+   * Overrides the spoken name. Only needed when the visible `label` isn't the
+   * whole story ("Next" → "Next, step 3 of 5"); otherwise `label` is used.
+   */
+  accessibilityLabel?: string;
+  /** What happens on activation, when it isn't obvious from the label. */
+  accessibilityHint?: string;
 }
 
 const SIZES: Record<Size, { h: number; px: number; font: number; icon: number }> = {
@@ -52,6 +59,8 @@ export function Button({
   disabled = false,
   loading = false,
   style,
+  accessibilityLabel,
+  accessibilityHint,
 }: ButtonProps) {
   const { colors } = useColors();
   const s = SIZES[size];
@@ -110,6 +119,15 @@ export function Button({
         onPressIn={() => animate(0.97)}
         onPressOut={() => animate(1)}
         disabled={disabled || loading}
+        // Every Button gets a spoken name for free by falling back to the
+        // visible label — the single highest-coverage a11y change in the app,
+        // since most touchables route through here. `busy` matters because a
+        // loading button swaps its text for a spinner and would otherwise go
+        // silent mid-action.
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel ?? label}
+        accessibilityHint={accessibilityHint}
+        accessibilityState={{ disabled: disabled || loading, busy: loading }}
       >
         {variant === "primary" || variant === "danger" ? (
           <LinearGradient

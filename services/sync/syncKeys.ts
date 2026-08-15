@@ -37,6 +37,8 @@ export const WATERMARKS_KEY = "@welliva_sync_watermarks";
 export const OUTBOX_KEY = "@welliva_sync_outbox";
 /** Signatures of the value we last pushed per key — powers the change-detecting sweep. */
 export const PUSHED_KEY = "@welliva_sync_pushed";
+/** ISO time this DEVICE last completed a push with an empty queue. */
+export const LAST_SYNC_KEY = "@welliva_sync_last_at";
 
 /**
  * Device-scoped keys that must NEVER leave the device. Grouped by why:
@@ -68,10 +70,13 @@ export const DEVICE_LOCAL_KEYS: readonly string[] = [
   // sync engine bookkeeping
   "@welliva_profile_synced_at",
   "@welliva_sync_telemetry",
+  // THIS device's caught-render-crash black box (services/telemetry/CrashLog)
+  "@welliva_crash_log",
   ACTIVE_USER_KEY,
   WATERMARKS_KEY,
   OUTBOX_KEY,
   PUSHED_KEY,
+  LAST_SYNC_KEY,
 ];
 
 /** Prefix-matched device-local families (versioned caches, etc.). */

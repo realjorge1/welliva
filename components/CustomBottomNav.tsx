@@ -162,9 +162,18 @@ const styles = StyleSheet.create({
   },
 });
 
+/**
+ * `id` IS THE ROUTE NAME under app/(tabs)/ — not a private nav key.
+ *
+ * These used to be home | meal | fitness | more while the route files were
+ * index | diet | exercise | more, and a layout translated between them. One
+ * vocabulary now: the id is what `navigation.navigate(id)` receives and what
+ * React Navigation reports back as the active route, so the two can't drift.
+ * `label` carries the display string — which is why "index" reads "Home".
+ */
 export const NAV_ITEMS: NavItem[] = [
-  { id: "home", icon: "home-outline", activeIcon: "home", label: "Home" },
-  { id: "meal", icon: "restaurant-outline", activeIcon: "restaurant", label: "Diet" },
-  { id: "fitness", icon: "barbell-outline", activeIcon: "barbell", label: "Fitness" },
+  { id: "index", icon: "home-outline", activeIcon: "home", label: "Home" },
+  { id: "diet", icon: "restaurant-outline", activeIcon: "restaurant", label: "Diet" },
+  { id: "exercise", icon: "barbell-outline", activeIcon: "barbell", label: "Fitness" },
   { id: "more", icon: "ellipsis-horizontal-outline", activeIcon: "ellipsis-horizontal", label: "More" },
 ];

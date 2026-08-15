@@ -24,8 +24,10 @@ import {
   useColors,
 } from "@/components/ui";
 import { Confetti } from "@/components/Confetti";
+import { ProLockCard } from "@/components/billing";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useSystem } from "@/contexts/AppContext";
+import { useBilling } from "@/contexts/BillingContext";
 import { recapShareText, recapSignoff } from "@/services/MonthlyRecapService";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
@@ -35,12 +37,21 @@ import { Pressable, Share, StyleSheet, View } from "react-native";
 export default function RecapScreen() {
   const { colors } = useColors();
   const { period } = useLocalSearchParams<{ period: string }>();
-  const { buildRecap, markRecapSeen } = useSystem();
+  const { buildRecap, markRecapSeen, currentDate } = useSystem();
+  const { hasProAccess } = useBilling();
 
   const periodKey = period ?? "";
   const recap = useMemo(() => buildRecap(periodKey), [buildRecap, periodKey]);
 
-  // Opening the recap counts as "seen" — clears the Profile banner.
+  // THE CURRENT MONTH IS ALWAYS FREE — it's the re-engagement hook, and a recap
+  // nobody is allowed to read can't bring anyone back. Only the ARCHIVE (any
+  // month strictly before this one) is Pro. Period keys are `YYYY-MM`, which
+  // compares correctly as a string.
+  const archiveLocked = !hasProAccess && periodKey < currentDate.slice(0, 7);
+
+  // Opening the recap counts as "seen" — clears the Profile banner. Still marked
+  // when locked: they were shown the month, and leaving the banner up would keep
+  // pointing them at something they've already been told they can't open.
   useEffect(() => {
     if (periodKey) markRecapSeen(periodKey);
   }, [periodKey, markRecapSeen]);
@@ -62,6 +73,18 @@ export default function RecapScreen() {
       </Pressable>
     </View>
   );
+
+  if (archiveLocked) {
+    return (
+      <Screen header={header}>
+        <ProLockCard
+          lock="recap-archive"
+          title={`${recap.label} is in your archive`}
+          blurb="This month's recap is always free. Pro keeps every past month, so you can look back on the whole year."
+        />
+      </Screen>
+    );
+  }
 
   if (!recap.hasActivity) {
     return (

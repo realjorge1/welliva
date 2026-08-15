@@ -56,6 +56,7 @@ import {
 } from "../services/intelligence";
 
 import { calculateNutritionTargets } from "../services/NutritionService";
+import { reconcileTargetsVersion } from "../services/nutrition/TargetsVersion";
 import {
   archiveWaterDay,
   KEYS,
@@ -705,7 +706,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       if (bio) {
         setUserBio(bio);
-        setNutritionTargets(calculateNutritionTargets(bio));
+        const bootTargets = calculateNutritionTargets(bio);
+        setNutritionTargets(bootTargets);
+        // A saved bio means this account has seen a target before — so if the
+        // algorithm that produced it has since been corrected, stage the
+        // explanation rather than letting the number change by itself.
+        // Fire-and-forget: it must never delay the boot path.
+        void reconcileTargetsVersion(bio, bootTargets, /* hasHistory */ true);
       }
       if (goals) setUserGoals(goals);
       if (plan) setPlanState(plan);

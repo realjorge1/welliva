@@ -10,7 +10,9 @@ import { Screen } from "@/components/ui/Screen";
 import { AppText } from "@/components/ui/Text";
 import { useColors } from "@/components/ui/useColors";
 import { Radius, Spacing, alpha } from "@/constants/theme";
+import { useBilling } from "@/contexts/BillingContext";
 import { useHabits } from "@/contexts/HabitsContext";
+import { canCreateHabit } from "@/services/billing";
 import { ensureReminderPermission } from "@/services/HabitService";
 import { DAY_LETTER, EVERY_DAY, type HabitReminder } from "@/models/habit";
 import * as Haptics from "@/utils/haptics";
@@ -30,7 +32,8 @@ export default function NewHabitScreen() {
   const router = useRouter();
   const { colors } = useColors();
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const { getView, createHabit, updateHabit, deleteHabit } = useHabits();
+  const { getView, views, createHabit, updateHabit, deleteHabit } = useHabits();
+  const { hasProAccess, openPaywall } = useBilling();
 
   const editing = useMemo(
     () => (id ? getView(String(id))?.habit : undefined),
@@ -38,6 +41,16 @@ export default function NewHabitScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+
+  // Creation is capped on the free tier; EDITING an existing habit never is —
+  // a user who subscribed, made five habits and then lapsed must still be able
+  // to rename and manage what they already have.
+  const canSave =
+    Boolean(editing) ||
+    canCreateHabit(
+      views.filter((v) => v.habit.source === "manual").length,
+      hasProAccess,
+    );
 
   const [name, setName] = useState(editing?.name ?? "");
   const [icon, setIcon] = useState<string>(editing?.icon ?? HABIT_ICONS[0]);
@@ -77,6 +90,10 @@ export default function NewHabitScreen() {
   const save = async () => {
     const trimmed = name.trim();
     if (!trimmed || saving) return;
+    if (!canSave) {
+      openPaywall("habits");
+      return;
+    }
     setSaving(true);
     try {
       if (editing) {

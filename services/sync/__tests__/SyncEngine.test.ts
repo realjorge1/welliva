@@ -229,3 +229,86 @@ describe("startAutoSync — the write observer", () => {
     }
   });
 });
+
+/**
+ * The two-device data-loss scenario, end to end through the real reconcile.
+ * mergeStrategies.test.ts proves the merge function; this proves the ENGINE
+ * actually calls it, and that the union then travels back to the cloud.
+ */
+describe("reconcileOnLogin — append-only logs merge instead of overwriting", () => {
+  const FOOD_LOG = "@welliva_food_log";
+
+  it("keeps both devices' entries for the same day", async () => {
+    // This phone logged breakfast…
+    await AsyncStorage.setItem(
+      FOOD_LOG,
+      JSON.stringify({
+        "2026-07-20": [{ id: "phone-breakfast", loggedAt: "2026-07-20T07:30:00Z" }],
+      }),
+    );
+    // …while the tablet had already pushed lunch for the same day.
+    fake.__seed(
+      USER,
+      FOOD_LOG,
+      JSON.stringify({
+        "2026-07-20": [{ id: "tablet-lunch", loggedAt: "2026-07-20T12:30:00Z" }],
+      }),
+    );
+
+    await reconcileOnLogin(USER);
+
+    const local = JSON.parse((await AsyncStorage.getItem(FOOD_LOG))!);
+    const ids = local["2026-07-20"].map((e: { id: string }) => e.id).sort();
+    expect(ids).toEqual(["phone-breakfast", "tablet-lunch"]);
+
+    // …and the union went back up, so the tablet learns about breakfast too.
+    const cloud = JSON.parse(cloudDoc(FOOD_LOG)!.doc as string);
+    expect(cloud["2026-07-20"]).toHaveLength(2);
+  });
+
+  it("adopts a remote day this device has never seen", async () => {
+    await AsyncStorage.setItem(
+      FOOD_LOG,
+      JSON.stringify({ "2026-07-20": [{ id: "local", loggedAt: "1" }] }),
+    );
+    fake.__seed(
+      USER,
+      FOOD_LOG,
+      JSON.stringify({ "2026-07-19": [{ id: "remote", loggedAt: "0" }] }),
+    );
+
+    await reconcileOnLogin(USER);
+
+    const local = JSON.parse((await AsyncStorage.getItem(FOOD_LOG))!);
+    expect(Object.keys(local).sort()).toEqual(["2026-07-19", "2026-07-20"]);
+  });
+
+  it("still uses last-write-wins for single-valued documents", async () => {
+    // A merged bio would be nonsense — LWW is correct here and must survive.
+    await AsyncStorage.setItem("@welliva_user_bio", JSON.stringify({ age: 30 }));
+    fake.__seed(USER, "@welliva_user_bio", JSON.stringify({ age: 31 }));
+
+    await reconcileOnLogin(USER);
+
+    expect(await AsyncStorage.getItem("@welliva_user_bio")).toBe(
+      JSON.stringify({ age: 31 }),
+    );
+  });
+
+  it("is idempotent — reconciling twice changes nothing", async () => {
+    await AsyncStorage.setItem(
+      FOOD_LOG,
+      JSON.stringify({ "2026-07-20": [{ id: "a", loggedAt: "1" }] }),
+    );
+    fake.__seed(
+      USER,
+      FOOD_LOG,
+      JSON.stringify({ "2026-07-20": [{ id: "b", loggedAt: "2" }] }),
+    );
+
+    await reconcileOnLogin(USER);
+    const first = await AsyncStorage.getItem(FOOD_LOG);
+    await reconcileOnLogin(USER);
+    expect(await AsyncStorage.getItem(FOOD_LOG)).toBe(first);
+  });
+});

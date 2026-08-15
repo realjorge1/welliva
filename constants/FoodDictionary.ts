@@ -8,7 +8,8 @@
  * catalog and lets users log a single food (as a snack) into today's plan.
  *
  * Source of truth: /diet_dictionary (repo root) → parsed by
- * scripts/build-diet-dictionary.mjs into DietLibraryGenerated.FOOD_DICTIONARY.
+ * scripts/build-diet-dictionary.mjs into catalogs-dist/food_dictionary.json,
+ * which is uploaded to Supabase Storage and fetched on device at runtime.
  * This module owns the FoodItem type and the query helpers over that data.
  */
 
@@ -35,11 +36,11 @@ export interface FoodItem {
 /**
  * The full catalog (generated from /diet_dictionary).
  *
- * LAZY: the ~1 MB generated source is dynamic-imported off the cold-start path
- * (Phase D — bundle trim). This array starts EMPTY and is filled in place by
- * {@link ensureFoodDictionaryLoaded}; on web that keeps the generated module out
- * of the initial chunk, and on native it defers its evaluation. Call the loader
- * (and re-render / await it) before relying on the catalog's contents. The query
+ * REMOTE + LAZY: the catalog is fetched from Supabase Storage and cached on
+ * device (Phase D.4 — bundle trim), so none of it ships in the JS bundle. This
+ * array starts EMPTY and is filled in place by {@link ensureFoodDictionaryLoaded},
+ * with {@link FOOD_SEED} as the offline fallback. Call the loader (and
+ * re-render / await it) before relying on the catalog's contents. The query
  * helpers below read the live array, so they return complete data once loaded.
  */
 export const FOOD_DICTIONARY: FoodItem[] = [];

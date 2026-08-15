@@ -22,8 +22,10 @@ import {
   type CheckinPayload,
   type WeighInPayload,
 } from "@/components/gozlin";
+import { DisclaimerNote } from "@/components/legal";
 import { AmbientCanvas, AppText } from "@/components/ui";
 import { useColors } from "@/components/ui/useColors";
+import { COACH_DISCLAIMER } from "@/constants/legal";
 import { Radius, Spacing } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "@/utils/haptics";
@@ -51,6 +53,9 @@ export default function GozlinScreen() {
     messages,
     suggestions,
     isThinking,
+    activity,
+    pendingConfirm,
+    respondToConfirm,
     motivation,
     send,
     resetConversation,
@@ -152,6 +157,30 @@ export default function GozlinScreen() {
     [todayCheckin, resetConversation, toast],
   );
 
+  /**
+   * The write-tool gate. Gozlin can log a food or save a fact about you, but
+   * never silently — the tool blocks on this sheet and takes "no" for an
+   * answer. Dismissing counts as declining, so there's no way to end up with
+   * a mutation the user didn't actively approve.
+   */
+  const confirmOptions = useMemo<ActionSheetOption[]>(
+    () => [
+      {
+        key: "confirm-tool",
+        label: "Yes, go ahead",
+        icon: "checkmark-circle-outline",
+        onPress: () => respondToConfirm(true),
+      },
+      {
+        key: "decline-tool",
+        label: "No thanks",
+        icon: "close-circle-outline",
+        onPress: () => respondToConfirm(false),
+      },
+    ],
+    [respondToConfirm],
+  );
+
   const forgetOptions = useMemo<ActionSheetOption[]>(
     () => [
       {
@@ -174,11 +203,15 @@ export default function GozlinScreen() {
     setMenuOpen(true);
   }, []);
 
-  const statusLine = isThinking
-    ? "Typing…"
-    : motivation
-      ? `For ${motivation}`
-      : twin.identitySummary || "Your AI coach";
+  // Naming the work turns the agent loop's latency into a trust signal — the
+  // user watches the coach dig through their data instead of staring at dots.
+  const statusLine = activity
+    ? activity
+    : isThinking
+      ? "Typing…"
+      : motivation
+        ? `For ${motivation}`
+        : twin.identitySummary || "Your AI coach";
 
   const canSend = !!input.trim() && !isThinking;
 
@@ -237,7 +270,11 @@ export default function GozlinScreen() {
         <GozlinSuggestionBar suggestions={suggestions} onPick={onSend} disabled={isThinking} />
 
         {/* ── Composer ── */}
-        <View style={[styles.composer, { borderTopColor: colors.divider, backgroundColor: colors.background }]}>
+        <View style={[styles.composerWrap, { borderTopColor: colors.divider, backgroundColor: colors.background }]}>
+        {/* Generative output, health topics: the standing reminder lives with
+            the input, not buried in Settings. Taps through to the disclaimer. */}
+        <DisclaimerNote text={COACH_DISCLAIMER} style={styles.coachDisclaimer} />
+        <View style={styles.composer}>
           <View
             style={[
               styles.inputWrap,
@@ -279,6 +316,7 @@ export default function GozlinScreen() {
             </LinearGradient>
           </Pressable>
         </View>
+        </View>
       </KeyboardAvoidingView>
 
       <GozlinActionSheet
@@ -287,6 +325,16 @@ export default function GozlinScreen() {
         subtitle="What would you like to do?"
         options={menuOptions}
         onClose={() => setMenuOpen(false)}
+      />
+
+      <GozlinActionSheet
+        visible={!!pendingConfirm}
+        title={pendingConfirm?.summary ?? ""}
+        subtitle="Gozlin never changes your data without asking."
+        options={confirmOptions}
+        // Dismissing is a decline, not a no-op — otherwise the tool waits
+        // forever on a sheet that's no longer on screen.
+        onClose={() => respondToConfirm(false)}
       />
 
       <GozlinActionSheet
@@ -402,14 +450,20 @@ const styles = StyleSheet.create({
   },
   dot: { width: 7, height: 7, borderRadius: 4 },
 
+  /** The composer's chrome: hairline top rule, background, bottom inset. */
+  composerWrap: {
+    paddingHorizontal: Spacing.screen,
+    paddingTop: Spacing.xs,
+    paddingBottom: Spacing.md,
+    borderTopWidth: 1,
+  },
+  coachDisclaimer: { paddingVertical: 4 },
+  /** The input row itself. */
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: Spacing.sm,
-    paddingHorizontal: Spacing.screen,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.md,
-    borderTopWidth: 1,
+    paddingTop: Spacing.xs,
   },
   inputWrap: {
     flex: 1,

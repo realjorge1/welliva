@@ -20,6 +20,7 @@ import {
     WeekSchedule,
 } from "../models/diet";
 import { KEYS } from "./OfflineStorage";
+import { pruneDatedArray, RETENTION_DAYS } from "./sync/retention";
 
 // Storage keys — sourced from the central KEYS registry (single source of truth).
 const STORAGE_KEYS = {
@@ -635,10 +636,15 @@ export async function processDayEnd(date: string): Promise<void> {
     // Remove existing entry for this date — recomputing on back-log replaces it.
     const filtered = history.filter((h) => h.date !== date);
     filtered.unshift(historyEntry);
-    await AsyncStorage.setItem(
-      STORAGE_KEYS.DIET_HISTORY,
-      JSON.stringify(filtered),
+    // Bound it. This document is re-uploaded in full on every day-close, and
+    // grew forever — 400 days keeps every trend chart whole while anything
+    // older survives as a compacted health-os day summary.
+    const bounded = await pruneDatedArray(
+      filtered as unknown as Record<string, unknown>[],
+      "date",
+      RETENTION_DAYS.DAILY_HISTORY,
     );
+    await AsyncStorage.setItem(STORAGE_KEYS.DIET_HISTORY, JSON.stringify(bounded));
     // NOTE: the schedule for `date` is intentionally left in place so the user
     // can still back-log it. purgeExpiredSchedules removes it once it ages out.
   });

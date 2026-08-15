@@ -7,11 +7,26 @@ import type { Equipment } from "./workout";
 
 export type Sex = "male" | "female";
 
+/**
+ * The full five-tier Mifflin-St Jeor activity scale.
+ *
+ * This used to stop at four tiers, with `very_active` carrying 1.725 ("hard
+ * exercise 6-7 days/week"). That left a genuinely extra-active user — a physical
+ * job PLUS daily training — capped at 1.725 and under-prescribed by roughly 10%
+ * of TDEE (250-350 kcal/day for a typical male), which matters most for the
+ * athletic_performance goal. The fifth tier closes that gap.
+ *
+ * The rename is deliberate: `active` now holds the 1.725 that `very_active` used
+ * to, and `very_active` is the new 1.9 top tier. Migration 003 rewrites stored
+ * `very_active` → `active` so no existing user's calorie target moves. Do not
+ * reorder or re-label these without a matching migration.
+ */
 export type ActivityLevel =
   | "sedentary" // Little/no exercise
   | "light" // Light exercise 1-3 days/week
   | "moderate" // Moderate exercise 3-5 days/week
-  | "very_active"; // Hard exercise 6-7 days/week
+  | "active" // Hard exercise 6-7 days/week
+  | "very_active"; // Physical job AND daily training ("extra active")
 
 export type PrimaryGoal =
   | "lose_weight"
@@ -253,11 +268,18 @@ export const DEFAULT_USER_BIO: Partial<UserBio> = {
 };
 
 /**
- * Activity level multipliers for calorie calculations
+ * Activity level multipliers for calorie calculations (Mifflin-St Jeor).
+ *
+ * Read alongside {@link ActivityLevel}: `active` is the old `very_active` value,
+ * and `very_active` is the new "extra active" tier. Callers must still index
+ * defensively (`?? ACTIVITY_MULTIPLIERS.moderate`) — a value can arrive from
+ * remote sync or a hand-edited row that this union doesn't know about, and an
+ * undefined multiplier silently produces NaN calories.
  */
 export const ACTIVITY_MULTIPLIERS: Record<ActivityLevel, number> = {
   sedentary: 1.2,
   light: 1.375,
   moderate: 1.55,
-  very_active: 1.725,
+  active: 1.725,
+  very_active: 1.9,
 };

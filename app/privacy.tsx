@@ -11,6 +11,7 @@
  */
 import { AppText, Card, IconBadge, Screen, useColors } from "@/components/ui";
 import { useConsent, type ConsentRow } from "@/components/privacy/useConsent";
+import { LEGAL_DOCS, LEGAL_DOC_ORDER } from "@/constants/legal";
 import {
   useNotificationSettings,
   type UseNotificationSettings,
@@ -93,6 +94,40 @@ export default function PrivacyScreen() {
       <ConsentGroupCard title="Senses" rows={integrations} onToggle={c.toggle} />
       <NotificationsCard notif={notif} />
       <ConsentGroupCard title="Not collected yet" rows={future} onToggle={c.toggle} />
+
+      {/* This screen is the CONTROLS; the policy is the promise. Both matter,
+          and the stores require the second one to be reachable in-app. */}
+      <Card style={styles.block} padding="none">
+        {LEGAL_DOC_ORDER.map((id, i) => {
+          const doc = LEGAL_DOCS[id];
+          return (
+            <Pressable
+              key={id}
+              onPress={() => router.push(`/legal/${id}` as never)}
+              style={[
+                styles.docRow,
+                i > 0 && {
+                  borderTopWidth: StyleSheet.hairlineWidth,
+                  borderTopColor: alpha(colors.text, 0.08),
+                },
+              ]}
+            >
+              <IconBadge
+                name={doc.icon as never}
+                tone={id === "disclaimer" ? colors.warning : colors.primary}
+                size={38}
+              />
+              <View style={styles.flex}>
+                <AppText variant="callout">{doc.title}</AppText>
+                <AppText variant="caption" color="tertiary" style={styles.consentBlurb}>
+                  {doc.summary}
+                </AppText>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+            </Pressable>
+          );
+        })}
+      </Card>
 
       <AppText variant="caption" color="tertiary" align="center" style={styles.footnote}>
         Some senses need the full app build to grant device permission. Until then they stay
@@ -242,6 +277,7 @@ const styles = StyleSheet.create({
   linkLabel: { fontWeight: "700" },
   consentRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md, paddingVertical: Spacing.sm },
   consentBlurb: { marginTop: 2 },
+  docRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md, padding: Spacing.lg },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: Spacing.xs },
   prefRow: {
     flexDirection: "row",

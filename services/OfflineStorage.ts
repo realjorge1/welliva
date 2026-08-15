@@ -95,6 +95,10 @@ export const KEYS = {
   TRACKING_MODE: "@welliva_tracking_mode",
   /** User overrides for daily nutrition targets, when they set their own. */
   CUSTOM_TARGETS: "@welliva_custom_targets",
+
+  // --- Legal -----------------------------------------------------------------
+  /** Which legal version this account accepted (services/legal/LegalAcceptance). */
+  LEGAL_ACCEPTANCE: "@welliva_legal_acceptance",
 } as const;
 
 // ============================================================================

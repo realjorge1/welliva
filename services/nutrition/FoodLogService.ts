@@ -26,6 +26,7 @@ import {
 } from "../../models/nutrients";
 import { KEYS, readJSON, writeJSON } from "../OfflineStorage";
 import { canLogForDate, logPermissionFor } from "../ScheduleService";
+import { pruneDatedRecord, RETENTION_DAYS } from "../sync/retention";
 import { resolveKnownFood } from "./NutrientResolver";
 
 export interface FoodLogEntry {
@@ -64,6 +65,18 @@ function newId(): string {
 
 async function readStore(): Promise<LogStore> {
   return readJSON<LogStore>(KEYS.FOOD_LOG, {});
+}
+
+/**
+ * The single write path, so retention can't be forgotten at one of the five
+ * call sites. This document had no cap at all: it's a Record of every day a
+ * user has ever logged an ad-hoc food, re-uploaded IN FULL on every tap (see
+ * services/sync/retention.ts). Days beyond the window are compacted into the
+ * health-os day summaries before they're dropped, so history survives.
+ */
+async function writeStore(store: LogStore): Promise<void> {
+  const pruned = await pruneDatedRecord(store, RETENTION_DAYS.FOOD_LOG);
+  await writeJSON(KEYS.FOOD_LOG, pruned);
 }
 
 // ============================================================================
@@ -142,7 +155,7 @@ export async function logAnalysis(
       loggedAt: new Date().toISOString(),
     };
     store[input.date] = [...(store[input.date] ?? []), entry];
-    await writeJSON(KEYS.FOOD_LOG, store);
+    await writeStore(store);
     return entry;
   });
 }
@@ -174,7 +187,7 @@ export async function logKnownFood(args: {
       loggedAt: new Date().toISOString(),
     };
     store[args.date] = [...(store[args.date] ?? []), entry];
-    await writeJSON(KEYS.FOOD_LOG, store);
+    await writeStore(store);
     return entry;
   });
 }
@@ -192,7 +205,7 @@ export async function removeFoodLog(
     if (next.length === entries.length) return false;
     if (next.length === 0) delete store[date];
     else store[date] = next;
-    await writeJSON(KEYS.FOOD_LOG, store);
+    await writeStore(store);
     return true;
   });
 }
@@ -238,7 +251,7 @@ export async function replaceLoggedItem(args: {
     entry.partialKeys = partialKeys;
     entry.confidence = worst(entry.items.map((i) => i.confidence));
 
-    await writeJSON(KEYS.FOOD_LOG, store);
+    await writeStore(store);
     return entry;
   });
 }
@@ -275,7 +288,7 @@ export async function pruneFoodLog(
     const stale = Object.keys(store).filter((date) => date < before);
     if (stale.length === 0) return 0;
     for (const date of stale) delete store[date];
-    await writeJSON(KEYS.FOOD_LOG, store);
+    await writeStore(store);
     return stale.length;
   });
 }

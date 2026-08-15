@@ -26,6 +26,8 @@ import {
 } from "@/components/ui";
 import { ActivityRings, type ActivityRingMetric } from "@/components/charts";
 import { GozlinIconButton } from "@/components/gozlin";
+import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
+import { CrashTrigger, ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useProfile, useSystem, useWorkout } from "@/contexts/AppContext";
 import { ArtTile } from "@/fitness/components/ArtTile";
@@ -287,6 +289,8 @@ export default function ExerciseScreen() {
   return (
     <View style={[styles.flex, { backgroundColor: colors.background }]}>
       <AmbientCanvas />
+      {/* Dev-only: open with ?crash=1 or ?crash=tab:exercise — see AppErrorBoundary. */}
+      {__DEV__ && <CrashTrigger surface="tab:exercise" />}
       <SafeAreaView style={styles.flex} edges={["top"]}>
         {/* Header */}
         <View style={styles.header}>
@@ -295,6 +299,8 @@ export default function ExerciseScreen() {
               {greeting()}
             </AppText>
             <AppText variant="display">Fitness</AppText>
+            {/* Only ever visible when something hasn't reached the cloud. */}
+            <SyncStatusPill style={styles.syncPill} />
           </View>
           {weekStats.streak > 0 && (
             <View style={[styles.streakChip, { backgroundColor: alpha(colors.calories, 0.14) }]}>
@@ -706,6 +712,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  syncPill: { marginTop: Spacing.sm },
   streakChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -810,3 +817,12 @@ const styles = StyleSheet.create({
   matchPctText: { fontWeight: "800" },
   matchSub: { marginTop: 2 },
 });
+
+/**
+ * LEVEL 3 — route-level boundary. Expo Router honours this named export, so a
+ * throw inside this screen is contained here: the tab bar stays live and every
+ * other tab stays usable. Only what this file couldn't render is lost.
+ */
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
+  return <ScreenErrorFallback error={error} onRetry={retry} surface="tab:exercise" />;
+}

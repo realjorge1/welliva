@@ -18,6 +18,8 @@ import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { useAuth } from "@/components/SupabaseAuthProvider";
 import { Gradients, Radius, Spacing, alpha } from "@/constants/theme";
 import { useApp } from "@/contexts/AppContext";
+import { useBilling } from "@/contexts/BillingContext";
+import { isHistoryRangeLocked } from "@/services/billing";
 import { useFitnessProfile } from "@/fitness/hooks/useFitnessProfile";
 import { buildProgressSnapshot } from "@/fitness/services/ProgressService";
 import { pickProgressPhoto } from "@/services/sync/pickAndUpload";
@@ -45,17 +47,36 @@ export default function FitnessProgressScreen() {
   );
 
   const today = app.currentDate;
+  const { hasProAccess, openPaywall } = useBilling();
+  const lockedBeyondFree = useCallback(
+    (rangeDays: number) => isHistoryRangeLocked(rangeDays, hasProAccess),
+    [hasProAccess],
+  );
 
   // Scrubbable trend series — the training story you can drag through.
+  // The shortest tab of each card is always free (see isHistoryRangeLocked);
+  // the wider ones are what Pro buys.
   const minuteSeries = useMemo<TrendSeries[]>(
     () => [
       { key: "8W", label: "8 wk", points: buildWeeklyMinutes(app.workoutLog, today, 8) },
-      { key: "16W", label: "16 wk", points: buildWeeklyMinutes(app.workoutLog, today, 16) },
-      { key: "6M", label: "6 mo", points: buildWeeklyMinutes(app.workoutLog, today, 26) },
+      {
+        key: "16W",
+        label: "16 wk",
+        points: buildWeeklyMinutes(app.workoutLog, today, 16),
+        locked: lockedBeyondFree(16 * 7),
+      },
+      {
+        key: "6M",
+        label: "6 mo",
+        points: buildWeeklyMinutes(app.workoutLog, today, 26),
+        locked: lockedBeyondFree(26 * 7),
+      },
     ],
-    [app.workoutLog, today],
+    [app.workoutLog, today, lockedBeyondFree],
   );
 
+  // Session volume is counted in SESSIONS, not days — "last 25" is not a date
+  // window, so the history cutoff doesn't apply and both tabs stay free.
   const volumeSeries = useMemo<TrendSeries[]>(
     () => [
       { key: "10", label: "Last 10", points: buildSessionVolume(app.sessionHistory, 10) },
@@ -67,10 +88,20 @@ export default function FitnessProgressScreen() {
   const weightSeries = useMemo<TrendSeries[]>(
     () => [
       { key: "1M", label: "1 mo", points: buildWeightTrend(app.bodyLogs, today, 30) },
-      { key: "3M", label: "3 mo", points: buildWeightTrend(app.bodyLogs, today, 90) },
-      { key: "1Y", label: "1 yr", points: buildWeightTrend(app.bodyLogs, today, 365) },
+      {
+        key: "3M",
+        label: "3 mo",
+        points: buildWeightTrend(app.bodyLogs, today, 90),
+        locked: lockedBeyondFree(90),
+      },
+      {
+        key: "1Y",
+        label: "1 yr",
+        points: buildWeightTrend(app.bodyLogs, today, 365),
+        locked: lockedBeyondFree(365),
+      },
     ],
-    [app.bodyLogs, today],
+    [app.bodyLogs, today, lockedBeyondFree],
   );
 
   const latestWeight = app.bodyLogs.length > 0 ? app.bodyLogs[app.bodyLogs.length - 1] : null;
@@ -157,6 +188,7 @@ export default function FitnessProgressScreen() {
           series={minuteSeries}
           initialRangeKey="8W"
           footnote="Active minutes per week — drag across to inspect any week."
+          onLockedRangePress={() => openPaywall("history")}
         />
       </View>
 
@@ -214,6 +246,7 @@ export default function FitnessProgressScreen() {
             format={(v) => v.toFixed(1)}
             neutralDelta
             footnote="Every logged weigh-in. The trend beats any single number."
+            onLockedRangePress={() => openPaywall("history")}
           />
         </View>
       ) : latestWeight ? (

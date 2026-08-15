@@ -14,7 +14,7 @@
  * columns (ProfileSync) cover analytics.
  */
 import { supabase } from "../../lib/supabase";
-import { withSyncTelemetry } from "./SyncTelemetry";
+import { recordSyncAnomaly, withSyncTelemetry } from "./SyncTelemetry";
 
 /** One remote document as the engine consumes it. */
 export interface RemoteDoc {
@@ -31,6 +31,19 @@ export interface RemoteDoc {
 const DEVICE_ID = `dev_${Math.random().toString(36).slice(2, 10)}`;
 
 /**
+ * Refuse to push a document past this size. THE CANARY, not a feature.
+ *
+ * Every synced key re-uploads its WHOLE document on every change, so an
+ * unbounded log means a two-year user pushing megabytes on every meal tap. The
+ * retention caps live in the services that own those keys (and in the merge
+ * strategies), and this is what tells us when one of them regresses: we find out
+ * from telemetry, not from a bandwidth bill or a user on a metered plan.
+ *
+ * 512 KB is ~10× the largest legitimate document today.
+ */
+const MAX_DOC_BYTES = 512 * 1024;
+
+/**
  * Upsert one key's current value. `value === null` writes a tombstone (soft
  * delete) so the deletion propagates to other devices. Returns the server
  * `updated_at`, or null on any failure (fail-soft — the caller keeps the key
@@ -41,6 +54,14 @@ export async function pushDoc(
   key: string,
   value: string | null,
 ): Promise<string | null> {
+  if (value !== null && value.length > MAX_DOC_BYTES) {
+    // Returning null keeps the key QUEUED (the caller requeues on null), so the
+    // data isn't lost — it just stops being retried into a wall until a cap is
+    // fixed. The anomaly is what surfaces it.
+    await recordSyncAnomaly("doc_too_large", { key, bytes: value.length });
+    return null;
+  }
+
   try {
     return await withSyncTelemetry("document.push", async () => {
       const { data, error } = await supabase

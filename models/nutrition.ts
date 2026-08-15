@@ -4,6 +4,28 @@
  */
 
 /**
+ * NutritionGuidance — the part of a user's medical picture that could NOT be
+ * expressed as a number, carried alongside the numbers that could.
+ *
+ * Produced by services/nutrition/ConditionConstraints. Two kinds of honesty:
+ * `referrals` says "this number is a conservative starting point, not a
+ * prescription — here's who should set it"; `unmodeled` names the levers that
+ * genuinely matter for the condition and that this app does not compute
+ * (phosphorus, FODMAP load, saturated fat…).
+ *
+ * Both MUST be rendered where the target is shown, not buried in settings —
+ * a cap the user never sees explained is a cap they'll assume is a prescription.
+ */
+export interface NutritionGuidance {
+  referrals: string[];
+  unmodeled: string[];
+  /** Food-selection flag for the diet layer (gout). Not a macro number. */
+  purineRestricted?: boolean;
+  /** Advisory ceiling we surface but don't track as a daily target (CKD). */
+  potassiumMgMax?: number;
+}
+
+/**
  * NutritionTargets - Daily recommended values
  * Based on WHO, AHA, ADA guidelines
  */
@@ -16,6 +38,8 @@ export interface NutritionTargets {
   fiberG: number;
   sodiumMg: number; // Max recommended
   waterMl: number;
+  /** Present only when a condition or medication constrained these numbers. */
+  guidance?: NutritionGuidance;
 }
 
 /**
@@ -101,7 +125,17 @@ export const BASELINE_NUTRITION: Record<"male" | "female", NutritionTargets> = {
 };
 
 /**
- * Age adjustment factors for calorie needs
+ * Age adjustment factors for calorie needs.
+ *
+ * @deprecated Never use this in a live calculation. It was multiplied onto the
+ * TDEE that Mifflin–St Jeor had already age-adjusted (the equation contains a
+ * `− 5 × age` term), so age was counted twice: a 65-year-old lost ~325 kcal to
+ * the equation and another ~300 to this table.
+ *
+ * The one remaining reader is `legacyTargetsV1` in services/nutrition/
+ * TargetsVersion.ts, which reproduces the OLD number so the correction notice
+ * can say "your target moved from 1,780 to 2,010" truthfully. That is frozen
+ * history, not a calculation.
  */
 export const AGE_CALORIE_ADJUSTMENTS: Record<string, number> = {
   "18-30": 1.0,

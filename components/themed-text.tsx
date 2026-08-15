@@ -1,3 +1,4 @@
+import { FORCED_COLOR_SCHEME, LIGHT_MODE_ENABLED } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { StyleSheet, Text, type TextProps } from "react-native";
 
@@ -14,7 +15,10 @@ export function ThemedText({
   type = "default",
   ...rest
 }: ThemedTextProps) {
-  const colorScheme = useColorScheme() ?? "light";
+  const systemScheme = useColorScheme() ?? "light";
+  // Pinned while light mode is disabled — this reads the system scheme directly
+  // rather than going through the ThemeContext.
+  const colorScheme = LIGHT_MODE_ENABLED ? systemScheme : FORCED_COLOR_SCHEME;
   const color =
     lightColor && colorScheme === "light"
       ? lightColor

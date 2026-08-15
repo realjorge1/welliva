@@ -7,11 +7,12 @@
  * and instant in use. Value *changes* (logging water, finishing a set) always
  * animate; only the first-paint reveal is gated.
  *
- * Why a single global flag rather than per-route tracking? Welliva's main
- * screens (Home / Diet / Exercise / More / Profile) are not separate routes —
- * they're one `/(tabs)` route whose screens mount lazily on first visit and then
- * stay mounted (see app/(tabs)/_layout). A route-based gate can't tell them
- * apart. Instead we keep one "reveal window":
+ * Why a single global flag rather than per-route tracking? The tabs ARE separate
+ * routes now (see app/(tabs)/_layout), but the mount PATTERN that this gate
+ * depends on is unchanged: React Navigation mounts a tab lazily on first visit
+ * and then keeps it mounted, freezing it on blur. So "mounted for the first
+ * time" still means "first visit", and one shared window still does the job
+ * without per-route bookkeeping. We keep one "reveal window":
  *
  *   • It opens on a cold start (fresh JS bundle → `revealWindowOpen = true`).
  *   • Every screen that mounts while it's open reveals — and thanks to lazy tab

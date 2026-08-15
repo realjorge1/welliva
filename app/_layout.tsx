@@ -10,6 +10,7 @@ import {
 } from "@react-navigation/native";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { Platform } from "react-native";
@@ -17,7 +18,9 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 
 import { AchievementCelebration } from "@/components/AchievementCelebration";
+import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 import { AuthWrapper } from "@/components/AuthWrapper";
+import { LegalGateProvider } from "@/components/legal";
 import { IntroRevealProvider } from "@/components/motion/IntroReveal";
 import { NotificationActionRunner } from "@/components/notifications/NotificationActionRunner";
 import { ProactiveDeliveryRunner } from "@/components/notifications/ProactiveDeliveryRunner";
@@ -27,10 +30,55 @@ import { Colors } from "@/constants/theme";
 import { ensureDietLibraryLoaded } from "@/constants/DietDatabase";
 import { ensureFoodDictionaryLoaded } from "@/constants/FoodDictionary";
 import { ensureWorkoutExercisesLoaded } from "@/services/WorkoutGenerator";
+import { installBackendWarmup } from "@/services/api/warmup";
 import { initNotifications } from "@/services/notifications/init";
+import { installNetworkProbe } from "@/services/sync/networkProbe";
+import { setRetentionCompactor } from "@/services/sync/retention";
+import { memory } from "@/health-os";
 import { AppProvider } from "@/contexts/AppContext";
+import { BillingProvider } from "@/contexts/BillingContext";
 import { HabitsProvider } from "@/contexts/HabitsContext";
 import { MealPlanProvider } from "@/contexts/MealPlanContext";
+
+/*
+ * Hold the NATIVE splash until we know who the user is.
+ *
+ * expo-splash-screen was configured in app.json and never controlled, so it
+ * auto-hid the moment the JS bundle loaded — revealing `if (!loaded) return
+ * null` as a blank frame, and then whatever route expo-router restored, before
+ * the auth gate had an answer. Module scope on purpose: this must run before the
+ * first render, not in an effect.
+ *
+ * `.catch()` because the call rejects harmlessly if the splash is already gone
+ * (fast refresh, or a re-import) — it must never take the app down with it.
+ */
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
+/*
+ * Cold-start stopwatch (dev only). Heavy catalogs log their evaluation time
+ * against this stamp — see constants/ExerciseDatabase.ts. If one of those logs
+ * appears before you navigate to the screen that needs it, `inlineRequires`
+ * (metro.config.js) isn't deferring that module and it's back on the cold-start
+ * path. Costs nothing in release: the whole block is stripped when __DEV__ is false.
+ */
+if (__DEV__) {
+  (globalThis as { __APP_START__?: number }).__APP_START__ ??= Date.now();
+}
+
+/*
+ * Teach the sync engine what "offline" means. Until this runs the engine
+ * assumes it's online (its safe default), so installing it at module scope —
+ * before the first flush can be scheduled — is what stops an offline device
+ * burning retries on fetches that cannot land.
+ */
+installNetworkProbe();
+
+/*
+ * Let retention compact a day into the health-os summaries BEFORE it prunes the
+ * raw logs. Injected rather than imported by the leaf services that prune, so
+ * FoodLogService doesn't have to reach into the health-os module graph.
+ */
+setRetentionCompactor((date) => memory.compactDayIfPresent(date));
 
 // Suppress keep-awake warnings in dev
 if (__DEV__) {
@@ -48,7 +96,15 @@ if (__DEV__) {
 
 function RootLayoutContent() {
   const { currentTheme } = useTheme();
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
+
+  // Drop the native splash only once the session is restored. Fonts are already
+  // guaranteed — RootLayout doesn't render this component until they've loaded.
+  // Until then the splash covers everything, so there is no blank frame and no
+  // glimpse of a route the auth gate is about to redirect away from.
+  useEffect(() => {
+    if (!authLoading) void SplashScreen.hideAsync().catch(() => {});
+  }, [authLoading]);
 
   // Warm up the lazy-loaded diet/food catalogs (Phase D — bundle trim) after
   // first paint, so their heavy generated module stays off the synchronous
@@ -61,6 +117,9 @@ function RootLayoutContent() {
     // Set the foreground handler + Android reminders channel once, so scheduled
     // habit/fitness reminders present correctly in a release build. Fail-soft.
     initNotifications();
+    // Wake the backend now (and on every foreground) so its 30-50s cold start
+    // has already happened by the time someone opens the coach. Fire-and-forget.
+    return installBackendWarmup();
   }, []);
 
   // Match the navigator's base background to the ambient canvas so screen
@@ -80,16 +139,38 @@ function RootLayoutContent() {
        * Keyed on the STABLE user id (not the session object) so a token refresh
        * doesn't needlessly remount.
        */}
+      {/*
+       * Billing sits ABOVE the account re-key on purpose. It has to survive an
+       * account switch to run its own logIn/logOut transfer (a purchase must
+       * follow the account, not the device), and re-keying it would reconfigure
+       * the RevenueCat SDK on every switch — which it explicitly guards against.
+       */}
+      <BillingProvider>
       <AppProvider key={user?.id ?? "signed-out"}>
         {/* Composes over AppContext — reads its clock, owns plan periods,
             custom menus, food logging and tracking mode. */}
         <MealPlanProvider>
         <HabitsProvider>
+        {/* Owns "has this account accepted the current policies?". Sits above
+            AuthWrapper because the answer is a routing decision, and inside
+            AppProvider because it waits on the login-time profile reconcile. */}
+        <LegalGateProvider>
         <AuthWrapper>
           <IntroRevealProvider>
+          {/*
+           * LEVEL 2 — navigation. Catches a crash while a screen mounts or
+           * renders, so a bad route drops to a recoverable screen instead of
+           * taking the providers (and every unsaved bit of in-memory state)
+           * down with it. Level 1 is the root boundary in RootLayout below;
+           * level 3 is each route's own `export function ErrorBoundary`.
+           */}
+          <AppErrorBoundary surface="navigation">
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="settings" />
+            {/* Profile: a PUSHED screen, not a tab. It was in the tab array but
+                never in the nav bar, reachable only via `?tab=profile`. */}
+            <Stack.Screen name="profile" />
             <Stack.Screen name="knows" />
             <Stack.Screen name="memory-center" />
             <Stack.Screen name="life" />
@@ -99,6 +180,10 @@ function RootLayoutContent() {
             <Stack.Screen name="sign-up" />
             <Stack.Screen name="verify-email" />
             <Stack.Screen name="onboarding" />
+            {/* Legal. The consent gate can't be swiped away — it's the one
+                screen a signed-in user must answer before the app opens. */}
+            <Stack.Screen name="legal/consent" options={{ gestureEnabled: false }} />
+            <Stack.Screen name="legal/[doc]" />
             <Stack.Screen name="notifications-setup" />
             <Stack.Screen name="exercise/[id]" />
             <Stack.Screen name="fitness/library" />
@@ -117,6 +202,9 @@ function RootLayoutContent() {
             <Stack.Screen name="habit/[id]" />
             <Stack.Screen name="habit/new" options={{ presentation: "modal" }} />
             <Stack.Screen name="gozlin" options={{ presentation: "modal" }} />
+            {/* Paywall: a modal, never a route the app redirects INTO. A lock
+                offers the upgrade; it never traps the user on the ask. */}
+            <Stack.Screen name="paywall" options={{ presentation: "modal" }} />
             <Stack.Screen name="new-chapter" options={{ presentation: "modal" }} />
             <Stack.Screen name="recap/[period]" options={{ presentation: "modal" }} />
             {/* Flexible meal planning */}
@@ -126,6 +214,7 @@ function RootLayoutContent() {
             <Stack.Screen name="diet/report/[periodId]" options={{ presentation: "modal" }} />
             <Stack.Screen name="+not-found" />
           </Stack>
+          </AppErrorBoundary>
           <AchievementCelebration />
           <ProactiveDeliveryRunner />
           {/* Closes the loop on delivered notifications: "Mark as Done",
@@ -134,15 +223,22 @@ function RootLayoutContent() {
           <StatusBar style={currentTheme === "dark" ? "light" : "dark"} />
           </IntroRevealProvider>
         </AuthWrapper>
+        </LegalGateProvider>
         </HabitsProvider>
         </MealPlanProvider>
       </AppProvider>
+      </BillingProvider>
     </ThemeProvider>
   );
 }
 
 export default function RootLayout() {
-  const [loaded] = useFonts({
+  // `error` matters as much as `loaded`: the splash is held open at module scope
+  // and is only dropped by RootLayoutContent, which never mounts while we return
+  // null here. So a font that fails to load would otherwise strand the user on
+  // the splash forever. Booting without the custom font is the correct
+  // degradation — RN falls back to the system face.
+  const [loaded, error] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
   });
 
@@ -158,7 +254,7 @@ export default function RootLayout() {
     }
   }, []);
 
-  if (!loaded) {
+  if (!loaded && !error) {
     return null;
   }
 
@@ -166,11 +262,19 @@ export default function RootLayout() {
     // Root gesture context — required for the interactive charts' pan-to-scrub
     // (and any future gesture-handler surfaces) to receive touches.
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SupabaseAuthProvider>
-        <CustomThemeProvider>
-          <RootLayoutContent />
-        </CustomThemeProvider>
-      </SupabaseAuthProvider>
+      {/*
+       * LEVEL 1 — root. Sits ABOVE every provider, so a crash inside auth, theme
+       * or the data contexts themselves still lands on a screen with a way out
+       * instead of a white void. Its fallback deliberately reads no context (see
+       * AppErrorBoundary's header) — a themed fallback would crash right here.
+       */}
+      <AppErrorBoundary surface="root">
+        <SupabaseAuthProvider>
+          <CustomThemeProvider>
+            <RootLayoutContent />
+          </CustomThemeProvider>
+        </SupabaseAuthProvider>
+      </AppErrorBoundary>
     </GestureHandlerRootView>
   );
 }

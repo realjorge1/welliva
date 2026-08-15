@@ -35,6 +35,11 @@ export interface TrendCardProps {
   footnote?: string;
   /** Shown in place of the chart when a range has too little data. */
   emptyHint?: string;
+  /**
+   * Tapped a range marked `locked`. Typically opens the paywall. When omitted a
+   * locked tab is simply inert.
+   */
+  onLockedRangePress?: (key: string) => void;
 }
 
 function defaultFormat(v: number): string {
@@ -55,16 +60,21 @@ export function TrendCard({
   neutralDelta = false,
   footnote,
   emptyHint = "Keep logging to see this trend come to life.",
+  onLockedRangePress,
 }: TrendCardProps) {
   const { colors } = useColors();
   // Default the accent to the theme brand ramp (orange in light, gold in dark).
   const grad = gradient ?? colors.brandGradient;
+  // Open on the first range the viewer can actually see. Defaulting to a locked
+  // tab would show an empty chart and read as broken rather than as an upsell.
+  const firstOpen = series.find((s) => !s.locked) ?? series[0];
   const [rangeKey, setRangeKey] = useState(
-    initialRangeKey ?? series[0]?.key ?? "",
+    initialRangeKey ?? firstOpen?.key ?? "",
   );
 
   const current =
-    series.find((s) => s.key === rangeKey) ?? series[0] ?? { key: "", label: "", points: [] };
+    series.find((s) => s.key === rangeKey && !s.locked) ??
+    firstOpen ?? { key: "", label: "", points: [] };
   const points = current.points;
   const n = points.length;
   const lastIndex = Math.max(0, n - 1);
@@ -173,12 +183,19 @@ export function TrendCard({
       {series.length > 1 && (
         <View style={styles.tabs}>
           {series.map((s) => {
-            const active = s.key === rangeKey;
+            const active = s.key === current.key;
             return (
               <Pressable
                 key={s.key}
-                onPress={() => setRangeKey(s.key)}
+                onPress={() =>
+                  s.locked ? onLockedRangePress?.(s.key) : setRangeKey(s.key)
+                }
                 hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  s.locked ? `${s.label} — requires Welliva Pro` : s.label
+                }
+                accessibilityState={{ selected: active, disabled: s.locked }}
                 style={[
                   styles.tab,
                   {
@@ -188,17 +205,24 @@ export function TrendCard({
                   },
                 ]}
               >
-                <AppText
-                  variant="footnote"
-                  style={{
-                    fontWeight: "700",
-                    color: active
-                      ? grad[grad.length - 1]
-                      : colors.textTertiary,
-                  }}
-                >
-                  {s.label}
-                </AppText>
+                <View style={styles.tabInner}>
+                  {s.locked && (
+                    <Ionicons name="lock-closed" size={10} color={colors.gold} />
+                  )}
+                  <AppText
+                    variant="footnote"
+                    style={{
+                      fontWeight: "700",
+                      color: s.locked
+                        ? colors.gold
+                        : active
+                          ? grad[grad.length - 1]
+                          : colors.textTertiary,
+                    }}
+                  >
+                    {s.label}
+                  </AppText>
+                </View>
               </Pressable>
             );
           })}
@@ -239,5 +263,6 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: Radius.pill,
   },
+  tabInner: { flexDirection: "row", alignItems: "center", gap: 4 },
   footnote: { marginTop: Spacing.md, textAlign: "center" },
 });

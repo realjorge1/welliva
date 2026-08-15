@@ -47,6 +47,14 @@ import {
   ensureDietLibraryLoaded,
 } from "@/constants/DietDatabase";
 import { GozlinIconButton, GozlinToast, useToast } from "@/components/gozlin";
+import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
+import { CrashTrigger, ScreenErrorFallback } from "@/components/AppErrorBoundary";
+import { DisclaimerNote } from "@/components/legal";
+import { ProBadge } from "@/components/billing";
+import { useBilling } from "@/contexts/BillingContext";
+import { clampHistoryDays, isDietLocked, isHistoryRangeLocked } from "@/services/billing";
+import { TargetGuidanceNote } from "@/components/nutrition/TargetGuidanceNote";
+import { TargetsRecalcCard } from "@/components/nutrition/TargetsRecalcCard";
 import { Gradients, Radius, Spacing, alpha } from "@/constants/theme";
 import { useNutrition, useProfile, useSystem } from "@/contexts/AppContext";
 import { useMealPlan } from "@/contexts/MealPlanContext";
@@ -226,6 +234,7 @@ type DietBrowseGroup = {
 
 export default function DietScreen() {
   const { colors, isDark } = useColors();
+  const { hasProAccess, openPaywall } = useBilling();
 
   const { userBio, nutritionTargets } = useProfile();
   const {
@@ -370,15 +379,25 @@ export default function DietScreen() {
 
   // Picking a diet advances the SAME modal to its opaque schedule step — no
   // second modal, so there's no transparent overlay and no present/dismiss race.
+  //
+  // A locked (clinical) diet is still shown and still tappable — hiding the 22
+  // condition-specific diets would just teach a free user the catalog is small.
+  // Tapping one opens the paywall instead of the schedule step; it stays
+  // reachable the moment they upgrade, with no separate "unlock" flow needed.
   const handleSelectDiet = useCallback(
     (diet: DietData, matchScore: DietMatchScore) => {
+      if (isDietLocked(diet.id, hasProAccess)) {
+        setShowDietModal(false);
+        openPaywall("clinical-diets");
+        return;
+      }
       setSelectedDiet(diet);
       setSelectedMatchScore(matchScore);
       setScheduleDuration("day");
       setCustomEndDate(null);
       Haptics.selectionAsync().catch(() => {});
     },
-    [],
+    [hasProAccess, openPaywall],
   );
 
   // Back from the schedule step to the diet list (same modal).
@@ -713,7 +732,12 @@ export default function DietScreen() {
   // Daily adherence timeline for the scrollable consistency graph — today's live
   // day is appended so the newest point tracks real-time progress.
   const adherenceTrend = useMemo(() => {
-    const pts = buildAdherenceTrend(dietHistory, currentDate, 90);
+    // Bounded to the tier's window — free reads back 30 days, Pro all 90.
+    const pts = buildAdherenceTrend(
+      dietHistory,
+      currentDate,
+      clampHistoryDays(90, hasProAccess),
+    );
     if (liveDay && liveDay.totalMeals > 0) {
       const v = Math.round((liveDay.mealsConsumed / liveDay.totalMeals) * 100);
       const label = shortDate(currentDate);
@@ -725,7 +749,7 @@ export default function DietScreen() {
       }
     }
     return pts;
-  }, [dietHistory, currentDate, liveDay]);
+  }, [dietHistory, currentDate, liveDay, hasProAccess]);
 
   const weekly = useMemo<WeeklyNutritionSummary>(
     () => computeWeeklySummary(dietHistory, currentWeekStart(), currentDate, liveDay),
@@ -755,9 +779,10 @@ export default function DietScreen() {
           carbs: rows.map((p) => p.carbsG),
           fat: rows.map((p) => p.fatG),
         },
+        locked: isHistoryRangeLocked(r.days, hasProAccess),
       };
     });
-  }, [dietHistory, currentDate]);
+  }, [dietHistory, currentDate, hasProAccess]);
 
   const macroDescriptors = useMemo<MacroDescriptor[]>(
     () => [
@@ -981,12 +1006,16 @@ export default function DietScreen() {
           <AppText variant="subhead" color="secondary" style={styles.headerSub}>
             {hasDiet ? "Your plan for today" : "Build your nutrition plan"}
           </AppText>
+          {/* Only ever visible when something hasn't reached the cloud. */}
+          <SyncStatusPill style={styles.syncPill} />
         </View>
         <View style={styles.headerActions}>
           <GozlinIconButton size={36} />
           {hasDiet && (
             <Pressable
               onPress={openDietModal}
+              accessibilityRole="button"
+              accessibilityLabel="Change diet plan"
               style={[styles.iconBtn, { backgroundColor: colors.primarySoft }]}
             >
               <Ionicons name="swap-horizontal" size={20} color={colors.primary} />
@@ -999,6 +1028,8 @@ export default function DietScreen() {
 
   return (
     <>
+      {/* Dev-only: open with ?crash=1 or ?crash=tab:diet — see AppErrorBoundary. */}
+      {__DEV__ && <CrashTrigger surface="tab:diet" />}
       <Screen header={header}>
         {/* Active plan period — what you committed to and how far through it
             you are. Without this the app can show today's meals but never says
@@ -1021,7 +1052,12 @@ export default function DietScreen() {
                       : `${periodProgress.remaining} to go`}
                   </AppText>
                 </View>
-                <Pressable onPress={() => router.push("/diet/history")} hitSlop={10}>
+                <Pressable
+                  onPress={() => router.push("/diet/history")}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Meal history"
+                >
                   <Ionicons name="calendar-outline" size={22} color={colors.textTertiary} />
                 </Pressable>
               </View>
@@ -1065,7 +1101,12 @@ export default function DietScreen() {
                     Yesterday · you can still tick them today, then the day closes
                   </AppText>
                 </View>
-                <Pressable onPress={dismissBacklogPrompt} hitSlop={10}>
+                <Pressable
+                  onPress={dismissBacklogPrompt}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Dismiss"
+                >
                   <Ionicons name="close" size={18} color={colors.textTertiary} />
                 </Pressable>
               </View>
@@ -1076,6 +1117,10 @@ export default function DietScreen() {
                     Haptics.selectionAsync().catch(() => {});
                     void backlogMeal(backlogPrompt.date, m.mealType, m.snackIndex);
                   }}
+                  accessible
+                  accessibilityRole="button"
+                  accessibilityLabel={`Log ${m.name} for ${m.mealType}`}
+                  accessibilityHint="Marks this meal as eaten"
                   style={[styles.backlogRow, { borderTopColor: colors.border }]}
                 >
                   <Ionicons name="ellipse-outline" size={20} color={colors.textTertiary} />
@@ -1092,6 +1137,8 @@ export default function DietScreen() {
               ))}
               <Pressable
                 onPress={() => router.push("/diet/history")}
+                accessibilityRole="button"
+                accessibilityLabel="See the full day"
                 style={styles.backlogAll}
               >
                 <AppText variant="caption" color="brand">
@@ -1191,6 +1238,8 @@ export default function DietScreen() {
                         <Pressable
                           onPress={handleSuggestAlternative}
                           hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel="Suggest an alternative meal"
                           style={[styles.altBtn, { backgroundColor: colors.primarySoft }]}
                         >
                           {/* High-contrast label: white on dark, black on light. */}
@@ -1307,6 +1356,24 @@ export default function DietScreen() {
                     <MacroRing key={m.label} {...m} colors={colors} />
                   ))}
                 </View>
+
+                {/* One-time: if the numbers above MOVED because we fixed how
+                    they're computed, say so where they're shown. Self-dismissing
+                    and silent for everyone else. */}
+                <TargetsRecalcCard style={styles.disclaimer} />
+
+                {/* When a condition CONSTRAINED these numbers (a renal protein
+                    cap, a diabetic carb cap), the reason and the referral ride
+                    with them — a capped number shown bare reads as a
+                    prescription. Renders nothing when nothing was constrained. */}
+                <TargetGuidanceNote
+                  guidance={nutritionTargets.guidance}
+                  style={styles.disclaimer}
+                />
+
+                {/* These targets are estimates from population formulas — the
+                    disclaimer sits with the numbers, not three screens away. */}
+                <DisclaimerNote compact style={styles.disclaimer} />
               </>
             )}
 
@@ -1480,6 +1547,7 @@ export default function DietScreen() {
                   ranges={macroRanges}
                   initialRangeKey="1W"
                   emptyHint="Log a few days of meals and your macro trends appear here."
+                  onLockedRangePress={() => openPaywall("history")}
                 />
               </View>
             </Reveal>
@@ -1692,6 +1760,7 @@ export default function DietScreen() {
                       userBio={userBio}
                       nutritionTargets={nutritionTargets}
                       scoreColor={getScoreColor(match.score)}
+                      locked={isDietLocked(diet.id, hasProAccess)}
                       onSelect={handleSelectDiet}
                     />
                   );
@@ -1721,6 +1790,7 @@ export default function DietScreen() {
                       userBio={userBio}
                       nutritionTargets={nutritionTargets}
                       scoreColor={getScoreColor(match.score)}
+                      locked={isDietLocked(diet.id, hasProAccess)}
                       onSelect={handleSelectDiet}
                     />
                   );
@@ -1745,6 +1815,7 @@ export default function DietScreen() {
                   colors={colors}
                   onSelect={handleSelectDiet}
                   getScoreColor={getScoreColor}
+                  isLocked={(id) => isDietLocked(id, hasProAccess)}
                 />
               </>
             )}
@@ -1842,6 +1913,8 @@ export default function DietScreen() {
               <View>
                 <Pressable
                   onPress={() => setShowCustomMealForm(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add custom meal"
                   style={[styles.dashedBtn, { borderColor: alpha(colors.primary, 0.5) }]}
                 >
                   <Ionicons name="create-outline" size={20} color={colors.primary} />
@@ -2143,7 +2216,12 @@ function AlternativeToast({
           >
             Alternative · {Math.round(suggestion.match * 100)}% nutrition match
           </AppText>
-          <Pressable onPress={onDismiss} hitSlop={8}>
+          <Pressable
+            onPress={onDismiss}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss suggestion"
+          >
             <Ionicons name="close" size={18} color={colors.textTertiary} />
           </Pressable>
         </View>
@@ -2385,6 +2463,7 @@ function DietCard({
   userBio,
   nutritionTargets,
   scoreColor,
+  locked = false,
   onSelect,
 }: {
   match: DietMatchScore;
@@ -2395,6 +2474,12 @@ function DietCard({
   userBio: any;
   nutritionTargets: any;
   scoreColor: string;
+  /**
+   * Pro-only (a clinical diet on the free tier). Still fully rendered and still
+   * pressable — `onSelect` routes a locked tap to the paywall. A visible diet
+   * the user wants is the reason to upgrade; a hidden one is just a smaller app.
+   */
+  locked?: boolean;
   onSelect: (d: DietData, m: DietMatchScore) => void;
 }) {
   const reasons = buildDietReasons(diet, userBio, nutritionTargets, match.reasons);
@@ -2414,7 +2499,8 @@ function DietCard({
           <AppText variant="callout">{diet.name}</AppText>
           <View style={styles.dietBadges}>
             <Pill label={`${Math.round(match.score)}% match`} tone={scoreColor} size="sm" />
-            {isRecommended && (
+            {locked && <ProBadge />}
+            {isRecommended && !locked && (
               <Pill label="Recommended" tone={colors.success} size="sm" icon="checkmark-circle" />
             )}
           </View>
@@ -2489,11 +2575,14 @@ function CategoryBrowser({
   colors,
   onSelect,
   getScoreColor,
+  isLocked,
 }: {
   groups: DietBrowseGroup[];
   colors: Colors;
   onSelect: (d: DietData, m: DietMatchScore) => void;
   getScoreColor: (score: number) => string;
+  /** Whether a given diet needs Pro. Rows stay visible either way. */
+  isLocked: (dietId: string) => boolean;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   return (
@@ -2507,6 +2596,10 @@ function CategoryBrowser({
                 Haptics.selectionAsync().catch(() => {});
                 setExpanded(open ? null : family);
               }}
+              accessible
+              accessibilityRole="button"
+              accessibilityLabel={family}
+              accessibilityState={{ expanded: open }}
               style={styles.browseHead}
             >
               <View style={styles.flex}>
@@ -2524,25 +2617,44 @@ function CategoryBrowser({
               />
             </Pressable>
             {open &&
-              items.map(({ diet, match }) => (
-                <Pressable
-                  key={diet.id}
-                  onPress={() => onSelect(diet, match)}
-                  style={[styles.browseRow, { borderTopColor: colors.divider }]}
-                >
-                  <IconBadge name={(diet.icon as any) || "nutrition"} tone={colors.primary} size={34} />
-                  <View style={styles.flex}>
-                    <AppText variant="subhead" numberOfLines={1}>
-                      {diet.name}
-                    </AppText>
-                    <AppText variant="caption" color="tertiary" numberOfLines={1}>
-                      {diet.difficulty}
-                    </AppText>
-                  </View>
-                  <Pill label={`${Math.round(match.score)}%`} tone={getScoreColor(match.score)} size="sm" />
-                  <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-                </Pressable>
-              ))}
+              items.map(({ diet, match }) => {
+                const locked = isLocked(diet.id);
+                return (
+                  <Pressable
+                    key={diet.id}
+                    onPress={() => onSelect(diet, match)}
+                    accessible
+                    accessibilityRole="button"
+                    accessibilityLabel={diet.name}
+                    accessibilityHint={
+                      locked
+                        ? "Included with Welliva Pro. Opens upgrade options"
+                        : "Selects this diet plan"
+                    }
+                    style={[styles.browseRow, { borderTopColor: colors.divider }]}
+                  >
+                    <IconBadge name={(diet.icon as any) || "nutrition"} tone={colors.primary} size={34} />
+                    <View style={styles.flex}>
+                      <AppText variant="subhead" numberOfLines={1}>
+                        {diet.name}
+                      </AppText>
+                      <AppText variant="caption" color="tertiary" numberOfLines={1}>
+                        {diet.difficulty}
+                      </AppText>
+                    </View>
+                    {locked ? (
+                      <ProBadge />
+                    ) : (
+                      <Pill
+                        label={`${Math.round(match.score)}%`}
+                        tone={getScoreColor(match.score)}
+                        size="sm"
+                      />
+                    )}
+                    <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                  </Pressable>
+                );
+              })}
           </View>
         );
       })}
@@ -2568,6 +2680,8 @@ function ModalHeader({
           <Pressable
             onPress={onBack}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
             style={[styles.closeBtn, { backgroundColor: colors.surfaceMuted }]}
           >
             <Ionicons name="chevron-back" size={22} color={colors.text} />
@@ -2575,7 +2689,13 @@ function ModalHeader({
         )}
         <AppText variant="title">{title}</AppText>
       </View>
-      <Pressable onPress={onClose} hitSlop={8} style={[styles.closeBtn, { backgroundColor: colors.surfaceMuted }]}>
+      <Pressable
+        onPress={onClose}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+        style={[styles.closeBtn, { backgroundColor: colors.surfaceMuted }]}
+      >
         <Ionicons name="close" size={22} color={colors.text} />
       </Pressable>
     </View>
@@ -2650,6 +2770,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xl,
   },
   headerSub: { marginTop: 2 },
+  syncPill: { marginTop: Spacing.sm },
   headerActions: { flexDirection: "row", alignItems: "center", gap: Spacing.lg },
   iconBtn: {
     width: 44,
@@ -2757,7 +2878,8 @@ const styles = StyleSheet.create({
   heroChips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: Spacing.sm },
   ringPct: { fontWeight: "800" },
   divider: { height: 1, marginVertical: Spacing.xl },
-  macroRingGrid: { flexDirection: "row", justifyContent: "space-around", marginBottom: Spacing.xxxl },
+  macroRingGrid: { flexDirection: "row", justifyContent: "space-around", marginBottom: Spacing.lg },
+  disclaimer: { marginBottom: Spacing.xxl },
   macroRingItem: { alignItems: "center", gap: Spacing.sm },
   macroRingLabel: { marginTop: 2 },
 
@@ -2927,3 +3049,12 @@ const styles = StyleSheet.create({
   },
   customSubmit: { marginTop: Spacing.lg },
 });
+
+/**
+ * LEVEL 3 — route-level boundary. Expo Router honours this named export, so a
+ * throw inside this screen is contained here: the tab bar stays live and every
+ * other tab stays usable. Only what this file couldn't render is lost.
+ */
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
+  return <ScreenErrorFallback error={error} onRetry={retry} surface="tab:diet" />;
+}

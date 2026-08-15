@@ -15,6 +15,24 @@
 
 import { Platform, type TextStyle } from "react-native";
 
+/* ────────────────────────────── Light mode kill-switch ───────────────────
+ * Light mode is TEMPORARILY DISABLED — the app is locked to dark everywhere.
+ * Nothing has been deleted: the full `Colors.light` palette, `lightGradient`,
+ * `LightCard` and every `isDark ? … : …` branch stay exactly as they were.
+ *
+ * To re-enable light mode later:
+ *   1. Flip this flag to `true`.
+ *   2. Set `expo.userInterfaceStyle` back to "automatic" in app.json
+ *      (needs a native rebuild to take effect).
+ * That's it — the Settings → Appearance picker and system-scheme following
+ * both come back on their own, and any theme a user had picked before the
+ * lock is still stored and will be restored.
+ */
+export const LIGHT_MODE_ENABLED = false;
+
+/** The scheme every consumer falls back to while light mode is disabled. */
+export const FORCED_COLOR_SCHEME = "dark" as const;
+
 /* ───────────────────────────── Brand & data-viz ──────────────────────────
  * Fixed semantic hues. Each metric owns exactly one color, app-wide.
  *

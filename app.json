@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/welliva1024.png",
     "scheme": "welliva",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,

@@ -570,8 +570,10 @@ function getGoalAlignmentBonus(dietId: string, goal: string): number {
  * Get activity level fit bonus/penalty
  */
 function getActivityFit(diet: DietData, activityLevel: string): number {
-  // Very active users benefit from higher-calorie / performance diets
-  if (activityLevel === "very_active") {
+  // Very active users benefit from higher-calorie / performance diets. Both top
+  // tiers qualify: the scale gained a fifth tier, so what used to be the single
+  // `very_active` bucket is now `active` (1.725) + `very_active` (1.9).
+  if (activityLevel === "very_active" || activityLevel === "active") {
     if (["high-protein", "bodybuilding", "weight-gain"].includes(diet.id))
       return 4;
     if (["very-low-calorie", "low-fat"].includes(diet.id)) return -3;

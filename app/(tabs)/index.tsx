@@ -20,6 +20,8 @@ import {
   useColors,
 } from "@/components/ui";
 import { GozlinIconButton, useGozlinMoments, useHabitReport } from "@/components/gozlin";
+import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
+import { CrashTrigger, ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { CoachDeepDive } from "@/components/home/CoachDeepDive";
 import { buildCoachDeck, buildHabitCard, type CoachCard } from "@/components/home/coachDeck";
 import { Gradients, Radius, Spacing, alpha } from "@/constants/theme";
@@ -228,6 +230,8 @@ export default function HomeScreen() {
           <AppText variant="subhead" color="brand" style={styles.brand} numberOfLines={1}>
             Welliva
           </AppText>
+          {/* Only ever visible when something hasn't reached the cloud. */}
+          <SyncStatusPill style={styles.syncPill} />
         </View>
         <GozlinIconButton size={40} prompt={gozlinMoment?.prompt} />
       </View>
@@ -236,6 +240,9 @@ export default function HomeScreen() {
 
   return (
     <>
+      {/* Dev-only: open with ?crash=1 or ?crash=tab:home to verify this
+          screen's ErrorBoundary catches without taking the app down. */}
+      {__DEV__ && <CrashTrigger surface="tab:home" />}
       <Screen gutter={false} header={header} onScroll={onScroll}>
       {/* ── Hero: calories + macros ── */}
       <Reveal index={1}>
@@ -616,6 +623,7 @@ const styles = StyleSheet.create({
   },
   headline: {},
   brand: { fontWeight: "800", marginTop: 3, letterSpacing: 0.2 },
+  syncPill: { marginTop: Spacing.sm },
 
   // Hero
   heroRow: { flexDirection: "row", alignItems: "center", gap: Spacing.xl },
@@ -680,3 +688,12 @@ const styles = StyleSheet.create({
   coachMsg: { flex: 1 },
   coachFoot: { flexDirection: "row", alignItems: "center", gap: 4 },
 });
+
+/**
+ * LEVEL 3 — route-level boundary. Expo Router honours this named export, so a
+ * throw inside this screen is contained here: the tab bar stays live and every
+ * other tab stays usable. Only what this file couldn't render is lost.
+ */
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
+  return <ScreenErrorFallback error={error} onRetry={retry} surface="tab:home" />;
+}

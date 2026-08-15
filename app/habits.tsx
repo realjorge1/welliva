@@ -13,9 +13,12 @@ import { Screen } from "@/components/ui/Screen";
 import { AppText } from "@/components/ui/Text";
 import { useColors } from "@/components/ui/useColors";
 import { Radius, Spacing, alpha } from "@/constants/theme";
+import { ProLockCard } from "@/components/billing";
 import { useProfile, useSystem } from "@/contexts/AppContext";
+import { useBilling } from "@/contexts/BillingContext";
 import { useHabits } from "@/contexts/HabitsContext";
 import { EVERY_DAY } from "@/models/habit";
+import { canCreateHabit, habitLimit } from "@/services/billing";
 import { isScheduled } from "@/services/HabitService";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -49,8 +52,18 @@ export default function HabitsScreen() {
   const { views, toggleToday, createHabit, loading } = useHabits();
   const { currentDate } = useSystem();
   const { userBio } = useProfile();
+  const { hasProAccess, openPaywall } = useBilling();
 
   const [adding, setAdding] = useState<Set<string>>(new Set());
+
+  // Only user-created habits count against the free cap — the three seeded
+  // auto-tracked ones derive from logging, which is never gated.
+  const manualCount = useMemo(
+    () => views.filter((v) => v.habit.source === "manual").length,
+    [views],
+  );
+  const canAddHabit = canCreateHabit(manualCount, hasProAccess);
+  const freeSlots = habitLimit(hasProAccess);
 
   // Today's scheduled habits → the summary readout.
   const scheduledToday = useMemo(
@@ -74,6 +87,10 @@ export default function HabitsScreen() {
 
   const addSuggestion = async (s: Suggestion) => {
     if (adding.has(s.name)) return;
+    if (!canAddHabit) {
+      openPaywall("habits");
+      return;
+    }
     setAdding((prev) => new Set(prev).add(s.name));
     try {
       await createHabit({
@@ -107,10 +124,13 @@ export default function HabitsScreen() {
       </AppText>
       <Pressable
         hitSlop={12}
-        onPress={() => router.push("/habit/new" as any)}
+        onPress={() =>
+          canAddHabit ? router.push("/habit/new" as any) : openPaywall("habits")
+        }
+        accessibilityLabel={canAddHabit ? "New habit" : "New habit — requires Welliva Pro"}
         style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
       >
-        <Ionicons name="add" size={22} color={colors.text} />
+        <Ionicons name={canAddHabit ? "add" : "lock-closed"} size={canAddHabit ? 22 : 18} color={colors.text} />
       </Pressable>
     </View>
   );
@@ -204,14 +224,41 @@ export default function HabitsScreen() {
                   <AppText variant="bodyLg" weight="600" style={styles.flex} numberOfLines={1}>
                     {s.name}
                   </AppText>
-                  <View style={[styles.addBtn, { backgroundColor: alpha(colors.primary, 0.12) }]}>
-                    <Ionicons name="add" size={18} color={colors.primary} />
+                  <View
+                    style={[
+                      styles.addBtn,
+                      {
+                        backgroundColor: alpha(
+                          canAddHabit ? colors.primary : colors.gold,
+                          0.12,
+                        ),
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={canAddHabit ? "add" : "lock-closed"}
+                      size={canAddHabit ? 18 : 14}
+                      color={canAddHabit ? colors.primary : colors.gold}
+                    />
                   </View>
                 </Pressable>
               </View>
             ))}
           </Card>
         </>
+      )}
+
+      {/* The cap, stated plainly. Shown only once it's actually reached — a
+          counter on an empty tracker is noise, and a limit you haven't met yet
+          isn't information the user needs. */}
+      {!canAddHabit && freeSlots !== null && (
+        <ProLockCard
+          lock="habits"
+          compact
+          title={`You're using all ${freeSlots} free habits`}
+          blurb="Pro removes the limit, so you can track as many as you want. Your auto-tracked water, meal and workout habits never count toward it."
+          style={styles.lockCard}
+        />
       )}
     </Screen>
   );
@@ -264,4 +311,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  lockCard: { marginTop: Spacing.xxl },
 });

@@ -3,6 +3,11 @@
  * history. Settings live on their own screen (`/settings`), reached from the
  * More tab only — this screen deliberately has no gear so there's exactly one
  * door to Settings. Rebuilt on the Welliva design system.
+ *
+ * A PUSHED ROUTE (`/profile`), not a tab. It used to sit in the tabs layout's
+ * screen array while being absent from the nav bar, reachable only through
+ * `/(tabs)?tab=profile` — which meant it stayed mounted alongside all four real
+ * tabs, and the link went dead once the param stopped changing.
  */
 
 import {
@@ -18,11 +23,14 @@ import {
   Stat,
   useColors,
 } from "@/components/ui";
+import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { TrendCard, buildAdherenceTrend, type TrendSeries } from "@/components/charts";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { useAuth } from "@/components/SupabaseAuthProvider";
 import { Gradients, Radius, Spacing, alpha } from "@/constants/theme";
 import { useGamification, useProfile, useSystem } from "@/contexts/AppContext";
+import { useBilling } from "@/contexts/BillingContext";
+import { isHistoryRangeLocked } from "@/services/billing";
 import { pickAvatar } from "@/services/sync/pickAndUpload";
 import { fetchAvatarUrl, getAvatarUrl } from "@/services/sync/StorageSync";
 import { Image } from "expo-image";
@@ -77,6 +85,7 @@ export default function ProfileScreen() {
   } = useGamification();
   const { currentDate } = useSystem();
   const { user } = useAuth();
+  const { hasProAccess, openPaywall } = useBilling();
 
   const summary = useMemo(() => getAchievementSummary(achievements), [achievements]);
   const nextMilestone = useMemo(
@@ -158,9 +167,14 @@ export default function ProfileScreen() {
     () => [
       { key: "2W", label: "2 wk", points: buildAdherenceTrend(history, currentDate, 14) },
       { key: "1M", label: "1 mo", points: buildAdherenceTrend(history, currentDate, 30) },
-      { key: "3M", label: "3 mo", points: buildAdherenceTrend(history, currentDate, 90) },
+      {
+        key: "3M",
+        label: "3 mo",
+        points: buildAdherenceTrend(history, currentDate, 90),
+        locked: isHistoryRangeLocked(90, hasProAccess),
+      },
     ],
-    [history, currentDate],
+    [history, currentDate, hasProAccess],
   );
 
   const targets = nutritionTargets
@@ -208,7 +222,12 @@ export default function ProfileScreen() {
       <View style={styles.headerRow}>
         <Pressable
           hitSlop={12}
-          onPress={() => router.replace({ pathname: "/(tabs)", params: { tab: "more" } })}
+          // A real pushed route now, so back means back — it returns to
+          // whichever screen opened Profile instead of always forcing More.
+          // (`dismissTo` guards the deep-link case where there's no history.)
+          onPress={() =>
+            router.canGoBack() ? router.back() : router.replace("/(tabs)/more")
+          }
           style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
           accessibilityLabel="Back"
         >
@@ -525,6 +544,7 @@ export default function ProfileScreen() {
                   initialRangeKey="1M"
                   format={(v) => `${Math.round(v)}`}
                   footnote="Share of your daily plan you completed — drag to inspect any day."
+                  onLockedRangePress={() => openPaywall("history")}
                 />
               </View>
             )}
@@ -964,3 +984,12 @@ const styles = StyleSheet.create({
   historyEmpty: { alignItems: "center", gap: Spacing.xs },
   historyEmptyTitle: { marginTop: Spacing.sm },
 });
+
+/**
+ * LEVEL 3 — route-level boundary. Expo Router honours this named export, so a
+ * throw inside this screen is contained here: the tab bar stays live and every
+ * other tab stays usable. Only what this file couldn't render is lost.
+ */
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
+  return <ScreenErrorFallback error={error} onRetry={retry} surface="profile" />;
+}

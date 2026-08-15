@@ -136,7 +136,7 @@ export default function SessionSummaryScreen() {
           </AppText>
           <Button
             label="Back to Fitness"
-            onPress={() => router.replace({ pathname: "/(tabs)", params: { tab: "fitness" } })}
+            onPress={() => router.replace("/(tabs)/exercise")}
             fullWidth={false}
           />
         </SafeAreaView>
@@ -275,13 +275,13 @@ export default function SessionSummaryScreen() {
               <Button
                 label="Back to Fitness"
                 icon="barbell"
-                onPress={() => router.replace({ pathname: "/(tabs)", params: { tab: "fitness" } })}
+                onPress={() => router.replace("/(tabs)/exercise")}
               />
               <Button
                 label="Go to Home"
                 icon="home-outline"
                 variant="tonal"
-                onPress={() => router.replace({ pathname: "/(tabs)", params: { tab: "home" } })}
+                onPress={() => router.replace("/(tabs)")}
               />
             </View>
           </Animated.View>

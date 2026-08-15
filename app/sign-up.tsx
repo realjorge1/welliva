@@ -5,6 +5,7 @@ import {
   AuthError,
   AuthField,
   AuthFooter,
+  AuthLegalNote,
   AuthPrimaryButton,
   SOCIAL_ENABLED,
   SocialButton,
@@ -140,6 +141,8 @@ export default function SignUpScreen() {
       <AuthError message={error} />
 
       <AuthPrimaryButton label="Create Account" onPress={onEmailSignUp} loading={emailLoading} disabled={loading} />
+
+      <AuthLegalNote />
 
       {SOCIAL_ENABLED && (
         <>

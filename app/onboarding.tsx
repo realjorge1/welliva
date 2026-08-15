@@ -35,6 +35,8 @@ import {
   useColors,
 } from "@/components/ui";
 import AILogoBadge from "@/components/gozlin/AILogoBadge";
+import { DisclaimerNote } from "@/components/legal";
+import { TargetGuidanceNote } from "@/components/nutrition/TargetGuidanceNote";
 import { OrbField, useOrbTouch } from "@/components/OrbField";
 import { HeroAura } from "@/components/onboarding/HeroAura";
 import { hasSeenNotificationPrimer } from "@/services/notifications/primer";
@@ -120,7 +122,8 @@ const ACTIVITY_OPTIONS: {
   { value: "sedentary", label: "Mostly sitting", desc: "Desk work, driving, screen time", icon: "desktop-outline", level: 1 },
   { value: "light", label: "Lightly active", desc: "On my feet here and there", icon: "walk-outline", level: 2 },
   { value: "moderate", label: "Active", desc: "Moving for much of the day", icon: "bicycle-outline", level: 3 },
-  { value: "very_active", label: "Very active", desc: "Physical job or always on the go", icon: "flame-outline", level: 4 },
+  { value: "active", label: "Very active", desc: "Physical job or hard training most days", icon: "flame-outline", level: 4 },
+  { value: "very_active", label: "Extra active", desc: "Physical job AND daily training", icon: "barbell-outline", level: 5 },
 ];
 
 const EXERCISE_LEVEL_OPTIONS: {
@@ -1058,6 +1061,9 @@ export default function OnboardingScreen() {
                 title="Anything I should know?"
                 subtitle="All optional — it just helps me keep your plan safe. Skip if nothing applies."
               />
+              {/* The most sensitive screen in the app. The reminder that this
+                  shapes a plan, not a treatment, belongs right here. */}
+              <DisclaimerNote compact />
               <View style={styles.group}>
                 <AppText variant="callout">Medical conditions</AppText>
                 <View style={styles.chips}>
@@ -1282,6 +1288,20 @@ export default function OnboardingScreen() {
               This is your starting point — I&apos;ll adjust it as I learn how you eat and move. Let&apos;s get going.
             </AppText>
           </View>
+        </Reveal>
+
+        {/* If a condition they just told us about CONSTRAINED these numbers,
+            say so here — at the first sight of the target, before it's had a
+            chance to read as a prescription. Silent for everyone else. */}
+        <Reveal index={5}>
+          <TargetGuidanceNote guidance={targets.guidance} />
+        </Reveal>
+
+        {/* The plan above is the first place Welliva hands the user real
+            numbers — calories, protein, sodium — so the disclaimer travels with
+            them rather than living only in Settings. */}
+        <Reveal index={5}>
+          <DisclaimerNote variant="card" />
         </Reveal>
 
         <Reveal index={5}>

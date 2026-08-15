@@ -21,12 +21,33 @@ import {
 } from "@/components/ui";
 import { useTheme } from "@/components/ThemeContext";
 import { useAuth } from "@/components/SupabaseAuthProvider";
+import { useLegalGate } from "@/components/legal";
+import {
+  LEGAL_CONTACT_EMAIL,
+  LEGAL_DOCS,
+  LEGAL_DOC_ORDER,
+  LEGAL_VERSION,
+} from "@/constants/legal";
 import {
   useReminderPermission,
   type ReminderPermission,
 } from "@/components/notifications/useReminderPermission";
 import { sendTestNotification } from "@/services/notifications/send";
-import { Radius, Spacing, alpha } from "@/constants/theme";
+import {
+  accountHasPassword,
+  ReauthenticationError,
+} from "@/services/account/AccountDeletion";
+import { useBilling } from "@/contexts/BillingContext";
+import {
+  getDevProOverride,
+  MANAGE_SUBSCRIPTION_URL,
+  resetUsage,
+  setDevProOverride,
+} from "@/services/billing";
+import { fullPushSweep } from "@/services/sync/SyncEngine";
+import { getActiveUserId, purgeAppData } from "@/services/sync/UserScope";
+import { describeSyncStatus, useSyncStatus } from "@/services/sync/useSyncStatus";
+import { LIGHT_MODE_ENABLED, Radius, Spacing, alpha } from "@/constants/theme";
 import { BioChangeSummary, useProfile } from "@/contexts/AppContext";
 import {
   CuisinePreference,
@@ -37,7 +58,6 @@ import {
 import { Equipment } from "@/models/workout";
 import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
-import { purgeAppData } from "@/services/sync/UserScope";
 import * as Haptics from "@/utils/haptics";
 import { useMealPlan } from "@/contexts/MealPlanContext";
 import { TRACKING_MODE_OPTIONS } from "@/models/trackingMode";
@@ -45,6 +65,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -61,7 +82,8 @@ const ACTIVITY_LEVELS: Opt<string>[] = [
   { value: "sedentary", label: "Sedentary" },
   { value: "light", label: "Light" },
   { value: "moderate", label: "Moderate" },
-  { value: "very_active", label: "Very active" },
+  { value: "active", label: "Very active" },
+  { value: "very_active", label: "Extra active" },
 ];
 const GOALS: Opt<string>[] = [
   { value: "lose_weight", label: "Lose weight" },
@@ -227,10 +249,27 @@ const REMINDER_STATUS: Record<
   },
 };
 
+/** "2 minutes ago" / "yesterday" — relative reads better than a raw timestamp. */
+function formatLastSync(iso: string | null): string {
+  if (!iso) return "Not synced yet";
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "Not synced yet";
+  const mins = Math.floor((Date.now() - then) / 60000);
+  if (mins < 1) return "Synced just now";
+  if (mins < 60) return `Synced ${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `Synced ${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "Synced yesterday" : `Synced ${days} days ago`;
+}
+
 export default function SettingsScreen() {
   const { colors } = useColors();
   const { themeMode, setThemeMode } = useTheme();
-  const { user, signOut } = useAuth();
+  const { user, signOut, deleteAccount } = useAuth();
+  const syncStatus = useSyncStatus();
+  const [syncing, setSyncing] = useState(false);
+  const { acceptance } = useLegalGate();
   const { trackingMode, setTrackingMode } = useMealPlan();
   const {
     userBio,
@@ -251,10 +290,75 @@ export default function SettingsScreen() {
   const [changeSummary, setChangeSummary] = useState<BioChangeSummary | null>(
     null,
   );
+  // Account deletion. Its own modal rather than an Alert: this is the one
+  // irreversible action in the app, and Alert.prompt (the only native way to
+  // ask for typed input) is iOS-only — an Android user would get a two-tap
+  // "Delete" on a permanent action. See handleDeleteAccount.
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  // Shown inline under the password field rather than as an Alert: a wrong
+  // password is a correction, not an incident, and an Alert would dismiss the
+  // sheet the user is mid-way through filling in.
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  // Subscription. `billing` also drives which row the section shows.
+  const billing = useBilling();
+  const [restoring, setRestoring] = useState(false);
+  const [devTier, setDevTier] = useState<boolean | null>(() => getDevProOverride());
 
   useEffect(() => {
     setEditingBio(userBio);
   }, [userBio]);
+
+  // The dev override is restored from disk during billing hydration, which
+  // finishes after this screen's first render — so re-read it once that lands.
+  useEffect(() => {
+    if (__DEV__ && !billing.isHydrating) setDevTier(getDevProOverride());
+  }, [billing.isHydrating]);
+
+  /**
+   * Restore purchases. Store-required, and it must give an answer either way —
+   * silence after tapping "Restore" reads as a broken app to someone who has
+   * genuinely paid and is trying to get their subscription back.
+   */
+  const handleRestorePurchases = async () => {
+    if (restoring) return;
+    setRestoring(true);
+    try {
+      const result = await billing.restore();
+      if (result.isPro) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+          () => {},
+        );
+        Alert.alert("Welcome back", "Your Welliva Pro subscription is active again.");
+      } else if (!result.ok) {
+        Alert.alert(
+          "Couldn't restore",
+          result.message ??
+            "We couldn't reach the store. Check your connection and try again.",
+        );
+      } else {
+        Alert.alert(
+          "Nothing to restore",
+          "No active subscription was found for the store account signed in on this device.",
+        );
+      }
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  /** Dev tier switch: real → free → pro → real. Also clears the day's meters. */
+  const handleCycleDevTier = async () => {
+    const next = devTier === null ? false : devTier === false ? true : null;
+    setDevTier(next);
+    await setDevProOverride(next);
+    // Reset the coach/photo counters too, so flipping to Free hands you a clean
+    // 3 messages rather than whatever you'd already spent as Pro.
+    await resetUsage();
+    Haptics.selectionAsync().catch(() => {});
+  };
 
   const waterGoal =
     userGoals.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500;
@@ -333,27 +437,112 @@ export default function SettingsScreen() {
     setTimeout(() => setTestState("idle"), result.delaySeconds * 1000 + 2000);
   };
 
+  /** Drain the outbox on demand. The one manual lever over a silent system. */
+  const handleSyncNow = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const userId = await getActiveUserId();
+      if (!userId) return;
+      await fullPushSweep(userId);
+    } catch (error) {
+      console.warn("Manual sync failed:", error);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const handleSignOut = () => {
-    Alert.alert(
-      "Sign out",
-      "Sign out of your account? Your profile is safely synced to the cloud.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Sign out",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await signOut();
-              // AuthWrapper redirects to /sign-in once the session clears.
-            } catch (error) {
-              console.error("Error signing out:", error);
-              Alert.alert("Error", "Failed to sign out.");
-            }
-          },
+    // Sign-out already REFUSES to purge while writes are pending (see
+    // SupabaseAuthProvider) — the data survives either way. What was missing is
+    // telling the user, so "sign out on the train and lose today's logs" stops
+    // being a thing they only discover afterwards.
+    const pending = syncStatus.pendingCount;
+    const body =
+      pending > 0
+        ? `${pending} change${pending === 1 ? "" : "s"} ${pending === 1 ? "hasn't" : "haven't"} reached the cloud yet. ` +
+          `They'll stay on this device and sync next time you're signed in with a connection — ` +
+          `or you can wait for signal and sign out after.`
+        : "Sign out of your account? Your profile is safely synced to the cloud.";
+
+    Alert.alert("Sign out", body, [
+      { text: "Cancel", style: "cancel" },
+      ...(pending > 0 && syncStatus.online
+        ? [{ text: "Sync first", onPress: () => void handleSyncNow() }]
+        : []),
+      {
+        text: pending > 0 ? "Sign out anyway" : "Sign out",
+        style: "destructive" as const,
+        onPress: async () => {
+          try {
+            await signOut();
+            // AuthWrapper redirects to /sign-in once the session clears.
+          } catch (error) {
+            console.error("Error signing out:", error);
+            Alert.alert("Error", "Failed to sign out.");
+          }
         },
-      ],
-    );
+      },
+    ]);
+  };
+
+  /** The word the user must type. Uppercase so it cannot be muscle-memory. */
+  const DELETE_PHRASE = "DELETE";
+  /**
+   * Google accounts have no password to re-enter. Asking for one would lock
+   * them out of deleting their own account — the exact failure this flow exists
+   * to prevent — so for them the live OAuth session IS the identity proof.
+   */
+  const needsPassword = accountHasPassword(user);
+  const canConfirmDelete =
+    deleteConfirmText.trim().toUpperCase() === DELETE_PHRASE &&
+    (!needsPassword || deletePassword.length > 0) &&
+    !deleting;
+
+  const closeDeleteModal = () => {
+    if (deleting) return; // never yank the sheet out mid-teardown
+    setShowDeleteModal(false);
+    setDeleteConfirmText("");
+    setDeletePassword("");
+    setDeleteError(null);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!canConfirmDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteAccount(deletePassword);
+      // The account is gone and the session with it. Don't route manually —
+      // clearing the session makes AuthWrapper redirect to /sign-in, and racing
+      // it here would push a route onto a tree that is being torn down.
+      setShowDeleteModal(false);
+      setDeleteConfirmText("");
+      setDeletePassword("");
+    } catch (error) {
+      setDeleting(false);
+
+      // A failed password check is not a failed deletion — nothing was touched.
+      // Keep the user in the sheet with the field cleared so they can retype,
+      // and say nothing about the account, because there is nothing to say.
+      if (error instanceof ReauthenticationError) {
+        setDeletePassword("");
+        setDeleteError(error.message);
+        return;
+      }
+
+      console.error("Error deleting account:", error);
+      // deleteAccount only throws while the account still EXISTS, so it is
+      // honest — and important — to say nothing was deleted. Telling someone
+      // their data might be half-gone when it is fully intact would be worse
+      // than the failure itself.
+      Alert.alert(
+        "Couldn't delete your account",
+        "Something went wrong and your account has NOT been deleted. " +
+          "Check your connection and try again — if it keeps failing, email " +
+          `${LEGAL_CONTACT_EMAIL} and we'll do it for you.`,
+      );
+    }
   };
 
   const handleResetData = () => {
@@ -386,6 +575,8 @@ export default function SettingsScreen() {
       <Pressable
         onPress={() => router.back()}
         hitSlop={10}
+        accessibilityRole="button"
+        accessibilityLabel="Go back"
         style={styles.iconBtn}
       >
         <Ionicons name="chevron-back" size={26} color={colors.text} />
@@ -420,6 +611,10 @@ export default function SettingsScreen() {
                       Haptics.selectionAsync().catch(() => {});
                       void setTrackingMode(opt.mode);
                     }}
+                    accessible
+                    accessibilityRole="radio"
+                    accessibilityLabel={opt.title}
+                    accessibilityState={{ selected: active, checked: active }}
                     style={[
                       styles.modeRow,
                       i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
@@ -455,7 +650,9 @@ export default function SettingsScreen() {
           </View>
         </Reveal>
 
-        {/* Appearance */}
+        {/* Appearance — hidden while light mode is disabled (LIGHT_MODE_ENABLED
+            in constants/theme.ts). Flip that flag and the picker returns. */}
+        {LIGHT_MODE_ENABLED ? (
         <Reveal index={0}>
           <View style={styles.section}>
             <SectionHeader title="Appearance" />
@@ -476,6 +673,10 @@ export default function SettingsScreen() {
                     <Pressable
                       key={opt.mode}
                       onPress={() => setThemeMode(opt.mode)}
+                      accessible
+                      accessibilityRole="radio"
+                      accessibilityLabel={opt.label}
+                      accessibilityState={{ selected: active, checked: active }}
                       style={[
                         styles.segmentItem,
                         {
@@ -504,6 +705,7 @@ export default function SettingsScreen() {
             </Card>
           </View>
         </Reveal>
+        ) : null}
 
         {/* Goals */}
         <Reveal index={1}>
@@ -642,8 +844,87 @@ export default function SettingsScreen() {
           </View>
         </Reveal>
 
-        {/* Account */}
+        {/* Subscription — "Manage subscription" and "Restore purchases" are
+            both REQUIRED by Google Play and the App Store, and an app without
+            them is rejected. They also have to work for a user who is already
+            subscribed, which is why the restore row is always shown and never
+            hidden behind the free-tier branch. */}
         <Reveal index={4}>
+          <View style={styles.section}>
+            <SectionHeader
+              title="Subscription"
+              subtitle={billing.isPro ? "Welliva Pro" : "Free plan"}
+            />
+            <Card padding="none">
+              {billing.isPro ? (
+                <SettingsRow
+                  icon="star"
+                  tone={colors.gold}
+                  title="Manage subscription"
+                  subtitle={
+                    billing.entitlement.expiresAt
+                      ? `Renews ${new Date(billing.entitlement.expiresAt).toLocaleDateString()}`
+                      : "Change or cancel your plan"
+                  }
+                  colors={colors}
+                  onPress={() => void Linking.openURL(MANAGE_SUBSCRIPTION_URL)}
+                  divider
+                />
+              ) : (
+                <SettingsRow
+                  icon="sparkles"
+                  tone={colors.gold}
+                  title="Upgrade to Welliva Pro"
+                  subtitle="Unlimited coaching, plans built for you, full history"
+                  colors={colors}
+                  onPress={() => billing.openPaywall("settings")}
+                  divider
+                />
+              )}
+              <SettingsRow
+                icon="refresh"
+                tone={colors.water}
+                title="Restore purchases"
+                subtitle={
+                  restoring
+                    ? "Checking with the store…"
+                    : "Already subscribed? Bring it back on this device"
+                }
+                colors={colors}
+                onPress={handleRestorePurchases}
+                divider={__DEV__}
+              />
+              {/* Dev-only tier switch. Every lock has to be walkable before the
+                  RevenueCat account exists — otherwise the free-tier experience
+                  first gets tested during store review. Stripped in release. */}
+              {__DEV__ ? (
+                <SettingsRow
+                  icon="construct"
+                  tone={colors.warning}
+                  title="Dev: force tier"
+                  subtitle={
+                    devTier === null
+                      ? "Off — using the real entitlement"
+                      : devTier
+                        ? "Forced to PRO"
+                        : "Forced to FREE"
+                  }
+                  colors={colors}
+                  onPress={handleCycleDevTier}
+                  right={
+                    <Pill
+                      label={devTier === null ? "REAL" : devTier ? "PRO" : "FREE"}
+                      tone={devTier === null ? colors.textTertiary : colors.warning}
+                    />
+                  }
+                />
+              ) : null}
+            </Card>
+          </View>
+        </Reveal>
+
+        {/* Account */}
+        <Reveal index={5}>
           <View style={styles.section}>
             <SectionHeader title="Account" />
             <Card padding="none">
@@ -669,7 +950,7 @@ export default function SettingsScreen() {
         </Reveal>
 
         {/* About */}
-        <Reveal index={5}>
+        <Reveal index={6}>
           <View style={styles.section}>
             <SectionHeader title="About" />
             <Card padding="none">
@@ -688,18 +969,94 @@ export default function SettingsScreen() {
           </View>
         </Reveal>
 
+        {/* Legal — the policies the user accepted, always re-readable. The
+            subtitle records WHICH version they agreed to and when. */}
+        <Reveal index={7}>
+          <View style={styles.section}>
+            <SectionHeader
+              title="Legal"
+              subtitle={
+                acceptance
+                  ? `Accepted version ${acceptance.version} on ${new Date(
+                      acceptance.acceptedAt,
+                    ).toLocaleDateString()}`
+                  : `Version ${LEGAL_VERSION}`
+              }
+            />
+            <Card padding="none">
+              {LEGAL_DOC_ORDER.map((id, i) => {
+                const doc = LEGAL_DOCS[id];
+                return (
+                  <SettingsRow
+                    key={id}
+                    icon={doc.icon as keyof typeof Ionicons.glyphMap}
+                    tone={id === "disclaimer" ? colors.warning : colors.primary}
+                    title={doc.title}
+                    subtitle={doc.summary}
+                    colors={colors}
+                    onPress={() => router.push(`/legal/${id}` as never)}
+                    divider={i < LEGAL_DOC_ORDER.length - 1}
+                  />
+                );
+              })}
+            </Card>
+          </View>
+        </Reveal>
+
         {/* Data */}
-        <Reveal index={6}>
+        <Reveal index={8}>
           <View style={styles.section}>
             <SectionHeader title="Data" />
             <Card padding="none">
+              {/* "Is my data actually in the cloud?" — previously unanswerable
+                  from inside the app. Now it's a row with a timestamp and a
+                  button, so a user with a flaky connection can check and act
+                  instead of guessing. */}
+              {/* On the free tier this row stops being "sync now" and becomes
+                  the honest statement of where the data lives, plus the way to
+                  change that. Offering a Sync button that silently does nothing
+                  would be the worst of both. */}
+              {syncStatus.cloudDisabled ? (
+                <SettingsRow
+                  icon="cloud-offline-outline"
+                  tone={colors.gold}
+                  title="Cloud backup is off"
+                  subtitle="Your data is saved on this device. Pro backs it up and syncs every device you sign in on."
+                  colors={colors}
+                  onPress={() => billing.openPaywall("sync")}
+                />
+              ) : (
+                <SettingsRow
+                  icon={syncStatus.online ? "cloud-done-outline" : "cloud-offline-outline"}
+                  tone={syncStatus.state === "synced" ? colors.success : colors.warning}
+                  title={syncing ? "Syncing…" : "Sync now"}
+                  subtitle={`${describeSyncStatus(syncStatus)} · ${formatLastSync(syncStatus.lastSyncAt)}`}
+                  colors={colors}
+                  onPress={handleSyncNow}
+                />
+              )}
               <SettingsRow
                 icon="trash"
                 tone={colors.error}
                 title="Reset data"
                 subtitle="Erase all data and start over"
                 colors={colors}
+                divider
                 onPress={handleResetData}
+              />
+              {/* Deliberately the LAST row in the last section, and the only
+                  one that leaves the app. "Reset data" above is the recoverable
+                  neighbour (device only, account intact) — keeping them adjacent
+                  is what makes the difference legible: one starts you over, one
+                  ends you. Required in-app by App Store 5.1.1(v) and promised in
+                  the privacy policy under "How long we keep it". */}
+              <SettingsRow
+                icon="person-remove-outline"
+                tone={colors.error}
+                title="Delete account"
+                subtitle="Permanently erase your account and all data"
+                colors={colors}
+                onPress={() => setShowDeleteModal(true)}
               />
             </Card>
           </View>
@@ -715,13 +1072,25 @@ export default function SettingsScreen() {
       >
         <SafeAreaView style={[styles.modal, { backgroundColor: colors.background }]}>
           <View style={[styles.modalHeader, { borderBottomColor: colors.divider }]}>
-            <Pressable onPress={() => setShowEditModal(false)} hitSlop={8}>
+            <Pressable
+              onPress={() => setShowEditModal(false)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
+            >
               <AppText variant="body" color="secondary">
                 Cancel
               </AppText>
             </Pressable>
             <AppText variant="headline">Edit profile</AppText>
-            <Pressable onPress={handleSaveBio} disabled={isSaving} hitSlop={8}>
+            <Pressable
+              onPress={handleSaveBio}
+              disabled={isSaving}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Save profile"
+              accessibilityState={{ disabled: isSaving, busy: isSaving }}
+            >
               <AppText variant="body" color="brand" style={styles.bold}>
                 {isSaving ? "Saving…" : "Save"}
               </AppText>
@@ -928,6 +1297,8 @@ export default function SettingsScreen() {
         <Pressable
           style={[styles.summaryScrim, { backgroundColor: colors.scrim }]}
           onPress={() => setChangeSummary(null)}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss"
         >
           <Pressable
             style={[
@@ -953,6 +1324,152 @@ export default function SettingsScreen() {
               label="Got it"
               onPress={() => setChangeSummary(null)}
               style={styles.summaryBtn}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Delete account — the confirmation.
+          Three deliberate frictions, because this is the only action in the app
+          with no undo and no support path back:
+            1. it names what goes, rather than saying "all your data" — people
+               under-estimate that, then discover the loss later;
+            2. it requires typing DELETE, so it cannot be reached by tapping
+               through muscle memory in the same spot as "Reset data" above;
+            3. it can't be dismissed while running, so a tap on the scrim
+               mid-teardown can't leave the user staring at a working app whose
+               account is already gone. */}
+      <Modal
+        visible={showDeleteModal}
+        transparent
+        animationType="fade"
+        onRequestClose={closeDeleteModal}
+      >
+        <Pressable
+          style={[styles.summaryScrim, { backgroundColor: colors.scrim }]}
+          onPress={closeDeleteModal}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss"
+        >
+          {/* Swallows taps so pressing inside the card doesn't hit the scrim. */}
+          <Pressable
+            style={[
+              styles.summaryCard,
+              { backgroundColor: colors.surface, borderColor: alpha(colors.error, 0.35) },
+            ]}
+          >
+            <IconBadge name="warning" tone={colors.error} size={56} solid />
+            <AppText variant="title" align="center" style={styles.summaryTitle}>
+              Delete your account?
+            </AppText>
+            <AppText variant="subhead" color="secondary" align="center">
+              This cannot be undone. We&apos;ll permanently erase:
+            </AppText>
+
+            <View style={styles.summaryLines}>
+              {[
+                "Your profile, goals and health details",
+                "Every meal, workout, weight and water log",
+                "Your streaks, achievements and habits",
+                "Progress photos and anything Gozlin remembers",
+              ].map((line) => (
+                <View key={line} style={styles.summaryLine}>
+                  <Ionicons name="close-circle" size={16} color={colors.error} />
+                  <AppText variant="subhead" color="secondary" style={styles.flex}>
+                    {line}
+                  </AppText>
+                </View>
+              ))}
+            </View>
+
+            {/* IDENTITY. The typed word below proves the user meant it; this
+                proves it's their account. Without it an unlocked phone is
+                enough to erase someone's whole health history. Hidden entirely
+                for Google accounts, which have no password to give. */}
+            {needsPassword && (
+              <>
+                <AppText variant="caption" color="secondary" align="center">
+                  Confirm it&apos;s you
+                </AppText>
+                <TextInput
+                  value={deletePassword}
+                  onChangeText={(text) => {
+                    setDeletePassword(text);
+                    setDeleteError(null); // clear the error as they retype
+                  }}
+                  editable={!deleting}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  textContentType="password"
+                  placeholder="Your password"
+                  placeholderTextColor={colors.textSecondary}
+                  accessibilityLabel="Your password, to confirm account deletion"
+                  style={[
+                    styles.input,
+                    styles.deleteField,
+                    {
+                      color: colors.text,
+                      borderColor: deleteError ? colors.error : colors.divider,
+                      backgroundColor: colors.background,
+                    },
+                  ]}
+                />
+                {!!deleteError && (
+                  // `alert` so a screen reader announces the correction without
+                  // the user having to go looking for why nothing happened.
+                  <AppText
+                    variant="caption"
+                    align="center"
+                    accessibilityRole="alert"
+                    style={{ color: colors.error }}
+                  >
+                    {deleteError}
+                  </AppText>
+                )}
+              </>
+            )}
+
+            <AppText variant="caption" color="secondary" align="center">
+              Type {DELETE_PHRASE} to confirm.
+            </AppText>
+            <TextInput
+              value={deleteConfirmText}
+              onChangeText={setDeleteConfirmText}
+              editable={!deleting}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              placeholder={DELETE_PHRASE}
+              placeholderTextColor={colors.textSecondary}
+              accessibilityLabel={`Type ${DELETE_PHRASE} to confirm account deletion`}
+              style={[
+                styles.input,
+                styles.deleteField,
+                styles.deletePhrase,
+                {
+                  color: colors.text,
+                  borderColor: canConfirmDelete ? colors.error : colors.divider,
+                  backgroundColor: colors.background,
+                },
+              ]}
+            />
+
+            <Button
+              label={deleting ? "Deleting…" : "Delete my account"}
+              variant="danger"
+              fullWidth
+              loading={deleting}
+              disabled={!canConfirmDelete}
+              onPress={() => void handleDeleteAccount()}
+              accessibilityHint="Permanently erases your account and all data"
+              style={styles.summaryBtn}
+            />
+            <Button
+              label="Cancel"
+              variant="ghost"
+              fullWidth
+              disabled={deleting}
+              onPress={closeDeleteModal}
             />
           </Pressable>
         </Pressable>
@@ -1027,6 +1544,11 @@ function SettingsRow({
     <Pressable
       onPress={onPress}
       disabled={!onPress}
+      // Reads as one row rather than three fragments (badge, title, subtitle).
+      // Non-tappable rows stay plain text so they aren't announced as buttons.
+      accessible
+      accessibilityRole={onPress ? "button" : undefined}
+      accessibilityLabel={subtitle ? `${title}. ${subtitle}` : title}
       style={[
         styles.settingsRow,
         divider && { borderBottomWidth: 1, borderBottomColor: colors.divider },
@@ -1106,17 +1628,23 @@ function StepBtn({
   onPress,
   disabled,
   colors,
+  label,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   onPress: () => void;
   disabled?: boolean;
   colors: ReturnType<typeof useColors>["colors"];
+  /** Spoken name — the glyph alone ("+"/"−") says nothing about what changes. */
+  label?: string;
 }) {
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
       hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={label ?? (icon.includes("add") ? "Increase" : "Decrease")}
+      accessibilityState={{ disabled: !!disabled }}
       style={[
         styles.stepBtn,
         {
@@ -1176,6 +1704,11 @@ function Chip({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      // `selected` is what tells a screen-reader user which option is currently
+      // chosen — without it every chip in the group sounds identical.
+      accessibilityState={{ selected: active }}
       style={[
         styles.chip,
         {
@@ -1320,4 +1853,18 @@ const styles = StyleSheet.create({
   },
   summaryLine: { flexDirection: "row", alignItems: "flex-start", gap: Spacing.sm },
   summaryBtn: { alignSelf: "stretch", marginTop: Spacing.xl },
+
+  // Delete-account inputs. Shared layout…
+  deleteField: {
+    alignSelf: "stretch",
+    marginTop: Spacing.sm,
+    textAlign: "center",
+  },
+  // …but only the typed word gets the letter-spaced treatment, so it reads as a
+  // deliberate act rather than an ordinary form field. Applying this to the
+  // password too would space out the secure-entry dots into nonsense.
+  deletePhrase: {
+    letterSpacing: 2,
+    fontWeight: "700",
+  },
 });

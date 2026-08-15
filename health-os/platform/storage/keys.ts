@@ -44,6 +44,13 @@ export const K = {
 
   // ── story (long-horizon recap archive: year / anniversary / 5-year) ──
   STORY_ARCHIVE: "@welliva_story_archive", // StoryArtifact[]
+
+  // ── learning (the closed loop: predict → observe → update a parameter) ──
+  LEARNING_LEDGER: "@welliva_learning_ledger", // Recommendation[] — falsifiable record
+  LEARNING_POSTERIORS: "@welliva_learning_posteriors", // Beta(α,β) per context×arm
+  LEARNING_TDEE: "@welliva_learning_tdee", // KalmanState — learned maintenance
+  LEARNING_FITNESS: "@welliva_learning_fitness", // FitnessFatigueParams — fitted τ/k
+  LEARNING_ADHERENCE: "@welliva_learning_adherence", // LogisticModel — β weights
 } as const;
 
 /**

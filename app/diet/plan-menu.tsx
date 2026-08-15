@@ -363,7 +363,22 @@ function MealPickerModal({
   const { colors } = useColors();
   const [query, setQuery] = useState("");
 
-  const results = useMemo(() => (query.trim() ? searchCanonical(query, 12) : []), [query]);
+  /*
+   * `searchCanonical` scans the whole food reference, so running it per
+   * keystroke was the actual cost on this screen — the RESULT list is capped at
+   * 12, so there was never anything here worth virtualizing. Debounce the term
+   * that drives the scan and leave the input itself instant.
+   */
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(query), 150);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const results = useMemo(
+    () => (search.trim() ? searchCanonical(search, 12) : []),
+    [search],
+  );
 
   const make = (name: string, kcal: number, p = 0, c = 0, f = 0): ScheduledMeal => ({
     id: `cm_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -383,7 +398,12 @@ function MealPickerModal({
           <AppText variant="headline" weight="700">
             Choose a meal
           </AppText>
-          <Pressable onPress={onClose} hitSlop={12}>
+          <Pressable
+            onPress={onClose}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+          >
             <Ionicons name="close" size={26} color={colors.text} />
           </Pressable>
         </View>

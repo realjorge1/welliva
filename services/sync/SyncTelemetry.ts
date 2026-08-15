@@ -132,6 +132,36 @@ export async function record(event: SyncEvent): Promise<void> {
   scheduleFlush();
 }
 
+/**
+ * Record a sync ANOMALY — something refused rather than something that failed.
+ *
+ * Distinct from a failed attempt on purpose: a 500 is the network being the
+ * network, whereas "this document is half a megabyte" is a bug in OUR retention
+ * that will keep costing every user bandwidth until someone notices. This is how
+ * we notice, before the bandwidth bill or the support ticket does.
+ *
+ * Same privacy rule as everything else here: operation names and magnitudes
+ * only, never field values.
+ */
+export type SyncAnomaly = "doc_too_large";
+
+export async function recordSyncAnomaly(
+  anomaly: SyncAnomaly,
+  detail: { key: string; bytes?: number },
+): Promise<void> {
+  const size = detail.bytes != null ? ` (${Math.round(detail.bytes / 1024)}KB)` : "";
+  await record({
+    op: "document.push",
+    outcome: "failed",
+    at: new Date().toISOString(),
+    ms: 0,
+    error: `${anomaly}: ${detail.key}${size}`,
+  });
+  if (__DEV__) {
+    console.warn(`[sync anomaly] ${anomaly}: ${detail.key}${size}`);
+  }
+}
+
 /** Read the local black box — for a debug screen or a support dump. */
 export async function getSyncHealth(): Promise<SyncHealth> {
   const health = await load();

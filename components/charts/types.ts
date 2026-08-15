@@ -25,4 +25,15 @@ export interface TrendSeries {
   label: string;
   /** The plotted samples, oldest → newest. */
   points: ChartPoint[];
+  /**
+   * This range is beyond the viewer's tier (see services/billing/tiers.ts).
+   * The tab still renders — a visible "1 yr" you can't open yet is the reason
+   * to upgrade — but it can't become active, and tapping it calls the card's
+   * `onLockedRangePress` instead.
+   *
+   * Deliberately a plain flag rather than a billing import: this module stays
+   * presentational and unit-testable with no React context in scope. Screens
+   * decide what locked means and what a locked tap does.
+   */
+  locked?: boolean;
 }

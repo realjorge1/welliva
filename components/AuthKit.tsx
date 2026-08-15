@@ -10,6 +10,7 @@ import { Radius, Spacing, brandGradientDark } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "@/utils/haptics";
 import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
 import React, { useEffect, useRef } from "react";
 import {
   ActivityIndicator,
@@ -242,6 +243,36 @@ export function AuthFooter({
   );
 }
 
+/**
+ * The legal line under the sign-up form. The full consent gate comes after
+ * sign-in (app/legal/consent.tsx), but the terms must also be reachable at the
+ * moment an account is created — the reviewer looks for it there, and a user
+ * shouldn't have to make an account to read what they're agreeing to. Both
+ * documents are readable while signed out (see AuthWrapper).
+ */
+export function AuthLegalNote() {
+  const router = useRouter();
+  return (
+    <Text style={styles.legalNote}>
+      By creating an account you agree to our{" "}
+      <Text
+        style={styles.legalLink}
+        onPress={() => router.push("/legal/terms" as never)}
+      >
+        Terms of Use
+      </Text>{" "}
+      and{" "}
+      <Text
+        style={styles.legalLink}
+        onPress={() => router.push("/legal/privacy" as never)}
+      >
+        Privacy Policy
+      </Text>
+      .
+    </Text>
+  );
+}
+
 export const authStyles = StyleSheet.create({
   link: { color: BUBBLE_YELLOW, fontSize: 14, fontWeight: "700" },
   rowGap: { gap: Spacing.md },
@@ -331,4 +362,12 @@ const styles = StyleSheet.create({
 
   footer: { flexDirection: "row", justifyContent: "center", marginTop: Spacing.xxl },
   footerText: { color: WHITE_70, fontSize: 14 },
+  legalNote: {
+    color: WHITE_55,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: "center",
+    marginTop: Spacing.lg,
+  },
+  legalLink: { color: BUBBLE_YELLOW, fontWeight: "700" },
 });

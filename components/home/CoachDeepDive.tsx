@@ -15,6 +15,7 @@
  * on Skia. Everything animates on the UI thread.
  */
 import { useApp } from "@/contexts/AppContext";
+import { PaywallGate } from "@/components/billing";
 import { useGozlinSnapshot } from "@/components/gozlin";
 import { Ease } from "@/components/motion/motion";
 import {
@@ -359,6 +360,18 @@ export function CoachDeepDive({
                 </>
               )}
 
+              {/* ── The depth: learned patterns + predicted slips ──
+                  Everything above this point is today's own numbers and the
+                  insight the user already tapped — free, because it is what
+                  brings them back daily. What follows is the accumulated
+                  "Gozlin knows you" layer, and it is what Pro sells. One gate
+                  wraps both sections so a free user gets a single calm card
+                  rather than two stacked upsells. */}
+              {/* Guarded on there being something to show: with no patterns and
+                  no risks yet (a brand-new account) the gate would advertise
+                  depth that does not exist for anyone, free or paid. */}
+              {(report.patterns.length > 0 || report.risks.length > 0) && (
+              <PaywallGate lock="insights">
               {/* ── What Gozlin has learned ── */}
               {report.patterns.length > 0 && (
                 <>
@@ -438,6 +451,8 @@ export function CoachDeepDive({
                     })}
                   </Card>
                 </>
+              )}
+              </PaywallGate>
               )}
 
               {/* ── CTA ── */}

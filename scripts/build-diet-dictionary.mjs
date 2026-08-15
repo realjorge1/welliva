@@ -27,11 +27,9 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const SRC = join(ROOT, "diet_dictionary");
-const OUT = join(ROOT, "constants", "DietLibraryGenerated.ts");
 // Phase D.4 — the catalogs are served from Supabase Storage, not the bundle.
-// The JSON here is the RUNTIME source (uploaded via scripts/upload-catalogs.mjs);
-// DietLibraryGenerated.ts is kept only as a readable reference + is no longer
-// imported by the app, so Metro leaves it out of the bundle.
+// The JSON emitted here is the RUNTIME source, uploaded via
+// scripts/upload-catalogs.mjs and fetched on device by services/catalogs/CatalogLoader.
 const CATALOG_DIST = join(ROOT, "catalogs-dist");
 
 // ── Intentional id per diet number ──────────────────────────────────────────
@@ -424,28 +422,13 @@ for (const item of foods) {
 
 // ── Emit ────────────────────────────────────────────────────────────────────
 
-const header = `/**
- * DietLibraryGenerated.ts — AUTO-GENERATED. DO NOT EDIT BY HAND.
- *
- * Source of truth: /diet_dictionary (repo root).
- * Regenerate:      node scripts/build-diet-dictionary.mjs
- *
- * ${out.length} diets + ${foodsOut.length} whole foods parsed from the clinical
- * diet dictionary. Diets whose id already exists in the hand-authored
- * DIET_DATABASE are merged/skipped there (base wins), so GENERATED_DIETS is
- * additive only. FOOD_DICTIONARY is the ingredient-level whole-foods catalog
- * (fruits, vegetables, proteins, grains, legumes, dairy, Nigerian staples …).
- */
-
-import type { DietData } from "./DietDatabase";
-import type { FoodItem } from "./FoodDictionary";
-
-export const GENERATED_DIETS: DietData[] = ${JSON.stringify(out, null, 2)};
-
-export const FOOD_DICTIONARY: FoodItem[] = ${JSON.stringify(foodsOut, null, 2)};
-`;
-
-writeFileSync(OUT, header, "utf8");
+// NOTE: this script used to also emit `constants/DietLibraryGenerated.ts` — a
+// 48k-line typed mirror of the data below, kept as a "readable reference". It
+// was imported by nothing (the app loads the JSON catalogs below from Supabase
+// Storage at runtime) and was deleted. Re-emitting it would resurrect 48k lines
+// of dead code on the next codegen run, so the emit stays removed on purpose.
+// The readable source of truth is /diet_dictionary; the runtime artifacts are
+// the JSON catalogs emitted below.
 
 // ── Emit runtime JSON catalogs (Phase D.4) ───────────────────────────────────
 // These are what the APP loads at runtime (fetched from Supabase Storage). The
@@ -488,4 +471,4 @@ if (thin.length) {
 const foodGroups = [...new Set(foodsOut.map((f) => f.group))];
 console.log(`Parsed ${foods.length} whole foods → ${foodsOut.length} unique ids`);
 console.log(`Food groups (${foodGroups.length}): ${foodGroups.join(", ")}`);
-console.log(`Wrote ${OUT}`);
+console.log(`Wrote runtime catalogs → ${CATALOG_DIST}`);

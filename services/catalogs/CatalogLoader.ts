@@ -33,14 +33,49 @@ export interface CatalogResult<T> {
   source: CatalogSource;
 }
 
+/**
+ * Blob → text, across runtimes.
+ *
+ * Web (and Node) Blobs have `.text()`. React Native's Blob polyfill does NOT —
+ * it carries a native blob id plus `size`/`type`/`slice()` and nothing else, so
+ * calling `.text()` on a downloaded catalog threw "data.text is not a function"
+ * on device and every catalog silently fell back to its bundled seed. FileReader
+ * is the reader RN actually implements.
+ */
+async function blobToText(blob: Blob): Promise<string> {
+  if (typeof blob.text === "function") return blob.text();
+  if (typeof FileReader === "undefined") throw new Error("no Blob reader available");
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? new Error("FileReader failed"));
+    reader.readAsText(blob);
+  });
+}
+
 /** Lazily download + parse a JSON file from the catalogs bucket. */
 async function downloadJson<T>(file: string): Promise<T | null> {
   try {
     const { supabase } = await import("../../lib/supabase");
-    const { data, error } = await supabase.storage.from(BUCKET).download(file);
+    const bucket = supabase.storage.from(BUCKET);
+
+    // FAST PATH — `catalogs` is a public bucket (migration 20260724130000), so a
+    // plain GET on the object URL needs no auth and, crucially, keeps the body a
+    // string: `res.json()` never materialises a Blob. That skips shuttling ~1 MB
+    // across the RN bridge and sidesteps the platform Blob differences entirely.
+    try {
+      const { publicUrl } = bucket.getPublicUrl(file).data;
+      const res = await fetch(publicUrl);
+      if (res.ok) return (await res.json()) as T;
+    } catch {
+      // fall through to the storage API
+    }
+
+    // FALLBACK — the storage API. Also the only path should the bucket ever go
+    // private, since it signs the request with the user's token.
+    const { data, error } = await bucket.download(file);
     if (error || !data) return null;
-    const text = await data.text();
-    return JSON.parse(text) as T;
+    return JSON.parse(await blobToText(data)) as T;
   } catch (e) {
     console.warn(`CatalogLoader: download ${file} failed:`, e);
     return null;

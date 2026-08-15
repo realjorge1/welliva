@@ -1,0 +1,23 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "app/**/*.{ts,tsx}",
+    "app.config.{js,ts}",
+    "metro.config.js",
+    "eslint.config.js",
+    "vitest.config.ts",
+    "vitest.setup.ts",
+    "scripts/**/*.{js,mjs}",
+    "**/*.test.ts",
+    "**/__tests__/**/*.{ts,tsx}"
+  ],
+  "project": ["**/*.{ts,tsx,js,mjs}"],
+  "ignore": ["catalogs-dist/**", "dist/**", ".expo/**", "supabase/**"],
+  "ignoreDependencies": [
+    "expo-router",
+    "react-dom",
+    "react-native-web",
+    "react-native-worklets"
+  ],
+  "ignoreBinaries": ["supabase"]
+}

@@ -23,6 +23,7 @@ import {
   getMedicationAdvisories,
 } from "../../services/DietMatchService";
 import { calculateNutritionTargets } from "../../services/NutritionService";
+import { reconcileTargetsVersion } from "../../services/nutrition/TargetsVersion";
 import {
   KEYS,
   currentWeekStart,
@@ -236,6 +237,11 @@ export function useProfileState({
     const targets = calculateNutritionTargets(bio);
     setNutritionTargets(targets);
     await writeJSON(KEYS.USER_BIO, bio);
+
+    // Stamp the targets-algorithm version NOW, silently. This user has never
+    // seen an older number, so the correction notice must never fire for them —
+    // recording the version here is what makes the boot-time check a no-op.
+    await reconcileTargetsVersion(bio, targets, /* hasHistory */ false);
 
     // Stamp the journey start so the Daily Briefing can count "Day N".
     const startDay = todayDate();

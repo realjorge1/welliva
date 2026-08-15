@@ -173,6 +173,37 @@ export async function removeObject(
   }
 }
 
+/**
+ * Hard-delete many objects in ONE request. Returns whether the batch went.
+ *
+ * Exists for account deletion: a user with a year of progress photos can hold
+ * dozens of objects per bucket, and `removeObject` in a loop would make that a
+ * dozens-round-trip teardown on a phone that may be on cellular — slow enough
+ * that a user could background the app mid-delete. The Storage API takes an
+ * array natively, so this is one call regardless of count.
+ *
+ * All-or-nothing per call, by design: the caller (AccountDeletion) treats a
+ * failed batch as "storage not fully cleared" and leans on the SQL backstop in
+ * migration 0007, rather than trying to work out which paths survived.
+ */
+export async function removeObjects(
+  bucket: Bucket,
+  paths: string[],
+): Promise<boolean> {
+  if (paths.length === 0) return true;
+  try {
+    await withSyncTelemetry("storage.remove", async () => {
+      const { error } = await supabase.storage.from(bucket).remove(paths);
+      if (error) throw new Error(error.message);
+    });
+    for (const path of paths) signedUrlCache.delete(cacheKey(bucket, path));
+    return true;
+  } catch (e) {
+    console.warn(`StorageSync.removeObjects(${bucket}, ${paths.length}):`, e);
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Avatars
 // ---------------------------------------------------------------------------

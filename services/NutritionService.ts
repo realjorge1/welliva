@@ -6,43 +6,72 @@
  */
 
 import {
-    AGE_CALORIE_ADJUSTMENTS,
     BASELINE_NUTRITION,
     GOAL_CALORIE_MODIFIERS,
     NutritionTargets,
 } from "../models/nutrition";
 import { ACTIVITY_MULTIPLIERS, Sex, UserBio } from "../models/user";
+import {
+    applyConstraints,
+    resolveConstraintsForBio,
+} from "./nutrition/ConditionConstraints";
+import { proteinBasisKg } from "./nutrition/bodyWeight";
 
 /**
  * Calculate personalized nutrition targets
  *
  * Algorithm:
- * 1. Start with sex-based baseline (WHO recommendations)
- * 2. Calculate BMR using Mifflin-St Jeor equation
- * 3. Apply activity level multiplier (TDEE)
- * 4. Adjust for age
- * 5. Apply goal modifier
- * 6. Calculate macros from final calories
+ * 1. Calculate BMR using Mifflin-St Jeor equation
+ * 2. Apply activity level multiplier (TDEE)
+ * 3. Apply goal modifier + any pregnancy/postpartum surplus, then clamp
+ * 4. Compute the baseline macro split from the final calories
+ * 5. Apply the MEDICAL CONSTRAINTS layer — one declarative pass over every
+ *    condition and medication category the user carries
+ *
+ * Step 5 is why there are no per-condition `if`s left in this file. There used
+ * to be four (pregnancy, postpartum, hypertension, renal) against a union of 30
+ * conditions, which meant 26 conditions the app advertised as supported changed
+ * nothing about the numbers. See services/nutrition/ConditionConstraints.ts.
  */
 export function calculateNutritionTargets(bio: UserBio): NutritionTargets {
   // Step 1: Calculate BMR using Mifflin-St Jeor
   const bmr = calculateBMR(bio.sex, bio.weightKg, bio.heightCm, bio.age);
 
-  // Step 2: Apply activity multiplier to get TDEE
-  const activityMultiplier = ACTIVITY_MULTIPLIERS[bio.activityLevel];
-  let tdee = bmr * activityMultiplier;
+  // Step 2: Apply activity multiplier to get TDEE.
+  // The `??` is load-bearing, not defensive noise: `activity_level` arrives from
+  // the profile row / API and the DB permits values this union doesn't cover.
+  // An unknown level used to make the multiplier `undefined` and every number
+  // downstream NaN — a target that renders as "NaN kcal" with no error anywhere.
+  const activityMultiplier =
+    ACTIVITY_MULTIPLIERS[bio.activityLevel] ?? ACTIVITY_MULTIPLIERS.moderate;
+  const tdee = bmr * activityMultiplier;
 
-  // Step 3: Apply age adjustment
-  const ageRange = getAgeRange(bio.age);
-  const ageAdjustment = AGE_CALORIE_ADJUSTMENTS[ageRange] || 1.0;
-  tdee = tdee * ageAdjustment;
+  // Step 3: NO separate age adjustment.
+  //
+  // There used to be one here (`tdee *= AGE_CALORIE_ADJUSTMENTS[range]`) and it
+  // double-counted age: Mifflin–St Jeor ALREADY contains a `− 5 × age` term, so
+  // multiplying its output by a further 0.85–0.95 penalised older users twice.
+  // For a 65-year-old that was roughly 300 kcal/day of phantom deficit on top
+  // of the ~325 kcal the equation had already removed — enough to make the app
+  // quietly prescribe under-eating to exactly the group least able to afford it.
+  //
+  // AGE_CALORIE_ADJUSTMENTS survives in models/nutrition.ts marked @deprecated.
+  // Its only reader is the frozen `legacyTargetsV1` reproduction that lets the
+  // correction notice quote the user's OLD number (services/nutrition/
+  // TargetsVersion.ts). Nothing live reads it.
+  //
+  // The LEGITIMATE effect this removed: older adults really do run a lower TDEE
+  // than the linear term alone predicts, via lost lean mass and lower
+  // non-exercise activity. That belongs on the activity multiplier, or better,
+  // learned per-user from logged intake vs. weight change — not as a second age
+  // coefficient on the whole equation.
 
   // Medical conditions that override goal-based energy logic for safety.
   const conditions = bio.medicalConditions ?? [];
   const isPregnant = conditions.includes("pregnancy");
   const isPostpartum = conditions.includes("postpartum");
 
-  // Step 4: Apply goal modifier, then clamp to medically-sensible bounds.
+  // Step 3: Apply goal modifier, then clamp to medically-sensible bounds.
   // Without this, an extreme bio (very low weight/height/activity) could yield
   // an unsafe daily calorie target. Bounds follow common WHO/AHA minimums.
   //
@@ -79,18 +108,25 @@ export function calculateNutritionTargets(bio: UserBio): NutritionTargets {
     ),
   );
 
-  // Step 5: Calculate macros
-  // Protein: 1.6g/kg for muscle gain, 1.2g/kg for others (higher than WHO
-  // minimum). Pregnancy/postpartum raise the floor to ~1.4g/kg (extra ~25g/day).
-  let proteinMultiplier =
+  // Step 4: The BASELINE macro split — goal-driven only. Every medical
+  // adjustment (renal protein cap, diabetic carb cap, pregnancy protein floor,
+  // sodium ceilings) is applied by the constraints pass at the end, so this
+  // stays readable and there is exactly one place to look for clinical rules.
+  //
+  // Protein: 1.6g/kg for muscle gain, 1.2g/kg for others (above the WHO minimum).
+  //
+  // Scaled on the PROTEIN BASIS weight, not raw bodyweight: above BMI 30 that's
+  // adjusted body weight (IBW + 40% of the excess), because adipose tissue isn't
+  // metabolically demanding and dosing on total mass over-prescribes badly at
+  // high BMI. Below BMI 30 the basis IS actual weight, so nothing changes for
+  // most users. See services/nutrition/bodyWeight.ts.
+  const basisKg = proteinBasisKg(bio);
+  const proteinMultiplier =
     bio.primaryGoal === "build_muscle" ||
     bio.primaryGoal === "athletic_performance"
       ? 1.6
       : 1.2;
-  if (isPregnant || isPostpartum) {
-    proteinMultiplier = Math.max(proteinMultiplier, 1.4);
-  }
-  const proteinG = Math.round(bio.weightKg * proteinMultiplier);
+  const proteinG = Math.round(basisKg * proteinMultiplier);
 
   // Fat: 25-30% of calories (using 27.5% average)
   const fatCalories = targetCalories * 0.275;
@@ -111,30 +147,24 @@ export function calculateNutritionTargets(bio: UserBio): NutritionTargets {
   if (isPregnant) waterMl += bio.pregnancyTrimester === 1 ? 150 : 300;
   else if (isPostpartum) waterMl += 700;
 
-  // Sodium: tighten to the AHA "ideal" 1500mg ceiling for blood-pressure and
-  // kidney conditions, and for meds that retain fluid / affect electrolytes
-  // (corticosteroids, diuretics, blood-pressure meds).
-  const meds = bio.medicationCategories ?? [];
-  const needsLowSodium =
-    conditions.includes("hypertension") ||
-    conditions.includes("renal_issues") ||
-    meds.includes("corticosteroids") ||
-    meds.includes("diuretics") ||
-    meds.includes("blood_pressure");
-  const sodiumMg = needsLowSodium
-    ? Math.min(baseline.sodiumMg, 1500)
-    : baseline.sodiumMg;
-
-  return {
+  const base: NutritionTargets = {
     calories: targetCalories,
     proteinG,
     fatG,
     carbsG,
     sugarG: baseline.sugarG,
     fiberG: baseline.fiberG,
-    sodiumMg,
+    sodiumMg: baseline.sodiumMg,
     waterMl,
   };
+
+  // Step 5: One declarative pass for all 30 conditions + every medication
+  // category. Clamps the ceilings/floors, then re-solves the macro split so the
+  // numbers still sum to `targetCalories`, and attaches the guidance (clinician
+  // referrals, and what we honestly don't model) for the UI to render.
+  // The SAME basis is handed to the constraints pass, so a `0.8 g/kg` renal cap
+  // is measured against the same denominator the target was built from.
+  return applyConstraints(base, resolveConstraintsForBio(bio), basisKg);
 }
 
 /**
@@ -152,16 +182,6 @@ function calculateBMR(
   } else {
     return 10 * weightKg + 6.25 * heightCm - 5 * age - 161;
   }
-}
-
-/**
- * Get age range for calorie adjustments
- */
-function getAgeRange(age: number): string {
-  if (age >= 18 && age <= 30) return "18-30";
-  if (age >= 31 && age <= 50) return "31-50";
-  if (age >= 51 && age <= 60) return "51-60";
-  return "61+";
 }
 
 /**

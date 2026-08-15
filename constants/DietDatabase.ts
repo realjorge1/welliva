@@ -2597,7 +2597,13 @@ export const DIET_DATABASE: DietData[] = [
         "Active individuals",
         "Type-2 diabetics (non-insulin)",
       ],
-      cautionFor: ["Advanced kidney disease - app disclaimer required"],
+      // The "app disclaimer required" note this used to carry has been actioned:
+      // NutritionService caps protein at 0.8 g/kg for renal_issues, the coach's
+      // clinical gate refuses protein questions for those users, and the medical
+      // disclaimer now ships (constants/legal.ts + the consent gate).
+      cautionFor: [
+        "Advanced kidney disease — protein targets must come from your nephrologist or renal dietitian, not from this plan",
+      ],
       guidelines: ["ADA", "NHS", "WHO protein distribution guidance"],
       clinicalNotes: [
         "Improves satiety & fat loss",

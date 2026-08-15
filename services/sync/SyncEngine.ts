@@ -16,16 +16,29 @@
  * that gap: it scans every synced key, compares a cheap signature against what we
  * last pushed, and queues whatever actually changed — regardless of who wrote it.
  *
- * CONFLICT POLICY (v1): per-key last-write-wins on the SERVER `updated_at`. Good
- * enough while the device is the source of truth and one human rarely edits two
- * phones in the same second. Live realtime propagation is a deliberate follow-up.
+ * CONFLICT POLICY (v2): TWO policies, chosen per key by services/sync/
+ * mergeStrategies.ts.
+ *
+ *  · Append-only logs (food log, water/diet history, body logs, workout and
+ *    session history, plan periods) MERGE. Both sides' entries survive.
+ *  · Single-valued documents (bio, plan state, preferences) stay last-write-wins
+ *    on the server `updated_at`, still protected by the local-dirty check.
+ *
+ * v1 was LWW for everything, and the granularity was the whole document — so
+ * logging breakfast on a phone and lunch on a tablet discarded one device's
+ * entire day. The old note here ("one human rarely edits two phones in the same
+ * second") measured the wrong window: with document-level LWW the collision
+ * window is as long as a device stays offline, not a second.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState, type AppStateStatus } from "react-native";
 import { setWriteObserver } from "../OfflineStorage";
+import { invalidateConnectivityCache, isOnline } from "./connectivity";
 import { pullDocsSince, pushDoc, type RemoteDoc } from "./DocumentSync";
+import { isMergeable, merge } from "./mergeStrategies";
 import {
   isSyncedKey,
+  LAST_SYNC_KEY,
   listSyncedKeys,
   OUTBOX_KEY,
   PUSHED_KEY,
@@ -36,6 +49,79 @@ type StampMap = Record<string, string>;
 
 /** Matches the profile-push debounce so a burst of edits costs one round-trip. */
 const FLUSH_DEBOUNCE_MS = 1200;
+
+// ---------------------------------------------------------------------------
+// Suspension — one flag, owned by account deletion.
+// ---------------------------------------------------------------------------
+/**
+ * While true, nothing pushes. Set by services/account/AccountDeletion.ts for the
+ * few seconds between "start deleting" and "session torn down".
+ *
+ * The FK graph already makes a resurrection IMPOSSIBLE — once `auth.users` is
+ * gone, an INSERT into `public.users` fails its foreign key, so a late flush
+ * cannot rebuild the account. This flag is not about correctness of the delete;
+ * it is about not spending the user's radio on a burst of writes that are all
+ * guaranteed to fail, and not filling telemetry with errors that look like a
+ * broken sync when they are just a race we chose not to run.
+ *
+ * Deliberately NOT persisted: if the app dies mid-deletion the flag should die
+ * with it, or a crash would leave sync silently off forever. The next launch
+ * finds either a deleted account (sign-in fails, nothing to sync) or an intact
+ * one (sync should resume) — both correct with an in-memory flag.
+ */
+let syncSuspended = false;
+
+/** @returns the previous value, so a caller can restore it if the delete aborts. */
+export function setSyncSuspended(next: boolean): boolean {
+  const previous = syncSuspended;
+  syncSuspended = next;
+  return previous;
+}
+
+export function isSyncSuspended(): boolean {
+  return syncSuspended;
+}
+
+// ---------------------------------------------------------------------------
+// Tier gate — cloud backup + multi-device sync is a paid feature.
+// ---------------------------------------------------------------------------
+/**
+ * Whether this account may PUSH to the cloud. Injected rather than imported:
+ * services/billing/config.ts reads `Platform` from react-native, and this module
+ * is unit-tested in a node environment that mocks react-native down to
+ * `AppState` alone. Injection keeps the engine free of a billing dependency and
+ * keeps the existing suite honest — the same reason `setSyncSuspended` exists.
+ *
+ * Defaults to ALLOW, matching the fail-open rule in services/billing/gating.ts:
+ * a build with no store keys behaves exactly as the app did before billing.
+ */
+let pushGate: () => boolean = () => true;
+
+/** Install the predicate. Called once from contexts/BillingContext.tsx. */
+export function setSyncPushGate(fn: (() => boolean) | null): void {
+  pushGate = fn ?? (() => true);
+}
+
+/**
+ * PUSH is the paid half; PULL is never gated.
+ *
+ * Uploading is the real infrastructure cost and the thing "sync across devices"
+ * actually means, so it is what Pro buys. Downloading on login stays open on
+ * purpose: someone who subscribed, filled the cloud, then lapsed must still be
+ * able to get their own data back onto a reinstalled device. Withholding data we
+ * are already storing for them would be hostile, and it is the same principle
+ * that keeps export and account deletion free (see services/billing/tiers.ts).
+ *
+ * It cannot leak the paid feature: with pushes gated, nothing new ever reaches
+ * the cloud, so there is nothing for a second device to pull.
+ */
+function canPush(): boolean {
+  try {
+    return pushGate();
+  } catch {
+    return true; // a broken gate must not silently disable sync for a payer
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Bookkeeping I/O — raw AsyncStorage so it bypasses the write observer (these
@@ -166,10 +252,47 @@ export async function hasPendingWrites(): Promise<boolean> {
 }
 
 /**
+ * How many local changes haven't reached the cloud. Drives the status pill and
+ * the sign-out warning — "3 changes waiting" is information a user can act on;
+ * a silent console.warn is not.
+ */
+export async function pendingWriteCount(): Promise<number> {
+  return (await readOutbox()).length;
+}
+
+/** ISO time this device last drained its queue completely, or null if never. */
+export async function getLastSyncAt(): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(LAST_SYNC_KEY);
+  } catch {
+    return null;
+  }
+}
+
+async function markSynced(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(LAST_SYNC_KEY, new Date().toISOString());
+  } catch {
+    /* fail-soft */
+  }
+}
+
+/**
  * Push every queued key to the cloud. Successes leave the queue and advance the
  * watermark + pushed-signature; failures are requeued for the next attempt.
  */
 export async function flushOutbox(userId: string): Promise<void> {
+  // The account is being torn down — every push below would 404 or fail a FK.
+  // Checked before the connectivity probe so deletion doesn't even wake the radio.
+  if (syncSuspended) return;
+  // Free tier: cloud backup is Pro. Bail before the radio, same as above.
+  if (!canPush()) return;
+  // Don't burn the radio and the battery on a round of fetches that cannot
+  // succeed. The queue is durable, the foreground hook re-drains it, and the
+  // status pill tells the user what's still waiting — so skipping here loses
+  // nothing and stops an offline device retrying every write it makes.
+  if (!(await isOnline())) return;
+
   const batch = await takeOutbox();
   if (batch.length === 0) return;
 
@@ -190,6 +313,9 @@ export async function flushOutbox(userId: string): Promise<void> {
 
   await applyStamps(watermarks, pushed);
   await requeue(failed);
+  // "Last synced" means the queue actually emptied — a partial drain with
+  // failures still pending is not a moment we should reassure the user about.
+  if (failed.length === 0) await markSynced();
 }
 
 /**
@@ -198,6 +324,15 @@ export async function flushOutbox(userId: string): Promise<void> {
  * services that write AsyncStorage directly. Then drain.
  */
 export async function fullPushSweep(userId: string): Promise<void> {
+  // Same reason as flushOutbox, but this one matters more: the sweep TOMBSTONES
+  // keys that vanished locally, and account deletion wipes every local key. An
+  // unguarded sweep during teardown would enqueue a tombstone for all ~50 of
+  // them — pure waste against rows the cascade is deleting anyway.
+  if (syncSuspended) return;
+  // Free tier. Returning BEFORE the enqueue loop is the point: queueing keys we
+  // will never drain would leave the sync status pill reading "50 waiting"
+  // forever, which looks like a broken sync rather than an unsubscribed one.
+  if (!canPush()) return;
   const pushed = await readMap(PUSHED_KEY);
   const liveKeys = await listSyncedKeys();
   const liveSet = new Set(liveKeys);
@@ -247,6 +382,33 @@ export async function reconcileOnLogin(userId: string): Promise<void> {
       }
       continue;
     }
+    if (isMergeable(doc.key)) {
+      // APPEND-ONLY LOGS: union both sides instead of picking a winner. This is
+      // the fix for "breakfast on the phone, lunch on the tablet" — under the
+      // old adopt-or-discard branch one of those days was silently thrown away.
+      // Merging unconditionally (not only when remote is newer) is safe because
+      // the union is idempotent and commutative: a stale remote contributes
+      // nothing, it can't take anything away.
+      const merged = merge(doc.key, local, doc.value);
+      if (merged !== local) {
+        await adopt({ ...doc, value: merged });
+        adoptedW[doc.key] = doc.updatedAt;
+        adoptedP[doc.key] = sign(merged);
+        // The merge produced something the cloud doesn't have (our local-only
+        // entries) — push it back, or the other device never learns about them.
+        // Skipped on the free tier: the merge still ran, so the user KEEPS the
+        // union locally; only the upload is withheld.
+        if (merged !== doc.value && canPush()) await enqueue(doc.key);
+      } else if (merged !== doc.value && canPush()) {
+        // Local already contained everything remote has, plus more.
+        await enqueue(doc.key);
+      }
+      continue;
+    }
+
+    // SINGLE-VALUED DOCUMENTS (bio, plan state, preferences): last-write-wins is
+    // the right semantic — merging two versions of one object is meaningless —
+    // so the original guard stands, including the local-dirty protection.
     if (fresh || (remoteNewer && !isDirty)) {
       await adopt(doc);
       adoptedW[doc.key] = doc.updatedAt;
@@ -283,11 +445,19 @@ export function startAutoSync(userId: string): () => void {
 
   setWriteObserver((key) => {
     if (!isSyncedKey(key)) return;
+    // Don't even queue on the free tier — see the note in fullPushSweep. The
+    // observer stays registered so an upgrade mid-session starts working at the
+    // very next write, with no re-login needed.
+    if (!canPush()) return;
     void enqueue(key).then(scheduleFlush);
   });
 
   const onAppState = (state: AppStateStatus) => {
-    if (state === "active") void fullPushSweep(userId);
+    if (state !== "active") return;
+    // The radio may have changed while we were backgrounded — re-probe rather
+    // than trusting a cached "offline" from three hours ago.
+    invalidateConnectivityCache();
+    void fullPushSweep(userId);
   };
   const sub = AppState.addEventListener("change", onAppState);
 

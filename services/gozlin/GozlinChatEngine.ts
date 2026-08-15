@@ -11,6 +11,7 @@
  */
 
 import type { CoachInsight } from "../intelligence";
+import { classify } from "./nlu/classify";
 import { buildNutritionAdaptations } from "./GozlinAdaptiveNutritionEngine";
 import { buildWorkoutAdaptations } from "./GozlinAdaptiveWorkoutEngine";
 import { buildBriefing, type BriefingInput } from "./GozlinBriefingEngine";
@@ -51,6 +52,11 @@ export interface GozlinChatContext {
   checkins: GozlinCheckin[];
   weekStart: string;
   weeklyWorkoutTarget: number;
+  /**
+   * Prior turns, oldest first. Read only by the agent loop (agent/context.ts) —
+   * the deterministic path is stateless by design and ignores this.
+   */
+  conversation?: GozlinMessage[];
   now?: Date;
 }
 
@@ -108,33 +114,17 @@ export function userMsg(content: string, now?: Date): GozlinMessage {
   };
 }
 
-// ── Intent classification (rule-based, on-device) ──────────────────
+// ── Intent classification ──────────────────────────────────────────
+//
+// The ordered first-match regex table that used to live here is gone. It had a
+// structural flaw no amount of pattern-tuning fixes: whichever rule was listed
+// first won, so "tune my macros" routed to adapt_workout because that rule sat
+// above adapt_nutrition. It also had no typo tolerance, no negation handling,
+// no way to express two intents, and no way to say "I'm not sure".
+//
+// ./nlu scores every intent instead, and can abstain. See ./nlu/classify.ts.
 
-const PATTERNS: [GozlinIntent, RegExp][] = [
-  ["greeting", /^(hi|hey|hello|yo|sup|gozlin|good (morning|afternoon|evening))\b/i],
-  ["motivation", /\b(my goal is|i want to|i'm trying to|i wanna|i'd like to|because i|my why)\b/i],
-  ["forecast", /\b(forecast|on track to|project|trajectory|how long|when will i|future|results)\b/i],
-  ["weekly", /\b(week(ly)? review|my week|recap|how was my week)\b/i],
-  // Adaptive intelligence — must precede the broader progress/diet/workout rules.
-  ["adapt_workout", /\b(tune|adapt|adjust|optimi[sz]e|progress|advance|update|upgrade)\b[^.?!]*\b(workout|workouts|training|program|routine|exercise|exercises|lift|lifts|reps|sets|volume)\b|\b(am i ready to progress|should i (progress|do more|add (volume|sets|reps))|make (it|them|my workout) (harder|easier)|too easy|too hard)\b/i],
-  ["adapt_nutrition", /\b(tune|adapt|adjust|optimi[sz]e|fix|improve|rebalance|change)\b[^.?!]*\b(nutrition|diet|eating|meal|meals|macro|macros|protein|calorie|calories|carbs?)\b|\b(optimi[sz]e my macros|my macros|eating (habit|pattern)s?|food preferences?)\b/i],
-  // Progress Detective (Phase 8) — root-cause "why", plateaus, stalls.
-  ["detective", /\b(detective|root cause|why (is|isn'?t|am i|aren'?t|haven'?t|hasn'?t|won'?t|can'?t)|explain|plateau|stalled?|stuck|not (losing|gaining|moving|working)|no (progress|change|results)|what'?s going on|investigate|figure out)\b/i],
-  // Habit Awareness (Phase 7) — behavior, life habits, accountability.
-  ["habits", /\b(habits?|behaviou?rs?|behavioural|accountab|keystone|life habits?|do i (usually|tend|always)|i (usually|tend|always)|bad habit|my (sleep|mood|stress)|sleep|mood|stress)\b/i],
-  ["progress", /\b(progress|how am i doing|pattern|insight|trend|noticed)\b/i],
-  ["recovery", /\b(recover|rest|sore|tired|readiness|should i train|fatigue|exhausted)\b/i],
-  ["diet", /\b(diet|eat|meal|food|protein|calorie|hungry|snack|water|hydrat|carb)\b/i],
-  ["workout", /\b(workout|train|exercise|gym|session|lift|run|cardio)\b/i],
-  ["briefing", /\b(brief|today|what should i do|plan for today|right now)\b/i],
-  ["memory_recall", /\b(what do you know|remember about me|my profile)\b/i],
-];
-
-export function classifyIntent(text: string): GozlinIntent {
-  const t = text.trim();
-  for (const [intent, re] of PATTERNS) if (re.test(t)) return intent;
-  return "smalltalk";
-}
+export { classifyIntent } from "./nlu/classify";
 
 // ── Deterministic responders per intent ────────────────────────────
 
@@ -179,13 +169,49 @@ function workoutReply(twin: GozlinTwin): { content: string; tone: GozlinTone } {
   return { content: `No session scheduled today. ${rec.recommendation}`, tone: "steady" };
 }
 
-function buildSmalltalkFallback(twin: GozlinTwin): string {
+/**
+ * What we say when we genuinely didn't understand.
+ *
+ * The line this replaced ("that's a little outside my lane") did more brand
+ * damage than any bug in the audit: it was a deflection dressed as a boundary,
+ * and it fired on typos and on perfectly in-scope questions the regex happened
+ * to miss. Admitting confusion and offering concrete options is both more
+ * honest and more useful.
+ */
+function buildUnknownFallback(): string {
   return (
-    "I'm your health and training coach, so that's a little outside my lane — but I've got you on everything in here. " +
-    "Ask me how today's looking, your forecast, this week's review, whether to train, to tune your training or nutrition, " +
-    "to read your habits, or to dig into why your progress is doing what it's doing. " +
-    closer(twin.asOf)
+    "I didn't quite catch that. Try me on one of these — " +
+    "what to focus on today, why your progress is doing what it's doing, " +
+    "or whether you should train right now."
   );
+}
+
+/** Human labels, for the clarifying question. */
+const INTENT_LABEL: Record<GozlinIntent, string> = {
+  greeting: "how today's looking",
+  motivation: "what's driving you",
+  forecast: "where you're heading",
+  weekly: "how your week went",
+  adapt_workout: "tuning your training",
+  adapt_nutrition: "tuning your nutrition",
+  detective: "why your progress is doing what it's doing",
+  habits: "the habits I've noticed",
+  progress: "how you're doing overall",
+  recovery: "whether you should train",
+  diet: "what to eat",
+  workout: "today's session",
+  briefing: "what to focus on today",
+  memory_recall: "what I know about you",
+  smalltalk: "something else",
+};
+
+/**
+ * Two plausible readings and no way to choose. Asking beats guessing: a coach
+ * who asks reads as attentive, a coach who confidently answers the wrong
+ * question reads as broken.
+ */
+function buildClarifier(a: GozlinIntent, b: GozlinIntent): string {
+  return `Two ways I can take that — do you want ${INTENT_LABEL[a]}, or ${INTENT_LABEL[b]}?`;
 }
 
 /** System prompt that grounds an optional LLM in *real* numbers only. */
@@ -210,15 +236,13 @@ export function buildGroundingPrompt(ctx: GozlinChatContext): string {
   );
 }
 
-/**
- * Synchronous, fully-offline response. Always correct and complete.
- */
-export function respondDeterministic(
+/** Produce the reply for one already-resolved intent. */
+function respondToIntent(
+  intent: GozlinIntent,
   text: string,
   ctx: GozlinChatContext,
+  now: Date,
 ): GozlinChatResult {
-  const now = ctx.now ?? new Date();
-  const intent = classifyIntent(text);
   const twin = ctx.twin;
 
   switch (intent) {
@@ -380,14 +404,78 @@ export function respondDeterministic(
     }
 
     default:
-      return { message: coachMsg(buildSmalltalkFallback(twin), "warm", undefined, now) };
+      return { message: coachMsg(buildUnknownFallback(), "warm", undefined, now) };
   }
 }
 
 /**
- * Async response. Identical to deterministic for all coaching intents; for
- * open-ended smalltalk it will use the LLM provider when available+online,
- * falling back to the deterministic reply on any error.
+ * Synchronous, fully-offline response. Always correct and complete.
+ *
+ * This is now the FLOOR under the agent loop rather than the primary path —
+ * every failure in services/gozlin/agent lands here. That raises the bar: it's
+ * the fallback for a much better online experience, so an honest "I didn't
+ * catch that" matters more than it used to, not less.
+ */
+export function respondDeterministic(
+  text: string,
+  ctx: GozlinChatContext,
+): GozlinChatResult {
+  const now = ctx.now ?? new Date();
+  const result = classify(text);
+
+  switch (result.kind) {
+    case "single":
+      return respondToIntent(result.intent, text, ctx, now);
+
+    case "multi": {
+      // Both engines run and both answers ship. The old table picked one and
+      // silently dropped the other — "I always eat too much protein" came back
+      // as a habits read with no mention of nutrition at all.
+      const [first, second] = result.intents;
+      const a = respondToIntent(first, text, ctx, now);
+      const b = respondToIntent(second, text, ctx, now);
+      return {
+        message: coachMsg(
+          `${a.message.content}\n\n${b.message.content}`,
+          a.message.tone ?? "warm",
+          // Only one card can render; lead with the stronger intent's.
+          a.message.structured ?? b.message.structured,
+          now,
+        ),
+        effects: a.effects ?? b.effects,
+      };
+    }
+
+    case "ambiguous":
+      return {
+        message: coachMsg(
+          buildClarifier(result.options[0].intent, result.options[1].intent),
+          "curious",
+          undefined,
+          now,
+        ),
+      };
+
+    case "non_english":
+      // Offline we can only work in English — say so in their language rather
+      // than deflecting at them in ours.
+      return { message: coachMsg(result.apology, "warm", undefined, now) };
+
+    case "unknown":
+    default:
+      return { message: coachMsg(buildUnknownFallback(), "warm", undefined, now) };
+  }
+}
+
+/**
+ * Async response — the LEGACY single-shot path.
+ *
+ * Superseded by the agent loop (services/gozlin/agent), where the model picks
+ * tools instead of only rephrasing whatever the classifier already decided.
+ * Kept for callers that haven't moved over.
+ *
+ * The provider is consulted only when the classifier abstains, which is now a
+ * much narrower set than the old catch-all "smalltalk" bucket.
  */
 export async function respond(
   text: string,
@@ -395,9 +483,9 @@ export async function respond(
   provider?: GozlinProvider,
 ): Promise<GozlinChatResult> {
   const base = respondDeterministic(text, ctx);
-  const intent = classifyIntent(text);
+  const result = classify(text);
 
-  if (intent === "smalltalk" && provider?.isAvailable()) {
+  if (result.kind === "unknown" && provider?.isAvailable()) {
     try {
       const reply = await provider.complete({
         system: buildGroundingPrompt(ctx),

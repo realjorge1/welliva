@@ -13,6 +13,7 @@
  * glows or gradients. Settings live here and ONLY here (the Profile screen's
  * gear was removed) so there's exactly one door to them.
  */
+import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { GozlinMoment } from "@/components/gozlin";
 import { useAuth } from "@/components/SupabaseAuthProvider";
 import { AppText, Button, Card, IconBadge, Reveal, Screen, useColors } from "@/components/ui";
@@ -33,7 +34,8 @@ interface Dest {
   href: string;
 }
 
-const PROFILE_HREF = "/(tabs)?tab=profile";
+/** Profile is a pushed screen, not a tab — it was never in the nav bar. */
+const PROFILE_HREF = "/profile";
 
 /** The five tile destinations — tones, copy and routes preserved verbatim. */
 const DEST = {
@@ -361,3 +363,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 });
+
+/**
+ * LEVEL 3 — route-level boundary. Expo Router honours this named export, so a
+ * throw inside this screen is contained here: the tab bar stays live and every
+ * other tab stays usable. Only what this file couldn't render is lost.
+ */
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
+  return <ScreenErrorFallback error={error} onRetry={retry} surface="tab:more" />;
+}

@@ -70,6 +70,7 @@
 //   return context;
 // };
 
+import { FORCED_COLOR_SCHEME, LIGHT_MODE_ENABLED } from "@/constants/theme";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useColorScheme } from "react-native";
@@ -119,6 +120,10 @@ export const CustomThemeProvider = ({
   };
 
   const setThemeMode = async (mode: ThemeMode) => {
+    // Light mode disabled → theme changes are ignored, and we deliberately do
+    // NOT overwrite the stored preference, so whatever the user picked before
+    // the lock comes back untouched when LIGHT_MODE_ENABLED flips to true.
+    if (!LIGHT_MODE_ENABLED) return;
     try {
       await AsyncStorage.setItem("themeMode", mode);
       setThemeModeState(mode);
@@ -131,9 +136,14 @@ export const CustomThemeProvider = ({
     setThemeMode(isDark ? "dark" : "light");
   };
 
-  // Determine the actual theme to use
-  const currentTheme: "light" | "dark" =
+  // Determine the actual theme to use. While light mode is disabled the stored
+  // preference and the system scheme are both ignored — everything resolves to
+  // the forced scheme so no screen can render a light palette.
+  const resolvedTheme: "light" | "dark" =
     themeMode === "system" ? (systemColorScheme ?? "light") : themeMode;
+  const currentTheme: "light" | "dark" = LIGHT_MODE_ENABLED
+    ? resolvedTheme
+    : FORCED_COLOR_SCHEME;
 
   const isDarkMode = currentTheme === "dark";
 
@@ -145,7 +155,10 @@ export const CustomThemeProvider = ({
   return (
     <ThemeContext.Provider
       value={{
-        themeMode,
+        // Report the forced scheme (not the stored preference) while the lock
+        // is on, so any consumer reading `themeMode` stays consistent with what
+        // is actually on screen.
+        themeMode: LIGHT_MODE_ENABLED ? themeMode : FORCED_COLOR_SCHEME,
         currentTheme,
         setThemeMode,
         setIsDarkMode,

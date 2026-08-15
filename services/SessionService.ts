@@ -446,7 +446,9 @@ export class SessionService {
       const raw = await AsyncStorage.getItem(SESSION_HISTORY_KEY);
       const history: SessionSummaryData[] = raw ? JSON.parse(raw) : [];
       history.unshift(summary);
-      // Keep last 50 sessions
+      // Keep last 50 sessions. Already bounded — noted here because this is the
+      // pattern services/sync/retention.ts generalises: an unbounded document
+      // is re-uploaded IN FULL on every write.
       if (history.length > 50) history.length = 50;
       await AsyncStorage.setItem(SESSION_HISTORY_KEY, JSON.stringify(history));
     } catch (e) {

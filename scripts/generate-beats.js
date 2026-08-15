@@ -331,10 +331,11 @@ function renderTrack(spec) {
 
     // drums
     if (spec.kick)
-      for (const [st, v] of barPattern(spec.kick.p, spec.kick.f, bar))
-        spec.kick.boom
-          ? r.boom(stepSamp(bar, st), spec.root - 24 + chord.o, v * spec.kick.g, spec.kick.len ?? 0.55)
-          : r.kick(stepSamp(bar, st), v * spec.kick.g, spec.kick.opts);
+      for (const [st, v] of barPattern(spec.kick.p, spec.kick.f, bar)) {
+        if (spec.kick.boom)
+          r.boom(stepSamp(bar, st), spec.root - 24 + chord.o, v * spec.kick.g, spec.kick.len ?? 0.55);
+        else r.kick(stepSamp(bar, st), v * spec.kick.g, spec.kick.opts);
+      }
     if (spec.snare)
       for (const [st, v] of barPattern(spec.snare.p, spec.snare.f, bar))
         r.snare(stepSamp(bar, st), v * spec.snare.g, spec.snare.opts);

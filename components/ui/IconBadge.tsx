@@ -22,14 +22,38 @@ export interface IconBadgeProps {
   /** Solid filled background instead of soft tint. */
   solid?: boolean;
   style?: StyleProp<ViewStyle>;
+  /**
+   * Spoken name, when the badge CARRIES meaning that no nearby text repeats
+   * (a lone status glyph). Leave unset for decoration — the default is to hide
+   * the badge from assistive tech entirely.
+   */
+  accessibilityLabel?: string;
 }
 
-export function IconBadge({ name, tone, muted, size = 40, solid = false, style }: IconBadgeProps) {
+export function IconBadge({
+  name,
+  tone,
+  muted,
+  size = 40,
+  solid = false,
+  style,
+  accessibilityLabel,
+}: IconBadgeProps) {
   const { colors } = useColors();
   const hue = muted ? colors.textTertiary : tone ?? colors.textTertiary;
   const glyph = Math.round(size * 0.5);
+  const decorative = !accessibilityLabel;
   return (
     <View
+      // Icon fonts are TEXT to the platform, so an unlabelled glyph is announced
+      // as whatever private-use character it maps to — literal garbage in
+      // VoiceOver/TalkBack. Decorative badges are therefore hidden outright;
+      // a labelled one is promoted to a single image element instead.
+      accessibilityElementsHidden={decorative}
+      importantForAccessibility={decorative ? "no-hide-descendants" : "yes"}
+      accessible={!decorative}
+      accessibilityRole={decorative ? undefined : "image"}
+      accessibilityLabel={accessibilityLabel}
       style={[
         styles.base,
         {

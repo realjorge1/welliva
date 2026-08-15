@@ -18,9 +18,12 @@ import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { AppText, Card, Screen, useColors } from "@/components/ui";
+import { ProLockCard } from "@/components/billing";
 import { Radius, Spacing } from "@/constants/theme";
 import { useNutrition, useSystem } from "@/contexts/AppContext";
+import { useBilling } from "@/contexts/BillingContext";
 import { useMealPlan } from "@/contexts/MealPlanContext";
+import { historyCutoffDate } from "@/services/billing";
 import type { DietHistoryEntry, MealType, ScheduledMeal } from "@/models/diet";
 import { addDays, parseLocalDate, toLocalDate } from "@/models/mealPlan";
 import { getScheduledDietForDate } from "@/services/ScheduleService";
@@ -31,6 +34,16 @@ export default function DietHistoryScreen() {
   const { currentDate } = useSystem();
   const { dietHistory } = useNutrition();
   const { backlogPrompt, backlogMeal, permissionFor } = useMealPlan();
+  const { hasProAccess } = useBilling();
+
+  // The free tier reads back 30 days. This bounds the VIEW, never the storage —
+  // the entries stay on device and reappear in full the moment they upgrade.
+  // Older days are still drawn, just dimmed and unselectable: seeing the shape
+  // of the history you already own is the whole argument for opening it.
+  const cutoff = useMemo(
+    () => historyCutoffDate(hasProAccess, parseLocalDate(currentDate)),
+    [hasProAccess, currentDate],
+  );
 
   const [selected, setSelected] = useState<string>(addDays(currentDate, -1));
   const [daySchedule, setDaySchedule] = useState<{
@@ -139,12 +152,13 @@ export default function DietHistoryScreen() {
             {week.map((date) => {
               const entry = historyByDate.get(date);
               const isFuture = date > currentDate;
+              const beyondFree = cutoff !== null && date < cutoff;
               const isSelected = date === selected;
               const ratio =
                 entry && entry.totalMeals > 0 ? entry.mealsConsumed / entry.totalMeals : null;
 
               const bg =
-                ratio === null
+                ratio === null || beyondFree
                   ? "transparent"
                   : ratio === 1
                     ? colors.success
@@ -155,12 +169,12 @@ export default function DietHistoryScreen() {
               return (
                 <Pressable
                   key={date}
-                  disabled={isFuture}
+                  disabled={isFuture || beyondFree}
                   onPress={() => {
                     Haptics.selectionAsync().catch(() => {});
                     setSelected(date);
                   }}
-                  style={[styles.cell, styles.dayCell]}
+                  style={[styles.cell, styles.dayCell, beyondFree && styles.dayLocked]}
                 >
                   <View
                     style={[
@@ -176,11 +190,12 @@ export default function DietHistoryScreen() {
                       variant="caption"
                       weight={date === currentDate ? "800" : "500"}
                       style={{
-                        color: isFuture
-                          ? colors.border
-                          : ratio !== null && ratio === 1
-                            ? colors.background
-                            : colors.text,
+                        color:
+                          isFuture || beyondFree
+                            ? colors.border
+                            : ratio !== null && ratio === 1
+                              ? colors.background
+                              : colors.text,
                       }}
                     >
                       {Number(date.slice(8, 10))}
@@ -197,6 +212,14 @@ export default function DietHistoryScreen() {
           <Legend color={`${colors.error}55`} label="None" />
         </View>
       </Card>
+
+      {cutoff !== null && (
+        <ProLockCard
+          lock="history"
+          compact
+          blurb="Free shows the last 30 days. The dimmed days above are still yours — Pro opens them, along with every chart and report back to day one."
+        />
+      )}
 
       {/* --- Selected day ---------------------------------------------------- */}
       <DayDetail
@@ -363,6 +386,8 @@ const styles = StyleSheet.create({
   weekRow: { flexDirection: "row" },
   cell: { width: `${100 / 7}%` },
   dayCell: { aspectRatio: 1, alignItems: "center", justifyContent: "center" },
+  /** Beyond the free 30-day window — visible, but clearly not reachable. */
+  dayLocked: { opacity: 0.35 },
   dayDot: {
     width: 34,
     height: 34,

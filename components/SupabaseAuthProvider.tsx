@@ -21,6 +21,7 @@ import React, {
   useState,
 } from "react";
 import { supabase } from "../lib/supabase";
+import { deleteAccount as deleteAccountData } from "../services/account/AccountDeletion";
 import { clearSignedUrlCache } from "../services/sync/StorageSync";
 import { flush as flushSyncTelemetry } from "../services/sync/SyncTelemetry";
 import { fullPushSweep, hasPendingWrites } from "../services/sync/SyncEngine";
@@ -59,6 +60,23 @@ interface AuthContextType {
   signInWithApple: () => Promise<void>;
   signInWithFacebook: () => Promise<void>;
   signOut: () => Promise<void>;
+  /**
+   * Irreversibly delete the account and every trace of it, then end the session.
+   *
+   * Separate from `signOut` rather than a flag on it, because the two want
+   * OPPOSITE things from the sync layer: sign-out's first act is to push local
+   * data up so nothing is stranded; deletion must never push, because it is
+   * removing the very rows a sweep would write to. Sharing one function would
+   * mean a boolean deciding whether the first thing it does is save your data
+   * or destroy it — too easy to pass wrongly, and unrecoverable when it is.
+   *
+   * @param password required for password accounts; ignored for OAuth-only ones
+   *        (see `accountHasPassword`). Taken HERE rather than verified by the
+   *        caller beforehand so there is no window between "password checked"
+   *        and "account deleted", and no way to reach the delete having skipped
+   *        the check. Throws `ReauthenticationError` before touching anything.
+   */
+  deleteAccount: (password?: string) => Promise<void>;
   refreshSession: () => Promise<void>;
 }
 
@@ -181,6 +199,40 @@ export function SupabaseAuthProvider({
         } catch (e) {
           console.warn("signOut cleanup:", e);
         }
+      },
+      deleteAccount: async (password?: string) => {
+        if (!user) throw new Error("Not signed in.");
+
+        // Re-authenticates (throwing ReauthenticationError before touching
+        // anything), then deletes files, the auth row — cascading every table —
+        // and this device. Throws if the account survived, in which case we
+        // deliberately do NOT touch the session below, leaving the user signed
+        // in and able to retry.
+        await deleteAccountData(user, password);
+
+        // The account is gone; the session is now a token for a user that does
+        // not exist. Tear it down WITHOUT the sign-out path: `signOut` above
+        // opens with fullPushSweep, which would try to re-upload the local data
+        // we just erased into rows that no longer exist.
+        //
+        // Errors past this line are swallowed on purpose. The deletion has
+        // already succeeded and cannot be undone, so surfacing "couldn't clear
+        // the local session" as a failure would tell the user their account
+        // still exists — the opposite of the truth. Worst case the stale token
+        // is rejected on next use and onAuthStateChange signs them out anyway.
+        try {
+          clearSignedUrlCache();
+          await flushSyncTelemetry();
+          await supabase.auth.signOut();
+        } catch (e) {
+          console.warn("deleteAccount session teardown:", e);
+        }
+
+        // Belt and braces: if signOut failed above, onAuthStateChange never
+        // fires and AuthWrapper would keep rendering the app for a deleted
+        // account. Clearing state here guarantees the redirect to /sign-in.
+        setSession(null);
+        setUser(null);
       },
       refreshSession: async () => {
         const { data, error } = await supabase.auth.getSession();

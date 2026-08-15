@@ -116,6 +116,104 @@ function exerciseArt(id: string, pattern: string): {
   };
 }
 
+/** One row of the exercise browser, as projected by the `exercises` memo. */
+interface ExerciseRowData {
+  id: string;
+  name: string;
+  category: string;
+  muscle: string;
+  difficulty: string;
+  difficultyRaw: Difficulty;
+  equipment: string;
+  art: { icon: string; hue: ArtHue; pattern: ArtPattern };
+  match: number | null;
+  caution: string | null;
+}
+
+function toneForDifficulty(
+  difficulty: string,
+  colors: ReturnType<typeof useColors>["colors"],
+): string {
+  switch (difficulty.toLowerCase()) {
+    case "beginner":
+      return colors.success;
+    case "intermediate":
+      return colors.warning;
+    case "advanced":
+      return colors.error;
+    default:
+      return colors.textTertiary;
+  }
+}
+
+/**
+ * Memoized exercise row.
+ *
+ * This list was already a FlatList, so it windowed correctly — but `renderItem`
+ * was an inline arrow and the row was unmemoized, so every visible row rebuilt
+ * on each parent render (a filter chip tap, a keystroke). Lifting the row out and
+ * memoizing it is what makes the virtualization actually pay.
+ */
+const ExerciseRow = React.memo(function ExerciseRow({
+  item,
+  onPress,
+}: {
+  item: ExerciseRowData;
+  onPress: (id: string) => void;
+}) {
+  const { colors } = useColors();
+  const tone = toneForDifficulty(item.difficulty, colors);
+
+  return (
+    <Card
+      onPress={() => onPress(item.id)}
+      style={styles.exerciseCard}
+      padding="md"
+      elevation="xs"
+      accessibilityLabel={`${item.name}. ${item.difficulty}. Targets ${item.muscle}.${
+        item.caution ? ` Caution: ${item.caution}.` : ""
+      }`}
+      accessibilityHint="Opens the exercise detail"
+    >
+      <View style={styles.exerciseCardRow}>
+        <ArtTile
+          icon={item.art.icon}
+          hue={item.art.hue}
+          pattern={item.art.pattern}
+          size={52}
+          radius={Radius.md}
+        />
+        <View style={styles.flex}>
+          <AppText variant="callout" numberOfLines={1}>
+            {item.name}
+          </AppText>
+          <AppText variant="footnote" color="tertiary" numberOfLines={1} style={styles.exMuscle}>
+            {item.muscle}
+          </AppText>
+          <View style={styles.exMeta}>
+            <Pill label={item.difficulty} tone={tone} size="sm" />
+            {item.match != null && !item.caution && (
+              <Pill label={`${item.match}% match`} tone={colors.success} size="sm" />
+            )}
+            <AppText variant="caption" color="tertiary" numberOfLines={1} style={styles.flex}>
+              {item.equipment}
+            </AppText>
+          </View>
+          {item.caution && (
+            <View style={styles.cautionRow}>
+              <Ionicons name="warning" size={13} color={colors.warning} />
+              <AppText variant="caption" color="warning" numberOfLines={1} style={styles.flex}>
+                {item.caution}
+              </AppText>
+            </View>
+          )}
+        </View>
+        <ThemedIcon name="chevron-forward" size={18} role="textTertiary" />
+      </View>
+    </Card>
+  );
+});
+
 export default function FitnessLibraryScreen() {
   const { colors } = useColors();
   const router = useRouter();
@@ -173,6 +271,33 @@ export default function FitnessLibraryScreen() {
   const openWorkout = useCallback(
     (id: string) => router.push(`/fitness/workout/${id}` as never),
     [router],
+  );
+
+  const openExercise = useCallback(
+    (id: string) => router.push(`/exercise/${id}` as never),
+    [router],
+  );
+
+  // Stable identities so the memoized rows aren't invalidated on every render.
+  const keyExtractor = useCallback((item: { id: string }) => item.id, []);
+
+  const renderExercise = useCallback(
+    ({ item }: { item: ExerciseRowData }) => (
+      <ExerciseRow item={item} onPress={openExercise} />
+    ),
+    [openExercise],
+  );
+
+  const renderWorkout = useCallback(
+    ({ item }: { item: Parameters<typeof WorkoutCard>[0]["workout"] }) => (
+      <WorkoutCard
+        workout={item}
+        onPress={openWorkout}
+        isFavorite={isFavorite(item.id)}
+        onToggleFavorite={toggleFavorite}
+      />
+    ),
+    [openWorkout, isFavorite, toggleFavorite],
   );
 
   const difficultyTone = useCallback(
@@ -313,56 +438,16 @@ export default function FitnessLibraryScreen() {
 
           <FlatList
             data={exercises}
-            keyExtractor={(item) => item.id}
+            keyExtractor={keyExtractor}
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
-            renderItem={({ item }) => {
-              const tone = difficultyTone(item.difficulty);
-              return (
-                <Card
-                  onPress={() => router.push(`/exercise/${item.id}` as never)}
-                  style={styles.exerciseCard}
-                  padding="md"
-                  elevation="xs"
-                >
-                  <View style={styles.exerciseCardRow}>
-                    <ArtTile
-                      icon={item.art.icon}
-                      hue={item.art.hue}
-                      pattern={item.art.pattern}
-                      size={52}
-                      radius={Radius.md}
-                    />
-                    <View style={styles.flex}>
-                      <AppText variant="callout" numberOfLines={1}>
-                        {item.name}
-                      </AppText>
-                      <AppText variant="footnote" color="tertiary" numberOfLines={1} style={styles.exMuscle}>
-                        {item.muscle}
-                      </AppText>
-                      <View style={styles.exMeta}>
-                        <Pill label={item.difficulty} tone={tone} size="sm" />
-                        {item.match != null && !item.caution && (
-                          <Pill label={`${item.match}% match`} tone={colors.success} size="sm" />
-                        )}
-                        <AppText variant="caption" color="tertiary" numberOfLines={1} style={styles.flex}>
-                          {item.equipment}
-                        </AppText>
-                      </View>
-                      {item.caution && (
-                        <View style={styles.cautionRow}>
-                          <Ionicons name="warning" size={13} color={colors.warning} />
-                          <AppText variant="caption" color="warning" numberOfLines={1} style={styles.flex}>
-                            {item.caution}
-                          </AppText>
-                        </View>
-                      )}
-                    </View>
-                    <ThemedIcon name="chevron-forward" size={18} role="textTertiary" />
-                  </View>
-                </Card>
-              );
-            }}
+            renderItem={renderExercise}
+            // Tuned for low-end Android. `removeClippedSubviews` is deliberately
+            // omitted — these rows have layered Skia art tiles, exactly the kind
+            // of child that intermittently blanks on Android when clipped.
+            initialNumToRender={8}
+            maxToRenderPerBatch={8}
+            windowSize={7}
             ListFooterComponent={<View style={styles.footerPad} />}
             ListEmptyComponent={
               <View style={styles.listEmpty}>
@@ -454,24 +539,18 @@ export default function FitnessLibraryScreen() {
 
         <FlatList
           data={workouts}
-          keyExtractor={(w) => w.id}
+          keyExtractor={keyExtractor}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           initialNumToRender={8}
+          maxToRenderPerBatch={8}
           windowSize={7}
           ListHeaderComponent={
             <AppText variant="footnote" color="tertiary" style={styles.count}>
               {workouts.length} workout{workouts.length === 1 ? "" : "s"}
             </AppText>
           }
-          renderItem={({ item }) => (
-            <WorkoutCard
-              workout={item}
-              onPress={openWorkout}
-              isFavorite={isFavorite(item.id)}
-              onToggleFavorite={toggleFavorite}
-            />
-          )}
+          renderItem={renderWorkout}
           ListFooterComponent={<View style={styles.footerPad} />}
           ListEmptyComponent={
             <View style={styles.listEmpty}>

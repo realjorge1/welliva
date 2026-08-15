@@ -20,9 +20,36 @@ export interface ThemedIconProps {
   /** Which palette token to tint with (default: textTertiary). */
   role?: IconRole & keyof ThemeColors;
   style?: StyleProp<TextStyle>;
+  /**
+   * Spoken name, for the rare glyph that carries meaning on its own. Almost
+   * always leave this unset: these icons are chevrons and affordance hints
+   * beside text that already says the same thing.
+   */
+  accessibilityLabel?: string;
 }
 
-export function ThemedIcon({ name, size = 18, role = "textTertiary", style }: ThemedIconProps) {
+export function ThemedIcon({
+  name,
+  size = 18,
+  role = "textTertiary",
+  style,
+  accessibilityLabel,
+}: ThemedIconProps) {
   const { colors } = useColors();
-  return <Ionicons name={name} size={size} color={colors[role]} style={style} />;
+  const decorative = !accessibilityLabel;
+  return (
+    <Ionicons
+      name={name}
+      size={size}
+      color={colors[role]}
+      style={style}
+      // An Ionicon is a Text node carrying a private-use glyph, so left alone a
+      // screen reader reads it as a meaningless character. Decorative by
+      // default — which is what a chevron next to a labelled row actually is.
+      accessibilityElementsHidden={decorative}
+      importantForAccessibility={decorative ? "no-hide-descendants" : "yes"}
+      accessibilityRole={decorative ? undefined : "image"}
+      accessibilityLabel={accessibilityLabel}
+    />
+  );
 }

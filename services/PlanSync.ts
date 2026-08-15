@@ -8,6 +8,21 @@
  *  - When the backend is unconfigured or unreachable, we fall back to the local
  *    deterministic generators so the app never breaks.
  *
+ * THE TIER BOUNDARY LIVES HERE
+ *
+ * AI generation is a Pro feature, and this file is where that is decided. Free
+ * users take the `generateDietPlan` / `generateWorkoutPlan` branch — the same
+ * deterministic engines over 28 clinically-reviewed diets and 112 workouts that
+ * the app shipped with. That matters: a free user gets a real, complete,
+ * personalised-by-rules plan, not a stub or an error. There is no dead end
+ * anywhere below, which is why the gate can be a single `&&` at each call site
+ * rather than a new code path.
+ *
+ * This is also the *only* place a plan can become AI-generated, so gating here
+ * covers onboarding, daily rollover, regeneration and the offline buffer at once.
+ * The spend itself is additionally protected server-side — a modified client can
+ * still call the endpoint (docs/monetization/setup.md Part 6).
+ *
  * These are pure async functions (no React, no component state). Callers persist
  * any resulting plan-state themselves.
  */
@@ -16,6 +31,7 @@ import type { UserBio } from "../models/user";
 import type { GeneratedWorkoutPlan } from "../models/workout";
 import { ensureDietLibraryLoaded } from "../constants/DietDatabase";
 import { WellivaApi } from "./api/WellivaApi";
+import { allowPro } from "./billing/gating";
 import { generateDietPlan } from "./DietPlanGenerator";
 import { parseLocalDate, toLocalDateString } from "./OfflineStorage";
 import {
@@ -29,6 +45,15 @@ export interface EnsuredDiet {
   dietId: string;
   /** Where the served plan came from. */
   source: "cache" | "ai" | "local";
+}
+
+/**
+ * Whether to take the AI branch: a backend must exist AND the user must be
+ * entitled to it. Read on every call rather than cached, so an upgrade takes
+ * effect on the next plan the app builds — no restart, no cache to invalidate.
+ */
+function canGenerateWithAI(): boolean {
+  return WellivaApi.isConfigured && allowPro();
 }
 
 /**
@@ -47,7 +72,7 @@ export async function ensureDietForDate(
   const cached = await getScheduleForDate(date);
   if (cached) return { dietId: cached.dietId, source: "cache" };
 
-  if (WellivaApi.isConfigured) {
+  if (canGenerateWithAI()) {
     try {
       const ai = await WellivaApi.generateDiet({ bio, targets, date, dietId: preferredDietId });
       await saveDaySchedule(ai.schedule);
@@ -76,7 +101,7 @@ export async function regenerateDietForDate(
   date: string,
   preferredDietId?: string,
 ): Promise<EnsuredDiet | null> {
-  if (WellivaApi.isConfigured) {
+  if (canGenerateWithAI()) {
     try {
       const ai = await WellivaApi.generateDiet({ bio, targets, date, dietId: preferredDietId });
       await saveDaySchedule(ai.schedule);
@@ -121,7 +146,11 @@ export async function ensureDietBuffer(
   preferredDietId?: string,
   days = 7,
 ): Promise<void> {
-  if (!WellivaApi.isConfigured) return;
+  // Free users have no buffer to fill: their days are generated locally on
+  // rollover by `ensureDietForDate`, which needs no network and so needs no
+  // read-ahead. Skipping this also means a free user never triggers a single
+  // paid API call in the background.
+  if (!canGenerateWithAI()) return;
   // Coalesce concurrent fills (onboarding + the app-open effect can overlap)
   // so we never fire duplicate AI calls for the same day.
   if (bufferInFlight) return bufferInFlight;
@@ -180,7 +209,7 @@ export async function generateWorkoutWeek(
   weekStart: string,
 ): Promise<GeneratedWorkoutPlan> {
   await ensureWorkoutExercisesLoaded(); // local generator reads the exercise pool
-  if (WellivaApi.isConfigured) {
+  if (canGenerateWithAI()) {
     try {
       const ai = await WellivaApi.generateWorkout({ bio, weekStart });
       const localHash = generateWorkoutPlan(bio, weekStart, {

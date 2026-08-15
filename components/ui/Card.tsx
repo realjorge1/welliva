@@ -28,6 +28,14 @@ export interface CardProps {
   bordered?: boolean;
   onPress?: () => void;
   style?: StyleProp<ViewStyle>;
+  /**
+   * Spoken name for a TAPPABLE card. A card's contents are often several text
+   * nodes (title, metadata, pills), which a screen reader would otherwise read
+   * as a stream of disconnected fragments — so a pressable card should name
+   * itself as one thing. Ignored when there's no `onPress`.
+   */
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
 }
 
 export function Card({
@@ -39,6 +47,8 @@ export function Card({
   bordered = true,
   onPress,
   style,
+  accessibilityLabel,
+  accessibilityHint,
 }: CardProps) {
   const { colors, isDark } = useColors();
   const pad = typeof padding === "number" ? padding : Spacing[padding];
@@ -69,6 +79,13 @@ export function Card({
     return (
       <Pressable
         onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        accessibilityHint={accessibilityHint}
+        // Group the children into one focusable element when the card names
+        // itself; without a label, leave the children individually reachable so
+        // nothing becomes unreadable.
+        accessible={accessibilityLabel ? true : undefined}
         style={({ pressed }) => [
           base,
           pressed && { opacity: 0.9, transform: [{ scale: 0.99 }] },

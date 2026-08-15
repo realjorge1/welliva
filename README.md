@@ -116,8 +116,8 @@ welliva/
 │   └── ...                       # Other services
 │
 ├── constants/                    # App constants
-│   ├── MealDatabase.ts           # Meal data
-│   ├── RecommendedDiets.ts       # Diet plans
+│   ├── DietDatabase.ts           # Hand-authored diets + meal options
+│   ├── FoodDictionary.ts         # Whole-foods catalog (loaded from Storage)
 │   └── theme.ts                  # Theme configuration
 │
 └── assets/                       # Images, fonts, etc.
