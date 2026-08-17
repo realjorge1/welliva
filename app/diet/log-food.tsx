@@ -135,7 +135,7 @@ export default function LogFoodScreen() {
               <AppText variant="body" weight="600">
                 That day is closed
               </AppText>
-              <AppText variant="caption" color="textSecondary" style={{ marginTop: 4 }}>
+              <AppText variant="caption" color="secondary" style={{ marginTop: 4 }}>
                 You can log today or yesterday. Anything older stays as it was
                 recorded.
               </AppText>
@@ -193,18 +193,18 @@ export default function LogFoodScreen() {
 
           {!analysis ? (
             <View style={styles.examples}>
-              <AppText variant="caption" color="textSecondary" weight="700" uppercase>
+              <AppText variant="caption" color="secondary" weight="700" uppercase>
                 Try
               </AppText>
               {EXAMPLES.map((ex) => (
                 <Pressable key={ex} onPress={() => setText(ex)} style={styles.exampleRow}>
                   <Ionicons name="arrow-forward" size={13} color={colors.textSecondary} />
-                  <AppText variant="caption" color="textSecondary">
+                  <AppText variant="caption" color="secondary">
                     {ex}
                   </AppText>
                 </Pressable>
               ))}
-              <AppText variant="caption" color="textSecondary" style={styles.honesty}>
+              <AppText variant="caption" color="secondary" style={styles.honesty}>
                 {`Numbers come from USDA FoodData Central and the FAO West African food tables — not from a chatbot's guess. Anything we can't match is shown as unidentified rather than estimated.`}
               </AppText>
             </View>
@@ -220,7 +220,7 @@ export default function LogFoodScreen() {
                 {usedAI ? (
                   <View style={[styles.aiChip, { borderColor: colors.border }]}>
                     <Ionicons name="sparkles" size={11} color={colors.textSecondary} />
-                    <AppText variant="caption" color="textSecondary" weight="600">
+                    <AppText variant="caption" color="secondary" weight="600">
                       Gozlin parsed
                     </AppText>
                   </View>
@@ -228,7 +228,7 @@ export default function LogFoodScreen() {
               </View>
 
               {aiError ? (
-                <AppText variant="caption" color="textSecondary">
+                <AppText variant="caption" color="secondary">
                   Gozlin was unreachable — read on-device instead.
                 </AppText>
               ) : null}
@@ -259,7 +259,7 @@ export default function LogFoodScreen() {
                   <AppText variant="body" weight="600">
                     Nothing we could identify
                   </AppText>
-                  <AppText variant="caption" color="textSecondary" style={{ marginTop: 4 }}>
+                  <AppText variant="caption" color="secondary" style={{ marginTop: 4 }}>
                     {`Try naming the foods more plainly — "rice", "chicken breast", "moi moi". We'd rather say we don't know than make numbers up.`}
                   </AppText>
                 </Card>
@@ -326,7 +326,7 @@ function ItemRow({
           <AppText variant="body" weight="700">
             {item.name}
           </AppText>
-          <AppText variant="caption" color="textSecondary">
+          <AppText variant="caption" color="secondary">
             {item.quantity} {item.unit}
             {item.grams > 0 ? ` · ${item.grams} g` : ""} · {CONFIDENCE_LABEL[item.confidence]}
           </AppText>
@@ -341,14 +341,14 @@ function ItemRow({
       </View>
 
       {item.source ? (
-        <AppText variant="caption" color="textSecondary" style={styles.src}>
+        <AppText variant="caption" color="secondary" style={styles.src}>
           {describeSource(item.source)}
         </AppText>
       ) : null}
 
       {item.alternatives && item.alternatives.length > 0 ? (
         <View style={styles.alts}>
-          <AppText variant="caption" color="textSecondary" weight="700">
+          <AppText variant="caption" color="secondary" weight="700">
             {unmatched ? "Did you mean" : "Not right?"}
           </AppText>
           <View style={styles.altRow}>

@@ -40,7 +40,13 @@ import {
   WorkoutSession,
 } from "../models/workout";
 
-import { migrate, memory, lifeContext, signalsCoordinator } from "../health-os";
+import {
+  migrate,
+  memory,
+  lifeContext,
+  runDailyLearning,
+  signalsCoordinator,
+} from "../health-os";
 import { useAuth } from "../components/SupabaseAuthProvider";
 import { loadBodyLogs } from "../services/BodyLogService";
 import { useProfileSync } from "./domain/useProfileSync";
@@ -55,7 +61,7 @@ import {
   generateCoachInsights,
 } from "../services/intelligence";
 
-import { calculateNutritionTargets } from "../services/NutritionService";
+import { calculateNutritionTargets, maintenanceTdee } from "../services/NutritionService";
 import { reconcileTargetsVersion } from "../services/nutrition/TargetsVersion";
 import {
   archiveWaterDay,
@@ -729,6 +735,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await sweepClosedDays(today);
         // Compact the just-closed day into the L2 summaries (see checkDayChange above).
         await memory.compactDayIfPresent(lastDate);
+        // Close the learning loop for every day that ended while the app was
+        // shut. This is the path that matters MOST for learning: the in-app
+        // interval sweep (useDayChange) only fires if the app happens to be
+        // running at midnight, and for anyone who closes it overnight — which
+        // is the normal case — THIS is the only place the models ever refit.
+        // Both paths call the same idempotent job, so a user who does leave it
+        // open simply resolves the same day twice to the same numbers.
+        if (bio) {
+          try {
+            await runDailyLearning({
+              mifflinTdee: maintenanceTdee(bio),
+              weightKg: bio.weightKg,
+            });
+          } catch {
+            // Never let learning block boot — the app has to come up regardless.
+          }
+        }
         // Archive the day that just ended, then reset today's counter — and
         // PERSIST the reset. Without writing WATER_TODAY=0 here, reopening the
         // app on a new day (before any water is logged) would reload the stale

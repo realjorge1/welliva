@@ -221,6 +221,26 @@ export type NutrientSource =
       kind: "user";
       /** The user typed the numbers in themselves. Truth by assertion. */
       description: string;
+    }
+  | {
+      /**
+       * A LANGUAGE MODEL'S ESTIMATE. The weakest thing this app will assert.
+       *
+       * This exists only for foods no reference table covers — regional dishes
+       * and local delicacies that USDA and the WAFCT simply don't have. The
+       * alternative isn't better data, it's no data at all, so the estimate is
+       * allowed on one condition: it is labelled as an estimate EVERYWHERE it
+       * appears, and it is ranked below every measured rung so any total it
+       * touches inherits `ai-estimated` (see weakestConfidence).
+       *
+       * It must never be produced for a food a reference table DOES cover. The
+       * lookup ladder tries USDA first for exactly this reason.
+       */
+      kind: "ai-estimate";
+      /** Model that produced it, so a bad batch can be traced and re-run. */
+      model: string;
+      /** What it reasoned from, e.g. "typical home recipe, 1 cup cooked". */
+      description: string;
     };
 
 /**
@@ -237,6 +257,12 @@ export type NutrientConfidence =
   | "recipe-estimated"
   /** Only the four macros are known; micronutrients are genuinely unknown. */
   | "macros-only"
+  /**
+   * A language model's estimate for a food no reference table covers. Weaker
+   * than every measured rung; stronger than nothing. See NutrientSource's
+   * "ai-estimate" for the conditions under which this is allowed to exist.
+   */
+  | "ai-estimated"
   /** No reference match — nothing is asserted as fact. */
   | "unmatched";
 
@@ -245,6 +271,7 @@ export const CONFIDENCE_LABEL: Record<NutrientConfidence, string> = {
   "portion-estimated": "Estimated portion",
   "recipe-estimated": "Typical recipe",
   "macros-only": "Macros only",
+  "ai-estimated": "AI estimate",
   unmatched: "Not identified",
 };
 
@@ -257,6 +284,8 @@ export const CONFIDENCE_NOTE: Record<NutrientConfidence, string> = {
     "A mixed dish, calculated by adding up a standard recipe's ingredients. Real portions vary with how it's cooked.",
   "macros-only":
     "We know this food's calories and macros, but its vitamin and mineral content hasn't been measured in our reference data.",
+  "ai-estimated":
+    "No food composition table covers this dish, so these figures are an AI estimate from a typical recipe — not a measurement. Treat them as a reasonable ballpark, and expect real portions to vary.",
   unmatched:
     "We couldn't match this to a reference food, so no nutrition figures are claimed.",
 };
@@ -430,17 +459,31 @@ export function formatNutrient(key: NutrientKey, value: number): string {
   return meta.unit === "kcal" ? `${rounded}` : `${rounded} ${meta.unit}`;
 }
 
+/**
+ * How much to trust each rung, worst = highest. Exported because the ordering
+ * is a contract, not an implementation detail: FoodLogService ranks the same
+ * way, and the two drifting apart would let a meal be labelled better than its
+ * worst ingredient.
+ *
+ * `ai-estimated` sits below every measured rung and above `unmatched`. That
+ * placement is what makes an estimated food propagate its own uncertainty
+ * upward — a day containing one is a day labelled "AI estimate", automatically,
+ * everywhere totals are shown.
+ */
+export const CONFIDENCE_RANK: Record<NutrientConfidence, number> = {
+  measured: 0,
+  "portion-estimated": 1,
+  "recipe-estimated": 2,
+  "macros-only": 3,
+  "ai-estimated": 4,
+  unmatched: 5,
+};
+
 /** The weakest (most cautious) confidence in a set — how a meal is labelled. */
 export function weakestConfidence(
   list: NutrientConfidence[],
 ): NutrientConfidence {
-  const rank: Record<NutrientConfidence, number> = {
-    measured: 0,
-    "portion-estimated": 1,
-    "recipe-estimated": 2,
-    "macros-only": 3,
-    unmatched: 4,
-  };
+  const rank = CONFIDENCE_RANK;
   return list.reduce<NutrientConfidence>(
     (worst, c) => (rank[c] > rank[worst] ? c : worst),
     "measured",
@@ -463,5 +506,9 @@ export function describeSource(source: NutrientSource | null): string {
       return "Welliva meal catalog (macros only)";
     case "user":
       return "Entered by you";
+    case "ai-estimate":
+      // Named plainly. "AI" in the attribution line is the whole point — this
+      // is the one source with no measurement behind it.
+      return `AI estimate (${source.model}) — not a measured source`;
   }
 }

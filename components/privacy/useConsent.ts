@@ -1,5 +1,5 @@
 /**
- * useConsent — bridge hook for the Privacy / "What Gozlin is watching" surface.
+ * useConsent — bridge hook for the Trust surface (`app/(tabs)/privacy.tsx`).
  *
  * Thin wiring over health-os/privacy + the signals coordinator. Exposes the consent
  * record (grouped, toggleable), the live "what's connected" rows, and a count of active

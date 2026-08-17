@@ -11,9 +11,33 @@
  *   bandit          learned delivery, Thompson sampling    (how, and whether, to ask)
  *   changepoint     noticing an absence, CUSUM             (when to speak)
  *   adherence       pre-emption, logistic regression       (shrink before the miss)
+ *   engine          the composition root that connects all of it to real data
+ *
+ * Everything above `engine` is pure and knows nothing about storage or the app.
+ * `engine` is the only file here that does, and it is what the app imports.
  */
 
 export * from "./types";
+
+export {
+  armLabel,
+  buildContext,
+  buildSeries,
+  issueRecommendation,
+  loadLearnedState,
+  makeMetricReader,
+  readIntelligence,
+  runDailyLearning,
+} from "./engine";
+export type {
+  DailyLearningInput,
+  DailyLearningReport,
+  DayRow,
+  IntelligenceSnapshot,
+  IssueInput,
+  LearnedState,
+  ModelCard,
+} from "./engine";
 
 export {
   adherenceBucket,

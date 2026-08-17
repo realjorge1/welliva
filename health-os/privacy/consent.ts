@@ -206,7 +206,7 @@ export function needsReconsent(record: ConsentRecord): boolean {
   return record.version < CONSENT_VERSION;
 }
 
-/** The integrations the user has switched on (for the "what Gozlin is watching" view). */
+/** The integrations the user has switched on (for the Trust screen's live view). */
 export function grantedIntegrations(record: ConsentRecord): ConsentCategory[] {
   return CONSENT_CATEGORIES.filter(
     (c) =>

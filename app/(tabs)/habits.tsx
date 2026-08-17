@@ -5,6 +5,7 @@
  * Auto-tracked habits (water / meals / workout) light up from app data.
  */
 import { HabitRow } from "@/components/habits/HabitRow";
+import { ScreenTopBar } from "@/components/navigation";
 import { Card } from "@/components/ui/Card";
 import { Divider } from "@/components/ui/Divider";
 import { IconBadge } from "@/components/ui/IconBadge";
@@ -111,28 +112,26 @@ export default function HabitsScreen() {
   };
 
   const header = (
-    <View style={styles.headerRow}>
-      <Pressable
-        hitSlop={12}
-        onPress={() => router.back()}
-        style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
-      >
-        <Ionicons name="chevron-back" size={20} color={colors.text} />
-      </Pressable>
-      <AppText variant="displayLg" style={styles.headerTitle}>
-        Habits
-      </AppText>
-      <Pressable
-        hitSlop={12}
-        onPress={() =>
-          canAddHabit ? router.push("/habit/new" as any) : openPaywall("habits")
-        }
-        accessibilityLabel={canAddHabit ? "New habit" : "New habit — requires Welliva Pro"}
-        style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
-      >
-        <Ionicons name={canAddHabit ? "add" : "lock-closed"} size={canAddHabit ? 22 : 18} color={colors.text} />
-      </Pressable>
-    </View>
+    <ScreenTopBar
+      title="Habits"
+      style={styles.headerRow}
+      right={
+        <Pressable
+          hitSlop={12}
+          onPress={() =>
+            canAddHabit ? router.push("/habit/new" as any) : openPaywall("habits")
+          }
+          accessibilityLabel={canAddHabit ? "New habit" : "New habit — requires Welliva Pro"}
+          style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
+        >
+          <Ionicons
+            name={canAddHabit ? "add" : "lock-closed"}
+            size={canAddHabit ? 22 : 18}
+            color={colors.text}
+          />
+        </Pressable>
+      }
+    />
   );
 
   return (
@@ -267,14 +266,7 @@ export default function HabitsScreen() {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
 
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.md,
-    gap: Spacing.md,
-  },
-  headerTitle: { flex: 1 },
+  headerRow: { paddingTop: Spacing.xs, paddingBottom: Spacing.md },
   iconBtn: {
     width: 36,
     height: 36,

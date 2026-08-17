@@ -108,7 +108,7 @@ export default function PlanMenuScreen() {
           <AppText variant="body" weight="700">
             No diet, just your food
           </AppText>
-          <AppText variant="caption" color="textSecondary" style={styles.para}>
+          <AppText variant="caption" color="secondary" style={styles.para}>
             {`Pick exactly what you want to eat on each day. Days you don't fill in stay empty — nothing gets chosen for you, and empty days aren't counted against you at the end.`}
           </AppText>
         </Card>
@@ -148,7 +148,7 @@ export default function PlanMenuScreen() {
           }}
         />
         {activePeriod ? (
-          <AppText variant="caption" color="textSecondary" align="center">
+          <AppText variant="caption" color="secondary" align="center">
             This will end your current {activePeriod.label} plan.
           </AppText>
         ) : null}
@@ -179,7 +179,7 @@ export default function PlanMenuScreen() {
     <Screen scroll contentStyle={styles.body}>
       <ScreenHeader title={activePeriod.label} />
 
-      <AppText variant="caption" color="textSecondary">
+      <AppText variant="caption" color="secondary">
         {fmt(activePeriod.startDate)} – {fmt(activePeriod.endDate)} · {days.length} days ·{" "}
         {plannedDates.length} planned
       </AppText>
@@ -258,7 +258,7 @@ export default function PlanMenuScreen() {
             </View>
 
             {picked.length === 0 ? (
-              <AppText variant="caption" color="textSecondary" style={{ marginTop: 6 }}>
+              <AppText variant="caption" color="secondary" style={{ marginTop: 6 }}>
                 Nothing planned — tap + to choose, or leave it empty.
               </AppText>
             ) : (
@@ -268,7 +268,7 @@ export default function PlanMenuScreen() {
                     <AppText variant="body" weight="600">
                       {entry.meal.name}
                     </AppText>
-                    <AppText variant="caption" color="textSecondary">
+                    <AppText variant="caption" color="secondary">
                       {entry.meal.calories.min === entry.meal.calories.max
                         ? `${entry.meal.calories.min} kcal`
                         : `${entry.meal.calories.min}–${entry.meal.calories.max} kcal`}
@@ -296,7 +296,7 @@ export default function PlanMenuScreen() {
           <AppText variant="body" weight="700">
             Reuse this day
           </AppText>
-          <AppText variant="caption" color="textSecondary" style={{ marginTop: 2 }}>
+          <AppText variant="caption" color="secondary" style={{ marginTop: 2 }}>
             {`Planning a long stretch one meal at a time isn't realistic.`}
           </AppText>
           <View style={styles.bulkRow}>
@@ -436,7 +436,7 @@ function MealPickerModal({
 
         {results.length > 0 ? (
           <>
-            <AppText variant="caption" color="textSecondary" weight="700" uppercase>
+            <AppText variant="caption" color="secondary" weight="700" uppercase>
               From the food reference
             </AppText>
             {results.map((food) => {
@@ -467,7 +467,7 @@ function MealPickerModal({
                     <AppText variant="body" weight="600">
                       {food.name}
                     </AppText>
-                    <AppText variant="caption" color="textSecondary">
+                    <AppText variant="caption" color="secondary">
                       {food.group}
                     </AppText>
                   </View>
@@ -482,7 +482,7 @@ function MealPickerModal({
 
         {savedMeals.length > 0 && !query.trim() ? (
           <>
-            <AppText variant="caption" color="textSecondary" weight="700" uppercase>
+            <AppText variant="caption" color="secondary" weight="700" uppercase>
               Your saved meals
             </AppText>
             {savedMeals.map((sm) => (

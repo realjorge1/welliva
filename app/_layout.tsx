@@ -22,6 +22,7 @@ import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 import { AuthWrapper } from "@/components/AuthWrapper";
 import { LegalGateProvider } from "@/components/legal";
 import { IntroRevealProvider } from "@/components/motion/IntroReveal";
+import { AppDrawer } from "@/components/navigation";
 import { NotificationActionRunner } from "@/components/notifications/NotificationActionRunner";
 import { ProactiveDeliveryRunner } from "@/components/notifications/ProactiveDeliveryRunner";
 import { SupabaseAuthProvider, useAuth } from "@/components/SupabaseAuthProvider";
@@ -165,16 +166,24 @@ function RootLayoutContent() {
            * level 3 is each route's own `export function ErrorBoundary`.
            */}
           <AppErrorBoundary surface="navigation">
+          {/*
+           * THE SWIPE MENU wraps the whole navigator, not a screen inside it —
+           * that's what lets the app itself be the thing that slides. Everything
+           * below is drawn on the moving surface; the panel sits behind it.
+           *
+           * It sits INSIDE the auth gate on purpose: the menu header reads the
+           * signed-in account, and the sign-in / onboarding / consent routes it
+           * also technically contains are excluded from the gesture by
+           * SWIPEABLE_PATHS and simply don't render a hamburger.
+           */}
+          <AppDrawer>
           <Stack screenOptions={{ headerShown: false }}>
+            {/* The root shell: Home, Diet, Fitness, Gozlin, Habits, Logs,
+                Trust, Foods, Knows, Settings, Profile — every menu
+                destination, switched without a push. See (tabs)/_layout. */}
             <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="settings" />
-            {/* Profile: a PUSHED screen, not a tab. It was in the tab array but
-                never in the nav bar, reachable only via `?tab=profile`. */}
-            <Stack.Screen name="profile" />
-            <Stack.Screen name="knows" />
             <Stack.Screen name="memory-center" />
             <Stack.Screen name="life" />
-            <Stack.Screen name="privacy" />
             <Stack.Screen name="story/[id]" />
             <Stack.Screen name="sign-in" />
             <Stack.Screen name="sign-up" />
@@ -197,11 +206,8 @@ function RootLayoutContent() {
               options={{ gestureEnabled: false }}
             />
             <Stack.Screen name="session-summary" />
-            <Stack.Screen name="habits" />
-            <Stack.Screen name="foods" />
             <Stack.Screen name="habit/[id]" />
             <Stack.Screen name="habit/new" options={{ presentation: "modal" }} />
-            <Stack.Screen name="gozlin" options={{ presentation: "modal" }} />
             {/* Paywall: a modal, never a route the app redirects INTO. A lock
                 offers the upgrade; it never traps the user on the ask. */}
             <Stack.Screen name="paywall" options={{ presentation: "modal" }} />
@@ -214,6 +220,7 @@ function RootLayoutContent() {
             <Stack.Screen name="diet/report/[periodId]" options={{ presentation: "modal" }} />
             <Stack.Screen name="+not-found" />
           </Stack>
+          </AppDrawer>
           </AppErrorBoundary>
           <AchievementCelebration />
           <ProactiveDeliveryRunner />

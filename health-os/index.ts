@@ -18,3 +18,4 @@ export * from "./privacy";
 export * from "./notifications";
 export * from "./multimodal";
 export * from "./modules";
+export * from "./learning";

@@ -23,6 +23,7 @@ import {
   type WeighInPayload,
 } from "@/components/gozlin";
 import { DisclaimerNote } from "@/components/legal";
+import { MenuButton } from "@/components/navigation";
 import { AmbientCanvas, AppText } from "@/components/ui";
 import { useColors } from "@/components/ui/useColors";
 import { COACH_DISCLAIMER } from "@/constants/legal";
@@ -221,9 +222,9 @@ export default function GozlinScreen() {
       <SafeAreaView style={styles.flex} edges={["top"]}>
       {/* ── Header — quiet & airy ── */}
       <View style={[styles.header, { borderBottomColor: colors.divider }]}>
-        <Pressable onPress={() => router.back()} hitSlop={10} style={styles.iconBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.text} />
-        </Pressable>
+        {/* Gozlin is a menu destination now, not a modal pushed over a screen —
+            so this is the hamburger, not a way back to where you came from. */}
+        <MenuButton size={36} />
         <GozlinAvatar size={34} pulsing={isThinking} />
         <View style={styles.headerText}>
           <AppText variant="headline" numberOfLines={1}>

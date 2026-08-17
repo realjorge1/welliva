@@ -25,6 +25,8 @@ import {
 } from "@/components/ui";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { TrendCard, buildAdherenceTrend, type TrendSeries } from "@/components/charts";
+import { GozlinMoment } from "@/components/gozlin";
+import { ScreenTopBar } from "@/components/navigation";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { useAuth } from "@/components/SupabaseAuthProvider";
 import { Gradients, Radius, Spacing, alpha } from "@/constants/theme";
@@ -219,24 +221,9 @@ export default function ProfileScreen() {
 
   const header = (
     <Reveal index={0}>
-      <View style={styles.headerRow}>
-        <Pressable
-          hitSlop={12}
-          // A real pushed route now, so back means back — it returns to
-          // whichever screen opened Profile instead of always forcing More.
-          // (`dismissTo` guards the deep-link case where there's no history.)
-          onPress={() =>
-            router.canGoBack() ? router.back() : router.replace("/(tabs)/more")
-          }
-          style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
-          accessibilityLabel="Back"
-        >
-          <Ionicons name="chevron-back" size={20} color={colors.text} />
-        </Pressable>
-        <AppText variant="display" style={styles.flex}>
-          Profile
-        </AppText>
-      </View>
+      {/* A menu destination, not a pushed screen — there is nothing behind it
+          to go back to, so the hamburger is the control here. */}
+      <ScreenTopBar title="Profile" style={styles.headerRow} />
     </Reveal>
   );
 
@@ -299,6 +286,12 @@ export default function ProfileScreen() {
               </View>
             )}
           </Card>
+        </Reveal>
+
+        {/* Gozlin's read of you. It lived under "YOU" on the More tab; when the
+            menu replaced that tab, identity was the right place for it. */}
+        <Reveal index={2}>
+          <GozlinMoment surface="progress" style={styles.moment} />
         </Reveal>
 
         {/* Streak hero */}
@@ -769,20 +762,8 @@ const styles = StyleSheet.create({
   section: { marginTop: Spacing.xxl },
   vline: { width: 1, height: 34 },
 
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-    paddingTop: Spacing.md,
-    marginBottom: Spacing.xl,
-  },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: Radius.pill,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  headerRow: { paddingTop: Spacing.xs, marginBottom: Spacing.xl },
+  moment: { marginBottom: Spacing.xl },
 
   // Hero
   heroTop: { flexDirection: "row", alignItems: "center", gap: Spacing.md },

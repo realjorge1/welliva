@@ -105,7 +105,7 @@ export default function DietHistoryScreen() {
               Did you have these and forget to log?
             </AppText>
           </View>
-          <AppText variant="caption" color="textSecondary" style={{ marginTop: 4 }}>
+          <AppText variant="caption" color="secondary" style={{ marginTop: 4 }}>
             {longDate(backlogPrompt.date)} — you can still tick these today.
             After that the day closes.
           </AppText>
@@ -125,7 +125,7 @@ export default function DietHistoryScreen() {
                   <AppText variant="body" weight="600">
                     {m.name}
                   </AppText>
-                  <AppText variant="caption" color="textSecondary">
+                  <AppText variant="caption" color="secondary">
                     {cap(m.mealType)}
                   </AppText>
                 </View>
@@ -142,7 +142,7 @@ export default function DietHistoryScreen() {
       <Card padding="lg">
         <View style={styles.weekHead}>
           {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
-            <AppText key={i} variant="caption" color="textSecondary" weight="700" align="center" style={styles.cell}>
+            <AppText key={i} variant="caption" color="secondary" weight="700" align="center" style={styles.cell}>
               {d}
             </AppText>
           ))}
@@ -269,7 +269,7 @@ function DayDetail({
       ) : null}
 
       {entry ? (
-        <AppText variant="caption" color="textSecondary" style={{ marginTop: Spacing.sm }}>
+        <AppText variant="caption" color="secondary" style={{ marginTop: Spacing.sm }}>
           {entry.mealsConsumed} of {entry.totalMeals} meals ·{" "}
           {entry.consumedCalories !== undefined ? `${entry.consumedCalories} kcal` : "no macro data"}
           {entry.dietName ? ` · ${entry.dietName}` : ""}
@@ -277,7 +277,7 @@ function DayDetail({
       ) : null}
 
       {meals.length === 0 ? (
-        <AppText variant="caption" color="textSecondary" style={{ marginTop: Spacing.md }}>
+        <AppText variant="caption" color="secondary" style={{ marginTop: Spacing.md }}>
           {entry
             ? "This day's plan has been archived — its result is kept above."
             : "No plan was scheduled for this day."}
@@ -306,7 +306,7 @@ function DayDetail({
                 >
                   {m.name}
                 </AppText>
-                <AppText variant="caption" color="textSecondary">
+                <AppText variant="caption" color="secondary">
                   {cap(m.slot)}
                 </AppText>
               </View>
@@ -316,7 +316,7 @@ function DayDetail({
       )}
 
       {permission === "locked" ? (
-        <AppText variant="caption" color="textSecondary" style={styles.lockNote}>
+        <AppText variant="caption" color="secondary" style={styles.lockNote}>
           {`You can log today and yesterday. Older days stay as they were recorded — that's what keeps your history, and your end-of-plan report, honest.`}
         </AppText>
       ) : null}
@@ -339,7 +339,7 @@ function Legend({ color, label }: { color: string; label: string }) {
   return (
     <View style={styles.legendItem}>
       <View style={[styles.legendDot, { backgroundColor: color }]} />
-      <AppText variant="caption" color="textSecondary">
+      <AppText variant="caption" color="secondary">
         {label}
       </AppText>
     </View>

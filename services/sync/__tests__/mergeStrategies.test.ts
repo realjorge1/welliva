@@ -122,6 +122,13 @@ const FIXTURES: Record<string, [string, string]> = {
     JSON.stringify([{ id: "w1", completedAt: "2026-07-01T10:00:00Z" }]),
     JSON.stringify([{ id: "w2", completedAt: "2026-07-02T10:00:00Z" }]),
   ],
+  // CustomFood[] — foods the user added that our catalogs never had. The two
+  // sides are deliberately DISJOINT: the realistic failure is two devices each
+  // adding a different food offline, and last-write-wins losing one of them.
+  [KEYS.CUSTOM_FOODS]: [
+    JSON.stringify([{ id: "custom_a", addedAt: "2026-07-01T10:00:00Z", name: "Abacha" }]),
+    JSON.stringify([{ id: "custom_b", addedAt: "2026-07-02T10:00:00Z", name: "Chin chin" }]),
+  ],
   [SESSION_HISTORY]: [
     JSON.stringify([{ sessionRunId: "s1", completedAt: "2026-07-01T10:00:00Z" }]),
     JSON.stringify([

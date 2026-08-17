@@ -7,7 +7,7 @@
  * (Expo Go, web, denied, offline), so calling this is always safe.
  *
  * AppContext calls `syncDue()` alongside `lifeContext.expireDue()`; the result feeds the
- * "What Gozlin is watching" surface so the user can always see — and revoke — the live
+ * Trust screen's "Connected now" surface so the user can always see — and revoke — the live
  * forward model. See docs/companion/00-proactive-companion-blueprint.md §3.2 + §6.
  */
 import { consent as defaultConsent, type ConsentRepository } from "../privacy";
@@ -23,7 +23,7 @@ export interface SignalSyncResult {
   weatherRefreshed: boolean;
 }
 
-/** A row for the "What Gozlin is watching" surface — one per connectable sense. */
+/** A row for the Trust screen's "Connected now" surface — one per connectable sense. */
 export interface WatchedSignal {
   id: "calendar" | "weather" | "wearable";
   label: string;
@@ -77,7 +77,7 @@ export class SignalsCoordinator {
     return { calendarProposed, weatherRefreshed };
   }
 
-  /** The current "what Gozlin is watching" rows (no native reads beyond status/cache). */
+  /** The current "Connected now" rows (no native reads beyond status/cache). */
   async watching(): Promise<WatchedSignal[]> {
     const rows: WatchedSignal[] = [];
 

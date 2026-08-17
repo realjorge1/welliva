@@ -43,10 +43,12 @@ import {
 } from "../models/trackingMode";
 import { analyzeFoodText } from "../services/gozlin/GozlinFoodAnalyst";
 import * as MealPlan from "../services/MealPlanService";
+import type { FoodItem } from "../constants/FoodDictionary";
 import {
   dayNutrients,
   getFoodLogForDate,
   logAnalysis,
+  logCatalogFood as logCatalogFoodEntry,
   logKnownFood,
   removeFoodLog,
   replaceLoggedItem,
@@ -129,6 +131,18 @@ interface MealPlanContextValue {
     slot: MealType | null;
     date?: string;
   }) => Promise<boolean>;
+  /**
+   * Log a food picked from the browsable Foods catalog. Returns the created
+   * entry (not a boolean) because the caller needs its id to offer an undo —
+   * a catalog tap is a one-gesture write, so it must be a one-gesture unwrite.
+   */
+  logCatalogFood: (args: {
+    food: FoodItem;
+    quantity: number;
+    unit: string;
+    slot: MealType | null;
+    date?: string;
+  }) => Promise<FoodLogEntry | null>;
   removeLoggedFood: (entryId: string, date?: string) => Promise<void>;
   correctLoggedItem: (args: {
     entryId: string;
@@ -467,6 +481,28 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
     [currentDate, refreshLog],
   );
 
+  const logCatalogFood = useCallback(
+    async (args: {
+      food: FoodItem;
+      quantity: number;
+      unit: string;
+      slot: MealType | null;
+      date?: string;
+    }) => {
+      const target = args.date ?? currentDate;
+      const entry = await logCatalogFoodEntry({
+        date: target,
+        slot: args.slot,
+        food: args.food,
+        quantity: args.quantity,
+        unit: args.unit,
+      });
+      if (entry) await refreshLog(target);
+      return entry;
+    },
+    [currentDate, refreshLog],
+  );
+
   const removeLoggedFood = useCallback(
     async (entryId: string, date?: string) => {
       const target = date ?? currentDate;
@@ -565,6 +601,7 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
       analyzeFood,
       logFoodAnalysis,
       logFood,
+      logCatalogFood,
       removeLoggedFood,
       correctLoggedItem,
 
@@ -585,7 +622,8 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
       dismissReport, periodArchive, customEntriesToday, getCustomEntries,
       setCustomMeal, removeCustomMeal, copyDayTo, repeatWeekPattern, plannedDates,
       savedMeals, saveMealForReuse, deleteSavedMeal, todayFoodLog, todayNutrients,
-      analyzeFood, logFoodAnalysis, logFood, removeLoggedFood, correctLoggedItem,
+      analyzeFood, logFoodAnalysis, logFood, logCatalogFood, removeLoggedFood,
+      correctLoggedItem,
       backlogPrompt, backlogDismissed, currentDate, backlogMeal,
       dismissBacklogPrompt, permissionFor, adHocResult, publishAdHocResult,
       clearAdHocResult, refresh,

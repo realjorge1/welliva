@@ -23,9 +23,11 @@ import {
   Reveal,
   SectionHeader,
   useColors,
+  useElasticScroll,
 } from "@/components/ui";
 import { ActivityRings, type ActivityRingMetric } from "@/components/charts";
-import { GozlinIconButton } from "@/components/gozlin";
+import { GozlinButton } from "@/components/gozlin";
+import { ScreenTopBar } from "@/components/navigation";
 import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
 import { CrashTrigger, ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { Radius, Spacing, alpha } from "@/constants/theme";
@@ -72,13 +74,9 @@ const WEEKLY_MIN_GOAL = 150;
 
 const sessionService = SessionService.getInstance();
 
-function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 5) return "Still up?";
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
-  return "Good evening";
-}
+// The time-of-day greeting that used to sit above "Fitness" is gone: greeting
+// the user once, on Home, is a welcome; greeting them again on every screen they
+// visit is noise. Home owns it now (constants/HomeGreetings).
 
 export default function ExerciseScreen() {
   const { colors } = useColors();
@@ -277,6 +275,10 @@ export default function ExerciseScreen() {
 
   /* ── render ───────────────────────────────────────────────────────── */
 
+  // Fitness builds its own scaffold instead of using <Screen>, so it has to ask
+  // for the elastic ends the same way Screen does.
+  const elastic = useElasticScroll();
+
   const recoveryTone =
     recovery.level === "green"
       ? colors.success
@@ -293,28 +295,37 @@ export default function ExerciseScreen() {
       {__DEV__ && <CrashTrigger surface="tab:exercise" />}
       <SafeAreaView style={styles.flex} edges={["top"]}>
         {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.flex}>
-            <AppText variant="subhead" color="secondary">
-              {greeting()}
-            </AppText>
-            <AppText variant="display">Fitness</AppText>
-            {/* Only ever visible when something hasn't reached the cloud. */}
-            <SyncStatusPill style={styles.syncPill} />
-          </View>
-          {weekStats.streak > 0 && (
-            <View style={[styles.streakChip, { backgroundColor: alpha(colors.calories, 0.14) }]}>
-              <Ionicons name="flame" size={14} color={colors.calories} />
-              <AppText variant="callout" color="calories">
-                {weekStats.streak}
-              </AppText>
-            </View>
-          )}
-          <GozlinIconButton size={40} />
-        </View>
+        <ScreenTopBar
+          style={styles.header}
+          title={
+            <>
+              <AppText variant="title">Fitness</AppText>
+              {/* Only ever visible when something hasn't reached the cloud. */}
+              <SyncStatusPill style={styles.syncPill} />
+            </>
+          }
+          trailing={<GozlinButton />}
+          right={
+            weekStats.streak > 0 ? (
+              <View
+                style={[
+                  styles.streakChip,
+                  { backgroundColor: alpha(colors.calories, 0.14) },
+                ]}
+              >
+                <Ionicons name="flame" size={14} color={colors.calories} />
+                <AppText variant="callout" color="calories">
+                  {weekStats.streak}
+                </AppText>
+              </View>
+            ) : undefined
+          }
+        />
 
+        {elastic.wrap(
         <ScrollView
           showsVerticalScrollIndicator={false}
+          {...elastic.scrollProps}
           contentContainerStyle={styles.content}
         >
           {/* First-run setup invitation */}
@@ -688,7 +699,8 @@ export default function ExerciseScreen() {
               </Card>
             </Reveal>
           )}
-        </ScrollView>
+        </ScrollView>,
+        )}
       </SafeAreaView>
     </View>
   );
@@ -699,11 +711,8 @@ const styles = StyleSheet.create({
   block: { marginBottom: Spacing.xl },
 
   header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
     paddingHorizontal: Spacing.screen,
-    paddingTop: Spacing.md,
+    paddingTop: Spacing.sm,
     paddingBottom: Spacing.lg,
   },
   headerIcon: {

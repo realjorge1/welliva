@@ -73,7 +73,7 @@ export class ConsentRepository {
     return needsReconsent(await this.get());
   }
 
-  /** Switched-on integrations (for the "what Gozlin is watching" surface). */
+  /** Switched-on integrations (for the Trust screen's live view). */
   async grantedIntegrations(): Promise<ConsentCategory[]> {
     return grantedIntegrations(await this.get());
   }

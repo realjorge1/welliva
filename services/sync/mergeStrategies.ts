@@ -130,6 +130,17 @@ export const MERGE_STRATEGIES: Record<string, MergeStrategy> = {
     tsField: "createdAt",
     order: "desc",
   },
+  // CustomFood[] — foods the user added that our catalogs never had. Merging
+  // matters more here than for most lists: these are hand-curated additions, so
+  // last-write-wins would silently discard everything one device added while
+  // the other was offline. Newest first, matching CustomFoodService's writes.
+  [KEYS.CUSTOM_FOODS]: {
+    kind: "mergeById",
+    idField: "id",
+    tsField: "addedAt",
+    order: "desc",
+    cap: 300,
+  },
 };
 
 export function strategyFor(key: string): MergeStrategy {

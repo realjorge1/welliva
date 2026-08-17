@@ -90,6 +90,14 @@ export const KEYS = {
   /** Ad-hoc resolved foods logged per date, outside any planned meal. */
   FOOD_LOG: "@welliva_food_log",
 
+  // --- Foods catalog shortlist (FoodShortlist) -----------------------------
+  /** Catalog food ids the user starred, newest first. */
+  FOOD_FAVORITES: "@welliva_food_favorites",
+  /** Catalog food ids the user recently logged, most recent first. */
+  FOOD_RECENTS: "@welliva_food_recents",
+  /** Foods the user added themselves via lookup (CustomFoodService). */
+  CUSTOM_FOODS: "@welliva_custom_foods",
+
   // --- Engagement -----------------------------------------------------------
   /** TrackingMode: which domains this user actually wants tracked. */
   TRACKING_MODE: "@welliva_tracking_mode",

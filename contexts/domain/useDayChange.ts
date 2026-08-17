@@ -17,7 +17,8 @@
 import { useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
-import { lifeContext, memory, signalsCoordinator } from "../../health-os";
+import { lifeContext, memory, runDailyLearning, signalsCoordinator } from "../../health-os";
+import { maintenanceTdee } from "../../services/NutritionService";
 import type { NutritionTargets } from "../../models/nutrition";
 import type { PlanState } from "../../models/planState";
 import type { UserBio, UserGoals } from "../../models/user";
@@ -80,6 +81,27 @@ export function useDayChange({
         await memory.compactDayIfPresent(currentDate);
         // Sweep Life Context: terminate forward events whose grace day has now passed.
         await lifeContext.expireDue();
+        // Close the learning loop for the day that just ended: score every
+        // recommendation whose horizon has passed, then refit the TDEE filter,
+        // the training-response curves, the adherence model and the delivery
+        // posteriors from the full history. Idempotent, so a device that wakes
+        // up after a week of sleep resolves the whole backlog in one pass.
+        //
+        // Deliberately AFTER the day-close compaction above — the resolver
+        // reads the timeline, and a day that hasn't been closed yet has no
+        // `nutrition.day.closed` event for it to judge against.
+        if (userBio) {
+          try {
+            await runDailyLearning({
+              mifflinTdee: maintenanceTdee(userBio),
+              weightKg: userBio.weightKg,
+            });
+          } catch {
+            // Learning is an enhancement, never a gate: a failure here must not
+            // strand the rest of the rollover (diet regeneration, hydration
+            // archiving) that the user's day actually depends on.
+          }
+        }
         // Refresh any connected senses (consent + permission gated; safe no-op otherwise).
         await signalsCoordinator.syncDue();
         // Archive the ending day's hydration before wiping today's counter.

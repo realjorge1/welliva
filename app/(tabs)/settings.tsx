@@ -11,23 +11,24 @@ import {
   AppText,
   Button,
   Card,
+  Chip,
+  Divider,
   IconBadge,
+  ListGroup,
+  ListRow,
   Pill,
   Reveal,
   Screen,
   SectionHeader,
-  ThemedIcon,
+  SegmentedControl,
+  Stepper,
   useColors,
 } from "@/components/ui";
+import { ScreenTopBar } from "@/components/navigation";
 import { useTheme } from "@/components/ThemeContext";
 import { useAuth } from "@/components/SupabaseAuthProvider";
 import { useLegalGate } from "@/components/legal";
-import {
-  LEGAL_CONTACT_EMAIL,
-  LEGAL_DOCS,
-  LEGAL_DOC_ORDER,
-  LEGAL_VERSION,
-} from "@/constants/legal";
+import { LEGAL_CONTACT_EMAIL, LEGAL_VERSION } from "@/constants/legal";
 import {
   useReminderPermission,
   type ReminderPermission,
@@ -60,10 +61,11 @@ import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import * as Haptics from "@/utils/haptics";
 import { useMealPlan } from "@/contexts/MealPlanContext";
-import { TRACKING_MODE_OPTIONS } from "@/models/trackingMode";
+import { TRACKING_MODE_OPTIONS, tracksDiet } from "@/models/trackingMode";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Linking,
   Modal,
@@ -208,20 +210,30 @@ const MEALS_PER_DAY: Opt<string>[] = [
 ];
 
 const THEME_OPTIONS: {
-  mode: "system" | "light" | "dark";
+  value: "system" | "light" | "dark";
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
 }[] = [
-  { mode: "system", label: "System", icon: "phone-portrait-outline" },
-  { mode: "light", label: "Light", icon: "sunny-outline" },
-  { mode: "dark", label: "Dark", icon: "moon-outline" },
+  { value: "system", label: "System", icon: "phone-portrait-outline" },
+  { value: "light", label: "Light", icon: "sunny-outline" },
+  { value: "dark", label: "Dark", icon: "moon-outline" },
 ];
 
-const CUISINES: { value: CuisinePreference; label: string }[] = [
-  { value: "mixed", label: "No preference" },
-  { value: "african", label: "African" },
-  { value: "western", label: "Western" },
-  { value: "mediterranean", label: "Mediterranean" },
+/**
+ * Cuisines, laid out as a 2×2 grid rather than a wrapping pill row. Four labels
+ * of very different lengths ("African" vs "No preference") flow into a ragged
+ * right edge that reads as a mistake — an even grid says these are four equal
+ * choices. Icons come along because a half-width tile has the room for them.
+ */
+const CUISINES: {
+  value: CuisinePreference;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}[] = [
+  { value: "mixed", label: "No preference", icon: "globe-outline" },
+  { value: "african", label: "African", icon: "leaf-outline" },
+  { value: "western", label: "Western", icon: "restaurant-outline" },
+  { value: "mediterranean", label: "Mediterranean", icon: "fish-outline" },
 ];
 
 const WATER_MIN = 1000;
@@ -229,6 +241,20 @@ const WATER_MAX = 5000;
 const WATER_STEP = 250;
 const WORKOUT_MIN = 1;
 const WORKOUT_MAX = 7;
+/**
+ * Target-weight bounds. Wide on purpose — this is a destination, not a health
+ * assessment, and clamping someone's stated goal is not our call. The floor and
+ * ceiling exist only so a stuck finger can't drive it to an absurd number.
+ */
+const TARGET_WEIGHT_MIN = 35;
+const TARGET_WEIGHT_MAX = 250;
+const TARGET_WEIGHT_STEP = 0.5;
+
+/** Meals-per-day is a closed pair, so it reads as a switch, not a chip list. */
+const MEALS_PER_DAY_OPTIONS = [
+  { value: 3, label: "3 meals" },
+  { value: 4, label: "4 meals" },
+];
 
 const APP_VERSION = Constants.expoConfig?.version ?? "1.0.0";
 
@@ -306,6 +332,10 @@ export default function SettingsScreen() {
   const billing = useBilling();
   const [restoring, setRestoring] = useState(false);
   const [devTier, setDevTier] = useState<boolean | null>(() => getDevProOverride());
+  // Meals-per-day writes through updateUserBio, which regenerates the day's
+  // meals before it resolves. Hold the tapped value locally so the control moves
+  // under the finger instead of sitting on the old number until the plan lands.
+  const [pendingMeals, setPendingMeals] = useState<3 | 4 | null>(null);
 
   useEffect(() => {
     setEditingBio(userBio);
@@ -364,6 +394,18 @@ export default function SettingsScreen() {
     userGoals.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500;
   const workoutTarget = userGoals.weeklyWorkoutsTarget ?? 3;
   const cuisine = userBio?.cuisinePreference ?? "mixed";
+  const mealsPerDay = pendingMeals ?? userBio?.mealsPerDay ?? 3;
+  // Target weight is genuinely optional: unset means "no destination", and the
+  // forecast says so rather than inventing one. Hence null, not a default.
+  const targetWeight = userGoals.targetWeightKg ?? null;
+  const currentWeight = userBio?.weightKg ?? null;
+  /** Signed distance left, in kg. Positive = to lose, negative = to gain. */
+  const weightGap =
+    targetWeight != null && currentWeight != null
+      ? Math.round((currentWeight - targetWeight) * 10) / 10
+      : null;
+  /** Nutrition only earns a targets panel when nutrition is actually tracked. */
+  const dietTracked = tracksDiet(trackingMode);
 
   /** Toggle a value in an array field, keeping it tidy (no dupes). */
   const toggleIn = <T,>(list: T[] | undefined, value: T): T[] => {
@@ -403,6 +445,49 @@ export default function SettingsScreen() {
       Math.max(WORKOUT_MIN, workoutTarget + delta),
     );
     if (next !== workoutTarget) updateGoals({ weeklyWorkoutsTarget: next });
+  };
+
+  /**
+   * Start a weight goal at today's weight rather than at some invented target —
+   * the app has no business guessing where someone should be heading. From
+   * there the stepper is the whole conversation.
+   */
+  const handleStartTargetWeight = () => {
+    const seed = currentWeight ? Math.round(currentWeight) : 70;
+    Haptics.selectionAsync().catch(() => {});
+    void updateGoals({ targetWeightKg: seed });
+  };
+
+  const handleTargetWeight = (delta: number) => {
+    if (targetWeight == null) return;
+    // Round to the step so a value seeded from a decimal bodyweight can't drift
+    // into 72.3 → 72.8 → 73.3.
+    const raw = Math.min(
+      TARGET_WEIGHT_MAX,
+      Math.max(TARGET_WEIGHT_MIN, targetWeight + delta),
+    );
+    const next = Math.round(raw * 2) / 2;
+    if (next !== targetWeight) void updateGoals({ targetWeightKg: next });
+  };
+
+  /**
+   * Splitting the day differently rebuilds the plan, so this goes through the
+   * same re-fit path as any other bio change — and reports back with the same
+   * "here's what changed" recap.
+   */
+  const handleMealsPerDay = async (next: number) => {
+    if (!userBio || next === userBio.mealsPerDay || pendingMeals !== null) return;
+    const value = next as 3 | 4;
+    setPendingMeals(value);
+    try {
+      const summary = await updateUserBio({ mealsPerDay: value });
+      setChangeSummary(summary);
+    } catch (error) {
+      console.error("Error changing meals per day:", error);
+      Alert.alert("Couldn't update", "Your meal plan didn't change. Please try again.");
+    } finally {
+      setPendingMeals(null);
+    }
   };
 
   /**
@@ -570,23 +655,7 @@ export default function SettingsScreen() {
     );
   };
 
-  const header = (
-    <View style={styles.headerRow}>
-      <Pressable
-        onPress={() => router.back()}
-        hitSlop={10}
-        accessibilityRole="button"
-        accessibilityLabel="Go back"
-        style={styles.iconBtn}
-      >
-        <Ionicons name="chevron-back" size={26} color={colors.text} />
-      </Pressable>
-      <AppText variant="title" style={styles.headerTitle}>
-        Settings
-      </AppText>
-      <View style={styles.iconBtn} />
-    </View>
-  );
+  const header = <ScreenTopBar title="Settings" style={styles.headerRow} />;
 
   return (
     <>
@@ -598,55 +667,50 @@ export default function SettingsScreen() {
         <Reveal index={0}>
           <View style={styles.section}>
             <SectionHeader
-              title="What are you using Welliva for?"
-              subtitle="Changes what gets planned and tracked"
+              title="Your focus"
+              subtitle="What Welliva plans and tracks for you"
             />
-            <Card padding="lg">
-              {TRACKING_MODE_OPTIONS.map((opt, i) => {
+            <ListGroup>
+              {TRACKING_MODE_OPTIONS.map((opt) => {
                 const active = trackingMode === opt.mode;
                 return (
-                  <Pressable
+                  <ListRow
                     key={opt.mode}
+                    icon={opt.icon as keyof typeof Ionicons.glyphMap}
+                    tone={active ? colors.primary : colors.textTertiary}
+                    title={opt.title}
+                    subtitle={opt.subtitle}
+                    // What you give up only matters once an option is the one in
+                    // force — on the other two rows it's noise.
+                    footer={
+                      active && opt.mode !== "both" ? (
+                        <AppText
+                          variant="caption"
+                          color="secondary"
+                          style={styles.modeNote}
+                        >
+                          {opt.note}
+                        </AppText>
+                      ) : undefined
+                    }
                     onPress={() => {
                       Haptics.selectionAsync().catch(() => {});
                       void setTrackingMode(opt.mode);
                     }}
-                    accessible
                     accessibilityRole="radio"
-                    accessibilityLabel={opt.title}
                     accessibilityState={{ selected: active, checked: active }}
-                    style={[
-                      styles.modeRow,
-                      i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-                    ]}
-                  >
-                    <IconBadge
-                      name={opt.icon as never}
-                      tone={active ? colors.primary : colors.textTertiary}
-                      size={40}
-                    />
-                    <View style={styles.flex}>
-                      <AppText variant="callout" color={active ? "brand" : "primary"}>
-                        {opt.title}
-                      </AppText>
-                      <AppText variant="footnote" color="tertiary" style={styles.subtle}>
-                        {opt.subtitle}
-                      </AppText>
-                      {active && opt.mode !== "both" ? (
-                        <AppText variant="caption" color="secondary" style={styles.modeNote}>
-                          {opt.note}
-                        </AppText>
-                      ) : null}
-                    </View>
-                    <Ionicons
-                      name={active ? "radio-button-on" : "radio-button-off"}
-                      size={20}
-                      color={active ? colors.primary : colors.textTertiary}
-                    />
-                  </Pressable>
+                    chevron={false}
+                    right={
+                      <Ionicons
+                        name={active ? "radio-button-on" : "radio-button-off"}
+                        size={20}
+                        color={active ? colors.primary : colors.textTertiary}
+                      />
+                    }
+                  />
                 );
               })}
-            </Card>
+            </ListGroup>
           </View>
         </Reveal>
 
@@ -657,85 +721,105 @@ export default function SettingsScreen() {
           <View style={styles.section}>
             <SectionHeader title="Appearance" />
             <Card padding="lg">
-              <View style={styles.cardRowHead}>
-                <IconBadge name="color-palette" tone={colors.fat} size={40} />
-                <View style={styles.flex}>
-                  <AppText variant="callout">Theme</AppText>
-                  <AppText variant="footnote" color="tertiary" style={styles.subtle}>
-                    Match your device, or pick a look
-                  </AppText>
-                </View>
-              </View>
-              <View style={styles.segment}>
-                {THEME_OPTIONS.map((opt) => {
-                  const active = themeMode === opt.mode;
-                  return (
-                    <Pressable
-                      key={opt.mode}
-                      onPress={() => setThemeMode(opt.mode)}
-                      accessible
-                      accessibilityRole="radio"
-                      accessibilityLabel={opt.label}
-                      accessibilityState={{ selected: active, checked: active }}
-                      style={[
-                        styles.segmentItem,
-                        {
-                          backgroundColor: active
-                            ? colors.primary
-                            : colors.surfaceSunken,
-                        },
-                      ]}
-                    >
-                      <Ionicons
-                        name={opt.icon}
-                        size={17}
-                        color={active ? colors.onPrimary : colors.textSecondary}
-                      />
-                      <AppText
-                        variant="footnote"
-                        color={active ? colors.onPrimary : "secondary"}
-                        style={styles.segmentLabel}
-                      >
-                        {opt.label}
-                      </AppText>
-                    </Pressable>
-                  );
-                })}
-              </View>
+              <ControlBlock
+                icon="color-palette"
+                tone={colors.fat}
+                title="Theme"
+                subtitle="Match your device, or pick a look"
+              >
+                <SegmentedControl
+                  options={THEME_OPTIONS}
+                  value={themeMode}
+                  onChange={setThemeMode}
+                  label="Theme"
+                />
+              </ControlBlock>
             </Card>
           </View>
         </Reveal>
         ) : null}
 
-        {/* Goals */}
+        {/* Goals — the numbers you're aiming at. Every one of these is read by
+            something real: water and workouts drive the daily rings, streaks and
+            Gozlin's habit report; target weight is what gives the Transformation
+            Forecast a destination (without it there's no goal date to compute). */}
         <Reveal index={1}>
           <View style={styles.section}>
-            <SectionHeader title="Goals" subtitle="Daily & weekly targets" />
-            <Card padding="none">
-              <StepperRow
+            <SectionHeader title="Goals" subtitle="What you're aiming at" />
+            <ListGroup>
+              <ListRow
                 icon="water"
                 tone={colors.water}
-                title="Daily water goal"
-                value={`${(waterGoal / 1000).toFixed(2)} L`}
-                onDecrement={() => handleWaterGoal(-WATER_STEP)}
-                onIncrement={() => handleWaterGoal(WATER_STEP)}
-                canDecrement={waterGoal > WATER_MIN}
-                canIncrement={waterGoal < WATER_MAX}
-                colors={colors}
-                divider
+                title="Daily water"
+                chevron={false}
+                right={
+                  <Stepper
+                    label="daily water goal"
+                    value={`${(waterGoal / 1000).toFixed(1)} L`}
+                    onDecrement={() => handleWaterGoal(-WATER_STEP)}
+                    onIncrement={() => handleWaterGoal(WATER_STEP)}
+                    canDecrement={waterGoal > WATER_MIN}
+                    canIncrement={waterGoal < WATER_MAX}
+                  />
+                }
               />
-              <StepperRow
+              <ListRow
                 icon="barbell"
                 tone={colors.fat}
                 title="Weekly workouts"
-                value={`${workoutTarget} / week`}
-                onDecrement={() => handleWorkoutTarget(-1)}
-                onIncrement={() => handleWorkoutTarget(1)}
-                canDecrement={workoutTarget > WORKOUT_MIN}
-                canIncrement={workoutTarget < WORKOUT_MAX}
-                colors={colors}
+                chevron={false}
+                right={
+                  <Stepper
+                    label="weekly workout target"
+                    value={`${workoutTarget} / wk`}
+                    onDecrement={() => handleWorkoutTarget(-1)}
+                    onIncrement={() => handleWorkoutTarget(1)}
+                    canDecrement={workoutTarget > WORKOUT_MIN}
+                    canIncrement={workoutTarget < WORKOUT_MAX}
+                  />
+                }
               />
-            </Card>
+              {/* Two states, deliberately: an unset target is a real answer
+                  ("I'm not chasing a number"), so it gets an invitation rather
+                  than a stepper pre-loaded with a weight nobody chose. */}
+              {targetWeight == null ? (
+                <ListRow
+                  icon="flag"
+                  tone={colors.gold}
+                  title="Target weight"
+                  subtitle="Not set — unlocks your goal date and forecast"
+                  onPress={handleStartTargetWeight}
+                  chevron={false}
+                  right={<Pill label="Set" tone={colors.gold} size="sm" />}
+                />
+              ) : (
+                <ListRow
+                  icon="flag"
+                  tone={colors.gold}
+                  title="Target weight"
+                  subtitle={
+                    weightGap == null
+                      ? "Where you're heading"
+                      : weightGap > 0
+                        ? `${weightGap} kg to go`
+                        : weightGap < 0
+                          ? `${Math.abs(weightGap)} kg to gain`
+                          : "You're at your target"
+                  }
+                  chevron={false}
+                  right={
+                    <Stepper
+                      label="target weight"
+                      value={`${targetWeight} kg`}
+                      onDecrement={() => handleTargetWeight(-TARGET_WEIGHT_STEP)}
+                      onIncrement={() => handleTargetWeight(TARGET_WEIGHT_STEP)}
+                      canDecrement={targetWeight > TARGET_WEIGHT_MIN}
+                      canIncrement={targetWeight < TARGET_WEIGHT_MAX}
+                    />
+                  }
+                />
+              )}
+            </ListGroup>
           </View>
         </Reveal>
 
@@ -745,32 +829,131 @@ export default function SettingsScreen() {
             <View style={styles.section}>
               <SectionHeader
                 title="Nutrition"
-                subtitle="Flavor your meal plan"
+                subtitle={
+                  dietTracked
+                    ? "Your daily targets and how meals are built"
+                    : "How meal lookups are flavoured"
+                }
               />
-              <Card padding="lg">
-                <View style={styles.cardRowHead}>
-                  <IconBadge name="restaurant" tone={colors.protein} size={40} />
-                  <View style={styles.flex}>
-                    <AppText variant="callout">Cuisine preference</AppText>
-                    <AppText variant="footnote" color="tertiary" style={styles.subtle}>
-                      Today&apos;s meals update to match
-                    </AppText>
+
+              {/* THE TARGETS, SHOWN — they used to exist only inside the diet
+                  tab, so the one screen called "settings" never said what your
+                  numbers were. Read-only by design: NutritionService derives
+                  these from body, activity, goal and health profile, and clamps
+                  them to medically-sensible floors (and to a surplus, never a
+                  deficit, in pregnancy). A hand-typed calorie box would walk
+                  straight through all of that, so the way to move these numbers
+                  is to correct the facts under them — the row below. */}
+              {dietTracked && nutritionTargets ? (
+                <Card padding="lg">
+                  <View style={styles.calorieRow}>
+                    <IconBadge name="flame" tone={colors.calories} size={44} />
+                    <View style={styles.flex}>
+                      <AppText variant="metric">
+                        {nutritionTargets.calories.toLocaleString()}
+                      </AppText>
+                      <AppText variant="footnote" color="tertiary">
+                        calories a day
+                      </AppText>
+                    </View>
+                    {/* `guidance` is only ever present when a condition or a
+                        medication actually moved these numbers — so the badge
+                        appears exactly when there's something behind it. */}
+                    {nutritionTargets.guidance ? (
+                      <Pill
+                        label="Health-adjusted"
+                        tone={colors.success}
+                        icon="shield-checkmark"
+                        size="sm"
+                      />
+                    ) : null}
                   </View>
-                </View>
-                <View style={styles.chips}>
-                  {CUISINES.map((c) => (
-                    <Chip
-                      key={c.value}
-                      label={c.label}
-                      active={cuisine === c.value}
-                      onPress={() => {
-                        if (cuisine !== c.value) setCuisinePreference(c.value);
-                      }}
-                      colors={colors}
+                  <View
+                    style={[styles.macroRow, { borderTopColor: colors.divider }]}
+                  >
+                    <MacroStat
+                      label="Protein"
+                      grams={nutritionTargets.proteinG}
+                      tone={colors.protein}
                     />
-                  ))}
-                </View>
+                    <MacroStat
+                      label="Carbs"
+                      grams={nutritionTargets.carbsG}
+                      tone={colors.carbs}
+                    />
+                    <MacroStat
+                      label="Fat"
+                      grams={nutritionTargets.fatG}
+                      tone={colors.fat}
+                    />
+                  </View>
+                </Card>
+              ) : null}
+
+              {/* Only the SECOND card onward carries the stack gap — without
+                  the conditional the controls card would float away from the
+                  section header whenever the targets panel is hidden. */}
+              <Card
+                padding="lg"
+                style={dietTracked && nutritionTargets ? styles.stacked : undefined}
+              >
+                {/* Meals per day was buried in the profile modal even though it
+                    changes the shape of every day. It belongs with nutrition. */}
+                {dietTracked ? (
+                  <>
+                    <ControlBlock
+                      icon="restaurant"
+                      tone={colors.protein}
+                      title="Meals per day"
+                      subtitle="How your plan splits the day"
+                      busy={pendingMeals !== null}
+                    >
+                      <SegmentedControl
+                        options={MEALS_PER_DAY_OPTIONS}
+                        value={mealsPerDay}
+                        onChange={(n) => void handleMealsPerDay(n)}
+                        label="Meals per day"
+                      />
+                    </ControlBlock>
+                    <Divider spacing={Spacing.lg} />
+                  </>
+                ) : null}
+                <ControlBlock
+                  icon="globe"
+                  tone={colors.carbs}
+                  title="Cuisine"
+                  subtitle={
+                    dietTracked
+                      ? "Today's meals update to match"
+                      : "Flavours the meals you look up"
+                  }
+                >
+                  <View style={styles.cuisineGrid}>
+                    {CUISINES.map((c) => (
+                      <Chip
+                        key={c.value}
+                        label={c.label}
+                        icon={c.icon}
+                        active={cuisine === c.value}
+                        onPress={() => {
+                          if (cuisine !== c.value) setCuisinePreference(c.value);
+                        }}
+                        style={styles.cuisineChip}
+                      />
+                    ))}
+                  </View>
+                </ControlBlock>
               </Card>
+
+              <ListGroup style={styles.stacked}>
+                <ListRow
+                  icon="body"
+                  tone={colors.primary}
+                  title="Body & health details"
+                  subtitle="Weight, activity, conditions — what your targets are built from"
+                  onPress={() => setShowEditModal(true)}
+                />
+              </ListGroup>
             </View>
           </Reveal>
         )}
@@ -782,13 +965,12 @@ export default function SettingsScreen() {
               title="Reminders"
               subtitle="Nudges you can finish from the lock screen"
             />
-            <Card padding="none">
-              <SettingsRow
+            <ListGroup>
+              <ListRow
                 icon="notifications"
                 tone={colors.primary}
                 title="Permission"
                 subtitle={REMINDER_STATUS[reminders.status].subtitle}
-                colors={colors}
                 onPress={
                   reminders.status === "granted"
                     ? undefined
@@ -812,9 +994,8 @@ export default function SettingsScreen() {
                     />
                   )
                 }
-                divider
               />
-              <SettingsRow
+              <ListRow
                 icon="paper-plane"
                 tone={colors.water}
                 title="Send test notification"
@@ -823,24 +1004,21 @@ export default function SettingsScreen() {
                     ? "On its way — lock your phone to see it land"
                     : "Preview the real banner, buttons and all"
                 }
-                colors={colors}
                 onPress={handleTestNotification}
                 right={
                   testState === "sent" ? (
                     <Ionicons name="checkmark-circle" size={20} color={colors.success} />
                   ) : undefined
                 }
-                divider
               />
-              <SettingsRow
+              <ListRow
                 icon="repeat"
                 tone={colors.warning}
                 title="Habit reminders"
                 subtitle="Set the time each habit nudges you"
-                colors={colors}
                 onPress={() => router.push("/habits" as never)}
               />
-            </Card>
+            </ListGroup>
           </View>
         </Reveal>
 
@@ -855,9 +1033,9 @@ export default function SettingsScreen() {
               title="Subscription"
               subtitle={billing.isPro ? "Welliva Pro" : "Free plan"}
             />
-            <Card padding="none">
+            <ListGroup>
               {billing.isPro ? (
-                <SettingsRow
+                <ListRow
                   icon="star"
                   tone={colors.gold}
                   title="Manage subscription"
@@ -866,50 +1044,49 @@ export default function SettingsScreen() {
                       ? `Renews ${new Date(billing.entitlement.expiresAt).toLocaleDateString()}`
                       : "Change or cancel your plan"
                   }
-                  colors={colors}
                   onPress={() => void Linking.openURL(MANAGE_SUBSCRIPTION_URL)}
-                  divider
                 />
               ) : (
-                <SettingsRow
+                <ListRow
                   icon="sparkles"
                   tone={colors.gold}
                   title="Upgrade to Welliva Pro"
                   subtitle="Unlimited coaching, plans built for you, full history"
-                  colors={colors}
                   onPress={() => billing.openPaywall("settings")}
-                  divider
                 />
               )}
-              <SettingsRow
+              {/* Store-required, and it must answer either way: silence after
+                  tapping reads as a broken app to someone who has genuinely paid
+                  and is trying to get their subscription back on a new phone. */}
+              <ListRow
                 icon="refresh"
                 tone={colors.water}
                 title="Restore purchases"
                 subtitle={
                   restoring
                     ? "Checking with the store…"
-                    : "Already subscribed? Bring it back on this device"
+                    : "Already paid? Bring your subscription back on this device"
                 }
-                colors={colors}
                 onPress={handleRestorePurchases}
-                divider={__DEV__}
+                right={
+                  restoring ? <ActivityIndicator size="small" color={colors.water} /> : undefined
+                }
               />
               {/* Dev-only tier switch. Every lock has to be walkable before the
                   RevenueCat account exists — otherwise the free-tier experience
                   first gets tested during store review. Stripped in release. */}
               {__DEV__ ? (
-                <SettingsRow
+                <ListRow
                   icon="construct"
                   tone={colors.warning}
-                  title="Dev: force tier"
+                  title="Force plan tier (dev only)"
                   subtitle={
                     devTier === null
-                      ? "Off — using the real entitlement"
+                      ? "Using your real entitlement — tap to test as Free, then Pro"
                       : devTier
-                        ? "Forced to PRO"
-                        : "Forced to FREE"
+                        ? "Pretending you're Pro — every lock is open"
+                        : "Pretending you're Free — every lock is on"
                   }
-                  colors={colors}
                   onPress={handleCycleDevTier}
                   right={
                     <Pill
@@ -919,7 +1096,20 @@ export default function SettingsScreen() {
                   }
                 />
               ) : null}
-            </Card>
+              {/* TEMP dev entry — replays the onboarding flow in preview mode,
+                  which does NOT overwrite the real profile, so the onboarding
+                  screens can be edited and tested like a brand-new user. Remove
+                  before ship, with the `?preview=1` handling in onboarding. */}
+              {__DEV__ ? (
+                <ListRow
+                  icon="albums"
+                  tone={colors.warning}
+                  title="Replay onboarding (dev only)"
+                  subtitle="Walk the sign-up flow as a new user — your real profile is untouched"
+                  onPress={() => router.push("/onboarding?preview=1" as never)}
+                />
+              ) : null}
+            </ListGroup>
           </View>
         </Reveal>
 
@@ -927,25 +1117,22 @@ export default function SettingsScreen() {
         <Reveal index={5}>
           <View style={styles.section}>
             <SectionHeader title="Account" />
-            <Card padding="none">
-              <SettingsRow
+            <ListGroup>
+              <ListRow
                 icon="person-circle"
                 tone={colors.primary}
                 title="Edit profile"
                 subtitle="Age, body metrics, goal & activity"
-                colors={colors}
                 onPress={() => setShowEditModal(true)}
-                divider
               />
-              <SettingsRow
+              <ListRow
                 icon="log-out"
                 tone={colors.error}
                 title="Sign out"
                 subtitle={user?.email ? `Signed in as ${user.email}` : undefined}
-                colors={colors}
                 onPress={handleSignOut}
               />
-            </Card>
+            </ListGroup>
           </View>
         </Reveal>
 
@@ -953,53 +1140,42 @@ export default function SettingsScreen() {
         <Reveal index={6}>
           <View style={styles.section}>
             <SectionHeader title="About" />
-            <Card padding="none">
-              <SettingsRow
+            <ListGroup>
+              <ListRow
                 icon="information-circle"
                 tone={colors.water}
                 title="Version"
-                colors={colors}
-                right={
-                  <AppText variant="callout" color="tertiary">
-                    {APP_VERSION}
-                  </AppText>
-                }
+                value={APP_VERSION}
               />
-            </Card>
+            </ListGroup>
           </View>
         </Reveal>
 
-        {/* Legal — the policies the user accepted, always re-readable. The
-            subtitle records WHICH version they agreed to and when. */}
+        {/* Privacy & legal — a SIGNPOST, not a second copy. The three documents
+            used to be listed here AND on /privacy, byte for byte, which made
+            both copies read as filler and left the policies sitting a screen
+            away from the switches that enforce them. They live on Trust now;
+            this row keeps them one tap from Settings (where users and store
+            reviewers look for them) and carries the one fact that isn't over
+            there in the same form: which version you actually accepted. */}
         <Reveal index={7}>
           <View style={styles.section}>
-            <SectionHeader
-              title="Legal"
-              subtitle={
-                acceptance
-                  ? `Accepted version ${acceptance.version} on ${new Date(
-                      acceptance.acceptedAt,
-                    ).toLocaleDateString()}`
-                  : `Version ${LEGAL_VERSION}`
-              }
-            />
-            <Card padding="none">
-              {LEGAL_DOC_ORDER.map((id, i) => {
-                const doc = LEGAL_DOCS[id];
-                return (
-                  <SettingsRow
-                    key={id}
-                    icon={doc.icon as keyof typeof Ionicons.glyphMap}
-                    tone={id === "disclaimer" ? colors.warning : colors.primary}
-                    title={doc.title}
-                    subtitle={doc.summary}
-                    colors={colors}
-                    onPress={() => router.push(`/legal/${id}` as never)}
-                    divider={i < LEGAL_DOC_ORDER.length - 1}
-                  />
-                );
-              })}
-            </Card>
+            <SectionHeader title="Privacy & legal" />
+            <ListGroup>
+              <ListRow
+                icon="shield-checkmark"
+                tone={colors.primary}
+                title="Trust"
+                subtitle={
+                  acceptance
+                    ? `Policy, terms and what Welliva can see · accepted v${
+                        acceptance.version
+                      } on ${new Date(acceptance.acceptedAt).toLocaleDateString()}`
+                    : `Policy, terms and what Welliva can see · version ${LEGAL_VERSION}`
+                }
+                onPress={() => router.push("/privacy" as never)}
+              />
+            </ListGroup>
           </View>
         </Reveal>
 
@@ -1007,7 +1183,7 @@ export default function SettingsScreen() {
         <Reveal index={8}>
           <View style={styles.section}>
             <SectionHeader title="Data" />
-            <Card padding="none">
+            <ListGroup>
               {/* "Is my data actually in the cloud?" — previously unanswerable
                   from inside the app. Now it's a row with a timestamp and a
                   button, so a user with a flaky connection can check and act
@@ -1017,31 +1193,31 @@ export default function SettingsScreen() {
                   change that. Offering a Sync button that silently does nothing
                   would be the worst of both. */}
               {syncStatus.cloudDisabled ? (
-                <SettingsRow
+                <ListRow
                   icon="cloud-offline-outline"
                   tone={colors.gold}
                   title="Cloud backup is off"
                   subtitle="Your data is saved on this device. Pro backs it up and syncs every device you sign in on."
-                  colors={colors}
                   onPress={() => billing.openPaywall("sync")}
                 />
               ) : (
-                <SettingsRow
+                <ListRow
                   icon={syncStatus.online ? "cloud-done-outline" : "cloud-offline-outline"}
                   tone={syncStatus.state === "synced" ? colors.success : colors.warning}
                   title={syncing ? "Syncing…" : "Sync now"}
                   subtitle={`${describeSyncStatus(syncStatus)} · ${formatLastSync(syncStatus.lastSyncAt)}`}
-                  colors={colors}
                   onPress={handleSyncNow}
+                  right={
+                    syncing ? <ActivityIndicator size="small" color={colors.warning} /> : undefined
+                  }
                 />
               )}
-              <SettingsRow
+              <ListRow
                 icon="trash"
                 tone={colors.error}
                 title="Reset data"
                 subtitle="Erase all data and start over"
-                colors={colors}
-                divider
+                destructive
                 onPress={handleResetData}
               />
               {/* Deliberately the LAST row in the last section, and the only
@@ -1050,15 +1226,14 @@ export default function SettingsScreen() {
                   is what makes the difference legible: one starts you over, one
                   ends you. Required in-app by App Store 5.1.1(v) and promised in
                   the privacy policy under "How long we keep it". */}
-              <SettingsRow
+              <ListRow
                 icon="person-remove-outline"
-                tone={colors.error}
                 title="Delete account"
                 subtitle="Permanently erase your account and all data"
-                colors={colors}
+                destructive
                 onPress={() => setShowDeleteModal(true)}
               />
-            </Card>
+            </ListGroup>
           </View>
         </Reveal>
       </Screen>
@@ -1111,28 +1286,24 @@ export default function SettingsScreen() {
                   options={SEXES}
                   selected={(v) => editingBio.sex === v}
                   onToggle={(v) => setEditingBio({ ...editingBio, sex: v as any })}
-                  colors={colors}
                 />
                 <Field
                   label="Age"
                   value={String(editingBio.age)}
                   onChangeText={(v) => setEditingBio({ ...editingBio, age: parseInt(v) || 0 })}
                   placeholder="Enter your age"
-                  colors={colors}
                 />
                 <Field
                   label="Height (cm)"
                   value={String(editingBio.heightCm)}
                   onChangeText={(v) => setEditingBio({ ...editingBio, heightCm: parseInt(v) || 0 })}
                   placeholder="Enter your height"
-                  colors={colors}
                 />
                 <Field
                   label="Weight (kg)"
                   value={String(editingBio.weightKg)}
                   onChangeText={(v) => setEditingBio({ ...editingBio, weightKg: parseInt(v) || 0 })}
                   placeholder="Enter your weight"
-                  colors={colors}
                 />
 
                 <ChipGroup
@@ -1140,21 +1311,18 @@ export default function SettingsScreen() {
                   options={ACTIVITY_LEVELS}
                   selected={(v) => editingBio.activityLevel === v}
                   onToggle={(v) => setEditingBio({ ...editingBio, activityLevel: v as any })}
-                  colors={colors}
                 />
                 <ChipGroup
                   label="Primary goal"
                   options={GOALS}
                   selected={(v) => editingBio.primaryGoal === v}
                   onToggle={(v) => setEditingBio({ ...editingBio, primaryGoal: v as any })}
-                  colors={colors}
                 />
                 <ChipGroup
                   label="Experience"
                   options={EXERCISE_LEVELS}
                   selected={(v) => editingBio.exerciseLevel === v}
                   onToggle={(v) => setEditingBio({ ...editingBio, exerciseLevel: v as any })}
-                  colors={colors}
                 />
 
                 {/* Nutrition needs */}
@@ -1163,7 +1331,6 @@ export default function SettingsScreen() {
                   options={DIETARY_RESTRICTIONS}
                   selected={(v) => editingBio.dietaryRestriction === v}
                   onToggle={(v) => setEditingBio({ ...editingBio, dietaryRestriction: v as any })}
-                  colors={colors}
                 />
                 <ChipGroup
                   label="Allergies"
@@ -1173,7 +1340,6 @@ export default function SettingsScreen() {
                   onToggle={(v) =>
                     setEditingBio({ ...editingBio, allergies: toggleIn(editingBio.allergies, v) })
                   }
-                  colors={colors}
                 />
 
                 {/* Health & safety */}
@@ -1194,7 +1360,6 @@ export default function SettingsScreen() {
                         : undefined,
                     });
                   }}
-                  colors={colors}
                 />
                 {(editingBio.medicalConditions ?? []).includes("pregnancy") && (
                   <ChipGroup
@@ -1208,7 +1373,6 @@ export default function SettingsScreen() {
                         pregnancyTrimester: Number(v) as PregnancyTrimester,
                       })
                     }
-                    colors={colors}
                   />
                 )}
                 <ChipGroup
@@ -1219,7 +1383,6 @@ export default function SettingsScreen() {
                   onToggle={(v) =>
                     setEditingBio({ ...editingBio, injuries: toggleIn(editingBio.injuries, v) })
                   }
-                  colors={colors}
                 />
                 <ChipGroup
                   label="Medication kinds"
@@ -1237,7 +1400,6 @@ export default function SettingsScreen() {
                       ),
                     })
                   }
-                  colors={colors}
                 />
 
                 {/* Training setup */}
@@ -1259,7 +1421,6 @@ export default function SettingsScreen() {
                     if (next.length === 0) next = ["none"];
                     setEditingBio({ ...editingBio, equipment: next });
                   }}
-                  colors={colors}
                 />
                 <ChipGroup
                   label="Training days / week"
@@ -1268,7 +1429,6 @@ export default function SettingsScreen() {
                   onToggle={(v) =>
                     setEditingBio({ ...editingBio, workoutDaysPerWeek: Number(v) })
                   }
-                  colors={colors}
                 />
                 <ChipGroup
                   label="Meals per day"
@@ -1277,7 +1437,6 @@ export default function SettingsScreen() {
                   onToggle={(v) =>
                     setEditingBio({ ...editingBio, mealsPerDay: Number(v) as 3 | 4 })
                   }
-                  colors={colors}
                 />
 
                 <Button label="Save changes" icon="checkmark" onPress={handleSaveBio} loading={isSaving} style={styles.saveBtn} />
@@ -1480,6 +1639,71 @@ export default function SettingsScreen() {
 
 /* ───────────────────────────── Sub-components ──────────────────────────── */
 
+/**
+ * A titled control block inside a card: the icon/title/subtitle head, with the
+ * control itself underneath. Used wherever the control is too wide to sit on a
+ * row's trailing edge (segmented pickers, chip groups).
+ */
+function ControlBlock({
+  icon,
+  tone,
+  title,
+  subtitle,
+  busy,
+  children,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  tone: string;
+  title: string;
+  subtitle?: string;
+  /** Shows a spinner in the head while the change is being applied. */
+  busy?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <View>
+      <View style={styles.cardRowHead}>
+        <IconBadge name={icon} tone={tone} size={40} />
+        <View style={styles.flex}>
+          <AppText variant="callout">{title}</AppText>
+          {subtitle ? (
+            <AppText variant="footnote" color="tertiary" style={styles.subtle}>
+              {subtitle}
+            </AppText>
+          ) : null}
+        </View>
+        {busy ? <ActivityIndicator size="small" color={tone} /> : null}
+      </View>
+      {children}
+    </View>
+  );
+}
+
+/** One macro of the daily target — a colored dot, the grams, the name. */
+function MacroStat({
+  label,
+  grams,
+  tone,
+}: {
+  label: string;
+  grams: number;
+  tone: string;
+}) {
+  return (
+    <View style={styles.macro} accessible accessibilityLabel={`${label}: ${grams} grams`}>
+      <View style={styles.macroHead}>
+        <View style={[styles.macroDot, { backgroundColor: tone }]} />
+        <AppText variant="callout" style={styles.macroValue}>
+          {grams}g
+        </AppText>
+      </View>
+      <AppText variant="caption" color="tertiary" uppercase>
+        {label}
+      </AppText>
+    </View>
+  );
+}
+
 /** A labeled row of selectable chips — works for single- or multi-select. */
 function ChipGroup<T extends string>({
   label,
@@ -1487,14 +1711,12 @@ function ChipGroup<T extends string>({
   options,
   selected,
   onToggle,
-  colors,
 }: {
   label: string;
   hint?: string;
   options: Opt<T>[];
   selected: (value: T) => boolean;
   onToggle: (value: T) => void;
-  colors: ReturnType<typeof useColors>["colors"];
 }) {
   return (
     <View style={styles.group}>
@@ -1513,149 +1735,10 @@ function ChipGroup<T extends string>({
             label={o.label}
             active={selected(o.value)}
             onPress={() => onToggle(o.value)}
-            colors={colors}
           />
         ))}
       </View>
     </View>
-  );
-}
-
-function SettingsRow({
-  icon,
-  tone,
-  title,
-  subtitle,
-  onPress,
-  right,
-  divider,
-  colors,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  tone: string;
-  title: string;
-  subtitle?: string;
-  onPress?: () => void;
-  right?: React.ReactNode;
-  divider?: boolean;
-  colors: ReturnType<typeof useColors>["colors"];
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={!onPress}
-      // Reads as one row rather than three fragments (badge, title, subtitle).
-      // Non-tappable rows stay plain text so they aren't announced as buttons.
-      accessible
-      accessibilityRole={onPress ? "button" : undefined}
-      accessibilityLabel={subtitle ? `${title}. ${subtitle}` : title}
-      style={[
-        styles.settingsRow,
-        divider && { borderBottomWidth: 1, borderBottomColor: colors.divider },
-      ]}
-    >
-      <IconBadge name={icon} tone={tone} size={40} />
-      <View style={styles.flex}>
-        <AppText variant="callout">{title}</AppText>
-        {subtitle && (
-          <AppText variant="footnote" color="tertiary" style={styles.subtle}>
-            {subtitle}
-          </AppText>
-        )}
-      </View>
-      {right ?? (onPress && <ThemedIcon name="chevron-forward" size={18} role="textTertiary" />)}
-    </Pressable>
-  );
-}
-
-function StepperRow({
-  icon,
-  tone,
-  title,
-  value,
-  onDecrement,
-  onIncrement,
-  canDecrement,
-  canIncrement,
-  divider,
-  colors,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  tone: string;
-  title: string;
-  value: string;
-  onDecrement: () => void;
-  onIncrement: () => void;
-  canDecrement: boolean;
-  canIncrement: boolean;
-  divider?: boolean;
-  colors: ReturnType<typeof useColors>["colors"];
-}) {
-  return (
-    <View
-      style={[
-        styles.settingsRow,
-        divider && { borderBottomWidth: 1, borderBottomColor: colors.divider },
-      ]}
-    >
-      <IconBadge name={icon} tone={tone} size={40} />
-      <View style={styles.flex}>
-        <AppText variant="callout">{title}</AppText>
-        <AppText variant="footnote" color="secondary" style={styles.subtle}>
-          {value}
-        </AppText>
-      </View>
-      <View style={styles.stepper}>
-        <StepBtn
-          icon="remove"
-          onPress={onDecrement}
-          disabled={!canDecrement}
-          colors={colors}
-        />
-        <StepBtn
-          icon="add"
-          onPress={onIncrement}
-          disabled={!canIncrement}
-          colors={colors}
-        />
-      </View>
-    </View>
-  );
-}
-
-function StepBtn({
-  icon,
-  onPress,
-  disabled,
-  colors,
-  label,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  onPress: () => void;
-  disabled?: boolean;
-  colors: ReturnType<typeof useColors>["colors"];
-  /** Spoken name — the glyph alone ("+"/"−") says nothing about what changes. */
-  label?: string;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      hitSlop={6}
-      accessibilityRole="button"
-      accessibilityLabel={label ?? (icon.includes("add") ? "Increase" : "Decrease")}
-      accessibilityState={{ disabled: !!disabled }}
-      style={[
-        styles.stepBtn,
-        {
-          backgroundColor: colors.surfaceSunken,
-          borderColor: colors.border,
-          opacity: disabled ? 0.4 : 1,
-        },
-      ]}
-    >
-      <Ionicons name={icon} size={18} color={colors.text} />
-    </Pressable>
   );
 }
 
@@ -1664,14 +1747,13 @@ function Field({
   value,
   onChangeText,
   placeholder,
-  colors,
 }: {
   label: string;
   value: string;
   onChangeText: (t: string) => void;
   placeholder: string;
-  colors: ReturnType<typeof useColors>["colors"];
 }) {
+  const { colors } = useColors();
   return (
     <View style={styles.field}>
       <AppText variant="footnote" color="secondary" style={styles.fieldLabel}>
@@ -1690,67 +1772,18 @@ function Field({
   );
 }
 
-function Chip({
-  label,
-  active,
-  onPress,
-  colors,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-  colors: ReturnType<typeof useColors>["colors"];
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      // `selected` is what tells a screen-reader user which option is currently
-      // chosen — without it every chip in the group sounds identical.
-      accessibilityState={{ selected: active }}
-      style={[
-        styles.chip,
-        {
-          backgroundColor: active ? colors.primary : colors.surface,
-          borderColor: active ? colors.primary : colors.border,
-        },
-      ]}
-    >
-      <AppText variant="subhead" color={active ? colors.onPrimary : "secondary"} style={styles.chipText}>
-        {label}
-      </AppText>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   bold: { fontWeight: "700" },
   subtle: { marginTop: 2 },
-  modeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-    paddingVertical: Spacing.md,
-  },
   modeNote: { marginTop: 6, lineHeight: 17 },
   section: { marginTop: Spacing.xxl },
+  /** Second and later cards within one section — a tighter gap than between
+   *  sections, so a stack of cards still reads as ONE subject. */
+  stacked: { marginTop: Spacing.md },
 
   // Header
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingTop: Spacing.md,
-    marginBottom: Spacing.sm,
-  },
-  headerTitle: { flex: 1, textAlign: "center" },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  headerRow: { paddingTop: Spacing.md, marginBottom: Spacing.sm },
 
   // Card head (icon + title above a control)
   cardRowHead: {
@@ -1760,48 +1793,32 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
 
-  // Theme segmented control
-  segment: { flexDirection: "row", gap: Spacing.sm },
-  segmentItem: {
-    flex: 1,
+  // Nutrition targets
+  calorieRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
+  macroRow: {
     flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: Spacing.md,
-    borderRadius: Radius.md,
+    marginTop: Spacing.lg,
+    paddingTop: Spacing.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
-  segmentLabel: { fontWeight: "600" },
-
-  // Rows
-  settingsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-    padding: Spacing.lg,
-  },
-
-  // Stepper
-  stepper: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
-  stepBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  macro: { flex: 1, alignItems: "center", gap: 2 },
+  macroHead: { flexDirection: "row", alignItems: "center", gap: 6 },
+  macroDot: { width: 7, height: 7, borderRadius: Radius.pill },
+  macroValue: { fontWeight: "700" },
 
   // Chips
   chips: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm },
+  /**
+   * Two per row, both stretching to fill it. `flexBasis: "45%"` is what forces
+   * the wrap at two (two 45% items + the gap exceed 100%, three can't fit), and
+   * `flexGrow` then spends the remainder equally — so the row always ends flush
+   * on the right instead of trailing off wherever the last label happened to
+   * end. An odd count just gives the final tile the full width, which still
+   * reads as deliberate.
+   */
+  cuisineGrid: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm },
+  cuisineChip: { flexGrow: 1, flexBasis: "45%", justifyContent: "center" },
   options: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm, marginBottom: Spacing.sm },
-  chip: {
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    borderRadius: Radius.pill,
-    borderWidth: 1,
-  },
-  chipText: { fontWeight: "600" },
 
   // Modal
   modal: { flex: 1 },

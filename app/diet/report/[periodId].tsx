@@ -111,13 +111,13 @@ export default function PeriodReportScreen() {
         <AppText variant="displayLg" weight="800" align="center">
           {Math.round(report.adherenceRate * 100)}%
         </AppText>
-        <AppText variant="caption" color="textSecondary" weight="700" uppercase>
+        <AppText variant="caption" color="secondary" weight="700" uppercase>
           Meals logged
         </AppText>
         <AppText variant="body" align="center" style={styles.headline}>
           {report.headline}
         </AppText>
-        <AppText variant="caption" color="textSecondary" align="center">
+        <AppText variant="caption" color="secondary" align="center">
           {fmt(report.startDate)} – {fmt(report.endDate)} ·{" "}
           {formatDuration(periodLengthDays(report))}
         </AppText>
@@ -136,7 +136,7 @@ export default function PeriodReportScreen() {
         <AppText variant="body" weight="700">
           Day by day
         </AppText>
-        <AppText variant="caption" color="textSecondary" style={{ marginTop: 2 }}>
+        <AppText variant="caption" color="secondary" style={{ marginTop: 2 }}>
           Each square is a day. Filled = every meal logged.
         </AppText>
         <View style={styles.dayGrid}>
@@ -165,7 +165,7 @@ export default function PeriodReportScreen() {
           })}
         </View>
         {report.totalDays > report.daysWithPlan ? (
-          <AppText variant="caption" color="textSecondary" style={{ marginTop: Spacing.sm }}>
+          <AppText variant="caption" color="secondary" style={{ marginTop: Spacing.sm }}>
             {`Outlined squares are days with no plan — they aren't counted against you.`}
           </AppText>
         ) : null}
@@ -233,7 +233,7 @@ export default function PeriodReportScreen() {
         <MacroRow label="Carbs" actual={report.avgConsumed.carbsG} target={report.targets.carbsG} unit="g" />
         <MacroRow label="Fat" actual={report.avgConsumed.fatG} target={report.targets.fatG} unit="g" />
         {report.avgConsumed.calories === null ? (
-          <AppText variant="caption" color="textSecondary" style={{ marginTop: Spacing.sm }}>
+          <AppText variant="caption" color="secondary" style={{ marginTop: Spacing.sm }}>
             No macro data was recorded for this period.
           </AppText>
         ) : null}
@@ -250,7 +250,7 @@ export default function PeriodReportScreen() {
               {report.weight.deltaKg > 0 ? "+" : ""}
               {report.weight.deltaKg} kg
             </AppText>
-            <AppText variant="caption" color="textSecondary">
+            <AppText variant="caption" color="secondary">
               {report.weight.startKg} → {report.weight.endKg} kg
               {report.weight.perWeekKg !== null
                 ? ` · ${report.weight.perWeekKg > 0 ? "+" : ""}${report.weight.perWeekKg} kg/week`
@@ -269,7 +269,7 @@ export default function PeriodReportScreen() {
                 Meals that worked
               </AppText>
               {report.mostEaten.slice(0, 3).map((m) => (
-                <AppText key={m.name} variant="caption" color="textSecondary" style={styles.tally}>
+                <AppText key={m.name} variant="caption" color="secondary" style={styles.tally}>
                   {m.name} · {m.times}×
                 </AppText>
               ))}
@@ -282,7 +282,7 @@ export default function PeriodReportScreen() {
                 Meals you kept skipping
               </AppText>
               {report.mostSkipped.slice(0, 3).map((m) => (
-                <AppText key={m.name} variant="caption" color="textSecondary" style={styles.tally}>
+                <AppText key={m.name} variant="caption" color="secondary" style={styles.tally}>
                   {m.name} · skipped {m.times}×
                 </AppText>
               ))}
@@ -339,13 +339,13 @@ export default function PeriodReportScreen() {
 function StatBox({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
     <Card padding="lg" style={styles.statBox}>
-      <AppText variant="caption" color="textSecondary" weight="700" uppercase>
+      <AppText variant="caption" color="secondary" weight="700" uppercase>
         {label}
       </AppText>
       <AppText variant="title" weight="800">
         {value}
       </AppText>
-      <AppText variant="caption" color="textSecondary">
+      <AppText variant="caption" color="secondary">
         {sub}
       </AppText>
     </Card>
@@ -371,7 +371,7 @@ function MacroRow({
           {actual === null ? "—" : `${Math.round(actual)}${unit}`}
         </AppText>
         {target !== null ? (
-          <AppText variant="caption" color="textSecondary">
+          <AppText variant="caption" color="secondary">
             target {Math.round(target)}
             {unit}
           </AppText>

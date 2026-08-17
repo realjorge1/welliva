@@ -88,7 +88,7 @@ export function PlanDurationPicker({
               <AppText variant="caption" weight="700" align="center">
                 {opt.label}
               </AppText>
-              <AppText variant="caption" color="textSecondary" align="center">
+              <AppText variant="caption" color="secondary" align="center">
                 {opt.hint}
               </AppText>
             </Pressable>
@@ -99,7 +99,7 @@ export function PlanDurationPicker({
       {/* The resolved window — shown for every option, not just custom. */}
       <View style={[styles.summary, { borderColor: colors.border }]}>
         <Ionicons name="time-outline" size={15} color={colors.textSecondary} />
-        <AppText variant="caption" color="textSecondary">
+        <AppText variant="caption" color="secondary">
           {formatLong(startDate)} → {formatLong(endDate)} ·{" "}
           <AppText variant="caption" weight="700">
             {formatDuration(totalDays)}
@@ -185,7 +185,7 @@ function MonthCalendar({
           <AppText
             key={i}
             variant="caption"
-            color="textSecondary"
+            color="secondary"
             weight="700"
             align="center"
             style={styles.cell}

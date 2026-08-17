@@ -15,9 +15,11 @@
  * reason — a log you can rewrite indefinitely stops being a record.
  */
 
+import type { FoodItem } from "../../constants/FoodDictionary";
 import type { MealType } from "../../models/diet";
 import {
   sumPanels,
+  weakestConfidence,
   type FoodAnalysis,
   type NutrientConfidence,
   type NutrientKey,
@@ -27,7 +29,7 @@ import {
 import { KEYS, readJSON, writeJSON } from "../OfflineStorage";
 import { canLogForDate, logPermissionFor } from "../ScheduleService";
 import { pruneDatedRecord, RETENTION_DAYS } from "../sync/retention";
-import { resolveKnownFood } from "./NutrientResolver";
+import { resolveCatalogFood, resolveKnownFood } from "./NutrientResolver";
 
 export interface FoodLogEntry {
   id: string;
@@ -160,6 +162,43 @@ export async function logAnalysis(
   });
 }
 
+/**
+ * Persist one already-resolved food as its own entry.
+ *
+ * The single-item write path, shared by every "the user picked a food and a
+ * portion" caller. `partialKeys` is empty by construction: one item can't have
+ * a partial total, since there is nothing for it to be partial against.
+ */
+export async function logResolvedItem(args: {
+  date: string;
+  slot: MealType | null;
+  item: ResolvedFoodItem;
+  /** Display label; defaults to the item's own "2 cup rice" phrasing. */
+  label?: string;
+  origin?: FoodLogEntry["origin"];
+}): Promise<FoodLogEntry | null> {
+  if (!canLogForDate(args.date)) return null;
+
+  return withLock(async () => {
+    const store = await readStore();
+    const entry: FoodLogEntry = {
+      id: newId(),
+      date: args.date,
+      slot: args.slot,
+      label: (args.label ?? args.item.inputText).replace(/\s+/g, " ").trim(),
+      items: [args.item],
+      totals: args.item.nutrients,
+      partialKeys: [],
+      confidence: args.item.confidence,
+      origin: args.origin ?? "catalog",
+      loggedAt: new Date().toISOString(),
+    };
+    store[args.date] = [...(store[args.date] ?? []), entry];
+    await writeStore(store);
+    return entry;
+  });
+}
+
 /** Log a single reference food at a chosen portion (a catalog tap). */
 export async function logKnownFood(args: {
   date: string;
@@ -168,28 +207,46 @@ export async function logKnownFood(args: {
   quantity: number;
   unit: string;
 }): Promise<FoodLogEntry | null> {
-  if (!canLogForDate(args.date)) return null;
   const item = resolveKnownFood(args.foodId, args.quantity, args.unit);
   if (!item) return null;
-
-  return withLock(async () => {
-    const store = await readStore();
-    const entry: FoodLogEntry = {
-      id: newId(),
-      date: args.date,
-      slot: args.slot,
-      label: `${args.quantity} ${args.unit} ${item.name}`.replace(/\s+/g, " ").trim(),
-      items: [item],
-      totals: item.nutrients,
-      partialKeys: [],
-      confidence: item.confidence,
-      origin: "catalog",
-      loggedAt: new Date().toISOString(),
-    };
-    store[args.date] = [...(store[args.date] ?? []), entry];
-    await writeStore(store);
-    return entry;
+  return logResolvedItem({
+    date: args.date,
+    slot: args.slot,
+    item,
+    label: `${args.quantity} ${args.unit} ${item.name}`,
   });
+}
+
+/**
+ * Log a food the user picked out of the browsable Foods catalog.
+ *
+ * Routed through NutrientResolver rather than reading the catalog's macros
+ * directly, so a catalog food that also exists in the reference table is logged
+ * with its measured panel and citation instead of four macros — the whole point
+ * of moving the Foods screen onto this store.
+ */
+export async function logCatalogFood(args: {
+  date: string;
+  slot: MealType | null;
+  food: FoodItem;
+  quantity: number;
+  unit: string;
+}): Promise<FoodLogEntry | null> {
+  const item = resolveCatalogFood(args.food, args.quantity, args.unit);
+  return logResolvedItem({
+    date: args.date,
+    slot: args.slot,
+    item,
+    // The catalog's own name, always — the reference entry it matched may be
+    // called something else ("Mackerel" for "Mackerel / Titus"), and the log
+    // should read back as the thing the user actually tapped.
+    label: `${formatQuantity(args.quantity)} ${args.unit} ${args.food.name}`,
+  });
+}
+
+/** Trim trailing zeros so a half portion reads "0.5", not "0.50". */
+function formatQuantity(q: number): string {
+  return Number.isInteger(q) ? String(q) : String(Math.round(q * 100) / 100);
 }
 
 export async function removeFoodLog(
@@ -256,18 +313,13 @@ export async function replaceLoggedItem(args: {
   });
 }
 
+/**
+ * Weakest confidence in a set. Delegates to models/nutrients rather than
+ * carrying its own copy of the ranking — this file used to duplicate the table,
+ * which meant adding a rung in one place silently mis-ranked entries here.
+ */
 function worst(list: NutrientConfidence[]): NutrientConfidence {
-  const rank: Record<NutrientConfidence, number> = {
-    measured: 0,
-    "portion-estimated": 1,
-    "recipe-estimated": 2,
-    "macros-only": 3,
-    unmatched: 4,
-  };
-  return list.reduce<NutrientConfidence>(
-    (w, c) => (rank[c] > rank[w] ? c : w),
-    "measured",
-  );
+  return weakestConfidence(list);
 }
 
 /** Whether the UI should enable logging controls for a date, and why not. */

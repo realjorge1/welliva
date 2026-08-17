@@ -1,85 +1,85 @@
 /**
- * TABS LAYOUT — four REAL routes: Home, Diet, Fitness, More.
+ * ROOT SHELL — every destination the swipe menu can reach, as one flat
+ * navigator with no visible bar.
  *
- * WHAT THIS REPLACED, AND WHY. The tabs used to be local state: one route that
- * mounted all five screens and toggled `display: none`, with `<Freeze>` around
- * the inactive ones. The `<Freeze>` instinct was right — it's what stopped four
- * hidden screens re-rendering on every AppContext change. The underlying choice
- * cost three things that only real routes give you:
+ * WHAT THIS REPLACED, AND WHY. This was four tabs (Home, Diet, Fitness, More)
+ * behind a floating pill nav bar, while Profile, Settings, Habits, Privacy,
+ * Foods, Knows and Gozlin were PUSHED screens living at the app root. That split
+ * is what the ChatGPT-style menu can't have: a menu that pushes builds a back
+ * stack behind itself, so the second destination you pick gets a back arrow
+ * instead of a hamburger, and picking a third stacks a third screen on top of
+ * two live ones. The menu would be lying about where you are.
  *
- *  · ANDROID BACK did nothing between tabs. No BackHandler existed anywhere, so
- *    back either exited the app or felt broken. Play's quality guidelines flag
- *    it, and users read it as a bug.
- *  · ALL FIVE SCREENS were resident at once — including a 2,900-line Diet screen
- *    and Profile — which is real memory pressure on a low-end Android.
- *  · A STALE-PARAM DEAD LINK: navigation went through `/(tabs)?tab=profile`, so
- *    after switching tabs by hand the param hadn't changed, the effect watching
- *    it didn't re-fire, and tapping the same link again did nothing.
+ * So every menu destination is now a screen HERE, and the menu switches between
+ * them. What that buys, and what it cost:
  *
- * React Navigation gives back the freeze behaviour declaratively (`freezeOnBlur`
- * is react-freeze underneath — the same dependency, already in package.json) and
- * adds back navigation, deep links (welliva://exercise), typed routes and state
- * restoration across cold starts.
+ *  · NO BACK STACK between destinations. The hamburger is the top-left control
+ *    everywhere, always, because there is never anything to go back to.
+ *  · `freezeOnBlur` + lazy mounting, for eleven screens instead of four. A
+ *    destination you've never opened has never mounted; one you've left stops
+ *    re-rendering. This is what makes an eleven-screen shell cheaper than the
+ *    old four-tab one plus a stack of pushed screens.
+ *  · ANDROID BACK still retraces the destinations you actually visited
+ *    (`backBehavior="history"`), which is what the gesture means to a person.
+ *  · URLS DIDN'T MOVE. `(tabs)` is a route GROUP — it never appears in a path —
+ *    so `app/(tabs)/settings.tsx` is still `/settings`. Every deep link,
+ *    notification route and `router.push` in the codebase kept working.
  *
- * ROUTE NAMES ARE NOW LOAD-BEARING IDENTIFIERS. `NAV_ITEMS` ids were
- * home|meal|fitness|more while the files were index|diet|exercise|more. Rather
- * than map through a second alias table — one more place for the two to drift —
- * the ids ARE the route names and `label` carries the display string.
+ * ROUTE NAMES ARE LOAD-BEARING IDENTIFIERS. The names below are the ids in
+ * components/navigation/menu.ts; the menu's `label` carries the display string,
+ * which is why "index" reads "Home" and "exercise" reads "Fitness". One
+ * vocabulary, so the highlighted row and the visible screen can't drift.
  *
- * Profile is no longer here: it was in the screen list but not in the nav bar,
- * reachable only by that param. It isn't a tab, it's a pushed screen, and it
- * lives at `/profile`.
+ * The floating tab bar is gone with the More tab it lived beside — its
+ * destinations are menu rows now, and `tabBar` renders nothing.
  */
 
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
-import { CustomBottomNav, NAV_ITEMS } from "@/components/CustomBottomNav";
-import { useTheme } from "@/components/ThemeContext";
 import { Tabs } from "expo-router";
 import React from "react";
 
 export default function TabLayout() {
-  const { isDarkMode } = useTheme();
-
   return (
     <Tabs
-      // ANDROID BACK. The reason this whole file changed shape: with local
-      // state, back between tabs did nothing (no BackHandler existed anywhere)
-      // and users read that as broken. "history" retraces the tabs you actually
-      // visited, which is what the gesture means to a person.
       backBehavior="history"
+      // The menu is the navigation. Returning null (rather than hiding a bar
+      // that still lays out) means no bar is measured, mounted or inset for.
+      tabBar={() => null}
       screenOptions={{
         headerShown: false,
-        // Exactly what <Freeze freeze={!isActive}> was doing by hand — but
-        // declarative, and it composes correctly with navigation state.
+        // Stops a blurred destination re-rendering on every AppContext change —
+        // the single most important option in this file now that eleven screens
+        // share the navigator.
         freezeOnBlur: true,
-        // Each tab's own <Screen> paints an opaque full-bleed gradient, so the
-        // navigator's own background is pure overdraw on the most-used screen.
+        // Each screen paints its own opaque full-bleed gradient, so the
+        // navigator's background is pure overdraw.
         sceneStyle: { backgroundColor: "transparent" },
       }}
-      // The custom nav bar is preserved verbatim — this is the whole point.
-      // React Navigation owns WHICH tab is active; the bar only draws it.
-      tabBar={({ state, navigation }) => (
-        <CustomBottomNav
-          items={NAV_ITEMS}
-          activeTab={state.routes[state.index]?.name ?? "index"}
-          onTabPress={(id) => navigation.navigate(id)}
-          isDarkMode={isDarkMode}
-        />
-      )}
     >
+      {/* Primary — the menu's main list, in menu order. */}
       <Tabs.Screen name="index" options={{ title: "Home" }} />
       <Tabs.Screen name="diet" options={{ title: "Diet" }} />
       <Tabs.Screen name="exercise" options={{ title: "Fitness" }} />
-      <Tabs.Screen name="more" options={{ title: "More" }} />
+      <Tabs.Screen name="gozlin" options={{ title: "Gozlin" }} />
+      <Tabs.Screen name="habits" options={{ title: "Habits" }} />
+      <Tabs.Screen name="logs" options={{ title: "Logs" }} />
+      <Tabs.Screen name="privacy" options={{ title: "Trust" }} />
+
+      {/* Secondary — what the retired More tab used to hold. */}
+      <Tabs.Screen name="foods" options={{ title: "Foods" }} />
+      <Tabs.Screen name="knows" options={{ title: "Memory" }} />
+
+      {/* Pinned separately in the menu, ordinary screens here. */}
+      <Tabs.Screen name="settings" options={{ title: "Settings" }} />
+      <Tabs.Screen name="profile" options={{ title: "Profile" }} />
     </Tabs>
   );
 }
 
 /**
- * Tab-shell boundary. Each tab ALSO exports its own route-level `ErrorBoundary`
- * (level 3), which contains a crash inside one screen and leaves the nav bar
- * working; this one catches anything thrown by the navigator itself, so a broken
- * shell still doesn't have to reach the root boundary.
+ * Shell boundary. Each screen ALSO exports its own route-level `ErrorBoundary`
+ * (level 3), which contains a crash inside one screen and leaves the menu
+ * working; this one catches anything thrown by the navigator itself.
  */
 export function ErrorBoundary({
   error,

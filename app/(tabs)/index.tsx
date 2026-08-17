@@ -19,7 +19,8 @@ import {
   SectionHeader,
   useColors,
 } from "@/components/ui";
-import { GozlinIconButton, useGozlinMoments, useHabitReport } from "@/components/gozlin";
+import { GozlinButton, useGozlinMoments, useHabitReport } from "@/components/gozlin";
+import { ScreenTopBar } from "@/components/navigation";
 import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
 import { CrashTrigger, ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { CoachDeepDive } from "@/components/home/CoachDeepDive";
@@ -222,19 +223,24 @@ export default function HomeScreen() {
 
   const header = (
     <Reveal index={0}>
-      <View style={styles.header}>
-        <View style={styles.flex}>
-          <AppText variant="title" style={styles.headline} numberOfLines={1}>
-            {headline}
-          </AppText>
-          <AppText variant="subhead" color="brand" style={styles.brand} numberOfLines={1}>
-            Welliva
-          </AppText>
-          {/* Only ever visible when something hasn't reached the cloud. */}
-          <SyncStatusPill style={styles.syncPill} />
-        </View>
-        <GozlinIconButton size={40} prompt={gozlinMoment?.prompt} />
-      </View>
+      <ScreenTopBar
+        style={styles.topBar}
+        // Home is the ONLY screen with a greeting — everywhere else the top line
+        // belongs to the menu button alone.
+        greeting={headline}
+        // The app name stands in for a screen name here: "Home" would be
+        // redundant on the screen you land on.
+        title={
+          <>
+            <AppText variant="subhead" color="brand" style={styles.brand} numberOfLines={1}>
+              Welliva
+            </AppText>
+            {/* Only ever visible when something hasn't reached the cloud. */}
+            <SyncStatusPill style={styles.syncPill} />
+          </>
+        }
+        trailing={<GozlinButton prompt={gozlinMoment?.prompt} />}
+      />
     </Reveal>
   );
 
@@ -243,7 +249,11 @@ export default function HomeScreen() {
       {/* Dev-only: open with ?crash=1 or ?crash=tab:home to verify this
           screen's ErrorBoundary catches without taking the app down. */}
       {__DEV__ && <CrashTrigger surface="tab:home" />}
-      <Screen gutter={false} header={header} onScroll={onScroll}>
+      {/* `bottomInset`: Home floats nothing over its footer any more — the coach
+          button moved into the top bar — so the default nav clearance was just a
+          screen-height of dead space under the last card. This is the end of the
+          content plus the device's own bottom inset, nothing more. */}
+      <Screen gutter={false} header={header} onScroll={onScroll} bottomInset={Spacing.xxl}>
       {/* ── Hero: calories + macros ── */}
       <Reveal index={1}>
         <Card style={styles.gutter} padding="xxl">
@@ -614,14 +624,11 @@ const styles = StyleSheet.create({
   gutter: { marginHorizontal: Spacing.screen },
 
   // Header
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
+  topBar: {
     paddingHorizontal: Spacing.screen,
-    paddingTop: Spacing.lg,
+    paddingTop: Spacing.sm,
     paddingBottom: Spacing.lg,
   },
-  headline: {},
   brand: { fontWeight: "800", marginTop: 3, letterSpacing: 0.2 },
   syncPill: { marginTop: Spacing.sm },
 

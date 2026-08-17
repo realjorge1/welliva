@@ -11,13 +11,36 @@
  *  3. The confidence chip and the source line are ALWAYS rendered. There is no
  *     variant of this component that shows numbers without saying where they
  *     came from — that's the whole contract of the feature.
+ *
+ * ── LAYOUT ──────────────────────────────────────────────────────────────────
+ * An FDA label is a legal document, not a good screen. It's a flat wall of rows
+ * where "Calories" and "Riboflavin" carry identical visual weight — fine on a
+ * packet you scan with your eyes, poor on a phone. So this reads top-down in the
+ * order a person actually asks:
+ *
+ *   how much energy?    → the hero number
+ *   where's it from?    → the macro split bar + the protein/carb/fat trio
+ *   the fine print      → label rows, %DV with an inline bar
+ *   says who?           → provenance
+ *
+ * The trio uses the theme's per-macro colours (protein/carbs/fat) — the same
+ * hues the rings and charts use elsewhere, so a number here reads as the same
+ * quantity the user already recognises from Home.
+ *
+ * ── COLOURS ─────────────────────────────────────────────────────────────────
+ * Every colour comes from `useColors()`. Nothing here is a literal, and nothing
+ * passes a raw string to AppText's `color`. An earlier version passed
+ * `color="textSecondary"`, which is NOT one of AppText's roles (they are
+ * `secondary` / `tertiary`), so it fell through to being treated as a literal
+ * colour, resolved to nothing valid, and rendered BLACK — unreadable on the dark
+ * theme. If you add a colour here, use a role or a `colors.*` token.
  */
 
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { AppText, Card, useColors } from "@/components/ui";
-import { Radius, Spacing } from "@/constants/theme";
+import { Radius, Spacing, alpha } from "@/constants/theme";
 import {
   CONFIDENCE_LABEL,
   CONFIDENCE_NOTE,
@@ -55,8 +78,15 @@ const CONFIDENCE_TONE: Record<
   "portion-estimated": "ok",
   "recipe-estimated": "ok",
   "macros-only": "weak",
+  // Deliberately the same alarm colour as "not identified". An AI estimate is
+  // the one figure here with no measurement behind it, and dressing it in the
+  // calm grey of "macros only" would understate that.
+  "ai-estimated": "none",
   unmatched: "none",
 };
+
+/** Energy per gram — how the split bar turns grams back into calories. */
+const KCAL_PER_G = { protein: 4, carbs: 4, fat: 9 } as const;
 
 export function NutrientPanel({
   panel,
@@ -69,7 +99,8 @@ export function NutrientPanel({
   defaultExpanded = false,
 }: NutrientPanelProps) {
   const { colors } = useColors();
-  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [showAll, setShowAll] = useState(defaultExpanded);
   const [showSources, setShowSources] = useState(false);
 
   const partial = new Set(partialKeys);
@@ -92,6 +123,19 @@ export function NutrientPanel({
       s !== null && arr.findIndex((o) => o && describeSource(o) === describeSource(s)) === i,
   );
 
+  const macros = [
+    { key: "protein" as const, label: "Protein", color: colors.protein },
+    { key: "carbs" as const, label: "Carbs", color: colors.carbs },
+    { key: "fat" as const, label: "Fat", color: colors.fat },
+  ];
+
+  // The energy split. Computed from the macros' own calorie values rather than
+  // from `calories`, so the three segments always fill the width even when a
+  // source's stated calories don't match its macros exactly (rounding, fibre,
+  // alcohol). The bar is a proportion and should look like one.
+  const energy = macros.map((m) => (panel[m.key] ?? 0) * KCAL_PER_G[m.key]);
+  const energyTotal = energy.reduce((a, b) => a + b, 0);
+
   return (
     <Card padding="xl">
       {title ? (
@@ -100,15 +144,26 @@ export function NutrientPanel({
             {title}
           </AppText>
           {subtitle ? (
-            <AppText variant="caption" color="textSecondary">
+            <AppText variant="footnote" color="tertiary">
               {subtitle}
             </AppText>
           ) : null}
         </View>
       ) : null}
 
-      {/* Confidence — stated before the numbers, not after them. */}
-      <View style={[styles.chip, { backgroundColor: `${toneColor}1A`, borderColor: `${toneColor}40` }]}>
+      {/* Confidence — stated before the numbers, not after them. Tappable so the
+          explanation is available without permanently occupying four lines. */}
+      <Pressable
+        onPress={() => setNoteOpen((e) => !e)}
+        hitSlop={6}
+        accessibilityRole="button"
+        accessibilityLabel={`Data quality: ${CONFIDENCE_LABEL[confidence]}`}
+        accessibilityHint={noteOpen ? "Hides the explanation" : "Explains what this means"}
+        style={[
+          styles.chip,
+          { backgroundColor: alpha(toneColor, 0.14), borderColor: alpha(toneColor, 0.35) },
+        ]}
+      >
         <Ionicons
           name={
             confidence === "measured"
@@ -123,26 +178,100 @@ export function NutrientPanel({
         <AppText variant="caption" weight="700" style={{ color: toneColor }}>
           {CONFIDENCE_LABEL[confidence]}
         </AppText>
-      </View>
-      <AppText variant="caption" color="textSecondary" style={styles.note}>
-        {CONFIDENCE_NOTE[confidence]}
-      </AppText>
+        <Ionicons
+          name={noteOpen ? "chevron-up" : "chevron-down"}
+          size={12}
+          color={toneColor}
+        />
+      </Pressable>
+      {noteOpen ? (
+        <AppText variant="caption" color="secondary" style={styles.note}>
+          {CONFIDENCE_NOTE[confidence]}
+        </AppText>
+      ) : null}
 
       {confidence === "unmatched" ? null : (
         <>
-          {/* Calories headline */}
-          <View style={[styles.calorieRow, { borderBottomColor: colors.border }]}>
-            <AppText variant="title" weight="800">
-              Calories
-            </AppText>
-            <AppText variant="display" weight="800">
-              {panel.calories !== undefined ? Math.round(panel.calories) : "—"}
-            </AppText>
+          {/* ── Hero: energy ───────────────────────────────────────────────── */}
+          <View style={styles.hero}>
+            <View style={styles.heroText}>
+              <AppText variant="caption" color="tertiary" uppercase weight="700">
+                Calories
+              </AppText>
+              <AppText variant="display" weight="800" style={{ color: colors.calories }}>
+                {panel.calories !== undefined
+                  ? `${partial.has("calories") ? "≥" : ""}${Math.round(panel.calories)}`
+                  : "—"}
+              </AppText>
+            </View>
+            {panel.calories !== undefined ? (
+              <AppText variant="caption" color="tertiary" style={styles.heroDv}>
+                {percentDV("calories", panel.calories)}% of a 2,000 kcal day
+              </AppText>
+            ) : null}
           </View>
 
-          <View style={[styles.dvHeader, { borderBottomColor: colors.border }]}>
-            <AppText variant="caption" color="textSecondary" weight="700">
-              % Daily Value*
+          {/* Where that energy comes from. */}
+          {energyTotal > 0 ? (
+            <View
+              style={[styles.splitBar, { backgroundColor: alpha(colors.text, 0.08) }]}
+              accessibilityRole="image"
+              accessibilityLabel={`Energy split: ${macros
+                .map((m, i) => `${Math.round((energy[i] / energyTotal) * 100)} percent ${m.label}`)
+                .join(", ")}`}
+            >
+              {macros.map((m, i) =>
+                energy[i] > 0 ? (
+                  <View key={m.key} style={{ flex: energy[i], backgroundColor: m.color }} />
+                ) : null,
+              )}
+            </View>
+          ) : null}
+
+          {/* ── The macro trio ─────────────────────────────────────────────── */}
+          <View style={styles.macroRow}>
+            {macros.map((m) => {
+              const value = panel[m.key];
+              const dv = value !== undefined ? percentDV(m.key, value) : null;
+              return (
+                <View
+                  key={m.key}
+                  style={[
+                    styles.macroCell,
+                    {
+                      backgroundColor: alpha(m.color, 0.1),
+                      borderColor: alpha(m.color, 0.22),
+                    },
+                  ]}
+                >
+                  <AppText
+                    variant="caption"
+                    weight="700"
+                    uppercase
+                    style={{ color: m.color }}
+                  >
+                    {m.label}
+                  </AppText>
+                  <AppText variant="headline" weight="800">
+                    {value === undefined
+                      ? "—"
+                      : `${partial.has(m.key) ? "≥" : ""}${formatNutrient(m.key, value)}`}
+                  </AppText>
+                  <AppText variant="caption" color="tertiary">
+                    {dv !== null ? `${dv}% DV` : " "}
+                  </AppText>
+                </View>
+              );
+            })}
+          </View>
+
+          {/* ── The label ──────────────────────────────────────────────────── */}
+          <View style={[styles.labelHead, { borderBottomColor: colors.borderStrong }]}>
+            <AppText variant="caption" color="tertiary" uppercase weight="700">
+              Full label
+            </AppText>
+            <AppText variant="caption" color="tertiary" weight="700">
+              % Daily Value
             </AppText>
           </View>
 
@@ -157,21 +286,7 @@ export function NutrientPanel({
 
           {extendedPresent.length > 0 ? (
             <>
-              <Pressable
-                onPress={() => setExpanded((e) => !e)}
-                style={styles.expandRow}
-                hitSlop={8}
-              >
-                <AppText variant="caption" weight="700" color="primary">
-                  {expanded ? "Hide" : "Show"} vitamins & minerals
-                </AppText>
-                <Ionicons
-                  name={expanded ? "chevron-up" : "chevron-down"}
-                  size={16}
-                  color={colors.primary}
-                />
-              </Pressable>
-              {expanded
+              {showAll
                 ? extendedPresent.map((key) => (
                     <NutrientRow
                       key={key}
@@ -181,36 +296,73 @@ export function NutrientPanel({
                     />
                   ))
                 : null}
+              <Pressable
+                onPress={() => setShowAll((e) => !e)}
+                style={styles.expandRow}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  showAll ? "Hide vitamins and minerals" : "Show vitamins and minerals"
+                }
+              >
+                <AppText variant="caption" weight="700" color="brand">
+                  {showAll ? "Hide" : "Show"} vitamins & minerals
+                </AppText>
+                <Ionicons
+                  name={showAll ? "chevron-up" : "chevron-down"}
+                  size={16}
+                  color={colors.primary}
+                />
+              </Pressable>
             </>
           ) : null}
 
-          <AppText variant="caption" color="textSecondary" style={styles.footnote}>
-            * Percent Daily Values are based on a 2,000 calorie diet (FDA
-            reference values).
+          <AppText variant="caption" color="tertiary" style={styles.footnote}>
+            % Daily Values are based on a 2,000 calorie diet (FDA reference
+            values). A dash means the figure wasn&apos;t measured — not zero.
           </AppText>
         </>
       )}
 
       {/* Provenance — always available, one tap away. */}
       {allSources.length > 0 ? (
-        <Pressable onPress={() => setShowSources((s) => !s)} hitSlop={8} style={styles.sourceToggle}>
-          <Ionicons name="library-outline" size={14} color={colors.textSecondary} />
-          <AppText variant="caption" color="textSecondary" weight="600">
-            {showSources ? "Hide sources" : `Source${allSources.length > 1 ? "s" : ""}`}
-          </AppText>
-        </Pressable>
-      ) : null}
-      {showSources
-        ? allSources.map((s, i) => (
-            <AppText key={i} variant="caption" color="textSecondary" style={styles.sourceLine}>
-              • {describeSource(s)}
+        <>
+          <Pressable
+            onPress={() => setShowSources((s) => !s)}
+            hitSlop={8}
+            style={[styles.sourceToggle, { borderTopColor: colors.border }]}
+            accessibilityRole="button"
+            accessibilityLabel={showSources ? "Hide sources" : "Show sources"}
+          >
+            <Ionicons name="library-outline" size={14} color={colors.textTertiary} />
+            <AppText variant="caption" color="tertiary" weight="600">
+              {showSources ? "Hide sources" : `Source${allSources.length > 1 ? "s" : ""}`}
             </AppText>
-          ))
-        : null}
+            <Ionicons
+              name={showSources ? "chevron-up" : "chevron-down"}
+              size={12}
+              color={colors.textTertiary}
+            />
+          </Pressable>
+          {showSources
+            ? allSources.map((s, i) => (
+                <AppText key={i} variant="caption" color="secondary" style={styles.sourceLine}>
+                  • {describeSource(s)}
+                </AppText>
+              ))
+            : null}
+        </>
+      ) : null}
     </Card>
   );
 }
 
+/**
+ * One label row. The %DV gets an inline bar rather than a bare percentage: "47%"
+ * means little at a glance, and the bar is what turns the column into something
+ * scannable. Limit nutrients (sodium, saturated fat) fill in the warning hue,
+ * because a high number there is the opposite of good news.
+ */
 function NutrientRow({
   nutrientKey,
   value,
@@ -224,30 +376,46 @@ function NutrientRow({
   const meta = NUTRIENT_META[nutrientKey];
   const dv = value !== undefined ? percentDV(nutrientKey, value) : null;
   const indented = Boolean(meta.parent);
+  const barColor = meta.isLimit ? colors.warning : colors.primary;
 
   return (
-    <View style={[styles.row, { borderBottomColor: colors.border }]}>
+    <View style={[styles.row, { borderBottomColor: colors.divider }]}>
       <AppText
-        variant="body"
-        weight={indented ? "400" : "700"}
-        style={indented ? styles.indent : undefined}
+        variant="subhead"
+        color={indented ? "secondary" : "primary"}
+        weight={indented ? "400" : "600"}
+        style={[styles.rowLabel, indented ? styles.indent : null]}
+        numberOfLines={1}
       >
         {meta.label}
       </AppText>
-      <View style={styles.values}>
-        <AppText variant="body" weight={indented ? "400" : "600"}>
-          {value === undefined
-            ? "—"
-            : `${isPartial ? "≥ " : ""}${formatNutrient(nutrientKey, value)}`}
-        </AppText>
-        <AppText
-          variant="body"
-          weight="700"
-          color="textSecondary"
-          style={styles.dv}
-        >
-          {dv !== null ? `${dv}%` : ""}
-        </AppText>
+
+      <AppText variant="subhead" weight={indented ? "400" : "600"} style={styles.rowValue}>
+        {value === undefined
+          ? "—"
+          : `${isPartial ? "≥ " : ""}${formatNutrient(nutrientKey, value)}`}
+      </AppText>
+
+      <View style={styles.dvCell}>
+        {dv !== null ? (
+          <>
+            <View style={[styles.dvTrack, { backgroundColor: alpha(colors.text, 0.08) }]}>
+              <View
+                style={[
+                  styles.dvFill,
+                  { width: `${Math.min(100, dv)}%`, backgroundColor: barColor },
+                ]}
+              />
+            </View>
+            <AppText variant="caption" color="secondary" weight="700" style={styles.dvText}>
+              {dv}%
+            </AppText>
+          </>
+        ) : (
+          <AppText variant="caption" color="tertiary" style={styles.dvText}>
+            —
+          </AppText>
+        )}
       </View>
     </View>
   );
@@ -266,30 +434,58 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   note: { marginTop: Spacing.sm, lineHeight: 17 },
-  calorieRow: {
+
+  hero: {
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
-    borderBottomWidth: 3,
-    paddingBottom: Spacing.sm,
+    gap: Spacing.md,
     marginTop: Spacing.lg,
   },
-  dvHeader: {
-    alignItems: "flex-end",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 4,
+  heroText: { gap: 2 },
+  heroDv: { paddingBottom: 6, flexShrink: 1, textAlign: "right" },
+  splitBar: {
+    flexDirection: "row",
+    height: 8,
+    borderRadius: Radius.pill,
+    overflow: "hidden",
+    marginTop: Spacing.md,
+  },
+
+  macroRow: { flexDirection: "row", gap: Spacing.sm, marginTop: Spacing.md },
+  macroCell: {
+    flex: 1,
+    gap: 2,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+  },
+
+  labelHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 2,
+    paddingBottom: Spacing.sm,
+    marginTop: Spacing.xl,
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingVertical: Spacing.sm,
-    gap: Spacing.md,
+    gap: Spacing.sm,
   },
+  rowLabel: { flex: 1 },
   indent: { paddingLeft: Spacing.lg },
-  values: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
-  dv: { minWidth: 44, textAlign: "right" },
+  rowValue: { minWidth: 62, textAlign: "right" },
+  dvCell: { width: 76, flexDirection: "row", alignItems: "center", gap: 6 },
+  dvTrack: { flex: 1, height: 4, borderRadius: Radius.pill, overflow: "hidden" },
+  dvFill: { height: "100%", borderRadius: Radius.pill },
+  dvText: { minWidth: 30, textAlign: "right" },
+
   expandRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -303,6 +499,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     marginTop: Spacing.lg,
+    paddingTop: Spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   sourceLine: { marginTop: 4, lineHeight: 16 },
 });

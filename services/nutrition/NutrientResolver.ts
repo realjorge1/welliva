@@ -31,6 +31,7 @@ import {
 } from "../../constants/NutrientDatabase";
 import { FOOD_DICTIONARY, type FoodItem } from "../../constants/FoodDictionary";
 import {
+  roundNutrient,
   scalePanel,
   sumPanels,
   weakestConfidence,
@@ -39,9 +40,11 @@ import {
   type NutrientConfidence,
   type NutrientPanel,
   type NutrientSource,
+  type PortionOption,
   type ResolvedFoodItem,
 } from "../../models/nutrients";
 import { normalizeForMatch, type ParsedFoodItem } from "./FoodTextParser";
+import { MATCH_THRESHOLD, similarity } from "./nameMatch";
 
 // ============================================================================
 // UNIT CONVERSION
@@ -74,44 +77,14 @@ const ALIAS_ENTRIES = canonicalAliasEntries().map((e) => ({
   food: e.food,
 }));
 
-/** Minimum similarity before we'll claim a match. Below this → unmatched. */
-const MATCH_THRESHOLD = 0.62;
+// MATCH_THRESHOLD and `similarity` now live in ./nameMatch so the Foods catalog
+// search can score names exactly the way resolution does.
 
 export interface FoodMatch {
   food: CanonicalFood;
   score: number;
   /** True for an exact alias hit — lets the caller skip fuzzy bookkeeping. */
   exact: boolean;
-}
-
-/**
- * Token-set similarity. Chosen over edit distance because food names are
- * multi-word and word ORDER varies freely ("boiled egg" / "egg, boiled"), while
- * a single wrong word matters a lot ("egg white" ≠ "egg"). Overlap is weighted
- * toward covering the QUERY's tokens, then penalised for extra tokens in the
- * candidate, so "egg" prefers "egg" over "egg noodles".
- */
-function similarity(query: string, candidate: string): number {
-  if (query === candidate) return 1;
-
-  const qTokens = query.split(" ").filter(Boolean);
-  const cTokens = candidate.split(" ").filter(Boolean);
-  if (qTokens.length === 0 || cTokens.length === 0) return 0;
-
-  const cSet = new Set(cTokens);
-  let hits = 0;
-  for (const t of qTokens) {
-    if (cSet.has(t)) hits += 1;
-    // Partial credit for a prefix match ("choc" → "chocolate").
-    else if (cTokens.some((c) => c.startsWith(t) || t.startsWith(c))) hits += 0.6;
-  }
-
-  const coverage = hits / qTokens.length;
-  // Penalise candidates carrying words the query never mentioned.
-  const extra = Math.max(0, cTokens.length - qTokens.length);
-  const precision = cTokens.length / (cTokens.length + extra * 0.5);
-
-  return coverage * 0.75 + coverage * precision * 0.25;
 }
 
 /** Best canonical match for a food name, or null below the threshold. */
@@ -374,6 +347,172 @@ export function resolveKnownFood(
       : exact
         ? "measured"
         : "portion-estimated",
+    matchScore: 1,
+  };
+}
+
+/**
+ * The portion unit meaning "one of whatever the catalog calls a serving". Used
+ * when a catalog food has no canonical entry, so there is no gram weight to
+ * scale by — only a count of the serving the catalog described.
+ */
+export const CATALOG_SERVING_UNIT = "serving";
+
+export interface CatalogLink {
+  /** The measured reference entry backing this catalog food, if we have one. */
+  canonical: CanonicalFood | null;
+  /** Portions to offer in a picker, best first. */
+  portions: PortionOption[];
+  /** Which of those to select initially. */
+  defaultUnit: string;
+}
+
+/**
+ * Does the app hold measured data for a food the user picked out of the Foods
+ * catalog?
+ *
+ * The two tables were built for different jobs and never linked: FOOD_DICTIONARY
+ * is the browsable catalog (205 foods, four macros, no citation) and
+ * CANONICAL_FOODS is the reference table (measured panels with an FDC/WAFCT id).
+ * Tapping a food in the catalog should get the better data whenever it exists,
+ * which means matching the two by name at the moment the user opens one.
+ *
+ * Matching by name is the only option — the catalog's ids come from a different
+ * generator — so it uses the same scorer and threshold as text resolution. A
+ * near-miss deliberately fails to null: showing a banana's macros is fine,
+ * showing a DIFFERENT food's measured iron content is not.
+ */
+const linkCache = new Map<string, CatalogLink>();
+
+export function linkCatalogFood(food: FoodItem): CatalogLink {
+  const cached = linkCache.get(food.id);
+  if (cached) return cached;
+
+  const match = matchCanonical(food.name);
+  const link: CatalogLink = match
+    ? {
+        canonical: match.food,
+        // Grams last: it's the precise option, not the likely one.
+        portions: [...match.food.portions, { unit: "g", grams: 1 }],
+        defaultUnit: defaultPortion(match.food).unit,
+      }
+    : {
+        canonical: null,
+        portions: [{ unit: CATALOG_SERVING_UNIT, grams: 0, isDefault: true }],
+        defaultUnit: CATALOG_SERVING_UNIT,
+      };
+
+  linkCache.set(food.id, link);
+  return link;
+}
+
+/**
+ * Resolve a catalog food at a chosen portion, climbing to the reference table
+ * when {@link linkCatalogFood} found a match and falling back to the catalog's
+ * own per-serving macros when it didn't.
+ *
+ * The fallback rung is the same one text resolution uses (rung 4 in this file's
+ * header): scale the four macros by the number of servings, source it to the
+ * app's own catalog, and label it `macros-only` so nothing downstream mistakes
+ * it for measured data.
+ */
+export function resolveCatalogFood(
+  food: FoodItem,
+  quantity: number,
+  unit: string,
+): ResolvedFoodItem {
+  /*
+   * A food the user added carries its OWN panel, source and confidence — from
+   * USDA, or from a model and labelled as such. Those must be used verbatim
+   * rather than run through the ladder below: re-matching "Abacha" against the
+   * canonical table would either find nothing (losing the data we just fetched)
+   * or, worse, find something vaguely similar and quietly relabel a stored
+   * estimate as measured. The user's own food is already resolved.
+   */
+  const custom = asCustomFood(food);
+  if (custom) return resolveCustomFood(custom, quantity);
+
+  const link = linkCatalogFood(food);
+
+  if (link.canonical && unit !== CATALOG_SERVING_UNIT) {
+    const resolved = resolveKnownFood(link.canonical.id, quantity, unit);
+    if (resolved) return resolved;
+  }
+
+  const servings = quantity;
+  const panel: NutrientPanel = {
+    calories: Math.round(food.calories * servings),
+    protein: Math.round(food.protein * servings * 10) / 10,
+    carbs: Math.round(food.carbs * servings * 10) / 10,
+    fat: Math.round(food.fat * servings * 10) / 10,
+  };
+  const source: NutrientSource = {
+    kind: "app",
+    description: food.serving ? `${food.name} — ${food.serving}` : food.name,
+  };
+
+  return {
+    id: nextId("res"),
+    inputText: `${servings} × ${food.name}`,
+    name: food.name,
+    foodId: null,
+    quantity: servings,
+    unit: CATALOG_SERVING_UNIT,
+    grams: 0,
+    nutrients: panel,
+    source,
+    confidence: "macros-only",
+    matchScore: 1,
+  };
+}
+
+/**
+ * The subset of CustomFood this module needs. Declared structurally rather than
+ * imported, so the resolver doesn't depend on the storage service — it only
+ * cares that a food arrived carrying its own resolved nutrition.
+ */
+interface ResolvedCarrier extends FoodItem {
+  nutrients: NutrientPanel;
+  per100g?: NutrientPanel;
+  servingGrams: number | null;
+  source: NutrientSource;
+  confidence: NutrientConfidence;
+}
+
+function asCustomFood(food: FoodItem): ResolvedCarrier | null {
+  const f = food as Partial<ResolvedCarrier>;
+  return f.nutrients && f.source && f.confidence
+    ? (food as ResolvedCarrier)
+    : null;
+}
+
+/**
+ * Scale a user-added food to a serving count.
+ *
+ * Scaling by SERVINGS, not grams: the stored panel describes one serving, and
+ * that's the only portion this food is known at. Its confidence and source are
+ * carried through untouched — an estimate stays an estimate at every portion,
+ * and doubling it doesn't make it more measured.
+ */
+function resolveCustomFood(food: ResolvedCarrier, servings: number): ResolvedFoodItem {
+  const panel: NutrientPanel = {};
+  for (const [k, v] of Object.entries(food.nutrients)) {
+    if (typeof v === "number") {
+      panel[k as keyof NutrientPanel] = roundNutrient(k as never, v * servings);
+    }
+  }
+
+  return {
+    id: nextId("res"),
+    inputText: `${servings} × ${food.name}`,
+    name: food.name,
+    foodId: food.id,
+    quantity: servings,
+    unit: CATALOG_SERVING_UNIT,
+    grams: food.servingGrams !== null ? Math.round(food.servingGrams * servings * 10) / 10 : 0,
+    nutrients: panel,
+    source: food.source,
+    confidence: food.confidence,
     matchScore: 1,
   };
 }

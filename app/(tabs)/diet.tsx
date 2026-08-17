@@ -18,6 +18,7 @@ import {
   AppText,
   Button,
   Card,
+  GradientIconButton,
   IconBadge,
   Pill,
   ProgressBar,
@@ -46,7 +47,8 @@ import {
   DietSnackOption,
   ensureDietLibraryLoaded,
 } from "@/constants/DietDatabase";
-import { GozlinIconButton, GozlinToast, useToast } from "@/components/gozlin";
+import { GozlinButton, GozlinToast, useToast } from "@/components/gozlin";
+import { ScreenTopBar } from "@/components/navigation";
 import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
 import { CrashTrigger, ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { DisclaimerNote } from "@/components/legal";
@@ -1000,29 +1002,38 @@ export default function DietScreen() {
 
   const header = (
     <Reveal index={0}>
-      <View style={styles.header}>
-        <View style={styles.flex}>
-          <AppText variant="display">Diet</AppText>
-          <AppText variant="subhead" color="secondary" style={styles.headerSub}>
+      <ScreenTopBar
+        style={styles.header}
+        title={
+          <>
+            <AppText variant="title">Diet</AppText>
+            {/* Only ever visible when something hasn't reached the cloud. */}
+            <SyncStatusPill style={styles.syncPill} />
+          </>
+        }
+        // The caption sits opposite the name, under the coach — so the header
+        // reads as two balanced columns rather than one left-hand stack.
+        titleRight={
+          <AppText
+            variant="subhead"
+            color="secondary"
+            align="right"
+            numberOfLines={1}
+          >
             {hasDiet ? "Your plan for today" : "Build your nutrition plan"}
           </AppText>
-          {/* Only ever visible when something hasn't reached the cloud. */}
-          <SyncStatusPill style={styles.syncPill} />
-        </View>
-        <View style={styles.headerActions}>
-          <GozlinIconButton size={36} />
-          {hasDiet && (
-            <Pressable
+        }
+        trailing={<GozlinButton />}
+        right={
+          hasDiet ? (
+            <GradientIconButton
+              icon="swap-horizontal"
               onPress={openDietModal}
-              accessibilityRole="button"
               accessibilityLabel="Change diet plan"
-              style={[styles.iconBtn, { backgroundColor: colors.primarySoft }]}
-            >
-              <Ionicons name="swap-horizontal" size={20} color={colors.primary} />
-            </Pressable>
-          )}
-        </View>
-      </View>
+            />
+          ) : undefined
+        }
+      />
     </Reveal>
   );
 
@@ -1508,6 +1519,28 @@ export default function DietScreen() {
                       )}
                     </View>
                   )}
+                </Card>
+
+                {/* The other way in: browse rather than describe. Both land in
+                    the same food log, so this is a second door on one room —
+                    not a second system. Foods used to be reachable only from
+                    the menu's secondary list, which left the whole catalog
+                    stranded away from the screen it feeds. */}
+                <Card
+                  onPress={() => router.push("/foods")}
+                  style={styles.medTop}
+                  accessibilityLabel="Browse the whole-foods catalog"
+                >
+                  <View style={styles.logRow}>
+                    <IconBadge name="nutrition" tone={colors.success} size={40} />
+                    <View style={styles.flex}>
+                      <AppText variant="callout">Browse whole foods</AppText>
+                      <AppText variant="footnote" color="tertiary" style={styles.medSub}>
+                        Search the catalog, pick a portion, see the full label
+                      </AppText>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                  </View>
                 </Card>
               </View>
             </Reveal>
@@ -2763,26 +2796,13 @@ const styles = StyleSheet.create({
   section: { marginTop: Spacing.xxl },
 
   // Header
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingTop: Spacing.sm,
-    marginBottom: Spacing.xl,
-  },
-  headerSub: { marginTop: 2 },
+  header: { paddingTop: Spacing.sm, marginBottom: Spacing.xl },
   syncPill: { marginTop: Spacing.sm },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: Spacing.lg },
-  iconBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: Radius.md,
-    alignItems: "center",
-    justifyContent: "center",
-  },
 
   // Medication advisories
   medHead: { flexDirection: "row", alignItems: "center", gap: Spacing.md, marginBottom: Spacing.md },
   medSub: { marginTop: 2 },
+  medTop: { marginTop: Spacing.md },
 
   // --- Plan period banner ---
   periodHead: { flexDirection: "row", alignItems: "center", gap: Spacing.md },

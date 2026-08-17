@@ -3,7 +3,8 @@
  * with the engine package (services/gozlin) via the useGozlin bridge hook.
  */
 export { GozlinAvatar } from "./GozlinAvatar";
-export { GozlinIconButton } from "./GozlinIconButton";
+export { GozlinButton } from "./GozlinButton";
+export type { GozlinButtonProps } from "./GozlinButton";
 export { GozlinMessageBubble } from "./GozlinMessageBubble";
 export { GozlinSuggestionBar } from "./GozlinSuggestionBar";
 export { GozlinActionSheet } from "./GozlinActionSheet";

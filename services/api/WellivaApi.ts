@@ -60,6 +60,45 @@ export interface ParseFoodResponse {
 }
 
 /**
+ * One candidate food from the lookup ladder.
+ *
+ * `origin` is the contract's most important field: it tells the app whether the
+ * numbers were MEASURED by a food composition body or ESTIMATED by a model, and
+ * the app labels them differently for the rest of their life. The server must
+ * never report `usda` for a figure a model produced.
+ */
+export interface FoodLookupResult {
+  /** Display name, as the source calls it. */
+  name: string;
+  /** Household serving the numbers describe, e.g. "1 cup", "100 g". */
+  serving: string;
+  /** What that serving weighs. Null when genuinely unknown. */
+  servingGrams: number | null;
+  /** One of the app's display groups; the server maps onto our list. */
+  group: string;
+  /** Nutrition for ONE serving, in the app's NutrientPanel keys/units. */
+  nutrients: Record<string, number>;
+  /** Per 100 g, when the source has it — lets portions rescale exactly. */
+  per100g?: Record<string, number>;
+  origin: "usda" | "ai-estimate";
+  /** Present iff origin === "usda". Verifiable at fdc.nal.usda.gov. */
+  fdcId?: number;
+  dataset?: "SR Legacy" | "Foundation" | "FNDDS" | "Branded";
+  /** Free text: the brand, or what an estimate reasoned from. */
+  description?: string;
+  /** Set on estimates so a bad batch can be traced. */
+  model?: string;
+  /** True when the food is a regional/West-African dish. Drives the NG tag. */
+  isRegional?: boolean;
+}
+
+export interface FoodLookupResponse {
+  results: FoodLookupResult[];
+  /** Which rung answered. "none" means neither had it — a legitimate outcome. */
+  resolvedBy: "usda" | "ai-estimate" | "none";
+}
+
+/**
  * Current access token. `getSession()` refreshes it when it's near expiry, so
  * this is normally enough on its own. Throws when there is no session.
  */
@@ -299,5 +338,29 @@ export const WellivaApi = {
    */
   parseFood(args: { system: string; user: string }): Promise<ParseFoodResponse> {
     return post<ParseFoodResponse>("/v1/nutrition/parse", args, 12000);
+  },
+
+  /**
+   * Look up a food our catalogs don't have.
+   *
+   * Note how this DIFFERS from `parseFood`, which is forbidden from returning
+   * numbers. This endpoint is allowed to, because its first rung is USDA
+   * FoodData Central — a measured source with a verifiable id — and anything it
+   * returns from the model instead is tagged `ai-estimate` and carried on the
+   * app's weakest confidence rung all the way through to the daily total.
+   *
+   * The caller must have already missed locally: this is the expensive rung and
+   * it never runs for a food we already have (see FoodLookupService).
+   *
+   * 20s: a USDA round-trip plus a possible model fallback is legitimately
+   * slower than a parse, and the user is looking at a progress state they asked
+   * for rather than waiting mid-typing.
+   */
+  lookupFood(args: {
+    query: string;
+    /** The user's region, so "swallow" or "pap" resolves the way they mean. */
+    region?: string;
+  }): Promise<FoodLookupResponse> {
+    return post<FoodLookupResponse>("/v1/nutrition/lookup", args, 20000);
   },
 };

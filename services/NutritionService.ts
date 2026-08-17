@@ -168,6 +168,25 @@ export function calculateNutritionTargets(bio: UserBio): NutritionTargets {
 }
 
 /**
+ * Maintenance energy — BMR × activity, with NO goal modifier and no clamps.
+ *
+ * `calculateNutritionTargets` returns a TARGET (deficit or surplus already
+ * applied, then bounded for safety), which is the wrong baseline for the
+ * learning layer: the Kalman filter estimates what this person actually burns,
+ * so it has to be initialised from, and compared against, the population
+ * estimate of *maintenance*. Comparing a learned maintenance figure to a cutting
+ * target would report a 500 kcal "discovery" on day one for every user.
+ *
+ * This is deliberately the same two steps as Step 1–2 above, and nothing more.
+ */
+export function maintenanceTdee(bio: UserBio): number {
+  const bmr = calculateBMR(bio.sex, bio.weightKg, bio.heightCm, bio.age);
+  const multiplier =
+    ACTIVITY_MULTIPLIERS[bio.activityLevel] ?? ACTIVITY_MULTIPLIERS.moderate;
+  return Math.round(bmr * multiplier);
+}
+
+/**
  * Calculate BMR using Mifflin-St Jeor equation
  * Most accurate for modern populations
  */
