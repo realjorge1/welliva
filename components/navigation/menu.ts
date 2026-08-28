@@ -15,7 +15,7 @@
  *
  * ORDER IS THE SPEC. Primary destinations in the order they were asked for,
  * a hairline, the two exploratory surfaces the retired "More" tab used to hold,
- * then Settings pinned last on its own.
+ * then the footer: Upgrade, and Settings pinned last.
  */
 
 import type { Ionicons } from "@expo/vector-icons";
@@ -31,8 +31,10 @@ export interface MenuItem {
   icon: IconName;
   activeIcon: IconName;
   /**
-   * Render Gozlin's own animated mark instead of an Ionicon. The coach has an
-   * identity; a generic chat bubble would throw it away.
+   * Render Gozlin's own mark instead of an Ionicon. The coach has an identity
+   * and a generic glyph throws it away — but the mark is drawn MONOCHROME here,
+   * tinted exactly like every other row (white at rest, gold when active), so
+   * it keeps the menu's one rule: gold means "you are here".
    */
   mark?: "gozlin";
 }
@@ -64,6 +66,8 @@ export const PRIMARY_ITEMS: MenuItem[] = [
     route: "gozlin",
     href: "/gozlin",
     label: "Gozlin",
+    // Fallbacks only — `mark` wins. Kept so the item is still renderable by
+    // anything that doesn't know about the coach's mark.
     icon: "sparkles-outline",
     activeIcon: "sparkles",
     mark: "gozlin",
@@ -82,17 +86,22 @@ export const PRIMARY_ITEMS: MenuItem[] = [
     icon: "reader-outline",
     activeIcon: "reader",
   },
-  {
-    route: "privacy",
-    href: "/privacy",
-    // The route keeps its name so every deep link still resolves; only the
-    // label changed. "Private" was the one adjective in a menu of nouns, and
-    // it named a mood rather than a destination. See app/(tabs)/privacy.tsx.
-    label: "Trust",
-    icon: "shield-checkmark-outline",
-    activeIcon: "shield-checkmark",
-  },
 ];
+
+/*
+ * WHERE TRUST WENT. `/privacy` (labelled "Trust") used to sit here as a primary
+ * destination. It is excellent content and none of it changed — but it is read
+ * ONCE, usually before signing up or when something worries you, and a menu
+ * slot is rent paid every session for a screen visited twice a year.
+ *
+ * It now hangs off Settings → "Privacy & legal", which is where both users and
+ * store reviewers already look for it, and which carries the one fact the Trust
+ * screen cannot: which policy version this account actually accepted.
+ *
+ * The route is untouched, so every deep link and `router.push("/privacy")`
+ * still resolves. It simply stops being swipe-reachable — correct, because it
+ * is now a pushed screen and keeps the stack's own swipe-back instead.
+ */
 
 /**
  * The two surfaces the "More" tab used to hold. Kept below a hairline rather
@@ -119,6 +128,24 @@ export const SECONDARY_ITEMS: MenuItem[] = [
   },
 ];
 
+/**
+ * Pinned above Settings, in the same footer — the one door to the storefront.
+ *
+ * It sits in the footer rather than in the scrolling list because it is not a
+ * place you go to DO something with your data; like Settings, it's a place you
+ * go to change the app itself. And it sits ABOVE Settings because that is where
+ * a subscription question is actually asked from — "what am I paying for" used
+ * to mean opening Settings and hunting, which is how a subscription screen ends
+ * up feeling like admin instead of a product.
+ */
+export const UPGRADE_ITEM: MenuItem = {
+  route: "upgrade",
+  href: "/upgrade",
+  label: "Upgrade",
+  icon: "diamond-outline",
+  activeIcon: "diamond",
+};
+
 /** Pinned to the bottom, alone — the one door to Settings. */
 export const SETTINGS_ITEM: MenuItem = {
   route: "settings",
@@ -141,6 +168,7 @@ export const PROFILE_ITEM: MenuItem = {
 export const ALL_MENU_ITEMS: MenuItem[] = [
   ...PRIMARY_ITEMS,
   ...SECONDARY_ITEMS,
+  UPGRADE_ITEM,
   SETTINGS_ITEM,
   PROFILE_ITEM,
 ];

@@ -1,10 +1,18 @@
 /**
- * HABIT DETAIL — hero identity, the three stat tiles (current streak, best
- * streak, last-30-days), full history heatmap with month + weekday labels,
- * and the Mark done / Undo today action. Matches the tracker's detail view
- * from the reference design, in Welliva's twilight skin.
+ * HABIT DETAIL — hero identity, this week at a glance, the three stat tiles
+ * (streak, best, last-30-days), the full history grid, and the Mark done / Undo
+ * today action.
+ *
+ * THE HISTORY GRID IS NOT IN A CARD, deliberately. It used to be, and the cells
+ * were sized in fixed points — twenty weeks at 12pt is 328pt of grid, which a
+ * card on a 360pt phone gives about 280pt to. The last two months of someone's
+ * history were being drawn off the right edge of the screen. Nesting a grid
+ * that must span the full content width inside a card that takes 40pt of
+ * padding was the whole problem, so the card is gone: the grid measures the
+ * page and sizes its own cells to land flush with everything else on it.
  */
 import { HabitHeatmap } from "@/components/habits/HabitHeatmap";
+import { HabitWeekStrip } from "@/components/habits/HabitWeekStrip";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { IconBadge } from "@/components/ui/IconBadge";
@@ -18,8 +26,8 @@ import { frequencyLabel } from "@/models/habit";
 import { buildHeatWeeks, monthLabels } from "@/services/HabitService";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import React, { useState } from "react";
+import { Pressable, StyleSheet, View, type LayoutChangeEvent } from "react-native";
 
 const HISTORY_WEEKS = 20;
 
@@ -35,6 +43,13 @@ export default function HabitDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { getView, toggleToday } = useHabits();
   const { currentDate } = useSystem();
+
+  // The width the page actually gives its content, measured once on layout.
+  // The grid can't be sized from a constant — screen gutters, safe areas and
+  // font scale all move it — so it's measured rather than assumed.
+  const [contentWidth, setContentWidth] = useState(0);
+  const onMeasure = (e: LayoutChangeEvent) =>
+    setContentWidth(e.nativeEvent.layout.width);
 
   const view = getView(String(id));
   if (!view) {
@@ -52,10 +67,17 @@ export default function HabitDetailScreen() {
   const weeks = buildHeatWeeks(habit, done, currentDate, HISTORY_WEEKS);
   const months = monthLabels(weeks);
   const isManual = habit.source === "manual";
+  const quota = habit.weeklyGoal != null;
 
   const header = (
     <View style={styles.headerRow}>
-      <Pressable hitSlop={12} onPress={() => router.back()} style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}>
+      <Pressable
+        hitSlop={12}
+        onPress={() => router.back()}
+        accessibilityRole="button"
+        accessibilityLabel="Back"
+        style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
+      >
         <Ionicons name="chevron-back" size={20} color={colors.text} />
       </Pressable>
       <View style={{ flex: 1 }} />
@@ -63,6 +85,8 @@ export default function HabitDetailScreen() {
         <Pressable
           hitSlop={12}
           onPress={() => router.push(`/habit/new?id=${habit.id}` as any)}
+          accessibilityRole="button"
+          accessibilityLabel="Edit habit"
           style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
         >
           <Ionicons name="pencil" size={17} color={colors.text} />
@@ -73,38 +97,54 @@ export default function HabitDetailScreen() {
 
   return (
     <Screen header={header}>
-      {/* Hero identity */}
-      <View style={styles.hero}>
+      {/* Hero identity. It also doubles as the ruler: it's a full-width block
+          with no gutter of its own, so its measured width IS the width the
+          history grid below has to fit into. */}
+      <View style={styles.hero} onLayout={onMeasure}>
         <IconBadge name={habit.icon as any} tone={habit.color} size={72} />
         <AppText variant="display" align="center" style={{ marginTop: Spacing.lg }}>
           {habit.name}
         </AppText>
         <AppText variant="subhead" color="secondary" align="center" style={{ marginTop: 2 }}>
-          {frequencyLabel(habit.days)}
+          {frequencyLabel(habit.days, habit.weeklyGoal)}
         </AppText>
       </View>
 
+      {/* This week — the goal's home. Sits above the stat tiles because it is
+          the only figure on this page that is still in play. */}
+      <Card padding="lg" style={styles.weekCard}>
+        <HabitWeekStrip habit={habit} stats={stats} done={done} today={currentDate} />
+      </Card>
+
       {/* Stat tiles */}
       <View style={styles.tiles}>
-        <StatTile icon="flame" tone="#FF9F45" value={`${stats.currentStreak}`} label="day streak" />
-        <StatTile icon="trophy" tone="#E9C16B" value={`${stats.bestStreak}`} label="best streak" />
+        <StatTile
+          icon="flame"
+          tone="#FF9F45"
+          value={`${stats.currentStreak}`}
+          label={quota ? "week streak" : "day streak"}
+        />
+        <StatTile icon="trophy" tone="#E9C16B" value={`${stats.bestStreak}`} label="best" />
         <StatTile icon="stats-chart" tone={habit.color} value={`${stats.last30Pct}%`} label="last 30 days" />
       </View>
 
-      {/* History */}
-      <Card padding="xl" style={{ marginTop: Spacing.md }}>
+      {/* History — no card; the grid sizes itself to the page. */}
+      <View style={styles.historyHead}>
         <AppText variant="headline">History</AppText>
-        <View style={{ marginTop: Spacing.lg, alignItems: "flex-start" }}>
-          <HabitHeatmap
-            weeks={weeks}
-            color={habit.color}
-            cellSize={12}
-            gap={3.5}
-            months={months}
-            dayLabels
-          />
-        </View>
-      </Card>
+        <AppText variant="footnote" color="tertiary">
+          {HISTORY_WEEKS} weeks
+        </AppText>
+      </View>
+      {contentWidth > 0 && (
+        <HabitHeatmap
+          weeks={weeks}
+          color={habit.color}
+          fitWidth={contentWidth}
+          gap={3}
+          months={months}
+          dayLabels
+        />
+      )}
 
       {/* Action */}
       {isManual ? (
@@ -147,7 +187,7 @@ function StatTile({
       <AppText variant="title" style={{ marginTop: Spacing.xs }}>
         {value}
       </AppText>
-      <AppText variant="footnote" color="secondary">
+      <AppText variant="footnote" color="secondary" numberOfLines={1}>
         {label}
       </AppText>
     </Card>
@@ -171,8 +211,9 @@ const styles = StyleSheet.create({
   hero: {
     alignItems: "center",
     marginTop: Spacing.md,
-    marginBottom: Spacing.xxl,
+    marginBottom: Spacing.xl,
   },
+  weekCard: { marginBottom: Spacing.sm },
   tiles: {
     flexDirection: "row",
     gap: Spacing.sm,
@@ -180,6 +221,13 @@ const styles = StyleSheet.create({
   tile: {
     flex: 1,
     alignItems: "center",
+  },
+  historyHead: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    marginTop: Spacing.xxl,
+    marginBottom: Spacing.lg,
   },
   hintRow: {
     flexDirection: "row",

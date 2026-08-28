@@ -50,7 +50,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "pop-cardio-pulse",
     art: { icon: "sunny", hue: "ember" },
   },
   {
@@ -74,7 +73,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "cardio_02", sets: 2, reps: "30 sec" },
     ],
     cooldown: [{ exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" }],
-    suggestedBeatId: "neon-hiit",
     art: { icon: "flash", hue: "violet" },
   },
   {
@@ -97,7 +95,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 2, reps: "30 sec each leg" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "45 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "laptop-outline", hue: "teal" },
   },
 
@@ -130,7 +127,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
     ],
-    suggestedBeatId: "electro-strength",
     art: { icon: "barbell", hue: "brand" },
   },
   {
@@ -161,7 +157,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "bass-boost",
     art: { icon: "home", hue: "brand" },
   },
   {
@@ -192,7 +187,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
       { exerciseId: "flex_05", sets: 1, reps: "5 each side" },
     ],
-    suggestedBeatId: "electro-strength",
     art: { icon: "fitness", hue: "brand" },
   },
   {
@@ -223,7 +217,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
     ],
-    suggestedBeatId: "power-circuit",
     art: { icon: "walk", hue: "gold" },
   },
   {
@@ -253,7 +246,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "funk-motion",
     art: { icon: "trending-up", hue: "gold" },
   },
   {
@@ -284,7 +276,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "electro-strength",
     art: { icon: "barbell-outline", hue: "violet" },
   },
   {
@@ -314,7 +305,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "power-circuit",
     art: { icon: "barbell", hue: "ember" },
   },
   {
@@ -345,7 +335,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
     ],
-    suggestedBeatId: "bass-boost",
     art: { icon: "body", hue: "brand" },
   },
   {
@@ -376,7 +365,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
     ],
-    suggestedBeatId: "electro-strength",
     art: { icon: "fitness", hue: "violet" },
   },
 
@@ -405,7 +393,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "pull_01", sets: 2 },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "45 sec" }],
-    suggestedBeatId: "rhythm-climb",
     art: { icon: "body", hue: "gold" },
   },
   {
@@ -436,7 +423,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
     ],
-    suggestedBeatId: "funk-motion",
     art: { icon: "flame", hue: "gold" },
   },
   {
@@ -463,7 +449,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
     ],
-    suggestedBeatId: "focus-flow",
     art: { icon: "body", hue: "teal" },
   },
 
@@ -492,7 +477,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "house-endurance",
     art: { icon: "pulse", hue: "sky" },
   },
   {
@@ -526,7 +510,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "synth-run",
     art: { icon: "infinite", hue: "brand" },
   },
 
@@ -559,7 +542,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
     ],
-    suggestedBeatId: "peak-energy",
     art: { icon: "flame", hue: "ember" },
   },
   {
@@ -590,7 +572,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "power-circuit",
     art: { icon: "rocket", hue: "ember" },
   },
   {
@@ -620,7 +601,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
     ],
-    suggestedBeatId: "dance-burn",
     art: { icon: "footsteps", hue: "sky" },
   },
   {
@@ -650,7 +630,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
     ],
-    suggestedBeatId: "victory-drive",
     art: { icon: "diamond", hue: "violet" },
   },
 
@@ -675,7 +654,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_02" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "leaf", hue: "teal" },
   },
   {
@@ -701,7 +679,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
     ],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "moon", hue: "teal" },
   },
   {
@@ -724,7 +701,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_04", sets: 2, reps: "60 sec" },
     ],
     cooldown: [{ exerciseId: "flex_05", sets: 1, reps: "5 each side" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "water", hue: "sky" },
   },
 
@@ -752,7 +728,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "cardio_03", sets: 2, reps: "30 sec" },
     ],
     cooldown: [{ exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" }],
-    suggestedBeatId: "pop-cardio-pulse",
     art: { icon: "stopwatch", hue: "ember", pattern: "beams" },
   },
   {
@@ -779,7 +754,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_09", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "funk-motion",
     art: { icon: "cloud", hue: "sky", pattern: "dots" },
   },
   {
@@ -808,7 +782,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_13", sets: 1, reps: "10 each direction" },
       { exerciseId: "flex_15", sets: 1, reps: "30 sec" },
     ],
-    suggestedBeatId: "disco-sprint",
     art: { icon: "hand-right", hue: "rose", pattern: "beams" },
   },
   {
@@ -834,7 +807,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "rhythm-climb",
     art: { icon: "play-circle", hue: "brand", pattern: "rings" },
   },
   {
@@ -864,7 +836,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_09", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
     ],
-    suggestedBeatId: "dance-burn",
     art: { icon: "shuffle", hue: "violet", pattern: "beams" },
   },
   {
@@ -895,7 +866,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "house-endurance",
     art: { icon: "bonfire", hue: "ember", pattern: "rings" },
   },
   {
@@ -922,7 +892,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_13", sets: 1, reps: "10 each direction" },
       { exerciseId: "flex_08", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "dance-burn",
     art: { icon: "happy", hue: "gold", pattern: "dots" },
   },
 
@@ -954,7 +923,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "peak-energy",
     art: { icon: "timer", hue: "midnight", pattern: "beams" },
   },
   {
@@ -989,7 +957,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "power-circuit",
     art: { icon: "grid", hue: "brand", pattern: "dots" },
   },
   {
@@ -1020,7 +987,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_06", sets: 1, reps: "30 sec" },
     ],
-    suggestedBeatId: "neon-hiit",
     art: { icon: "cellular", hue: "teal", pattern: "beams" },
   },
   {
@@ -1050,7 +1016,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "power-circuit",
     art: { icon: "speedometer", hue: "ember", pattern: "rings" },
   },
   {
@@ -1080,7 +1045,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "peak-energy",
     art: { icon: "stats-chart", hue: "violet", pattern: "orbit" },
   },
   {
@@ -1104,7 +1068,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "core_12", sets: 2, reps: "10 each side" },
     ],
     cooldown: [{ exerciseId: "flex_15", sets: 1, reps: "30 sec" }],
-    suggestedBeatId: "neon-hiit",
     art: { icon: "cafe", hue: "gold", pattern: "orbit" },
   },
   {
@@ -1134,7 +1097,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "electro-strength",
     art: { icon: "walk", hue: "forest", pattern: "dots" },
   },
   {
@@ -1159,7 +1121,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "cardio_07", sets: 1, reps: "30 sec" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "40 sec" }],
-    suggestedBeatId: "victory-drive",
     art: { icon: "flag", hue: "slate", pattern: "beams" },
   },
 
@@ -1192,7 +1153,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_15", sets: 1, reps: "30 sec" },
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
     ],
-    suggestedBeatId: "rhythm-climb",
     art: { icon: "link", hue: "teal", pattern: "orbit" },
   },
   {
@@ -1222,7 +1182,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_15", sets: 1, reps: "30 sec" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "bass-boost",
     art: { icon: "hammer", hue: "ember", pattern: "dots" },
   },
   {
@@ -1252,7 +1211,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_15", sets: 1, reps: "30 sec" },
       { exerciseId: "flex_11", sets: 1, reps: "6 each side" },
     ],
-    suggestedBeatId: "electro-strength",
     art: { icon: "construct", hue: "sky", pattern: "rings" },
   },
   {
@@ -1282,7 +1240,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_09", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
     ],
-    suggestedBeatId: "electro-strength",
     art: { icon: "bicycle", hue: "brand", pattern: "beams" },
   },
   {
@@ -1313,7 +1270,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_07", sets: 1, reps: "30 sec each side" },
     ],
-    suggestedBeatId: "bass-boost",
     art: { icon: "body", hue: "forest", pattern: "orbit" },
   },
   {
@@ -1344,7 +1300,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_15", sets: 1, reps: "30 sec" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "electro-strength",
     art: { icon: "barbell", hue: "midnight", pattern: "beams" },
   },
   {
@@ -1374,7 +1329,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_15", sets: 1, reps: "30 sec" },
       { exerciseId: "flex_11", sets: 1, reps: "6 each side" },
     ],
-    suggestedBeatId: "funk-motion",
     art: { icon: "body", hue: "gold", pattern: "rings" },
   },
   {
@@ -1405,7 +1359,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "focus-flow",
     art: { icon: "bed", hue: "slate", pattern: "dots" },
   },
   {
@@ -1437,7 +1390,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_15", sets: 1, reps: "30 sec" },
     ],
-    suggestedBeatId: "electro-strength",
     art: { icon: "medal", hue: "violet", pattern: "rings" },
   },
 
@@ -1463,7 +1415,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "core_01", sets: 2 },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "45 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "shield", hue: "brand", pattern: "rings" },
   },
   {
@@ -1493,7 +1444,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_06", sets: 1, reps: "30 sec" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "funk-motion",
     art: { icon: "shield-half", hue: "rose", pattern: "beams" },
   },
   {
@@ -1520,7 +1470,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_06", sets: 1, reps: "30 sec" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "rhythm-climb",
     art: { icon: "flask", hue: "teal", pattern: "dots" },
   },
   {
@@ -1552,7 +1501,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_06", sets: 1, reps: "30 sec" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "power-circuit",
     art: { icon: "apps", hue: "midnight", pattern: "dots" },
   },
   {
@@ -1579,7 +1527,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_09", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_07", sets: 1, reps: "30 sec each side" },
     ],
-    suggestedBeatId: "focus-flow",
     art: { icon: "body", hue: "sky", pattern: "orbit" },
   },
   {
@@ -1603,7 +1550,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "core_14", sets: 2, reps: "10" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "45 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "heart-circle", hue: "rose", pattern: "rings" },
   },
 
@@ -1636,7 +1582,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "house-endurance",
     art: { icon: "cog", hue: "slate", pattern: "rings" },
   },
   {
@@ -1665,7 +1610,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_09", sets: 1, reps: "30 sec each leg" },
     ],
-    suggestedBeatId: "synth-run",
     art: { icon: "trophy", hue: "gold", pattern: "beams" },
   },
   {
@@ -1698,7 +1642,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "synth-run",
     art: { icon: "layers", hue: "brand", pattern: "dots" },
   },
   {
@@ -1725,7 +1668,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_09", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "focus-flow",
     art: { icon: "hourglass", hue: "ember", pattern: "orbit" },
   },
 
@@ -1757,7 +1699,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_09", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
     ],
-    suggestedBeatId: "power-circuit",
     art: { icon: "sparkles", hue: "violet", pattern: "beams" },
   },
   {
@@ -1787,7 +1728,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_09", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
     ],
-    suggestedBeatId: "victory-drive",
     art: { icon: "star", hue: "midnight", pattern: "rings" },
   },
   {
@@ -1817,7 +1757,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "peak-energy",
     art: { icon: "nuclear", hue: "ember", pattern: "dots" },
   },
 
@@ -1843,7 +1782,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "cardio_12", sets: 1, reps: "6" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "45 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "partly-sunny", hue: "gold", pattern: "rings" },
   },
   {
@@ -1867,7 +1805,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_07", sets: 2 },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "45 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "desktop", hue: "teal", pattern: "dots" },
   },
   {
@@ -1891,7 +1828,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_05" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "45 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "key", hue: "rose", pattern: "orbit" },
   },
   {
@@ -1915,7 +1851,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "hinge_03", sets: 1, reps: "10" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "45 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "accessibility", hue: "forest", pattern: "beams" },
   },
   {
@@ -1939,7 +1874,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "pull_02", sets: 2, reps: "12" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "40 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "body", hue: "sky", pattern: "rings" },
   },
   {
@@ -1968,7 +1902,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "cardio_12", sets: 1, reps: "6" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "expand", hue: "brand", pattern: "orbit" },
   },
 
@@ -1994,7 +1927,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_08", sets: 2 },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 2, reps: "60 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "cloudy-night", hue: "midnight", pattern: "dots" },
   },
   {
@@ -2021,7 +1953,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "refresh-circle", hue: "teal", pattern: "rings" },
   },
   {
@@ -2045,7 +1976,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_02", sets: 2 },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "45 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "walk", hue: "sky", pattern: "beams" },
   },
   {
@@ -2069,7 +1999,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_09", sets: 2 },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "bandage", hue: "rose", pattern: "orbit" },
   },
   {
@@ -2093,7 +2022,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_02", sets: 2, reps: "40 sec each side" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 2, reps: "60 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "rose", hue: "forest", pattern: "rings" },
   },
 
@@ -2128,7 +2056,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "synth-run",
     art: { icon: "alarm", hue: "sky", pattern: "orbit" },
   },
   {
@@ -2159,7 +2086,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_09", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "rhythm-climb",
     art: { icon: "watch", hue: "rose", pattern: "rings" },
   },
   {
@@ -2190,7 +2116,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "funk-motion",
     art: { icon: "reload", hue: "violet", pattern: "dots" },
   },
   {
@@ -2221,7 +2146,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "pop-cardio-pulse",
     art: { icon: "bulb", hue: "gold", pattern: "beams" },
   },
   {
@@ -2252,7 +2176,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_09", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "disco-sprint",
     art: { icon: "repeat", hue: "teal", pattern: "orbit" },
   },
 
@@ -2285,7 +2208,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_10", sets: 1, reps: "30 sec" },
     ],
-    suggestedBeatId: "peak-energy",
     art: { icon: "flame", hue: "ember", pattern: "beams" },
   },
   {
@@ -2316,7 +2238,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_08", sets: 1, reps: "40 sec" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "dance-burn",
     art: { icon: "cog", hue: "violet", pattern: "orbit" },
   },
   {
@@ -2347,7 +2268,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_09", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "neon-hiit",
     art: { icon: "pulse", hue: "brand", pattern: "rings" },
   },
   {
@@ -2378,7 +2298,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_10", sets: 1, reps: "30 sec" },
     ],
-    suggestedBeatId: "victory-drive",
     art: { icon: "pulse", hue: "gold", pattern: "dots" },
   },
   {
@@ -2409,7 +2328,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_08", sets: 1, reps: "40 sec" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "power-circuit",
     art: { icon: "infinite", hue: "ember", pattern: "beams" },
   },
 
@@ -2442,7 +2360,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_06", sets: 1, reps: "30 sec" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "bass-boost",
     art: { icon: "shield", hue: "ember", pattern: "beams" },
   },
   {
@@ -2473,7 +2390,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_08", sets: 1, reps: "40 sec" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "electro-strength",
     art: { icon: "flame", hue: "violet", pattern: "orbit" },
   },
   {
@@ -2504,7 +2420,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_06", sets: 1, reps: "30 sec" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "funk-motion",
     art: { icon: "shield-half", hue: "gold", pattern: "rings" },
   },
   {
@@ -2535,7 +2450,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_11", sets: 1, reps: "6 each side" },
       { exerciseId: "flex_04", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "rhythm-climb",
     art: { icon: "shield", hue: "slate", pattern: "dots" },
   },
   {
@@ -2566,7 +2480,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_08", sets: 1, reps: "40 sec" },
       { exerciseId: "flex_04", sets: 1, reps: "45 sec" },
     ],
-    suggestedBeatId: "focus-flow",
     art: { icon: "body", hue: "teal", pattern: "beams" },
   },
 
@@ -2600,7 +2513,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_09", sets: 1, reps: "30 sec each leg" },
     ],
-    suggestedBeatId: "house-endurance",
     art: { icon: "hourglass", hue: "brand", pattern: "orbit" },
   },
   {
@@ -2632,7 +2544,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_10", sets: 1, reps: "30 sec" },
       { exerciseId: "flex_08", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "rhythm-climb",
     art: { icon: "footsteps", hue: "violet", pattern: "beams" },
   },
   {
@@ -2664,7 +2575,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_02", sets: 1, reps: "30 sec each side" },
     ],
-    suggestedBeatId: "synth-run",
     art: { icon: "infinite", hue: "sky", pattern: "rings" },
   },
   {
@@ -2696,7 +2606,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_09", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_08", sets: 1, reps: "40 sec" },
     ],
-    suggestedBeatId: "disco-sprint",
     art: { icon: "cog", hue: "gold", pattern: "dots" },
   },
   {
@@ -2728,7 +2637,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
       { exerciseId: "flex_10", sets: 1, reps: "30 sec" },
     ],
-    suggestedBeatId: "victory-drive",
     art: { icon: "pulse", hue: "forest", pattern: "orbit" },
   },
 
@@ -2755,7 +2663,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_10", reps: "30 sec" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "45 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "water", hue: "teal", pattern: "orbit" },
   },
   {
@@ -2780,7 +2687,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_02", reps: "30 sec each side" },
     ],
     cooldown: [{ exerciseId: "flex_08", sets: 1, reps: "45 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "accessibility", hue: "sky", pattern: "rings" },
   },
   {
@@ -2805,7 +2711,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_10", reps: "30 sec" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "45 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "body", hue: "violet", pattern: "dots" },
   },
   {
@@ -2830,7 +2735,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_10", reps: "30 sec" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "45 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "sync", hue: "teal", pattern: "beams" },
   },
   {
@@ -2855,7 +2759,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_02", reps: "30 sec each side" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "45 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "expand", hue: "forest", pattern: "orbit" },
   },
 
@@ -2885,7 +2788,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_18", reps: "40 sec each side" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "accessibility", hue: "forest", pattern: "orbit" },
   },
   {
@@ -2913,7 +2815,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_19", reps: "30 sec each side" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "heart", hue: "rose", pattern: "rings" },
   },
   {
@@ -2941,7 +2842,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_08", reps: "50 sec" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "expand", hue: "teal", pattern: "beams" },
   },
   {
@@ -2969,7 +2869,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_09", reps: "30 sec each leg" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "key", hue: "slate", pattern: "dots" },
   },
   {
@@ -2997,7 +2896,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_10", reps: "40 sec" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "accessibility", hue: "midnight", pattern: "orbit" },
   },
 
@@ -3024,7 +2922,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_11", reps: "8 each side" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "refresh", hue: "teal", pattern: "rings" },
   },
   {
@@ -3049,7 +2946,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", reps: "40 sec each leg" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "moon", hue: "slate", pattern: "orbit" },
   },
   {
@@ -3074,7 +2970,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_08", reps: "45 sec" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "moon", hue: "sky", pattern: "dots" },
   },
   {
@@ -3099,7 +2994,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_08", reps: "45 sec" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "snow", hue: "midnight", pattern: "rings" },
   },
   {
@@ -3124,7 +3018,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", reps: "40 sec each leg" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "rainy", hue: "forest", pattern: "beams" },
   },
 
@@ -3151,7 +3044,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_08", reps: "50 sec" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "cloudy", hue: "slate", pattern: "orbit" },
   },
   {
@@ -3176,7 +3068,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_10", reps: "40 sec" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "leaf", hue: "teal", pattern: "rings" },
   },
   {
@@ -3201,7 +3092,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_01", reps: "45 sec each leg" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "bed", hue: "midnight", pattern: "dots" },
   },
   {
@@ -3226,7 +3116,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_08", reps: "50 sec" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "focus-flow",
     art: { icon: "water", hue: "sky", pattern: "beams" },
   },
   {
@@ -3251,7 +3140,6 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_08", reps: "50 sec" },
     ],
     cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "60 sec" }],
-    suggestedBeatId: "cooldown-groove",
     art: { icon: "moon", hue: "forest", pattern: "orbit" },
   },
 ];

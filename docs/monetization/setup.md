@@ -3,6 +3,12 @@
 The end-to-end runbook for turning on subscriptions. Follow it in order: each
 part depends on IDs produced by the one before it.
 
+Welliva sells **two tiers, each monthly or annual**: Plus (the whole app
+unlocked) and Pro (Plus, plus generated plans, insights and uncapped coaching).
+What each one includes is defined once, in
+[services/billing/tiers.ts](../../services/billing/tiers.ts); the storefront is
+[app/(tabs)/upgrade.tsx](../../app/%28tabs%29/upgrade.tsx).
+
 **Read Part 0 first.** There is a Google Play policy that can add ~3 weeks to
 your timeline, and you want to start that clock today rather than discover it
 the week you plan to launch.
@@ -47,16 +53,36 @@ Android package    com.welliva.app
 iOS bundle id      com.welliva.app
 ```
 
-Product structure to create (matches the tier design):
+Product structure to create — **two tiers, each billed monthly or annually**, which
+is exactly what `services/billing/tiers.ts` and the `/upgrade` screen expect:
 
 | Thing | ID | Notes |
 | --- | --- | --- |
-| Play subscription | `welliva_pro` | One subscription, two base plans |
-| Base plan (monthly) | `p1m` | $12.99/mo |
-| Base plan (annual) | `p1y` | $69.99/yr |
-| Offer (trial) | `trial-7d` | 7-day free trial, attached to `p1y` |
-| RevenueCat entitlement | `pro` | The single thing the app checks |
-| RevenueCat offering | `default` | Contains both packages |
+| Play subscription (entry tier) | `welliva_plus` | One subscription, two base plans |
+| Base plan (monthly) | `p1m` | $2.99/mo |
+| Base plan (annual) | `p1y` | $22.99/yr — saves $12.89 (36%) |
+| Play subscription (top tier) | `welliva_pro` | One subscription, two base plans |
+| Base plan (monthly) | `p1m` | $3.50/mo |
+| Base plan (annual) | `p1y` | $35/yr — saves $7.00 (17%) |
+| Offer (trial) | `trial-7d` | 7-day free trial, attached to each `p1y` |
+| RevenueCat entitlement | `plus` | Granted by both `welliva_plus` base plans |
+| RevenueCat entitlement | `pro` | Granted by both `welliva_pro` base plans |
+| RevenueCat offering | `plus` | The two Plus packages |
+| RevenueCat offering | `pro` | The two Pro packages |
+
+These exact amounts must be entered in the console: the app displays the store's
+localized `priceString`, never a hardcoded number. The same figures are mirrored
+in [services/billing/pricing.ts](../../services/billing/pricing.ts) **only** as
+list prices for builds where no offering can load (Expo Go, web, no key) — where
+every buy button is disabled anyway — and `services/__tests__/pricing.test.ts`
+pins the savings arithmetic the plan cards show. Changing a price means changing
+it in the console AND there.
+
+> **Two entitlements, not one with metadata.** The client asks the store two
+> yes/no questions (`plus` active? `pro` active?) and takes the higher — see
+> `tierOf()` in services/billing/Billing.ts. That means a promo SKU, a regional
+> plan or a lifetime product can be added in the console with no app change: just
+> attach it to the right entitlement.
 
 > **The `id:basePlanId` gotcha.** Play's newer subscription model nests base
 > plans under a subscription. RevenueCat therefore identifies these products as
@@ -146,7 +172,11 @@ is green. Work through it — most of the answers are already prepared in
 - Government apps → No
 - Financial features → No
 
-### 1.5 Create the subscription
+### 1.5 Create the subscriptions
+
+Do this **twice** — once for Plus, once for Pro. The two are independent
+subscriptions, each with its own monthly and annual base plan, which is what lets
+Play handle a Plus → Pro upgrade (and its proration) natively.
 
 Play Console → **Monetize → Products → Subscriptions** → **Create subscription**.
 
@@ -154,8 +184,11 @@ Play Console → **Monetize → Products → Subscriptions** → **Create subscr
 
 | Field | Value |
 | --- | --- |
-| Product ID | `welliva_pro` — **permanent, cannot be changed or reused after deletion** |
-| Name | Welliva Pro |
+| Product ID | `welliva_plus` / `welliva_pro` — **permanent, cannot be changed or reused after deletion** |
+| Name | Welliva Plus / Welliva Pro |
+
+Put both subscriptions in the **same subscription group** so Play offers an
+upgrade rather than a second concurrent purchase.
 
 **Base plan 1 — monthly**
 
@@ -163,7 +196,8 @@ Add base plan → ID `p1m`:
 - Type: **Auto-renewing**
 - Billing period: **Monthly**
 - Grace period: 7 days *(keeps a failed-payment user active while the card is retried — meaningfully reduces involuntary churn)*
-- Set price: $12.99 USD, then use **Set prices for other countries** to let Google auto-convert
+- Set price: **$2.99** (Plus) / **$3.50** (Pro) USD, then use **Set prices for
+  other countries** to let Google auto-convert
 
 **Base plan 2 — annual**
 
@@ -171,7 +205,7 @@ Add base plan → ID `p1y`:
 - Type: **Auto-renewing**
 - Billing period: **Yearly**
 - Grace period: 7 days
-- Price: $69.99 USD + auto-convert
+- Price: **$22.99** (Plus) / **$35.00** (Pro) USD + auto-convert
 
 **Offer — the 7-day free trial**
 
@@ -290,10 +324,12 @@ Two keys exist and they are not interchangeable:
 
 ### 3.4 Import the products
 
-**Products → + New** → import from Play, or add manually. Add both, using the
+**Products → + New** → import from Play, or add manually. Add all four, using the
 compound identifiers:
 
 ```
+welliva_plus:p1m
+welliva_plus:p1y
 welliva_pro:p1m
 welliva_pro:p1y
 ```
@@ -301,34 +337,45 @@ welliva_pro:p1y
 If Play returns nothing, the base plans are not active (§1.5) or the credentials
 have not propagated (§2.5).
 
-### 3.5 Create the entitlement
+### 3.5 Create the entitlements
 
-**Entitlements → + New**:
+**Entitlements → + New**, twice:
 
-- Identifier: **`pro`**
-- Description: Full Welliva Pro access
-- **Attach both products** to it.
+| Identifier | Description | Attach |
+| --- | --- | --- |
+| `plus` | Welliva Plus access | `welliva_plus:p1m`, `welliva_plus:p1y` |
+| `pro` | Full Welliva Pro access | `welliva_pro:p1m`, `welliva_pro:p1y` |
 
-This is the only string the app checks. One entitlement covering every paid
-product means adding a lifetime tier or a promo product later requires zero app
-changes.
+These two strings are the only ones the app checks (`PLUS_ENTITLEMENT` /
+`PRO_ENTITLEMENT` in services/billing/config.ts), and **`pro` outranks `plus`**
+when both are momentarily active — which is normal for a few days after an
+upgrade, while the old subscription runs out its paid period.
 
-### 3.6 Create the offering
+Attaching a product to the wrong entitlement is the one mistake here that costs
+money: a Pro product on the `plus` entitlement sells full access at the lower
+price.
 
-**Offerings → + New**:
+### 3.6 Create the offerings
 
-- Identifier: **`default`**
-- Make it the current offering.
+**Offerings → + New**, twice — one per tier. Neither needs to be "current"; the
+app looks them up by identifier.
 
-Add two packages:
-
-| Package type | Product |
-| --- | --- |
-| `$rc_monthly` | `welliva_pro:p1m` |
-| `$rc_annual` | `welliva_pro:p1y` |
+| Offering | Package type | Product |
+| --- | --- | --- |
+| `plus` | `$rc_monthly` | `welliva_plus:p1m` |
+| `plus` | `$rc_annual` | `welliva_plus:p1y` |
+| `pro` | `$rc_monthly` | `welliva_pro:p1m` |
+| `pro` | `$rc_annual` | `welliva_pro:p1y` |
 
 Using RevenueCat's standard package identifiers means their prebuilt paywall
 templates work without configuration.
+
+> **The single-offering alternative.** If you would rather keep one `default`
+> offering holding all four packages, that works too: `getPlanOptions()` falls
+> back to classifying each package by whether its identifier or product id
+> contains `plus` (see `TIER_ID_HINTS`). Anything naming neither tier is treated
+> as Pro. The two-offering layout above is preferred because it cannot be
+> mis-parsed.
 
 ---
 
@@ -403,31 +450,41 @@ and hook `logIn`/`logOut` into
 > Getting identity wrong is the classic subscription bug: a user pays on their
 > phone, signs in on a tablet, and has nothing. Anonymous IDs are device-bound.
 
-### 4.4 Read the entitlement
+### 4.4 Read the tier
+
+This is already built — `services/billing/Billing.ts` reads both entitlements and
+keeps the higher one:
 
 ```ts
 const info = await Purchases.getCustomerInfo();
-const isPro = typeof info.entitlements.active["pro"] !== "undefined";
+const active = info.entitlements.active;
+const tier = active["pro"] ? "pro" : active["plus"] ? "plus" : "free";
 ```
 
-Fits your existing state architecture as a `contexts/domain/useEntitlementState.ts`
-hook alongside the other domain hooks. Cache the last known value in
-AsyncStorage so a paid user opening the app offline is not downgraded — a
-frequent and very annoying bug.
+The result is persisted by `services/billing/entitlement.ts` and hydrated before
+first paint, so a paying user opening the app offline is not downgraded — a
+frequent and very annoying bug. `contexts/BillingContext.tsx` is the React face
+of it.
 
 ### 4.5 The one-line lock that matters
 
-In [services/PlanSync.ts](../../services/PlanSync.ts), the AI/local branch is
-already written. Gate it:
+Feature code never compares tiers itself. It asks:
 
-```diff
-- if (WellivaApi.isConfigured) {
-+ if (WellivaApi.isConfigured && isPro) {
+```ts
+import { allows } from "@/services/billing";
+
+if (WellivaApi.isConfigured && allows("ai-plans")) { … }
 ```
 
-Free users silently fall through to
+`allows()` resolves the feature → tier map in `services/billing/tiers.ts`
+(`FEATURE_MIN_TIER`) and applies the fail-open rule for builds with no
+RevenueCat key. Everything below Pro silently falls through to
 [DietPlanGenerator](../../services/DietPlanGenerator.ts) — a real plan, no dead
 end, no error state.
+
+To move a feature between tiers, edit `FEATURE_MIN_TIER` and nothing else: the
+locks, the copy on the lock cards and the comparison table on `/upgrade` all read
+from it.
 
 ---
 
@@ -438,13 +495,16 @@ end, no error state.
 3. The app must be **downloaded from a Play track at least once** by that
    account, or Play returns "item unavailable." Add the tester to the internal
    testing track and have them accept the opt-in link.
-4. Verify, in order:
-   - Offerings load and show both packages with correct localized prices
-   - Purchase completes and `pro` becomes active
+4. Verify, in order, on `/upgrade`:
+   - Both tiers load, and the Monthly/Annual switch shows correct localized prices
+   - Buying Plus activates `plus`; the screen flips to the current-plan card and
+     then offers only Pro
+   - Upgrading Plus → Pro activates `pro` and the app grants Pro limits
+     immediately, even while `plus` is still active
    - The trial applies on annual, not monthly
-   - **Restore purchases** works after reinstalling
+   - **Restore purchases** works after reinstalling, and names the tier it found
    - Signing in on a second device carries the entitlement across (proves §4.3)
-   - Cancelling in Play revokes access at period end
+   - Cancelling in Play flips the card to "Ends …", and access stops at period end
 5. Watch RevenueCat → **Customer history** — every event should appear there
    within seconds.
 
@@ -455,8 +515,10 @@ Common failures:
 | "Product not found" / empty offerings | Base plan inactive, or you used `welliva_pro` instead of `welliva_pro:p1m` |
 | RevenueCat says credentials invalid | §2.5 propagation — wait up to 36h |
 | "Item unavailable for purchase" | Tester account never installed from a Play track |
-| Purchase works, entitlement never activates | Product not attached to the `pro` entitlement (§3.5) |
+| Purchase works, entitlement never activates | Product not attached to the `plus`/`pro` entitlement (§3.5) |
 | Entitlement lost on reinstall | Identity not tied to Supabase ID (§4.3) |
+| Buying Pro grants Plus limits | Pro products attached to the `plus` entitlement (§3.5) |
+| Only one tier shows on `/upgrade` | Offering identifiers are not `plus` / `pro`, and the package ids don't name a tier either (§3.6) |
 
 ---
 
@@ -470,13 +532,14 @@ can call them directly.
    (`https://back-for-welliva.onrender.com/v1/billing/webhook`), with the
    Authorization header value RevenueCat generates.
 2. The handler verifies that header, reads `app_user_id` (= the Supabase user
-   ID, thanks to §4.3), and writes `is_pro` + `pro_expires_at` onto that user's
-   profile row in Supabase.
-3. The existing `/v1` JWT middleware then checks that column and 402s free users
-   on `/v1/coach/*`, `/v1/diet/generate`, and `/v1/workout/generate`.
+   ID, thanks to §4.3), and writes `tier` (`free` / `plus` / `pro`) +
+   `tier_expires_at` onto that user's profile row in Supabase.
+3. The existing `/v1` JWT middleware then checks that column: free users are 402'd
+   past their daily cap on `/v1/coach/*`, and `/v1/diet/generate` +
+   `/v1/workout/generate` require `pro` (they are the `ai-plans` feature).
 
-This also gives you the free-tier daily message cap (3/day) in the one place a
-user cannot edit.
+This also gives you the per-tier daily message caps (3 / 25 / 100 — mirror
+`TIER_LIMITS` from services/billing/tiers.ts) in the one place a user cannot edit.
 
 Two safeguards worth adding at the same time:
 - **Fail open on webhook lag.** If the webhook is delayed, prefer briefly
@@ -492,15 +555,17 @@ Two safeguards worth adding at the same time:
 - [ ] Four legal placeholders filled and policy hosted publicly
       ([store-submission.md §2–3](../legal/store-submission.md))
 - [ ] Data safety form submitted, including subscription/purchase data
-- [ ] Both base plans **active**; trial offer active on annual
+- [ ] All four base plans **active**; trial offer active on each annual plan
 - [ ] Service account permissions granted and propagated
-- [ ] `pro` entitlement contains both products; `default` offering is current
+- [ ] `plus` and `pro` entitlements each contain their own two products;
+      `plus` and `pro` offerings both exist
 - [ ] RevenueCat keys in all three [eas.json](../../eas.json) profiles
-- [ ] Purchase → restore → cross-device → cancel all verified on a real device
-- [ ] Webhook live; `/v1` rejects free users server-side
-- [ ] Paywall discloses price, period, auto-renewal, and how to cancel —
-      Play rejects paywalls that hide renewal terms
-- [ ] Manage-subscription link in Settings
+- [ ] Purchase → upgrade → restore → cross-device → cancel all verified on a
+      real device
+- [ ] Webhook live; `/v1` rejects free users server-side and holds `ai-plans` to Pro
+- [ ] `/upgrade` discloses price, period, auto-renewal, and how to cancel with
+      the buy button — Play rejects paywalls that hide renewal terms
+- [ ] Manage-subscription link on `/upgrade`
       (`https://play.google.com/store/account/subscriptions`) — required by policy
 - [ ] Promoted to Production and reviewed
 
@@ -512,7 +577,9 @@ Deliberately out of scope here — you asked for the Google side. The App Store
 track is a separate account ($99/**year**), separate product creation in App
 Store Connect, an App-Specific Shared Secret instead of a service-account JSON,
 and Apple's own sandbox tester flow. RevenueCat then serves both platforms from
-the same `pro` entitlement, so **nothing in Part 4 changes** — you add a second
-app in §3.2 and a second API key in §4.2.
+the same `plus` / `pro` entitlements, so **nothing in Part 4 changes** — you add a
+second app in §3.2 and a second API key in §4.2. Create both subscriptions in one
+App Store Connect subscription group, at levels Pro > Plus, so Apple treats the
+Plus → Pro move as an upgrade rather than a second purchase.
 
 Ask when you want that written up.

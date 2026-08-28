@@ -13,27 +13,139 @@ import {
   buildWeightTrend,
   type TrendSeries,
 } from "@/components/charts";
-import { AppText, Card, IconBadge, ProgressGauge, Screen, useColors } from "@/components/ui";
-import { LoadingOverlay } from "@/components/LoadingOverlay";
+import {
+  AnimatedNumber,
+  AppText,
+  Card,
+  IconBadge,
+  ListGroup,
+  ListRow,
+  ProgressBar,
+  Screen,
+  SectionHeader,
+  useColors,
+} from "@/components/ui";
 import { useAuth } from "@/components/SupabaseAuthProvider";
-import { Gradients, Radius, Spacing, alpha } from "@/constants/theme";
+import { Ease } from "@/components/motion/motion";
+import { useIntroReveal } from "@/components/motion/IntroReveal";
+import { Gradients, Motion, Radius, Spacing, alpha } from "@/constants/theme";
 import { useApp } from "@/contexts/AppContext";
 import { useBilling } from "@/contexts/BillingContext";
 import { isHistoryRangeLocked } from "@/services/billing";
+import { ProgressPhotosCard } from "@/fitness/components/ProgressPhotos";
 import { useFitnessProfile } from "@/fitness/hooks/useFitnessProfile";
-import { buildProgressSnapshot } from "@/fitness/services/ProgressService";
-import { pickProgressPhoto } from "@/services/sync/pickAndUpload";
-import { getSignedUrl, listObjects } from "@/services/sync/StorageSync";
+import { buildProgressSnapshot, weekStartOf } from "@/fitness/services/ProgressService";
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import { router } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from "react-native-reanimated";
+import { LinearGradient } from "expo-linear-gradient";
+
+const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"] as const;
+const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+/** Height of the week chart's tallest bar. */
+const BAR_H = 84;
+
+interface DayActivity {
+  date: string;
+  letter: string;
+  name: string;
+  minutes: number;
+  trained: boolean;
+  isToday: boolean;
+  future: boolean;
+}
+
+interface StatFigure {
+  label: string;
+  tone: string;
+  value: number;
+  unit?: string;
+  format?: (n: number) => string;
+}
+
+/** 12480 → "12,480". Hand-rolled so it can't depend on Intl being present. */
+const grouped = (n: number) =>
+  Math.round(n)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+/**
+ * One day of the week chart: a sunken track that fills from the bottom with the
+ * brand ramp, in proportion to the minutes trained. Bars grow in sequence on a
+ * cold-start reveal (UI thread), so the week draws itself left to right.
+ */
+function DayBar({ day, index, peak }: { day: DayActivity; index: number; peak: number }) {
+  const { colors, isDark } = useColors();
+  const reduced = useReducedMotion();
+  const intro = useIntroReveal();
+  // A trained day never draws thinner than a visible stub, however short it was.
+  const target = day.minutes > 0 ? Math.max(0.14, Math.min(1, day.minutes / peak)) : 0;
+
+  const h = useSharedValue(reduced || !intro ? target : 0);
+  useEffect(() => {
+    h.value = reduced
+      ? target
+      : withDelay(
+          index * 60,
+          withTiming(target, { duration: Motion.duration.hero, easing: Ease.decelerate }),
+        );
+  }, [target, index, reduced, h]);
+
+  const fillStyle = useAnimatedStyle(() => ({ height: `${h.value * 100}%` }));
+
+  return (
+    <View
+      style={styles.dayCol}
+      accessible
+      accessibilityLabel={
+        day.trained ? `${day.name}: ${day.minutes} minutes trained` : `${day.name}: rest`
+      }
+    >
+      <View
+        style={[
+          styles.dayTrack,
+          {
+            backgroundColor: isDark ? alpha(colors.text, 0.07) : colors.surfaceSunken,
+            opacity: day.future ? 0.55 : 1,
+          },
+        ]}
+      >
+        <Animated.View style={[styles.dayFill, fillStyle]}>
+          <LinearGradient
+            colors={[...colors.brandGradient]}
+            start={{ x: 0, y: 1 }}
+            end={{ x: 0, y: 0 }}
+            style={StyleSheet.absoluteFill}
+          />
+        </Animated.View>
+      </View>
+      <AppText variant="caption" color={day.isToday ? "brand" : "tertiary"}>
+        {day.letter}
+      </AppText>
+      <View
+        style={[
+          styles.dayDot,
+          day.isToday && { backgroundColor: colors.primary },
+        ]}
+      />
+    </View>
+  );
+}
 
 export default function FitnessProgressScreen() {
   const { colors } = useColors();
   const app = useApp();
   const { profile } = useFitnessProfile();
+  // Progress photos are owner-scoped in Storage, so the gallery needs the uid.
+  const { user } = useAuth();
 
   const snapshot = useMemo(
     () =>
@@ -47,15 +159,15 @@ export default function FitnessProgressScreen() {
   );
 
   const today = app.currentDate;
-  const { hasProAccess, openPaywall } = useBilling();
+  const { tier, openUpgrade } = useBilling();
   const lockedBeyondFree = useCallback(
-    (rangeDays: number) => isHistoryRangeLocked(rangeDays, hasProAccess),
-    [hasProAccess],
+    (rangeDays: number) => isHistoryRangeLocked(rangeDays, tier),
+    [tier],
   );
 
   // Scrubbable trend series — the training story you can drag through.
   // The shortest tab of each card is always free (see isHistoryRangeLocked);
-  // the wider ones are what Pro buys.
+  // the wider ones are what a paid tier buys.
   const minuteSeries = useMemo<TrendSeries[]>(
     () => [
       { key: "8W", label: "8 wk", points: buildWeeklyMinutes(app.workoutLog, today, 8) },
@@ -111,19 +223,65 @@ export default function FitnessProgressScreen() {
 
   const target = profile.daysAvailable.length || 3;
 
-  const stats = [
-    { icon: "barbell", label: "Total workouts", value: `${snapshot.totalWorkouts}` },
-    { icon: "time", label: "This week", value: `${snapshot.thisWeekMinutes} min` },
-    { icon: "calendar", label: "This month", value: `${snapshot.thisMonthMinutes} min` },
-    { icon: "flame", label: "Calories (est.)", value: `${snapshot.totalCalories}` },
+  // The four lifetime/period numbers, as a card-less spec sheet: a colour-keyed
+  // label over one big tabular figure. No tiles, no badges — the numbers carry
+  // themselves, which is what makes a stats block read as considered.
+  const stats: StatFigure[] = [
+    { label: "Total workouts", tone: colors.primary, value: snapshot.totalWorkouts },
+    { label: "Calories burned", tone: colors.calories, value: snapshot.totalCalories, format: grouped },
+    { label: "This week", tone: colors.water, value: snapshot.thisWeekMinutes, unit: "min" },
+    { label: "This month", tone: colors.gold, value: snapshot.thisMonthMinutes, unit: "min" },
   ];
 
   const bests = [
-    { icon: "hourglass-outline", label: "Longest session", value: `${snapshot.personalBests.longestSessionMin} min` },
-    { icon: "repeat-outline", label: "Most reps in a session", value: `${snapshot.personalBests.mostRepsInSession}` },
-    { icon: "podium-outline", label: "Best week", value: `${snapshot.personalBests.bestWeekWorkouts} workouts` },
-    { icon: "flame-outline", label: "Longest streak", value: `${snapshot.personalBests.longestStreakDays} days` },
-  ];
+    { icon: "hourglass-outline", tone: colors.primary, label: "Longest session", value: `${snapshot.personalBests.longestSessionMin} min` },
+    { icon: "repeat-outline", tone: colors.protein, label: "Most reps in a session", value: `${snapshot.personalBests.mostRepsInSession}` },
+    { icon: "podium-outline", tone: colors.gold, label: "Best week", value: `${snapshot.personalBests.bestWeekWorkouts} workouts` },
+    { icon: "flame-outline", tone: colors.calories, label: "Longest streak", value: `${snapshot.personalBests.longestStreakDays} days` },
+  ] as const;
+
+  // Lifetime line under the title — the page should say what it's about before
+  // any chart loads.
+  const lifetime =
+    snapshot.totalMinutes >= 60
+      ? `${Math.round(snapshot.totalMinutes / 60)} h moved`
+      : `${snapshot.totalMinutes} min moved`;
+  const headerSub =
+    snapshot.totalWorkouts > 0
+      ? `${snapshot.totalWorkouts} session${snapshot.totalWorkouts === 1 ? "" : "s"} · ${lifetime}`
+      : "Your first session starts the story";
+
+  const remaining = Math.max(0, target - snapshot.thisWeekWorkouts);
+  const goalPct = Math.round(snapshot.weeklyGoalProgress * 100);
+
+  // The seven days of the current week, each with the minutes actually logged
+  // on it — the shape of the week is the thing a "this week" hero should show,
+  // and no single dial can say WHICH days you trained.
+  const weekDays = useMemo<DayActivity[]>(() => {
+    const start = weekStartOf(today);
+    const base = new Date(`${start}T00:00:00`);
+    return DAY_LETTERS.map((letter, i) => {
+      const d = new Date(base);
+      d.setDate(d.getDate() + i);
+      const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+        d.getDate(),
+      ).padStart(2, "0")}`;
+      const logs = app.workoutLog.filter((l) => l.date === date);
+      return {
+        date,
+        letter,
+        name: DAY_NAMES[i],
+        minutes: logs.reduce((sum, l) => sum + (l.durationMinutes || 0), 0),
+        trained: logs.length > 0,
+        isToday: date === today,
+        future: date > today,
+      };
+    });
+  }, [app.workoutLog, today]);
+
+  // Scale the bars against the week's own peak, with a floor so one short
+  // session doesn't read as a full day.
+  const weekPeak = Math.max(30, ...weekDays.map((d) => d.minutes));
 
   return (
     <Screen
@@ -138,43 +296,113 @@ export default function FitnessProgressScreen() {
           >
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </Pressable>
-          <AppText variant="display">Progress</AppText>
+          <View style={styles.flex}>
+            <AppText variant="display">Progress</AppText>
+            <AppText variant="footnote" color="tertiary" numberOfLines={1}>
+              {headerSub}
+            </AppText>
+          </View>
         </View>
       }
     >
-      {/* Weekly goal hero — the training tachometer */}
-      <Card style={[styles.block, styles.heroCard]} padding="xxl">
-        <AppText variant="caption" color="tertiary" uppercase style={styles.heroEyebrow}>
-          This week
-        </AppText>
-        <ProgressGauge
-          value={snapshot.thisWeekWorkouts}
-          max={target}
-          unit={`of ${target}`}
-          size={244}
-          mini={{ icon: "flame", text: `${snapshot.currentStreakDays}-day streak` }}
+      {/* This week — the count you're chasing, next to the SHAPE of the week.
+          (The old tachometer is gone: a fake instrument dial told you one number
+          in the most decorative way possible. This says the same number in type,
+          then spends the space on something a dial can't do — which days you
+          actually trained, and how long.) */}
+      <View style={styles.section}>
+        <SectionHeader
+          title="This week"
+          subtitle={
+            snapshot.thisWeekWorkouts >= target
+              ? "Weekly goal complete — outstanding."
+              : `${remaining} more ${remaining === 1 ? "workout" : "workouts"} to hit your goal`
+          }
+          weight="700"
         />
-        <AppText variant="subhead" color="secondary" align="center" style={styles.heroSub}>
-          {snapshot.thisWeekWorkouts >= target
-            ? "Weekly goal complete — outstanding."
-            : `${target - snapshot.thisWeekWorkouts} more ${
-                target - snapshot.thisWeekWorkouts === 1 ? "workout" : "workouts"
-              } to redline your goal.`}
-        </AppText>
-      </Card>
 
-      {/* Stat grid */}
-      <View style={styles.grid}>
-        {stats.map((s) => (
-          <Card key={s.label} style={styles.statCard} padding="lg">
-            <IconBadge name={s.icon as never} tone={colors.primary} size={34} />
-            <AppText variant="headline" style={styles.statValue}>
-              {s.value}
-            </AppText>
+        <View style={styles.weekHero}>
+          <View style={styles.weekFigure}>
+            <View style={styles.weekCount}>
+              <AnimatedNumber
+                value={snapshot.thisWeekWorkouts}
+                variant="displayLg"
+                style={styles.weekBig}
+              />
+              <AppText variant="title" color="tertiary" style={styles.weekOf}>
+                /{target}
+              </AppText>
+            </View>
             <AppText variant="caption" color="tertiary" uppercase>
-              {s.label}
+              {snapshot.thisWeekWorkouts === 1 ? "workout" : "workouts"}
             </AppText>
-          </Card>
+            {snapshot.currentStreakDays > 0 && (
+              <View
+                style={[styles.streakChip, { backgroundColor: alpha(colors.calories, 0.14) }]}
+              >
+                <Ionicons name="flame" size={12} color={colors.calories} />
+                <AppText variant="caption" color={colors.calories} numberOfLines={1}>
+                  {snapshot.currentStreakDays}-day streak
+                </AppText>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.weekChart}>
+            {weekDays.map((d, i) => (
+              <DayBar key={d.date} day={d} index={i} peak={weekPeak} />
+            ))}
+          </View>
+        </View>
+
+        <ProgressBar
+          progress={snapshot.weeklyGoalProgress}
+          gradient={colors.brandGradient}
+          height={6}
+          style={styles.weekTrack}
+        />
+        <View style={styles.weekFoot}>
+          <AppText variant="footnote" color="tertiary">
+            {snapshot.thisWeekMinutes} min active
+          </AppText>
+          <AppText variant="footnote" color="tertiary">
+            {goalPct}% of weekly goal
+          </AppText>
+        </View>
+      </View>
+
+      {/* Key numbers — CARD-LESS spec sheet: dot-keyed labels over big tabular
+          figures, two per row, a single hairline between the rows. */}
+      <View style={styles.section}>
+        {[stats.slice(0, 2), stats.slice(2, 4)].map((row, r) => (
+          <React.Fragment key={r}>
+            {r > 0 && <View style={[styles.figureRule, { backgroundColor: colors.divider }]} />}
+            <View style={styles.figureRow}>
+              {row.map((stat) => (
+                <View key={stat.label} style={styles.figureCell}>
+                  <View style={styles.figureHead}>
+                    <View style={[styles.figureDot, { backgroundColor: stat.tone }]} />
+                    <AppText variant="caption" color="tertiary" uppercase numberOfLines={1}>
+                      {stat.label}
+                    </AppText>
+                  </View>
+                  <View style={styles.figureValue}>
+                    <AnimatedNumber
+                      value={stat.value}
+                      variant="title"
+                      format={stat.format}
+                      style={styles.figureNum}
+                    />
+                    {!!stat.unit && (
+                      <AppText variant="footnote" color="tertiary">
+                        {stat.unit}
+                      </AppText>
+                    )}
+                  </View>
+                </View>
+              ))}
+            </View>
+          </React.Fragment>
         ))}
       </View>
 
@@ -188,36 +416,19 @@ export default function FitnessProgressScreen() {
           series={minuteSeries}
           initialRangeKey="8W"
           footnote="Active minutes per week — drag across to inspect any week."
-          onLockedRangePress={() => openPaywall("history")}
+          onLockedRangePress={() => openUpgrade("history")}
         />
       </View>
 
-      {/* Personal bests */}
-      <Card style={styles.block}>
-        <AppText variant="headline" style={styles.sectionTitle}>
-          Personal bests
-        </AppText>
-        {bests.map((b, i) => (
-          <View
-            key={b.label}
-            style={[
-              styles.bestRow,
-              i < bests.length - 1 && {
-                borderBottomColor: colors.divider,
-                borderBottomWidth: StyleSheet.hairlineWidth,
-              },
-            ]}
-          >
-            <Ionicons name={b.icon as never} size={18} color={colors.primary} />
-            <AppText variant="body" style={styles.flex}>
-              {b.label}
-            </AppText>
-            <AppText variant="callout" color="brand">
-              {b.value}
-            </AppText>
-          </View>
-        ))}
-      </Card>
+      {/* Personal bests — the records, in the app's standard row language. */}
+      <View style={styles.section}>
+        <SectionHeader title="Personal bests" subtitle="Your ceiling so far" weight="700" />
+        <ListGroup>
+          {bests.map((b) => (
+            <ListRow key={b.label} icon={b.icon} tone={b.tone} title={b.label} value={b.value} />
+          ))}
+        </ListGroup>
+      </View>
 
       {/* Session volume — reps completed per session */}
       <View style={styles.block}>
@@ -246,7 +457,7 @@ export default function FitnessProgressScreen() {
             format={(v) => v.toFixed(1)}
             neutralDelta
             footnote="Every logged weigh-in. The trend beats any single number."
-            onLockedRangePress={() => openPaywall("history")}
+            onLockedRangePress={() => openUpgrade("history")}
           />
         </View>
       ) : latestWeight ? (
@@ -276,96 +487,16 @@ export default function FitnessProgressScreen() {
       ) : null}
 
       {/* Progress photos — the change the numbers can't show */}
-      <ProgressPhotosCard />
+      <ProgressPhotosCard userId={user?.id} />
     </Screen>
-  );
-}
-
-/**
- * Progress-photo gallery — the user's private body/progress shots, uploaded to
- * the `progress-photos` bucket and read back through short-lived signed URLs.
- * Self-contained (owns its own fetch/upload state) and fail-soft: an unconfigured
- * backend or a cancelled picker simply leaves the empty state in place.
- */
-function ProgressPhotosCard() {
-  const { colors } = useColors();
-  const { user } = useAuth();
-  const [photos, setPhotos] = useState<{ path: string; url: string }[]>([]);
-  const [uploading, setUploading] = useState(false);
-
-  const load = useCallback(async () => {
-    if (!user?.id) {
-      setPhotos([]);
-      return;
-    }
-    const paths = await listObjects("progress-photos", user.id);
-    const resolved = await Promise.all(
-      paths.map(async (path) => ({
-        path,
-        url: (await getSignedUrl("progress-photos", path)) ?? "",
-      })),
-    );
-    setPhotos(resolved.filter((p) => p.url));
-  }, [user?.id]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const add = async () => {
-    if (!user?.id || uploading) return;
-    setUploading(true);
-    try {
-      const path = await pickProgressPhoto(user.id);
-      if (path) await load();
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  return (
-    <Card style={styles.block}>
-      <View style={styles.photosHeader}>
-        <AppText variant="headline" style={styles.flex}>
-          Progress photos
-        </AppText>
-        <Pressable
-          onPress={add}
-          disabled={uploading}
-          accessibilityLabel="Add progress photo"
-          hitSlop={8}
-          style={[styles.addPhotoBtn, { backgroundColor: alpha(colors.primary, 0.14) }]}
-        >
-          <Ionicons name="add" size={20} color={colors.primary} />
-        </Pressable>
-      </View>
-
-      {photos.length > 0 ? (
-        <View style={styles.photoGrid}>
-          {photos.map((p) => (
-            <Image
-              key={p.path}
-              source={{ uri: p.url }}
-              style={styles.photo}
-              contentFit="cover"
-              transition={150}
-            />
-          ))}
-        </View>
-      ) : (
-        <AppText variant="footnote" color="tertiary">
-          Add a photo now and again — seeing the change is the best motivation.
-        </AppText>
-      )}
-
-      <LoadingOverlay visible={uploading} message="Uploading photo…" />
-    </Card>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   block: { marginBottom: Spacing.xl },
+  /** A card-less section: content on the page, separated by air alone. */
+  section: { marginBottom: Spacing.xxxl },
 
   headerBar: {
     flexDirection: "row",
@@ -375,52 +506,59 @@ const styles = StyleSheet.create({
   },
   backBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
 
-  heroCard: { alignItems: "center" },
-  heroEyebrow: { alignSelf: "center", marginBottom: Spacing.lg },
-  heroSub: { marginTop: Spacing.lg, maxWidth: 280 },
-
-  grid: {
+  // This-week hero
+  weekHero: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Spacing.md,
-    marginBottom: Spacing.xl,
+    alignItems: "flex-end",
+    gap: Spacing.xl,
+    marginTop: Spacing.xs,
   },
-  statCard: {
-    flexBasis: "47%",
-    flexGrow: 1,
-    alignItems: "flex-start",
-    gap: 4,
-  },
-  statValue: { marginTop: Spacing.sm },
-
-  sectionTitle: { marginBottom: 4 },
-
-  bestRow: {
+  weekFigure: { alignItems: "flex-start", paddingBottom: 2 },
+  weekCount: { flexDirection: "row", alignItems: "baseline", gap: 2 },
+  weekBig: { fontWeight: "800", fontVariant: ["tabular-nums"], letterSpacing: -1 },
+  weekOf: { fontWeight: "700", fontVariant: ["tabular-nums"] },
+  streakChip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: Spacing.md,
-    paddingVertical: Spacing.md,
+    gap: 4,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: Radius.pill,
+    marginTop: Spacing.md,
   },
+  weekChart: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: Spacing.xs,
+  },
+  dayCol: { flex: 1, alignItems: "center", gap: 6 },
+  dayTrack: {
+    width: "100%",
+    maxWidth: 22,
+    height: BAR_H,
+    borderRadius: Radius.sm,
+    overflow: "hidden",
+    justifyContent: "flex-end",
+  },
+  dayFill: { width: "100%", overflow: "hidden" },
+  dayDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: "transparent" },
+  weekTrack: { marginTop: Spacing.xl },
+  weekFoot: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: Spacing.sm,
+  },
+
+  // Key numbers (card-less spec sheet)
+  figureRow: { flexDirection: "row", alignItems: "flex-start" },
+  figureCell: { flex: 1, gap: Spacing.xs, paddingVertical: Spacing.lg },
+  figureHead: { flexDirection: "row", alignItems: "center", gap: 6 },
+  figureDot: { width: 7, height: 7, borderRadius: 4 },
+  figureValue: { flexDirection: "row", alignItems: "baseline", gap: 4 },
+  figureNum: { fontWeight: "800", fontVariant: ["tabular-nums"] },
+  figureRule: { height: StyleSheet.hairlineWidth },
 
   weightRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
   weightNums: { alignItems: "flex-end" },
-
-  photosHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: Spacing.md,
-  },
-  addPhotoBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm },
-  photo: {
-    width: "31.5%",
-    aspectRatio: 3 / 4,
-    borderRadius: Radius.md,
-  },
 });

@@ -18,12 +18,24 @@ export const HABIT_COLORS = [
   "#A8E05F", // lime
 ] as const;
 
-/** Ionicons glyphs offered in the picker — health/diet/fitness-leaning. */
+/**
+ * Ionicons glyphs offered in the picker — health/diet/fitness-leaning.
+ *
+ * KEEP THE COUNT A MULTIPLE OF SIX. The picker solves a six-column grid
+ * (app/habit/new.tsx), so a set that isn't a whole number of rows leaves a
+ * ragged last row — the exact thing that grid was rebuilt to fix. 36 = six rows.
+ */
 export const HABIT_ICONS = [
   "walk",
   "barbell",
   "bicycle",
   "fitness",
+  // The sports row. A tracker that can only offer a dumbbell quietly tells
+  // people it isn't for their Tuesday five-a-side.
+  "football",
+  "tennisball",
+  "golf",
+  "basketball",
   "water",
   "restaurant",
   "nutrition",
@@ -50,4 +62,6 @@ export const HABIT_ICONS = [
   "cash",
   "time",
   "checkmark-circle",
+  "trophy",
+  "sparkles",
 ] as const;

@@ -1,5 +1,8 @@
 /**
- * FITNESS LIBRARY — searchable workout collection + the exercise browser.
+ * EXPLORE — searchable workout collection + the exercise browser.
+ *
+ * Titled "Explore" in the UI; the route stays /fitness/library so existing links
+ * keep working.
  *
  * Two lenses on one screen:
  *   • Workouts — the authored Welliva sessions (search + stacked filters)
@@ -377,7 +380,7 @@ export default function FitnessLibraryScreen() {
           <Ionicons name="chevron-back" size={24} color={colors.text} />
         </Pressable>
         <AppText variant="display" style={styles.flex}>
-          Library
+          Explore
         </AppText>
         <View style={[styles.segment, { backgroundColor: colors.surfaceMuted }]}>
           {(["workouts", "exercises"] as ViewMode[]).map((mode) => {

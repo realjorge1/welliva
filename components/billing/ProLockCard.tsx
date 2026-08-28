@@ -2,9 +2,14 @@
  * ProLockCard — the in-place upgrade prompt.
  *
  * The standard way a locked feature presents itself: a calm card that explains
- * what Pro adds, in the spot where the feature would have been. It replaces the
- * feature rather than blocking the screen, so a free user can still read and use
- * everything around it.
+ * what the paid tier adds, in the spot where the feature would have been. It
+ * replaces the feature rather than blocking the screen, so a free user can still
+ * read and use everything around it.
+ *
+ * The button names the tier this particular lock opens — "See Welliva Plus" on a
+ * habit cap, "See Welliva Pro" on generated plans — because sending someone to a
+ * two-tier storefront without saying which side they need is how a storefront
+ * loses the sale it just earned.
  *
  * Never use an alert or a full-screen interruption for a lock. The user was
  * mid-task; the ask should be something they can ignore and come back to.
@@ -16,6 +21,7 @@ import React from "react";
 import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 
 import { useBilling } from "@/contexts/BillingContext";
+import { featureMinTier, TIER_NAME } from "@/services/billing";
 import { LOCK_COPY, type LockId } from "./lockCopy";
 
 export function ProLockCard({
@@ -33,7 +39,7 @@ export function ProLockCard({
   style?: StyleProp<ViewStyle>;
 }) {
   const { colors } = useColors();
-  const { openPaywall } = useBilling();
+  const { openUpgrade } = useBilling();
   const copy = LOCK_COPY[lock];
 
   return (
@@ -52,11 +58,11 @@ export function ProLockCard({
       </AppText>
 
       <Button
-        label="See Welliva Pro"
+        label={`See ${TIER_NAME[featureMinTier(lock)]}`}
         size={compact ? "sm" : "md"}
         icon="arrow-forward"
         iconRight
-        onPress={() => openPaywall(lock)}
+        onPress={() => openUpgrade(lock)}
       />
     </Card>
   );

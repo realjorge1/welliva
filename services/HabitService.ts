@@ -127,16 +127,65 @@ function shiftDate(dateStr: string, deltaDays: number): string {
   return toLocalDateString(d);
 }
 
+/** Monday of the week containing `dateStr`. Weeks are Mon–Sun app-wide. */
+export function weekStartOf(dateStr: string): string {
+  return shiftDate(dateStr, -wellivaDay(dateStr));
+}
+
+/** Completions inside the Mon–Sun week that `dateStr` falls in. */
+export function weekCount(done: Set<string>, dateStr: string): number {
+  const start = weekStartOf(dateStr);
+  let n = 0;
+  for (let i = 0; i < 7; i++) if (done.has(shiftDate(start, i))) n++;
+  return n;
+}
+
 /**
- * Streaks + 30-day rate. Current streak walks back from today; today itself
- * being not-yet-done doesn't break the streak (the day isn't over), it just
- * doesn't count. Unscheduled days are skipped over transparently.
+ * The earliest date this habit's history can meaningfully start from — its
+ * creation date, unless completions were somehow logged before it (a restored
+ * backup, an edited seed), in which case the data wins.
+ */
+function firstRelevantDate(habit: Habit, done: Set<string>): string {
+  const earliestDone = [...done].sort()[0];
+  return earliestDone && earliestDone < habit.createdAt ? earliestDone : habit.createdAt;
+}
+
+/**
+ * Does this habit still want a tick today?
+ *
+ * Weekday habits: is today one of their days. GOAL habits: only while the
+ * week's quota is unmet — a 4×/week habit finished on Thursday leaves Friday
+ * genuinely free, and the day's summary would be lying if it still asked for
+ * it. Already ticked today always counts, so the summary's "done" and "total"
+ * move together.
+ */
+export function isDueToday(habit: Habit, done: Set<string>, today: string): boolean {
+  if (habit.weeklyGoal == null) return isScheduled(habit, today);
+  if (done.has(today)) return true;
+  return weekCount(done, today) < habit.weeklyGoal;
+}
+
+/**
+ * Streaks + 30-day rate, in whichever unit the habit is actually measured in.
+ *
+ * Two engines behind one shape: weekday habits streak in DAYS against their
+ * schedule, goal habits streak in WEEKS against their quota. Both extend the
+ * same courtesy to the period in progress — today not being ticked yet, or this
+ * week's quota not being filled yet, never breaks a streak, because the period
+ * isn't over.
  */
 export function computeStats(
   habit: Habit,
   done: Set<string>,
   today: string,
 ): HabitStats {
+  return habit.weeklyGoal != null
+    ? goalStats(habit, done, today, habit.weeklyGoal)
+    : scheduleStats(habit, done, today);
+}
+
+/** The weekday engine: streaks counted in scheduled days. */
+function scheduleStats(habit: Habit, done: Set<string>, today: string): HabitStats {
   const doneToday = done.has(today);
 
   // Current streak
@@ -159,9 +208,7 @@ export function computeStats(
   }
 
   // Best streak — single pass from the earliest relevant date to today.
-  const earliestDone = [...done].sort()[0];
-  const start =
-    earliestDone && earliestDone < habit.createdAt ? earliestDone : habit.createdAt;
+  const start = firstRelevantDate(habit, done);
   const from =
     start > shiftDate(today, -MAX_LOOKBACK_DAYS)
       ? start
@@ -191,7 +238,97 @@ export function computeStats(
   }
   const last30Pct = scheduled > 0 ? Math.round((completed / scheduled) * 100) : 0;
 
-  return { currentStreak, bestStreak: best, last30Pct, doneToday };
+  // This week, for the week strip: only scheduled days can be asked for, so
+  // only they are counted — otherwise a Mon/Wed/Fri habit ticked on a Sunday
+  // would read "4 of 3".
+  const monday = weekStartOf(today);
+  let weekDone = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = shiftDate(monday, i);
+    if (isScheduled(habit, d) && done.has(d)) weekDone++;
+  }
+
+  return {
+    currentStreak,
+    bestStreak: best,
+    last30Pct,
+    doneToday,
+    weekDone,
+    weekTarget: Math.min(habit.days.length, 7),
+    streakUnit: "day",
+  };
+}
+
+/**
+ * The quota engine: streaks counted in WEEKS that met the goal.
+ *
+ * The week a habit was created in is exempt from breaking a streak — someone
+ * who sets "5× a week" on a Saturday cannot possibly hit it, and punishing them
+ * for the calendar is not feedback, it's a bug with a UI.
+ */
+function goalStats(
+  habit: Habit,
+  done: Set<string>,
+  today: string,
+  rawGoal: number,
+): HabitStats {
+  const goal = Math.max(1, Math.min(7, Math.round(rawGoal)));
+  const thisWeek = weekStartOf(today);
+  const maxWeeks = Math.floor(MAX_LOOKBACK_DAYS / 7);
+  // Same horizon the weekday engine uses — a habit older than the lookback
+  // window is scanned from the edge of it, not from its creation date.
+  const scanFloor = weekStartOf(shiftDate(today, -MAX_LOOKBACK_DAYS));
+  const created = weekStartOf(firstRelevantDate(habit, done));
+  const firstWeek = created > scanFloor ? created : scanFloor;
+
+  // Current streak — walk back week by week. The week in progress counts once
+  // the quota is filled and is skipped (not broken) while it isn't.
+  let currentStreak = 0;
+  for (let i = 0, cursor = thisWeek; i < maxWeeks && cursor >= firstWeek; i++) {
+    const met = weekCount(done, cursor) >= goal;
+    if (met) currentStreak++;
+    else if (cursor !== thisWeek && cursor !== firstWeek) break;
+    else if (cursor === firstWeek) break; // partial first week — stop, don't punish
+    cursor = shiftDate(cursor, -7);
+  }
+
+  // Best streak — forward pass over the same weeks.
+  let best = 0;
+  let run = 0;
+  for (let cursor = firstWeek; cursor <= thisWeek; cursor = shiftDate(cursor, 7)) {
+    if (weekCount(done, cursor) >= goal) {
+      run++;
+      if (run > best) best = run;
+    } else if (cursor !== thisWeek && cursor !== firstWeek) {
+      run = 0;
+    }
+  }
+  if (currentStreak > best) best = currentStreak;
+
+  // Last 30 days, against the quota's pro-rata share of that window. Capped at
+  // 100 — beating your own goal is a good week, not a broken percentage.
+  const start = firstRelevantDate(habit, done);
+  let days = 0;
+  let completed = 0;
+  for (let i = 0; i < 30; i++) {
+    const d = shiftDate(today, -i);
+    if (d < start) continue;
+    days++;
+    if (done.has(d)) completed++;
+  }
+  const expected = (goal * days) / 7;
+  const last30Pct =
+    expected > 0 ? Math.min(100, Math.round((completed / expected) * 100)) : 0;
+
+  return {
+    currentStreak,
+    bestStreak: best,
+    last30Pct,
+    doneToday: done.has(today),
+    weekDone: weekCount(done, today),
+    weekTarget: goal,
+    streakUnit: "week",
+  };
 }
 
 /**
@@ -205,9 +342,13 @@ export function buildHeatWeeks(
   today: string,
   weeks: number,
 ): HeatWeek[] {
-  const earliestDone = [...done].sort()[0];
-  const firstRelevant =
-    earliestDone && earliestDone < habit.createdAt ? earliestDone : habit.createdAt;
+  const firstRelevant = firstRelevantDate(habit, done);
+
+  // A GOAL habit has no missed days — it only has a week that landed or didn't,
+  // and which particular days you used is your business. So no cell is ever
+  // marked "scheduled and skipped"; the grid shows the hits and stays quiet
+  // about the rest, instead of painting five accusatory squares a week.
+  const quota = habit.weeklyGoal != null;
 
   // Monday of the current week
   const monday = shiftDate(today, -wellivaDay(today));
@@ -220,7 +361,7 @@ export function buildHeatWeeks(
       col.push({
         date,
         done: done.has(date),
-        scheduled: isScheduled(habit, date),
+        scheduled: quota ? false : isScheduled(habit, date),
         outside: date > today || date < firstRelevant,
       });
     }

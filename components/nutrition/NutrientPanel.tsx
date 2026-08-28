@@ -27,6 +27,13 @@
  * hues the rings and charts use elsewhere, so a number here reads as the same
  * quantity the user already recognises from Home.
  *
+ * ── TWO SURFACES ────────────────────────────────────────────────────────────
+ * `surface="card"` (default) plates the panel; `surface="bare"` drops the box
+ * entirely for screens where the panel is the page rather than one block among
+ * carded siblings. Only the wrapper and the title's weight change — see the
+ * prop. Everything between them is the same component either way, so the two
+ * mounts can't drift apart.
+ *
  * ── COLOURS ─────────────────────────────────────────────────────────────────
  * Every colour comes from `useColors()`. Nothing here is a literal, and nothing
  * passes a raw string to AppText's `color`. An earlier version passed
@@ -68,6 +75,23 @@ export interface NutrientPanelProps {
   subtitle?: string;
   /** Start with the micronutrient section open. */
   defaultExpanded?: boolean;
+  /**
+   * How the panel is mounted.
+   *
+   *   • `"card"` (default) — the standard Card surface. Right when the panel is
+   *     one block among siblings that are also cards, where the box is what
+   *     says "this is the total, separate from the items above it".
+   *   • `"bare"` — no surface, no padding of its own. For a screen where the
+   *     panel IS the page at that point: a card there just draws a second frame
+   *     inside the one the screen already has, and costs the label a chunk of
+   *     width it has better uses for. The title drops to the app's section-label
+   *     style so it reads as a heading ON the page rather than as a card's own
+   *     title.
+   *
+   * The panel's internals don't change either way — the split bar, the macro
+   * cells, the %DV bars and the label rules are the data, not decoration.
+   */
+  surface?: "card" | "bare";
 }
 
 const CONFIDENCE_TONE: Record<
@@ -97,8 +121,10 @@ export function NutrientPanel({
   title,
   subtitle,
   defaultExpanded = false,
+  surface = "card",
 }: NutrientPanelProps) {
   const { colors } = useColors();
+  const bare = surface === "bare";
   const [noteOpen, setNoteOpen] = useState(false);
   const [showAll, setShowAll] = useState(defaultExpanded);
   const [showSources, setShowSources] = useState(false);
@@ -136,19 +162,41 @@ export function NutrientPanel({
   const energy = macros.map((m) => (panel[m.key] ?? 0) * KCAL_PER_G[m.key]);
   const energyTotal = energy.reduce((a, b) => a + b, 0);
 
-  return (
-    <Card padding="xl">
+  const body = (
+    <>
+      {/* Bare: the section-label treatment the rest of the app gives a heading
+          on the page ("HOW MUCH", "LOG IT AS"), with the portion it describes
+          set opposite it on the same line. Carded: the panel's own title, which
+          has to carry the block on its own because there's a box around it. */}
       {title ? (
-        <View style={styles.header}>
-          <AppText variant="headline" weight="700">
-            {title}
-          </AppText>
-          {subtitle ? (
-            <AppText variant="footnote" color="tertiary">
-              {subtitle}
+        bare ? (
+          <View style={styles.bareHeader}>
+            <AppText variant="caption" color="tertiary" uppercase>
+              {title}
             </AppText>
-          ) : null}
-        </View>
+            {subtitle ? (
+              <AppText
+                variant="caption"
+                color="tertiary"
+                numberOfLines={1}
+                style={styles.bareSubtitle}
+              >
+                {subtitle}
+              </AppText>
+            ) : null}
+          </View>
+        ) : (
+          <View style={styles.header}>
+            <AppText variant="headline" weight="700">
+              {title}
+            </AppText>
+            {subtitle ? (
+              <AppText variant="footnote" color="tertiary">
+                {subtitle}
+              </AppText>
+            ) : null}
+          </View>
+        )
       ) : null}
 
       {/* Confidence — stated before the numbers, not after them. Tappable so the
@@ -353,8 +401,10 @@ export function NutrientPanel({
             : null}
         </>
       ) : null}
-    </Card>
+    </>
   );
+
+  return bare ? <View>{body}</View> : <Card padding="xl">{body}</Card>;
 }
 
 /**
@@ -423,6 +473,18 @@ function NutrientRow({
 
 const styles = StyleSheet.create({
   header: { marginBottom: Spacing.md, gap: 2 },
+  // `marginLeft` matches the inset every other section label on a bare screen
+  // sits at — four points off is small enough to look like a mistake and large
+  // enough to see.
+  bareHeader: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+    marginLeft: Spacing.xs,
+  },
+  bareSubtitle: { flexShrink: 1, textAlign: "right" },
   chip: {
     flexDirection: "row",
     alignItems: "center",

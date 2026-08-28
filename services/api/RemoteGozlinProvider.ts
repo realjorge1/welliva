@@ -33,10 +33,11 @@ export const GOZLIN_PROMPT_VERSION = "2026-07-26.1";
  * reads null as "go deterministic" and never touches the network.
  */
 export const coachTransport: CoachTransport | null = isApiConfigured
-  ? async ({ messages, signal, onDelta }) => {
+  ? async ({ messages, signal, onDelta, mode }) => {
       const res = await WellivaApi.coachTurn({
         messages,
         promptVersion: GOZLIN_PROMPT_VERSION,
+        mode,
         onDelta,
         signal,
       });

@@ -1,8 +1,8 @@
 /**
  * CELEBRATION SERVICE — one unlock moment, many sources.
  *
- * Achievements, monthly-challenge completions, and goal/chapter milestones all
- * deserve a celebration, but they're different data shapes. This normalizes each
+ * Achievements, coach-noticed moments, and goal/chapter milestones all deserve
+ * a celebration, but they're different data shapes. This normalizes each
  * into one `Celebration` the global host (components/AchievementCelebration)
  * renders — so a new celebratable event is one builder away, not a new modal.
  *
@@ -16,16 +16,15 @@
  */
 
 import { Ionicons } from "@expo/vector-icons";
+import { Palette } from "../constants/theme";
+import type { Moment } from "./MomentEngine";
 import {
   TIER_META,
   type AchievementDef,
   type AchievementSummary,
   type AchievementTier,
 } from "./AchievementService";
-import { periodLabel, type ChallengeDef } from "./ChallengeService";
-import type { Trophy } from "./TournamentService";
-
-export type CelebrationKind = "achievement" | "challenge" | "chapter" | "trophy";
+export type CelebrationKind = "achievement" | "chapter" | "moment";
 
 export interface CelebrationCTA {
   label: string;
@@ -104,43 +103,6 @@ export function celebrationFromAchievement(
   };
 }
 
-export function celebrationFromChallenge(def: ChallengeDef): Celebration {
-  return {
-    id: `chal:${def.id}`,
-    kind: "challenge",
-    eyebrow: "CHALLENGE COMPLETE",
-    title: def.title,
-    description: def.description,
-    icon: def.icon,
-    accent: def.accent,
-    badgeIcon: "ribbon",
-    badgeLabel: `Monthly Challenge · +${def.points} pts`,
-    intensity: 0.92,
-  };
-}
-
-/**
- * A won-month Trophy → a full-fanfare celebration. Trophies are rare (one per
- * month, max) and only ever earned, so they always go all-in regardless of
- * maturity. Accent is the trophy's tier color; the medallion gradient, confetti
- * palette, and glow all follow it.
- */
-export function celebrationForTrophy(trophy: Trophy): Celebration {
-  const month = periodLabel(trophy.periodKey).split(" ")[0];
-  return {
-    id: `trophy:${trophy.id}`,
-    kind: "trophy",
-    eyebrow: "TROPHY EARNED",
-    title: trophy.title,
-    description: `You kept pace with ${trophy.rivalName} all month and finished strong. This trophy is yours for good.`,
-    icon: trophy.icon,
-    accent: trophy.accent,
-    badgeIcon: "trophy",
-    badgeLabel: `Consistency League · ${month}`,
-    intensity: 1,
-  };
-}
-
 export function celebrationForChapter(opts: {
   chapter: number;
   goalLabel: string;
@@ -158,5 +120,40 @@ export function celebrationForChapter(opts: {
     badgeLabel: "A new chapter awaits",
     intensity: 1,
     cta: { label: "Begin next chapter", route: "/new-chapter", icon: "arrow-forward" },
+  };
+}
+
+/**
+ * A coach-noticed moment → a celebration.
+ *
+ * Deliberately quieter than an achievement (0.72 rather than a tier base), and
+ * deliberately NOT dialled down by maturity. The maturity dial exists because a
+ * veteran has seen the same bronze badge a hundred times — but a moment is
+ * defined against that user's own history, so a seasoned user's moment is by
+ * construction rarer and more meaningful than a newcomer's, not less. Damping
+ * it would silence exactly the people it is most true for.
+ *
+ * The eyebrow is the coach speaking rather than the system announcing, which is
+ * the whole difference between this and a badge: "GOZLIN NOTICED" is somebody
+ * paying attention, "ACHIEVEMENT UNLOCKED" is a vending machine.
+ */
+export function celebrationFromMoment(moment: Moment): Celebration {
+  const TONE: Record<Moment["tone"], string> = {
+    gold: Palette.gold,
+    flame: Palette.brand,
+    water: Palette.water,
+    success: Palette.positive,
+  };
+  return {
+    id: moment.id,
+    kind: "moment",
+    eyebrow: "GOZLIN NOTICED",
+    title: moment.title,
+    description: moment.line,
+    icon: moment.icon,
+    accent: TONE[moment.tone],
+    badgeIcon: "eye",
+    badgeLabel: "From your own history",
+    intensity: 0.72,
   };
 }

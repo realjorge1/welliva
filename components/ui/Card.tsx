@@ -1,7 +1,9 @@
 /**
  * Card — the standard surface. One look, used everywhere.
- *   • Dark mode: a translucent pane of glass over the black canvas (depth from
- *     translucency + a hairline border, never a drop shadow).
+ *   • Dark mode: a pale sky-blue pane of frosted glass over the black canvas
+ *     (depth from the light wash + a hairline border, never a drop shadow).
+ *     The surface tokens ARE that wash (see SKY_WASH in constants/theme), so
+ *     the card keeps only a whisper of translucency on top of them.
  *   • Light mode: a soft neutral light-gray panel on the white page — children
  *     render dark-on-light exactly like the rest of the page (no inversion).
  */
@@ -61,7 +63,7 @@ export function Card({
   const base: StyleProp<ViewStyle> = [
     {
       backgroundColor: isDark
-        ? alpha(surfaceTone, 0.66)
+        ? alpha(surfaceTone, 0.8)
         : elevated
           ? LightCard.elevated
           : LightCard.base,

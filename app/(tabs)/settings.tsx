@@ -1,10 +1,30 @@
 /**
- * SETTINGS — appearance, goals, nutrition, account and data controls.
+ * SETTINGS — focus, goals, nutrition, reminders, account and data controls.
  *
- * Reached from the gear button in the Profile header (`/settings`, or
- * `/settings?edit=1` to open the bio editor directly). Lives outside the tab
- * navigator so it reads as a focused, full-screen settings page. Every control
- * here is wired to real app state — no cosmetic toggles.
+ * A menu destination inside the `(tabs)` shell (the group never appears in a
+ * path, so this file is still `/settings`; `/settings?edit=1` opens the bio
+ * editor straight away). Every control here is wired to real app state — no
+ * cosmetic toggles.
+ *
+ * ── HOW THE PAGE IS BUILT, AND WHY ──────────────────────────────────────────
+ *
+ * It used to be nine identically-weighted sections — headline, card, headline,
+ * card — several of which held a single row. Everything shouted at the same
+ * volume, so nothing led, and the page opened on a radio list rather than on
+ * anything about *you*. Three changes fixed that, and they're worth keeping:
+ *
+ *  1. A SUMMARY STRIP AT THE TOP. Settings really answers three questions —
+ *     what am I tracking, what am I paying, is my data safe — and all three
+ *     used to live in different sections, one of them last on the page. They're
+ *     the masthead now: read-only, because a row that's a status *and* a
+ *     shortcut teaches people to tap things to find out what they mean.
+ *  2. GROUP LABELS, NOT SECTION HEADLINES. A quiet uppercase kicker lets the
+ *     controls carry the page. Nine 18pt headlines made the eye stop nine times
+ *     on the way to a switch.
+ *  3. THE ONE-ROW SECTIONS ARE GONE. Plan, About, Privacy and Data were four
+ *     groups holding five rows between them; they're two groups now, and the
+ *     two irreversible actions were pulled out into a `Danger zone` framed in
+ *     the error colour — visibly a different kind of place, which is the point.
  */
 
 import {
@@ -19,10 +39,10 @@ import {
   Pill,
   Reveal,
   Screen,
-  SectionHeader,
   SegmentedControl,
   Stepper,
   useColors,
+  useKeyboardInset,
 } from "@/components/ui";
 import { ScreenTopBar } from "@/components/navigation";
 import { useTheme } from "@/components/ThemeContext";
@@ -39,12 +59,8 @@ import {
   ReauthenticationError,
 } from "@/services/account/AccountDeletion";
 import { useBilling } from "@/contexts/BillingContext";
-import {
-  getDevProOverride,
-  MANAGE_SUBSCRIPTION_URL,
-  resetUsage,
-  setDevProOverride,
-} from "@/services/billing";
+import { TIER_NAME } from "@/services/billing";
+import { bumpDataEpoch } from "@/services/sync/dataEpoch";
 import { fullPushSweep } from "@/services/sync/SyncEngine";
 import { getActiveUserId, purgeAppData } from "@/services/sync/UserScope";
 import { describeSyncStatus, useSyncStatus } from "@/services/sync/useSyncStatus";
@@ -58,27 +74,74 @@ import {
 } from "@/models/user";
 import { Equipment } from "@/models/workout";
 import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
 import Constants from "expo-constants";
 import * as Haptics from "@/utils/haptics";
 import { useMealPlan } from "@/contexts/MealPlanContext";
 import { TRACKING_MODE_OPTIONS, tracksDiet } from "@/models/trackingMode";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   TextInput,
   View,
 } from "react-native";
+import Animated, {
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 /** Generic {value,label} option lists for the editor's chip groups. */
 type Opt<T extends string> = { value: T; label: string };
+
+type DangerId = "reset" | "delete";
+
+/**
+ * An irreversible action, together with the confirmation it cannot be run
+ * without.
+ *
+ * `confirm` is REQUIRED by the type and `run` is only ever called by
+ * `DangerConfirmDialog` — so "a Danger zone action always confirms first" is a
+ * property of the code, not a convention someone has to remember when they add
+ * the third one. A row rendered from this shape can do exactly one thing when
+ * tapped: open the dialog.
+ */
+interface DangerAction {
+  id: DangerId;
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle: string;
+  confirm: {
+    heading: string;
+    lead: string;
+    /** Named consequences. "All your data" is the phrasing people discount. */
+    bullets: string[];
+    /** A caveat under the bullets — not another consequence. */
+    footnote?: string;
+    /** Typed verbatim to arm the button. Uppercase, so it can't be muscle memory. */
+    phrase: string;
+    cta: string;
+    /** Ask for the account password too: intent AND identity. */
+    needsPassword: boolean;
+  };
+  /** Runs only from inside the confirmation. Receives the typed password. */
+  run: (password: string) => Promise<void>;
+  /** Turn a thrown error into an inline correction; null → the generic alert. */
+  inlineError?: (error: unknown) => string | null;
+  /** What to say when it failed and nothing happened. */
+  failure: { title: string; body: string };
+}
 
 const ACTIVITY_LEVELS: Opt<string>[] = [
   { value: "sedentary", label: "Sedentary" },
@@ -256,7 +319,38 @@ const MEALS_PER_DAY_OPTIONS = [
   { value: 4, label: "4 meals" },
 ];
 
+/**
+ * THE THREE NUMBERS THE WHOLE ENGINE IS BUILT ON, and the range each has to be
+ * inside for the answer to mean anything.
+ *
+ * These used to be `parseInt(v) || 0` straight into the bio, which had two
+ * consequences that both ended up in the user's calorie target: clearing the
+ * field wrote a literal 0 (and `calculateNutritionTargets` was then computing a
+ * BMR for a zero-kilogram person), and `parseInt` quietly truncated 72.5 kg to
+ * 72 even though every other weight in the app carries a decimal. Save is
+ * blocked while any of them is outside its range, so a half-typed field can no
+ * longer be committed by tapping "Save" a beat too early.
+ */
+const BIO_LIMITS = {
+  age: { label: "Age", unit: "years", min: 13, max: 100, decimals: false },
+  heightCm: { label: "Height", unit: "cm", min: 100, max: 250, decimals: false },
+  weightKg: { label: "Weight", unit: "kg", min: 30, max: 300, decimals: true },
+} as const;
+
+type BioNumberKey = keyof typeof BIO_LIMITS;
+const BIO_NUMBER_KEYS = Object.keys(BIO_LIMITS) as BioNumberKey[];
+
 const APP_VERSION = Constants.expoConfig?.version ?? "1.0.0";
+/**
+ * The build, alongside the version. Two TestFlight builds of 1.0.0 are
+ * indistinguishable without it, which is exactly when someone is asking a
+ * tester "which build are you on?".
+ */
+const APP_BUILD = (() => {
+  if (Platform.OS === "ios") return Constants.expoConfig?.ios?.buildNumber;
+  const code = Constants.expoConfig?.android?.versionCode;
+  return code == null ? undefined : String(code);
+})();
 
 /** How each OS permission state reads in the Reminders section. */
 const REMINDER_STATUS: Record<
@@ -289,6 +383,14 @@ function formatLastSync(iso: string | null): string {
   return days === 1 ? "Synced yesterday" : `Synced ${days} days ago`;
 }
 
+/** Text → number, or null when the field can't be read as one yet. */
+function parseNum(text: string, decimals: boolean): number | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const n = decimals ? Number(trimmed) : parseInt(trimmed, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 export default function SettingsScreen() {
   const { colors } = useColors();
   const { themeMode, setThemeMode } = useTheme();
@@ -307,31 +409,46 @@ export default function SettingsScreen() {
   } = useProfile();
   const params = useLocalSearchParams<{ edit?: string }>();
 
-  const [showEditModal, setShowEditModal] = useState(params.edit === "1");
+  const [showEditModal, setShowEditModal] = useState(false);
   const [editingBio, setEditingBio] = useState(userBio);
+  /**
+   * Age / height / weight are held as TEXT while the editor is open, and only
+   * become numbers on save. A number can't represent "the user has cleared this
+   * field and is about to retype it", which is why the old version wrote a 0.
+   */
+  const [numText, setNumText] = useState<Record<BioNumberKey, string>>({
+    age: "",
+    heightCm: "",
+    weightKg: "",
+  });
   const [isSaving, setIsSaving] = useState(false);
   const reminders = useReminderPermission();
   const [testState, setTestState] = useState<"idle" | "sending" | "sent">("idle");
+  // Cleared on unmount: the reset is scheduled several seconds out (the test
+  // notification is deliberately delayed so the phone can be locked), which is
+  // long enough for the user to have left the screen.
+  const testTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The "here's what I changed for you" recap shown after a save completes.
   const [changeSummary, setChangeSummary] = useState<BioChangeSummary | null>(
     null,
   );
-  // Account deletion. Its own modal rather than an Alert: this is the one
-  // irreversible action in the app, and Alert.prompt (the only native way to
-  // ask for typed input) is iOS-only — an Android user would get a two-tap
-  // "Delete" on a permanent action. See handleDeleteAccount.
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState("");
-  const [deletePassword, setDeletePassword] = useState("");
-  const [deleting, setDeleting] = useState(false);
-  // Shown inline under the password field rather than as an Alert: a wrong
-  // password is a correction, not an incident, and an Alert would dismiss the
-  // sheet the user is mid-way through filling in.
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  // Subscription. `billing` also drives which row the section shows.
+  // THE DANGER ZONE'S ONLY STATE: which declared action is being confirmed, and
+  // the answers so far. A row cannot do anything but put its id in here — see
+  // DANGER_ACTIONS below for why the confirmation can't be skipped.
+  const [pendingDanger, setPendingDanger] = useState<DangerId | null>(null);
+  const [confirmText, setConfirmText] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [running, setRunning] = useState(false);
+  // Shown inline under the field rather than as an Alert: a wrong password is a
+  // correction, not an incident, and an Alert would dismiss the dialog the user
+  // is mid-way through filling in.
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  // Billing is read, never managed, from here: the plan, its renewal date,
+  // "restore purchases" and the tier switch all live on /upgrade now. What
+  // Settings still needs it for is the cloud-backup row below, which has to say
+  // whether backup is on and, when it isn't, point at the one screen that can
+  // change that.
   const billing = useBilling();
-  const [restoring, setRestoring] = useState(false);
-  const [devTier, setDevTier] = useState<boolean | null>(() => getDevProOverride());
   // Meals-per-day writes through updateUserBio, which regenerates the day's
   // meals before it resolves. Hold the tapped value locally so the control moves
   // under the finger instead of sitting on the old number until the plan lands.
@@ -341,54 +458,12 @@ export default function SettingsScreen() {
     setEditingBio(userBio);
   }, [userBio]);
 
-  // The dev override is restored from disk during billing hydration, which
-  // finishes after this screen's first render — so re-read it once that lands.
-  useEffect(() => {
-    if (__DEV__ && !billing.isHydrating) setDevTier(getDevProOverride());
-  }, [billing.isHydrating]);
-
-  /**
-   * Restore purchases. Store-required, and it must give an answer either way —
-   * silence after tapping "Restore" reads as a broken app to someone who has
-   * genuinely paid and is trying to get their subscription back.
-   */
-  const handleRestorePurchases = async () => {
-    if (restoring) return;
-    setRestoring(true);
-    try {
-      const result = await billing.restore();
-      if (result.isPro) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-          () => {},
-        );
-        Alert.alert("Welcome back", "Your Welliva Pro subscription is active again.");
-      } else if (!result.ok) {
-        Alert.alert(
-          "Couldn't restore",
-          result.message ??
-            "We couldn't reach the store. Check your connection and try again.",
-        );
-      } else {
-        Alert.alert(
-          "Nothing to restore",
-          "No active subscription was found for the store account signed in on this device.",
-        );
-      }
-    } finally {
-      setRestoring(false);
-    }
-  };
-
-  /** Dev tier switch: real → free → pro → real. Also clears the day's meters. */
-  const handleCycleDevTier = async () => {
-    const next = devTier === null ? false : devTier === false ? true : null;
-    setDevTier(next);
-    await setDevProOverride(next);
-    // Reset the coach/photo counters too, so flipping to Free hands you a clean
-    // 3 messages rather than whatever you'd already spent as Pro.
-    await resetUsage();
-    Haptics.selectionAsync().catch(() => {});
-  };
+  useEffect(
+    () => () => {
+      if (testTimer.current) clearTimeout(testTimer.current);
+    },
+    [],
+  );
 
   const waterGoal =
     userGoals.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500;
@@ -406,6 +481,21 @@ export default function SettingsScreen() {
       : null;
   /** Nutrition only earns a targets panel when nutrition is actually tracked. */
   const dietTracked = tracksDiet(trackingMode);
+  const focus =
+    TRACKING_MODE_OPTIONS.find((o) => o.mode === trackingMode) ??
+    TRACKING_MODE_OPTIONS[TRACKING_MODE_OPTIONS.length - 1];
+
+  /** The three numeric bio fields, parsed, plus whether each is usable. */
+  const numValues = useMemo(() => {
+    const out = {} as Record<BioNumberKey, number | null>;
+    for (const key of BIO_NUMBER_KEYS) {
+      const limits = BIO_LIMITS[key];
+      const n = parseNum(numText[key], limits.decimals);
+      out[key] = n != null && n >= limits.min && n <= limits.max ? n : null;
+    }
+    return out;
+  }, [numText]);
+  const bioValid = BIO_NUMBER_KEYS.every((key) => numValues[key] != null);
 
   /** Toggle a value in an array field, keeping it tidy (no dupes). */
   const toggleIn = <T,>(list: T[] | undefined, value: T): T[] => {
@@ -415,11 +505,52 @@ export default function SettingsScreen() {
       : [...arr, value];
   };
 
+  /**
+   * Open the bio editor with a fresh copy of the profile. Seeding the text
+   * fields here (rather than in an effect on `userBio`) is what stops a cloud
+   * profile arriving mid-edit from yanking the digits out from under the
+   * cursor.
+   */
+  const openEditor = () => {
+    setEditingBio(userBio);
+    setNumText({
+      age: userBio?.age ? String(userBio.age) : "",
+      heightCm: userBio?.heightCm ? String(userBio.heightCm) : "",
+      weightKg: userBio?.weightKg ? String(userBio.weightKg) : "",
+    });
+    setShowEditModal(true);
+  };
+
+  // `/settings?edit=1` — documented, and now actually honoured. Reading the
+  // param only in a `useState` initialiser meant it worked on a cold start and
+  // silently did nothing every other time, because this screen is a `(tabs)`
+  // destination that stays mounted once visited.
+  //
+  // THE PARAM IS CONSUMED, not just read. Profile's pencil pushes `edit=1`
+  // every time, so on the second tap the param's VALUE hasn't changed — the
+  // effect wouldn't re-run and the pencil would look broken from the second
+  // press onward. Clearing it here is what makes the next `edit=1` a change
+  // again. Setting it to "" rather than opening a loop: the effect re-runs
+  // once on the cleared value and falls straight out.
+  useEffect(() => {
+    if (params.edit !== "1") return;
+    openEditor();
+    router.setParams({ edit: "" });
+    // openEditor is recreated each render; depending on it would reopen the
+    // modal the user just closed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.edit]);
+
   const handleSaveBio = async () => {
-    if (!editingBio) return;
+    if (!editingBio || !bioValid || isSaving) return;
     setIsSaving(true);
     try {
-      const summary = await updateUserBio(editingBio);
+      const summary = await updateUserBio({
+        ...editingBio,
+        age: numValues.age as number,
+        heightCm: numValues.heightCm as number,
+        weightKg: numValues.weightKg as number,
+      });
       setShowEditModal(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => {},
@@ -436,7 +567,7 @@ export default function SettingsScreen() {
 
   const handleWaterGoal = (delta: number) => {
     const next = Math.min(WATER_MAX, Math.max(WATER_MIN, waterGoal + delta));
-    if (next !== waterGoal) updateGoals({ dailyWaterMl: next });
+    if (next !== waterGoal) void updateGoals({ dailyWaterMl: next });
   };
 
   const handleWorkoutTarget = (delta: number) => {
@@ -444,7 +575,7 @@ export default function SettingsScreen() {
       WORKOUT_MAX,
       Math.max(WORKOUT_MIN, workoutTarget + delta),
     );
-    if (next !== workoutTarget) updateGoals({ weeklyWorkoutsTarget: next });
+    if (next !== workoutTarget) void updateGoals({ weeklyWorkoutsTarget: next });
   };
 
   /**
@@ -519,7 +650,11 @@ export default function SettingsScreen() {
     }
 
     setTestState("sent");
-    setTimeout(() => setTestState("idle"), result.delaySeconds * 1000 + 2000);
+    if (testTimer.current) clearTimeout(testTimer.current);
+    testTimer.current = setTimeout(
+      () => setTestState("idle"),
+      result.delaySeconds * 1000 + 2000,
+    );
   };
 
   /** Drain the outbox on demand. The one manual lever over a silent system. */
@@ -571,265 +706,378 @@ export default function SettingsScreen() {
     ]);
   };
 
-  /** The word the user must type. Uppercase so it cannot be muscle-memory. */
-  const DELETE_PHRASE = "DELETE";
   /**
-   * Google accounts have no password to re-enter. Asking for one would lock
-   * them out of deleting their own account — the exact failure this flow exists
-   * to prevent — so for them the live OAuth session IS the identity proof.
+   * THE DANGER ZONE, DECLARED.
+   *
+   * Every irreversible action lives in this list, and the list is the only
+   * thing the Danger zone renders. That is the point: a row is built from a
+   * `DangerAction`, whose `run` is reachable ONLY through
+   * `DangerConfirmDialog`, and the type makes `confirm` required. There is no
+   * shape a future danger row can take that fires straight from `onPress` —
+   * the confirmation isn't a habit anyone has to remember, it's the only wiring
+   * that exists.
+   *
+   * WHY THIS ISN'T `Alert.alert`. Reset used to confirm through a native Alert,
+   * which is the weakest confirmation available to us and not one we can rely
+   * on: `Alert` is unimplemented on React Native Web, and `Alert.prompt` — the
+   * only native way to ask for typed input — is iOS-only, so an Android user
+   * got a two-tap destroy on a permanent action. A dialog we own gives both
+   * actions the same friction on every platform, and lets the confirmation
+   * NAME what goes rather than saying "all your data", which people
+   * under-estimate and then discover the loss later.
    */
-  const needsPassword = accountHasPassword(user);
-  const canConfirmDelete =
-    deleteConfirmText.trim().toUpperCase() === DELETE_PHRASE &&
-    (!needsPassword || deletePassword.length > 0) &&
-    !deleting;
+  const dangerActions = useMemo<DangerAction[]>(
+    () => [
+      {
+        id: "reset",
+        icon: "refresh-circle",
+        title: "Reset this device",
+        subtitle: syncStatus.cloudDisabled
+          ? "Erase everything here and start over at onboarding"
+          : "Erase this phone's copy — your cloud backup stays",
+        confirm: {
+          heading: "Reset this device?",
+          // THE COPY IS TIER-AWARE because this has never been able to touch
+          // the cloud, and the login reconcile adopts the remote profile
+          // whenever there is no local one — which, right after a wipe, is
+          // always. On Plus/Pro the profile comes back at the next sign-in.
+          lead: syncStatus.cloudDisabled
+            ? "Nothing here is backed up, so this cannot be undone. Erased from this phone:"
+            : "You'll start again at onboarding. Erased from this phone:",
+          bullets: [
+            "Your profile, goals and health details",
+            "Every meal, workout, weight and water log",
+            "Your streaks, achievements and habits",
+            "Anything Gozlin remembers about you",
+          ],
+          footnote: syncStatus.cloudDisabled
+            ? undefined
+            : "Your cloud backup is NOT touched — signing back in restores your profile. To erase the account itself, use Delete account.",
+          phrase: "RESET",
+          cta: "Erase and start over",
+          needsPassword: false,
+        },
+        // `bumpDataEpoch` re-keys the provider subtree, which is what makes the
+        // wipe real: purging storage alone left every provider holding the data
+        // in memory. Purge first — the remount re-reads storage immediately, so
+        // bumping first would just reload what we were about to delete. With
+        // storage empty AuthWrapper routes to onboarding on its own, so there is
+        // nothing to navigate to by hand.
+        run: async () => {
+          // Prefix-scan purge across BOTH namespaces. The old @welliva-only
+          // filter left every @gozlin_* memory key behind on a "reset".
+          await purgeAppData();
+          bumpDataEpoch();
+        },
+        failure: {
+          title: "Couldn't reset this device",
+          body: "Something went wrong and nothing was erased. Please try again.",
+        },
+      },
+      {
+        id: "delete",
+        icon: "person-remove-outline",
+        title: "Delete account",
+        subtitle: "Permanently erase your account and all data, everywhere",
+        confirm: {
+          heading: "Delete your account?",
+          lead: "This cannot be undone. We'll permanently erase:",
+          bullets: [
+            "Your profile, goals and health details",
+            "Every meal, workout, weight and water log",
+            "Your streaks, achievements and habits",
+            "Progress photos and anything Gozlin remembers",
+          ],
+          phrase: "DELETE",
+          cta: "Delete my account",
+          // IDENTITY, on top of intent. The typed word proves the user meant
+          // it; the password proves it's their account — without it an unlocked
+          // phone left on a desk is enough to erase someone's whole health
+          // history. Google accounts have no password to re-enter, and asking
+          // for one would lock them out of deleting their own account, so for
+          // them the live OAuth session IS the identity proof.
+          needsPassword: accountHasPassword(user),
+        },
+        // The account is gone and the session with it. Don't route manually —
+        // clearing the session makes AuthWrapper redirect to /sign-in, and
+        // racing it here would push a route onto a tree being torn down.
+        run: (password) => deleteAccount(password),
+        // A failed password check is not a failed deletion — nothing was
+        // touched. Keep the user in the dialog with the field cleared so they
+        // can retype, and say nothing about the account, because there is
+        // nothing to say.
+        inlineError: (error) =>
+          error instanceof ReauthenticationError ? error.message : null,
+        // `deleteAccount` only throws while the account still EXISTS, so it is
+        // honest — and important — to say nothing was deleted. Telling someone
+        // their data might be half-gone when it is fully intact would be worse
+        // than the failure itself.
+        failure: {
+          title: "Couldn't delete your account",
+          body:
+            "Something went wrong and your account has NOT been deleted. " +
+            "Check your connection and try again — if it keeps failing, email " +
+            `${LEGAL_CONTACT_EMAIL} and we'll do it for you.`,
+        },
+      },
+    ],
+    [syncStatus.cloudDisabled, user, deleteAccount],
+  );
 
-  const closeDeleteModal = () => {
-    if (deleting) return; // never yank the sheet out mid-teardown
-    setShowDeleteModal(false);
-    setDeleteConfirmText("");
-    setDeletePassword("");
-    setDeleteError(null);
+  const danger = dangerActions.find((a) => a.id === pendingDanger) ?? null;
+  const canConfirmDanger =
+    !!danger &&
+    !running &&
+    confirmText.trim().toUpperCase() === danger.confirm.phrase &&
+    (!danger.confirm.needsPassword || confirmPassword.length > 0);
+
+  /** Open a confirmation. The ONLY thing a danger row's onPress may do. */
+  const askDanger = (id: DangerId) => {
+    setPendingDanger(id);
+    setConfirmText("");
+    setConfirmPassword("");
+    setConfirmError(null);
   };
 
-  const handleDeleteAccount = async () => {
-    if (!canConfirmDelete) return;
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      await deleteAccount(deletePassword);
-      // The account is gone and the session with it. Don't route manually —
-      // clearing the session makes AuthWrapper redirect to /sign-in, and racing
-      // it here would push a route onto a tree that is being torn down.
-      setShowDeleteModal(false);
-      setDeleteConfirmText("");
-      setDeletePassword("");
-    } catch (error) {
-      setDeleting(false);
+  const closeDanger = () => {
+    if (running) return; // never yank the dialog out mid-teardown
+    setPendingDanger(null);
+    setConfirmText("");
+    setConfirmPassword("");
+    setConfirmError(null);
+  };
 
-      // A failed password check is not a failed deletion — nothing was touched.
-      // Keep the user in the sheet with the field cleared so they can retype,
-      // and say nothing about the account, because there is nothing to say.
-      if (error instanceof ReauthenticationError) {
-        setDeletePassword("");
-        setDeleteError(error.message);
+  const runDanger = async () => {
+    // Re-checked here and not just on the button's `disabled`: this is the last
+    // line before something irreversible, and a disabled prop is a rendering
+    // detail, not a guarantee.
+    if (!danger || !canConfirmDanger) return;
+    setRunning(true);
+    setConfirmError(null);
+    try {
+      await danger.run(confirmPassword);
+      setPendingDanger(null);
+      setConfirmText("");
+      setConfirmPassword("");
+    } catch (error) {
+      setRunning(false);
+      const inline = danger.inlineError?.(error) ?? null;
+      if (inline) {
+        setConfirmPassword("");
+        setConfirmError(inline);
         return;
       }
-
-      console.error("Error deleting account:", error);
-      // deleteAccount only throws while the account still EXISTS, so it is
-      // honest — and important — to say nothing was deleted. Telling someone
-      // their data might be half-gone when it is fully intact would be worse
-      // than the failure itself.
-      Alert.alert(
-        "Couldn't delete your account",
-        "Something went wrong and your account has NOT been deleted. " +
-          "Check your connection and try again — if it keeps failing, email " +
-          `${LEGAL_CONTACT_EMAIL} and we'll do it for you.`,
-      );
+      console.error(`Danger action "${danger.id}" failed:`, error);
+      Alert.alert(danger.failure.title, danger.failure.body);
+      return;
     }
+    setRunning(false);
   };
 
-  const handleResetData = () => {
-    Alert.alert(
-      "Reset All Data",
-      "This will erase all your data and return to onboarding. This cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Reset",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              // Prefix-scan purge across BOTH namespaces. The old @welliva-only
-              // filter left every @gozlin_* memory key behind on a "reset".
-              await purgeAppData();
-              router.replace("/");
-            } catch (error) {
-              console.error("Error resetting data:", error);
-              Alert.alert("Error", "Failed to reset data.");
-            }
-          },
-        },
-      ],
-    );
-  };
+  /* ── Masthead facts ────────────────────────────────────────────────────── */
+  const planLabel = billing.isSubscriber
+    ? TIER_NAME[billing.entitlement.tier]
+    : "Free";
+  const backup: {
+    icon: keyof typeof Ionicons.glyphMap;
+    label: string;
+    tone: string;
+  } = syncStatus.cloudDisabled
+    ? { icon: "phone-portrait", label: "This device", tone: colors.textTertiary }
+    : syncStatus.state === "synced"
+      ? { icon: "cloud-done", label: "Backed up", tone: colors.success }
+      : syncStatus.state === "offline"
+        ? { icon: "cloud-offline", label: "Offline", tone: colors.warning }
+        : syncStatus.state === "error"
+          ? { icon: "alert-circle", label: "Needs a hand", tone: colors.error }
+          : { icon: "cloud-upload", label: "Saving…", tone: colors.warning };
 
   const header = <ScreenTopBar title="Settings" style={styles.headerRow} />;
 
   return (
     <>
       <Screen header={header}>
+        {/* ── Masthead. The three questions this page exists to answer, read
+            off the same state the sections below let you change. */}
+        <Reveal index={0} stagger={45}>
+          <Card padding="lg" style={styles.masthead}>
+            <MastStat
+              icon={focus.icon as keyof typeof Ionicons.glyphMap}
+              label="Focus"
+              value={focus.title}
+              tone={colors.primary}
+            />
+            <View style={[styles.mastRule, { backgroundColor: colors.divider }]} />
+            <MastStat
+              icon={billing.isSubscriber ? "diamond" : "diamond-outline"}
+              label="Plan"
+              value={planLabel}
+              tone={colors.gold}
+            />
+            <View style={[styles.mastRule, { backgroundColor: colors.divider }]} />
+            <MastStat
+              icon={backup.icon}
+              label="Backup"
+              value={backup.label}
+              tone={backup.tone}
+            />
+          </Card>
+        </Reveal>
+
         {/* What the app is for — gates which domains are planned, scored and
             kept in history. The untracked side isn't hidden, it's untracked:
             you can still work out or look up a meal, you just don't get graded
-            on it. See models/trackingMode.ts. */}
-        <Reveal index={0}>
+            on it. See models/trackingMode.ts.
+
+            Three tiles rather than three radio rows: the modes are peers, and
+            the explainer below carries the consequence of whichever one is on,
+            which is the only place that copy was ever readable. */}
+        <Reveal index={1} stagger={45}>
           <View style={styles.section}>
-            <SectionHeader
-              title="Your focus"
-              subtitle="What Welliva plans and tracks for you"
-            />
-            <ListGroup>
-              {TRACKING_MODE_OPTIONS.map((opt) => {
-                const active = trackingMode === opt.mode;
-                return (
-                  <ListRow
+            <GroupLabel label="Your focus" />
+            <Card padding="lg">
+              <View
+                style={styles.focusRow}
+                accessibilityRole="radiogroup"
+                accessibilityLabel="What Welliva plans and tracks for you"
+              >
+                {TRACKING_MODE_OPTIONS.map((opt) => (
+                  <FocusTile
                     key={opt.mode}
                     icon={opt.icon as keyof typeof Ionicons.glyphMap}
-                    tone={active ? colors.primary : colors.textTertiary}
-                    title={opt.title}
-                    subtitle={opt.subtitle}
-                    // What you give up only matters once an option is the one in
-                    // force — on the other two rows it's noise.
-                    footer={
-                      active && opt.mode !== "both" ? (
-                        <AppText
-                          variant="caption"
-                          color="secondary"
-                          style={styles.modeNote}
-                        >
-                          {opt.note}
-                        </AppText>
-                      ) : undefined
-                    }
+                    label={opt.title}
+                    active={trackingMode === opt.mode}
                     onPress={() => {
                       Haptics.selectionAsync().catch(() => {});
                       void setTrackingMode(opt.mode);
                     }}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: active, checked: active }}
-                    chevron={false}
-                    right={
-                      <Ionicons
-                        name={active ? "radio-button-on" : "radio-button-off"}
-                        size={20}
-                        color={active ? colors.primary : colors.textTertiary}
-                      />
-                    }
                   />
-                );
-              })}
-            </ListGroup>
+                ))}
+              </View>
+              <View style={[styles.focusNote, { borderTopColor: colors.divider }]}>
+                <AppText variant="footnote">{focus.subtitle}</AppText>
+                <AppText variant="caption" color="tertiary" style={styles.focusNoteLine}>
+                  {focus.note}
+                </AppText>
+              </View>
+            </Card>
           </View>
         </Reveal>
 
         {/* Appearance — hidden while light mode is disabled (LIGHT_MODE_ENABLED
             in constants/theme.ts). Flip that flag and the picker returns. */}
         {LIGHT_MODE_ENABLED ? (
-        <Reveal index={0}>
-          <View style={styles.section}>
-            <SectionHeader title="Appearance" />
-            <Card padding="lg">
-              <ControlBlock
-                icon="color-palette"
-                tone={colors.fat}
-                title="Theme"
-                subtitle="Match your device, or pick a look"
-              >
-                <SegmentedControl
-                  options={THEME_OPTIONS}
-                  value={themeMode}
-                  onChange={setThemeMode}
-                  label="Theme"
-                />
-              </ControlBlock>
-            </Card>
-          </View>
-        </Reveal>
+          <Reveal index={2} stagger={45}>
+            <View style={styles.section}>
+              <GroupLabel label="Appearance" />
+              <Card padding="lg">
+                <ControlBlock
+                  icon="color-palette"
+                  tone={colors.fat}
+                  title="Theme"
+                  subtitle="Match your device, or pick a look"
+                >
+                  <SegmentedControl
+                    options={THEME_OPTIONS}
+                    value={themeMode}
+                    onChange={setThemeMode}
+                    label="Theme"
+                  />
+                </ControlBlock>
+              </Card>
+            </View>
+          </Reveal>
         ) : null}
 
         {/* Goals — the numbers you're aiming at. Every one of these is read by
             something real: water and workouts drive the daily rings, streaks and
             Gozlin's habit report; target weight is what gives the Transformation
-            Forecast a destination (without it there's no goal date to compute). */}
-        <Reveal index={1}>
+            Forecast a destination (without it there's no goal date to compute).
+
+            Tiles, not rows: the number IS the setting here, so it gets to be the
+            headline with the controls under it, rather than a 14pt value wedged
+            onto a row's trailing edge. */}
+        <Reveal index={3} stagger={45}>
           <View style={styles.section}>
-            <SectionHeader title="Goals" subtitle="What you're aiming at" />
-            <ListGroup>
-              <ListRow
-                icon="water"
-                tone={colors.water}
-                title="Daily water"
-                chevron={false}
-                right={
-                  <Stepper
-                    label="daily water goal"
-                    value={`${(waterGoal / 1000).toFixed(1)} L`}
-                    onDecrement={() => handleWaterGoal(-WATER_STEP)}
-                    onIncrement={() => handleWaterGoal(WATER_STEP)}
-                    canDecrement={waterGoal > WATER_MIN}
-                    canIncrement={waterGoal < WATER_MAX}
-                  />
-                }
-              />
-              <ListRow
-                icon="barbell"
-                tone={colors.fat}
-                title="Weekly workouts"
-                chevron={false}
-                right={
-                  <Stepper
-                    label="weekly workout target"
-                    value={`${workoutTarget} / wk`}
-                    onDecrement={() => handleWorkoutTarget(-1)}
-                    onIncrement={() => handleWorkoutTarget(1)}
-                    canDecrement={workoutTarget > WORKOUT_MIN}
-                    canIncrement={workoutTarget < WORKOUT_MAX}
-                  />
-                }
-              />
-              {/* Two states, deliberately: an unset target is a real answer
-                  ("I'm not chasing a number"), so it gets an invitation rather
-                  than a stepper pre-loaded with a weight nobody chose. */}
+            <GroupLabel label="Goals" hint="What you're aiming at" />
+            <View style={styles.tileRow}>
+              <GoalTile icon="water" tone={colors.water} label="Water" hint="per day">
+                <Stepper
+                  size="lg"
+                  label="daily water goal"
+                  value={`${(waterGoal / 1000).toFixed(1)} L`}
+                  onDecrement={() => handleWaterGoal(-WATER_STEP)}
+                  onIncrement={() => handleWaterGoal(WATER_STEP)}
+                  canDecrement={waterGoal > WATER_MIN}
+                  canIncrement={waterGoal < WATER_MAX}
+                />
+              </GoalTile>
+              <GoalTile icon="barbell" tone={colors.fat} label="Workouts" hint="per week">
+                <Stepper
+                  size="lg"
+                  label="weekly workout target"
+                  value={String(workoutTarget)}
+                  onDecrement={() => handleWorkoutTarget(-1)}
+                  onIncrement={() => handleWorkoutTarget(1)}
+                  canDecrement={workoutTarget > WORKOUT_MIN}
+                  canIncrement={workoutTarget < WORKOUT_MAX}
+                />
+              </GoalTile>
+            </View>
+
+            {/* Two states, deliberately: an unset target is a real answer
+                ("I'm not chasing a number"), so it gets an invitation rather
+                than a stepper pre-loaded with a weight nobody chose. */}
+            <Card padding="lg" style={styles.stacked}>
+              <View style={styles.tileHead}>
+                <IconBadge name="flag" tone={colors.gold} size={32} />
+                <View style={styles.flex}>
+                  <AppText variant="callout">Target weight</AppText>
+                  <AppText variant="caption" color="tertiary" style={styles.subtle}>
+                    {targetWeight == null
+                      ? "Not set — unlocks your goal date and forecast"
+                      : weightGap == null
+                        ? "Where you're heading"
+                        : weightGap > 0
+                          ? `${weightGap} kg to go`
+                          : weightGap < 0
+                            ? `${Math.abs(weightGap)} kg to gain`
+                            : "You're at your target"}
+                  </AppText>
+                </View>
+              </View>
               {targetWeight == null ? (
-                <ListRow
+                <Button
+                  label="Set a target"
                   icon="flag"
-                  tone={colors.gold}
-                  title="Target weight"
-                  subtitle="Not set — unlocks your goal date and forecast"
+                  variant="tonal"
+                  size="sm"
                   onPress={handleStartTargetWeight}
-                  chevron={false}
-                  right={<Pill label="Set" tone={colors.gold} size="sm" />}
+                  style={styles.tileControl}
                 />
               ) : (
-                <ListRow
-                  icon="flag"
-                  tone={colors.gold}
-                  title="Target weight"
-                  subtitle={
-                    weightGap == null
-                      ? "Where you're heading"
-                      : weightGap > 0
-                        ? `${weightGap} kg to go`
-                        : weightGap < 0
-                          ? `${Math.abs(weightGap)} kg to gain`
-                          : "You're at your target"
-                  }
-                  chevron={false}
-                  right={
-                    <Stepper
-                      label="target weight"
-                      value={`${targetWeight} kg`}
-                      onDecrement={() => handleTargetWeight(-TARGET_WEIGHT_STEP)}
-                      onIncrement={() => handleTargetWeight(TARGET_WEIGHT_STEP)}
-                      canDecrement={targetWeight > TARGET_WEIGHT_MIN}
-                      canIncrement={targetWeight < TARGET_WEIGHT_MAX}
-                    />
-                  }
+                <Stepper
+                  size="lg"
+                  label="target weight"
+                  value={`${targetWeight} kg`}
+                  onDecrement={() => handleTargetWeight(-TARGET_WEIGHT_STEP)}
+                  onIncrement={() => handleTargetWeight(TARGET_WEIGHT_STEP)}
+                  canDecrement={targetWeight > TARGET_WEIGHT_MIN}
+                  canIncrement={targetWeight < TARGET_WEIGHT_MAX}
+                  style={styles.tileControl}
                 />
               )}
-            </ListGroup>
+            </Card>
           </View>
         </Reveal>
 
         {/* Nutrition */}
         {userBio && (
-          <Reveal index={2}>
+          <Reveal index={4} stagger={45}>
             <View style={styles.section}>
-              <SectionHeader
-                title="Nutrition"
-                subtitle={
+              <GroupLabel
+                label="Nutrition"
+                hint={
                   dietTracked
                     ? "Your daily targets and how meals are built"
                     : "How meal lookups are flavoured"
@@ -868,25 +1116,11 @@ export default function SettingsScreen() {
                       />
                     ) : null}
                   </View>
-                  <View
-                    style={[styles.macroRow, { borderTopColor: colors.divider }]}
-                  >
-                    <MacroStat
-                      label="Protein"
-                      grams={nutritionTargets.proteinG}
-                      tone={colors.protein}
-                    />
-                    <MacroStat
-                      label="Carbs"
-                      grams={nutritionTargets.carbsG}
-                      tone={colors.carbs}
-                    />
-                    <MacroStat
-                      label="Fat"
-                      grams={nutritionTargets.fatG}
-                      tone={colors.fat}
-                    />
-                  </View>
+                  <MacroSplit
+                    proteinG={nutritionTargets.proteinG}
+                    carbsG={nutritionTargets.carbsG}
+                    fatG={nutritionTargets.fatG}
+                  />
                 </Card>
               ) : null}
 
@@ -944,26 +1178,16 @@ export default function SettingsScreen() {
                   </View>
                 </ControlBlock>
               </Card>
-
-              <ListGroup style={styles.stacked}>
-                <ListRow
-                  icon="body"
-                  tone={colors.primary}
-                  title="Body & health details"
-                  subtitle="Weight, activity, conditions — what your targets are built from"
-                  onPress={() => setShowEditModal(true)}
-                />
-              </ListGroup>
             </View>
           </Reveal>
         )}
 
         {/* Reminders */}
-        <Reveal index={3}>
+        <Reveal index={5} stagger={45}>
           <View style={styles.section}>
-            <SectionHeader
-              title="Reminders"
-              subtitle="Nudges you can finish from the lock screen"
+            <GroupLabel
+              label="Reminders"
+              hint="Nudges you can finish from the lock screen"
             />
             <ListGroup>
               <ListRow
@@ -1006,124 +1230,91 @@ export default function SettingsScreen() {
                 }
                 onPress={handleTestNotification}
                 right={
-                  testState === "sent" ? (
+                  testState === "sending" ? (
+                    <ActivityIndicator size="small" color={colors.water} />
+                  ) : testState === "sent" ? (
                     <Ionicons name="checkmark-circle" size={20} color={colors.success} />
                   ) : undefined
                 }
               />
+              {/* The times themselves live on each habit (create/edit), which is
+                  where a per-habit schedule belongs — so this points at the list
+                  and says so, rather than promising a picker that isn't here. */}
               <ListRow
                 icon="repeat"
                 tone={colors.warning}
                 title="Habit reminders"
-                subtitle="Set the time each habit nudges you"
+                subtitle="Open a habit to set the time it nudges you"
                 onPress={() => router.push("/habits" as never)}
               />
             </ListGroup>
           </View>
         </Reveal>
 
-        {/* Subscription — "Manage subscription" and "Restore purchases" are
-            both REQUIRED by Google Play and the App Store, and an app without
-            them is rejected. They also have to work for a user who is already
-            subscribed, which is why the restore row is always shown and never
-            hidden behind the free-tier branch. */}
-        <Reveal index={4}>
+        {/* Account — the plan signpost, the backup state, your body details and
+            the way out. The Plan row is a SIGNPOST, not a second storefront:
+            everything transactional (prices, restore, manage, cancel, the dev
+            tier switch) lives on /upgrade, which is a menu destination of its
+            own. Two places that can both sell you something is how prices and
+            copy drift apart. */}
+        <Reveal index={6} stagger={45}>
           <View style={styles.section}>
-            <SectionHeader
-              title="Subscription"
-              subtitle={billing.isPro ? "Welliva Pro" : "Free plan"}
-            />
+            <GroupLabel label="Account" hint={user?.email ?? undefined} />
             <ListGroup>
-              {billing.isPro ? (
+              <ListRow
+                icon={billing.isSubscriber ? "diamond" : "diamond-outline"}
+                tone={colors.gold}
+                title={billing.isSubscriber ? TIER_NAME[billing.entitlement.tier] : "Welliva Free"}
+                subtitle={
+                  billing.isSubscriber
+                    ? billing.entitlement.expiresAt
+                      ? `${billing.entitlement.willRenew ? "Renews" : "Ends"} ${new Date(
+                          billing.entitlement.expiresAt,
+                        ).toLocaleDateString()} · manage, change or restore`
+                      : "Manage, change or restore your subscription"
+                    : "See Plus and Pro, restore a purchase, or stay on free"
+                }
+                onPress={() => router.push("/upgrade" as never)}
+              />
+              {/* "Is my data actually in the cloud?" — previously unanswerable
+                  from inside the app. Now it's a row with a timestamp and a
+                  button, so a user with a flaky connection can check and act
+                  instead of guessing.
+
+                  On the free tier this row stops being "sync now" and becomes
+                  the honest statement of where the data lives, plus the way to
+                  change that. Offering a Sync button that silently does nothing
+                  would be the worst of both. */}
+              {syncStatus.cloudDisabled ? (
                 <ListRow
-                  icon="star"
+                  icon="cloud-offline-outline"
                   tone={colors.gold}
-                  title="Manage subscription"
-                  subtitle={
-                    billing.entitlement.expiresAt
-                      ? `Renews ${new Date(billing.entitlement.expiresAt).toLocaleDateString()}`
-                      : "Change or cancel your plan"
-                  }
-                  onPress={() => void Linking.openURL(MANAGE_SUBSCRIPTION_URL)}
+                  title="Cloud backup is off"
+                  subtitle="Your data is saved on this device. Plus backs it up and syncs every device you sign in on."
+                  onPress={() => billing.openUpgrade("sync")}
                 />
               ) : (
                 <ListRow
-                  icon="sparkles"
-                  tone={colors.gold}
-                  title="Upgrade to Welliva Pro"
-                  subtitle="Unlimited coaching, plans built for you, full history"
-                  onPress={() => billing.openPaywall("settings")}
+                  icon={syncStatus.online ? "cloud-done-outline" : "cloud-offline-outline"}
+                  tone={syncStatus.state === "synced" ? colors.success : colors.warning}
+                  title={syncing ? "Syncing…" : "Sync now"}
+                  subtitle={`${describeSyncStatus(syncStatus)} · ${formatLastSync(syncStatus.lastSyncAt)}`}
+                  onPress={handleSyncNow}
+                  right={
+                    syncing ? <ActivityIndicator size="small" color={colors.warning} /> : undefined
+                  }
                 />
               )}
-              {/* Store-required, and it must answer either way: silence after
-                  tapping reads as a broken app to someone who has genuinely paid
-                  and is trying to get their subscription back on a new phone. */}
+              {/* One entry point to the bio editor, not two. It used to appear
+                  here as "Edit profile" AND under Nutrition as "Body & health
+                  details" — same modal, two names, which reads as two different
+                  screens until you've opened both. */}
               <ListRow
-                icon="refresh"
-                tone={colors.water}
-                title="Restore purchases"
-                subtitle={
-                  restoring
-                    ? "Checking with the store…"
-                    : "Already paid? Bring your subscription back on this device"
-                }
-                onPress={handleRestorePurchases}
-                right={
-                  restoring ? <ActivityIndicator size="small" color={colors.water} /> : undefined
-                }
-              />
-              {/* Dev-only tier switch. Every lock has to be walkable before the
-                  RevenueCat account exists — otherwise the free-tier experience
-                  first gets tested during store review. Stripped in release. */}
-              {__DEV__ ? (
-                <ListRow
-                  icon="construct"
-                  tone={colors.warning}
-                  title="Force plan tier (dev only)"
-                  subtitle={
-                    devTier === null
-                      ? "Using your real entitlement — tap to test as Free, then Pro"
-                      : devTier
-                        ? "Pretending you're Pro — every lock is open"
-                        : "Pretending you're Free — every lock is on"
-                  }
-                  onPress={handleCycleDevTier}
-                  right={
-                    <Pill
-                      label={devTier === null ? "REAL" : devTier ? "PRO" : "FREE"}
-                      tone={devTier === null ? colors.textTertiary : colors.warning}
-                    />
-                  }
-                />
-              ) : null}
-              {/* TEMP dev entry — replays the onboarding flow in preview mode,
-                  which does NOT overwrite the real profile, so the onboarding
-                  screens can be edited and tested like a brand-new user. Remove
-                  before ship, with the `?preview=1` handling in onboarding. */}
-              {__DEV__ ? (
-                <ListRow
-                  icon="albums"
-                  tone={colors.warning}
-                  title="Replay onboarding (dev only)"
-                  subtitle="Walk the sign-up flow as a new user — your real profile is untouched"
-                  onPress={() => router.push("/onboarding?preview=1" as never)}
-                />
-              ) : null}
-            </ListGroup>
-          </View>
-        </Reveal>
-
-        {/* Account */}
-        <Reveal index={5}>
-          <View style={styles.section}>
-            <SectionHeader title="Account" />
-            <ListGroup>
-              <ListRow
-                icon="person-circle"
+                icon="body"
                 tone={colors.primary}
-                title="Edit profile"
-                subtitle="Age, body metrics, goal & activity"
-                onPress={() => setShowEditModal(true)}
+                title="Body & health details"
+                subtitle="Weight, activity, conditions — what your targets are built from"
+                onPress={openEditor}
               />
               <ListRow
                 icon="log-out"
@@ -1136,31 +1327,16 @@ export default function SettingsScreen() {
           </View>
         </Reveal>
 
-        {/* About */}
-        <Reveal index={6}>
+        {/* Privacy & about. The three legal documents used to be listed here AND
+            on /privacy, byte for byte, which made both copies read as filler and
+            left the policies sitting a screen away from the switches that
+            enforce them. They live on Trust now; this row keeps them one tap
+            from Settings (where users and store reviewers look for them) and
+            carries the one fact that isn't over there in the same form: which
+            version you actually accepted. */}
+        <Reveal index={7} stagger={45}>
           <View style={styles.section}>
-            <SectionHeader title="About" />
-            <ListGroup>
-              <ListRow
-                icon="information-circle"
-                tone={colors.water}
-                title="Version"
-                value={APP_VERSION}
-              />
-            </ListGroup>
-          </View>
-        </Reveal>
-
-        {/* Privacy & legal — a SIGNPOST, not a second copy. The three documents
-            used to be listed here AND on /privacy, byte for byte, which made
-            both copies read as filler and left the policies sitting a screen
-            away from the switches that enforce them. They live on Trust now;
-            this row keeps them one tap from Settings (where users and store
-            reviewers look for them) and carries the one fact that isn't over
-            there in the same form: which version you actually accepted. */}
-        <Reveal index={7}>
-          <View style={styles.section}>
-            <SectionHeader title="Privacy & legal" />
+            <GroupLabel label="Privacy & about" />
             <ListGroup>
               <ListRow
                 icon="shield-checkmark"
@@ -1175,70 +1351,71 @@ export default function SettingsScreen() {
                 }
                 onPress={() => router.push("/privacy" as never)}
               />
+              <ListRow
+                icon="information-circle"
+                tone={colors.water}
+                title="Version"
+                value={APP_BUILD ? `${APP_VERSION} (${APP_BUILD})` : APP_VERSION}
+              />
             </ListGroup>
           </View>
         </Reveal>
 
-        {/* Data */}
-        <Reveal index={8}>
+        {/* Developer — dev builds only, and stripped from release entirely. */}
+        {__DEV__ ? (
+          <Reveal index={8} stagger={45}>
+            <View style={styles.section}>
+              <GroupLabel label="Developer" />
+              <ListGroup>
+                {/* TEMP dev entry — replays the onboarding flow in preview mode,
+                    which does NOT overwrite the real profile, so the onboarding
+                    screens can be edited and tested like a brand-new user. Remove
+                    before ship, with the `?preview=1` handling in onboarding.
+                    The tier switch that used to sit beside it now lives on
+                    /upgrade, next to the table that says what each tier gets. */}
+                <ListRow
+                  icon="albums"
+                  tone={colors.warning}
+                  title="Replay onboarding"
+                  subtitle="Walk the sign-up flow as a new user — your real profile is untouched"
+                  onPress={() => router.push("/onboarding?preview=1" as never)}
+                />
+              </ListGroup>
+            </View>
+          </Reveal>
+        ) : null}
+
+        {/* Danger zone. Framed in the error colour and pulled out of "Data" for
+            one reason: these are the only two rows on the page you can't undo by
+            tapping again. Keeping them adjacent is what makes the difference
+            between them legible — one starts you over on this phone, one ends
+            the account everywhere. Deleting in-app is required by App Store
+            5.1.1(v) and promised in the privacy policy under "How long we keep
+            it". */}
+        <Reveal index={9} stagger={45}>
           <View style={styles.section}>
-            <SectionHeader title="Data" />
-            <ListGroup>
-              {/* "Is my data actually in the cloud?" — previously unanswerable
-                  from inside the app. Now it's a row with a timestamp and a
-                  button, so a user with a flaky connection can check and act
-                  instead of guessing. */}
-              {/* On the free tier this row stops being "sync now" and becomes
-                  the honest statement of where the data lives, plus the way to
-                  change that. Offering a Sync button that silently does nothing
-                  would be the worst of both. */}
-              {syncStatus.cloudDisabled ? (
+            <GroupLabel label="Danger zone" tone={colors.error} />
+            {/* Rendered FROM the declaration, never hand-wired. `askDanger` is
+                the only thing these rows can call — the action itself is
+                reachable only through the confirmation below. */}
+            <ListGroup style={[styles.danger, { borderColor: alpha(colors.error, 0.32) }]}>
+              {dangerActions.map((action) => (
                 <ListRow
-                  icon="cloud-offline-outline"
-                  tone={colors.gold}
-                  title="Cloud backup is off"
-                  subtitle="Your data is saved on this device. Pro backs it up and syncs every device you sign in on."
-                  onPress={() => billing.openPaywall("sync")}
+                  key={action.id}
+                  icon={action.icon}
+                  title={action.title}
+                  subtitle={action.subtitle}
+                  destructive
+                  onPress={() => askDanger(action.id)}
+                  accessibilityHint={`Asks you to type ${action.confirm.phrase} to confirm`}
                 />
-              ) : (
-                <ListRow
-                  icon={syncStatus.online ? "cloud-done-outline" : "cloud-offline-outline"}
-                  tone={syncStatus.state === "synced" ? colors.success : colors.warning}
-                  title={syncing ? "Syncing…" : "Sync now"}
-                  subtitle={`${describeSyncStatus(syncStatus)} · ${formatLastSync(syncStatus.lastSyncAt)}`}
-                  onPress={handleSyncNow}
-                  right={
-                    syncing ? <ActivityIndicator size="small" color={colors.warning} /> : undefined
-                  }
-                />
-              )}
-              <ListRow
-                icon="trash"
-                tone={colors.error}
-                title="Reset data"
-                subtitle="Erase all data and start over"
-                destructive
-                onPress={handleResetData}
-              />
-              {/* Deliberately the LAST row in the last section, and the only
-                  one that leaves the app. "Reset data" above is the recoverable
-                  neighbour (device only, account intact) — keeping them adjacent
-                  is what makes the difference legible: one starts you over, one
-                  ends you. Required in-app by App Store 5.1.1(v) and promised in
-                  the privacy policy under "How long we keep it". */}
-              <ListRow
-                icon="person-remove-outline"
-                title="Delete account"
-                subtitle="Permanently erase your account and all data"
-                destructive
-                onPress={() => setShowDeleteModal(true)}
-              />
+              ))}
             </ListGroup>
           </View>
         </Reveal>
       </Screen>
 
-      {/* Edit modal */}
+      {/* ── Bio editor ───────────────────────────────────────────────────── */}
       <Modal
         visible={showEditModal}
         animationType="slide"
@@ -1260,11 +1437,12 @@ export default function SettingsScreen() {
             <AppText variant="headline">Edit profile</AppText>
             <Pressable
               onPress={handleSaveBio}
-              disabled={isSaving}
+              disabled={isSaving || !bioValid}
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel="Save profile"
-              accessibilityState={{ disabled: isSaving, busy: isSaving }}
+              accessibilityState={{ disabled: isSaving || !bioValid, busy: isSaving }}
+              style={!bioValid && styles.headerActionOff}
             >
               <AppText variant="body" color="brand" style={styles.bold}>
                 {isSaving ? "Saving…" : "Save"}
@@ -1272,7 +1450,11 @@ export default function SettingsScreen() {
             </Pressable>
           </View>
 
-          <ScrollView contentContainerStyle={styles.modalBody} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            contentContainerStyle={styles.modalBody}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
             {editingBio && (
               <>
                 <AppText variant="footnote" color="tertiary" style={styles.modalIntro}>
@@ -1281,363 +1463,461 @@ export default function SettingsScreen() {
                 </AppText>
 
                 {/* Basics */}
-                <ChipGroup
-                  label="Sex"
-                  options={SEXES}
-                  selected={(v) => editingBio.sex === v}
-                  onToggle={(v) => setEditingBio({ ...editingBio, sex: v as any })}
-                />
-                <Field
-                  label="Age"
-                  value={String(editingBio.age)}
-                  onChangeText={(v) => setEditingBio({ ...editingBio, age: parseInt(v) || 0 })}
-                  placeholder="Enter your age"
-                />
-                <Field
-                  label="Height (cm)"
-                  value={String(editingBio.heightCm)}
-                  onChangeText={(v) => setEditingBio({ ...editingBio, heightCm: parseInt(v) || 0 })}
-                  placeholder="Enter your height"
-                />
-                <Field
-                  label="Weight (kg)"
-                  value={String(editingBio.weightKg)}
-                  onChangeText={(v) => setEditingBio({ ...editingBio, weightKg: parseInt(v) || 0 })}
-                  placeholder="Enter your weight"
-                />
+                <FormCard title="Basics">
+                  <ChipGroup
+                    label="Sex"
+                    options={SEXES}
+                    selected={(v) => editingBio.sex === v}
+                    onToggle={(v) => setEditingBio({ ...editingBio, sex: v as any })}
+                  />
+                  <View style={styles.numberRow}>
+                    {BIO_NUMBER_KEYS.map((key) => (
+                      <NumberField
+                        key={key}
+                        limits={BIO_LIMITS[key]}
+                        value={numText[key]}
+                        invalid={numValues[key] == null}
+                        onChangeText={(t) =>
+                          setNumText((prev) => ({ ...prev, [key]: t }))
+                        }
+                      />
+                    ))}
+                  </View>
+                  {!bioValid ? (
+                    <AppText
+                      variant="caption"
+                      style={{ color: colors.error }}
+                      accessibilityRole="alert"
+                    >
+                      Age, height and weight all need a realistic value before this
+                      can be saved — your targets are calculated from them.
+                    </AppText>
+                  ) : null}
+                </FormCard>
 
-                <ChipGroup
-                  label="Activity level"
-                  options={ACTIVITY_LEVELS}
-                  selected={(v) => editingBio.activityLevel === v}
-                  onToggle={(v) => setEditingBio({ ...editingBio, activityLevel: v as any })}
-                />
-                <ChipGroup
-                  label="Primary goal"
-                  options={GOALS}
-                  selected={(v) => editingBio.primaryGoal === v}
-                  onToggle={(v) => setEditingBio({ ...editingBio, primaryGoal: v as any })}
-                />
-                <ChipGroup
-                  label="Experience"
-                  options={EXERCISE_LEVELS}
-                  selected={(v) => editingBio.exerciseLevel === v}
-                  onToggle={(v) => setEditingBio({ ...editingBio, exerciseLevel: v as any })}
-                />
+                <FormCard title="How you move">
+                  <ChipGroup
+                    label="Activity level"
+                    options={ACTIVITY_LEVELS}
+                    selected={(v) => editingBio.activityLevel === v}
+                    onToggle={(v) => setEditingBio({ ...editingBio, activityLevel: v as any })}
+                  />
+                  <ChipGroup
+                    label="Primary goal"
+                    options={GOALS}
+                    selected={(v) => editingBio.primaryGoal === v}
+                    onToggle={(v) => setEditingBio({ ...editingBio, primaryGoal: v as any })}
+                  />
+                  <ChipGroup
+                    label="Experience"
+                    options={EXERCISE_LEVELS}
+                    selected={(v) => editingBio.exerciseLevel === v}
+                    onToggle={(v) => setEditingBio({ ...editingBio, exerciseLevel: v as any })}
+                  />
+                </FormCard>
 
                 {/* Nutrition needs */}
-                <ChipGroup
-                  label="Dietary restriction"
-                  options={DIETARY_RESTRICTIONS}
-                  selected={(v) => editingBio.dietaryRestriction === v}
-                  onToggle={(v) => setEditingBio({ ...editingBio, dietaryRestriction: v as any })}
-                />
-                <ChipGroup
-                  label="Allergies"
-                  hint="Meals with these are filtered out."
-                  options={ALLERGIES}
-                  selected={(v) => (editingBio.allergies ?? []).includes(v)}
-                  onToggle={(v) =>
-                    setEditingBio({ ...editingBio, allergies: toggleIn(editingBio.allergies, v) })
-                  }
-                />
+                <FormCard title="What you eat">
+                  <ChipGroup
+                    label="Dietary restriction"
+                    options={DIETARY_RESTRICTIONS}
+                    selected={(v) => editingBio.dietaryRestriction === v}
+                    onToggle={(v) =>
+                      setEditingBio({ ...editingBio, dietaryRestriction: v as any })
+                    }
+                  />
+                  <ChipGroup
+                    label="Allergies"
+                    hint="Meals with these are filtered out."
+                    options={ALLERGIES}
+                    selected={(v) => (editingBio.allergies ?? []).includes(v)}
+                    onToggle={(v) =>
+                      setEditingBio({ ...editingBio, allergies: toggleIn(editingBio.allergies, v) })
+                    }
+                  />
+                </FormCard>
 
                 {/* Health & safety */}
-                <ChipGroup
-                  label="Medical conditions"
-                  hint="Used to pick safe diets and adjust your targets."
-                  options={CONDITIONS}
-                  selected={(v) => (editingBio.medicalConditions ?? []).includes(v as MedicalCondition)}
-                  onToggle={(v) => {
-                    const cond = v as MedicalCondition;
-                    const next = toggleIn(editingBio.medicalConditions, cond);
-                    setEditingBio({
-                      ...editingBio,
-                      medicalConditions: next,
-                      // Drop the trimester if pregnancy was unselected.
-                      pregnancyTrimester: next.includes("pregnancy")
-                        ? editingBio.pregnancyTrimester
-                        : undefined,
-                    });
-                  }}
-                />
-                {(editingBio.medicalConditions ?? []).includes("pregnancy") && (
+                <FormCard title="Health & safety">
                   <ChipGroup
-                    label="Which trimester?"
-                    hint="Tunes your energy, hydration and movement safety."
-                    options={TRIMESTERS}
-                    selected={(v) => String(editingBio.pregnancyTrimester) === v}
+                    label="Medical conditions"
+                    hint="Used to pick safe diets and adjust your targets."
+                    options={CONDITIONS}
+                    selected={(v) =>
+                      (editingBio.medicalConditions ?? []).includes(v as MedicalCondition)
+                    }
+                    onToggle={(v) => {
+                      const cond = v as MedicalCondition;
+                      const next = toggleIn(editingBio.medicalConditions, cond);
+                      setEditingBio({
+                        ...editingBio,
+                        medicalConditions: next,
+                        // Drop the trimester if pregnancy was unselected.
+                        pregnancyTrimester: next.includes("pregnancy")
+                          ? editingBio.pregnancyTrimester
+                          : undefined,
+                      });
+                    }}
+                  />
+                  {(editingBio.medicalConditions ?? []).includes("pregnancy") && (
+                    <ChipGroup
+                      label="Which trimester?"
+                      hint="Tunes your energy, hydration and movement safety."
+                      options={TRIMESTERS}
+                      selected={(v) => String(editingBio.pregnancyTrimester) === v}
+                      onToggle={(v) =>
+                        setEditingBio({
+                          ...editingBio,
+                          pregnancyTrimester: Number(v) as PregnancyTrimester,
+                        })
+                      }
+                    />
+                  )}
+                  <ChipGroup
+                    label="Injuries / pain areas"
+                    hint="I'll protect these — risky moves are kept out of your plan."
+                    options={BODY_AREAS}
+                    selected={(v) => (editingBio.injuries ?? []).includes(v)}
+                    onToggle={(v) =>
+                      setEditingBio({ ...editingBio, injuries: toggleIn(editingBio.injuries, v) })
+                    }
+                  />
+                  <ChipGroup
+                    label="Medication kinds"
+                    hint="Kinds only — never names. Helps flag food interactions."
+                    options={MED_KINDS}
+                    selected={(v) =>
+                      (editingBio.medicationCategories ?? []).includes(v as MedicationCategory)
+                    }
                     onToggle={(v) =>
                       setEditingBio({
                         ...editingBio,
-                        pregnancyTrimester: Number(v) as PregnancyTrimester,
+                        medicationCategories: toggleIn(
+                          editingBio.medicationCategories,
+                          v as MedicationCategory,
+                        ),
                       })
                     }
                   />
-                )}
-                <ChipGroup
-                  label="Injuries / pain areas"
-                  hint="I'll protect these — risky moves are kept out of your plan."
-                  options={BODY_AREAS}
-                  selected={(v) => (editingBio.injuries ?? []).includes(v)}
-                  onToggle={(v) =>
-                    setEditingBio({ ...editingBio, injuries: toggleIn(editingBio.injuries, v) })
-                  }
-                />
-                <ChipGroup
-                  label="Medication kinds"
-                  hint="Kinds only — never names. Helps flag food interactions."
-                  options={MED_KINDS}
-                  selected={(v) =>
-                    (editingBio.medicationCategories ?? []).includes(v as MedicationCategory)
-                  }
-                  onToggle={(v) =>
-                    setEditingBio({
-                      ...editingBio,
-                      medicationCategories: toggleIn(
-                        editingBio.medicationCategories,
-                        v as MedicationCategory,
-                      ),
-                    })
-                  }
-                />
+                </FormCard>
 
                 {/* Training setup */}
-                <ChipGroup
-                  label="Equipment"
-                  options={EQUIPMENT}
-                  selected={(v) => (editingBio.equipment ?? ["none"]).includes(v as Equipment)}
-                  onToggle={(v) => {
-                    const eq = v as Equipment;
-                    const cur = editingBio.equipment ?? ["none"];
-                    let next: Equipment[];
-                    if (eq === "none") {
-                      next = ["none"];
-                    } else if (cur.includes(eq)) {
-                      next = cur.filter((e) => e !== eq);
-                    } else {
-                      next = [...cur.filter((e) => e !== "none"), eq];
+                <FormCard title="Training setup">
+                  <ChipGroup
+                    label="Equipment"
+                    options={EQUIPMENT}
+                    selected={(v) => (editingBio.equipment ?? ["none"]).includes(v as Equipment)}
+                    onToggle={(v) => {
+                      const eq = v as Equipment;
+                      const cur = editingBio.equipment ?? ["none"];
+                      let next: Equipment[];
+                      if (eq === "none") {
+                        next = ["none"];
+                      } else if (cur.includes(eq)) {
+                        next = cur.filter((e) => e !== eq);
+                      } else {
+                        next = [...cur.filter((e) => e !== "none"), eq];
+                      }
+                      if (next.length === 0) next = ["none"];
+                      setEditingBio({ ...editingBio, equipment: next });
+                    }}
+                  />
+                  <ChipGroup
+                    label="Training days / week"
+                    options={TRAINING_DAYS}
+                    selected={(v) => String(editingBio.workoutDaysPerWeek) === v}
+                    onToggle={(v) =>
+                      setEditingBio({ ...editingBio, workoutDaysPerWeek: Number(v) })
                     }
-                    if (next.length === 0) next = ["none"];
-                    setEditingBio({ ...editingBio, equipment: next });
-                  }}
-                />
-                <ChipGroup
-                  label="Training days / week"
-                  options={TRAINING_DAYS}
-                  selected={(v) => String(editingBio.workoutDaysPerWeek) === v}
-                  onToggle={(v) =>
-                    setEditingBio({ ...editingBio, workoutDaysPerWeek: Number(v) })
-                  }
-                />
-                <ChipGroup
-                  label="Meals per day"
-                  options={MEALS_PER_DAY}
-                  selected={(v) => String(editingBio.mealsPerDay) === v}
-                  onToggle={(v) =>
-                    setEditingBio({ ...editingBio, mealsPerDay: Number(v) as 3 | 4 })
-                  }
-                />
+                  />
+                  <ChipGroup
+                    label="Meals per day"
+                    options={MEALS_PER_DAY}
+                    selected={(v) => String(editingBio.mealsPerDay) === v}
+                    onToggle={(v) =>
+                      setEditingBio({ ...editingBio, mealsPerDay: Number(v) as 3 | 4 })
+                    }
+                  />
+                </FormCard>
 
-                <Button label="Save changes" icon="checkmark" onPress={handleSaveBio} loading={isSaving} style={styles.saveBtn} />
+                <Button
+                  label="Save changes"
+                  icon="checkmark"
+                  onPress={handleSaveBio}
+                  loading={isSaving}
+                  disabled={!bioValid}
+                  style={styles.saveBtn}
+                />
               </>
             )}
           </ScrollView>
         </SafeAreaView>
       </Modal>
 
-      {/* "Here's what I changed for you" recap */}
-      <Modal
-        visible={!!changeSummary}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setChangeSummary(null)}
-      >
-        <Pressable
-          style={[styles.summaryScrim, { backgroundColor: colors.scrim }]}
-          onPress={() => setChangeSummary(null)}
-          accessibilityRole="button"
-          accessibilityLabel="Dismiss"
+      {/* ── "Here's what I changed for you" recap ─────────────────────────── */}
+      <Dialog visible={!!changeSummary} onClose={() => setChangeSummary(null)}>
+        {/* Opaque, not the page's frosted `surface`: this paints over live
+            content and over the scrim's own blur, and a translucent panel
+            would show both straight through the text. */}
+        <View
+          style={[
+            styles.dialogCard,
+            {
+              backgroundColor: colors.surfaceElevated,
+              borderColor: alpha(colors.primary, 0.35),
+            },
+          ]}
         >
-          <Pressable
-            style={[
-              styles.summaryCard,
-              { backgroundColor: colors.surface, borderColor: alpha(colors.primary, 0.35) },
-            ]}
-          >
-            <IconBadge name="sparkles" tone={colors.primary} size={56} solid />
-            <AppText variant="title" align="center" style={styles.summaryTitle}>
-              {changeSummary?.headline}
-            </AppText>
-            <View style={styles.summaryLines}>
-              {changeSummary?.lines.map((line, i) => (
-                <View key={i} style={styles.summaryLine}>
-                  <Ionicons name="checkmark-circle" size={16} color={colors.success} />
-                  <AppText variant="subhead" color="secondary" style={styles.flex}>
-                    {line}
-                  </AppText>
-                </View>
-              ))}
-            </View>
-            <Button
-              label="Got it"
-              onPress={() => setChangeSummary(null)}
-              style={styles.summaryBtn}
-            />
-          </Pressable>
-        </Pressable>
-      </Modal>
+          <IconBadge name="sparkles" tone={colors.primary} size={56} solid />
+          <AppText variant="title" align="center" style={styles.dialogTitle}>
+            {changeSummary?.headline}
+          </AppText>
+          <View style={styles.dialogLines}>
+            {changeSummary?.lines.map((line, i) => (
+              <View key={i} style={styles.dialogLine}>
+                <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+                <AppText variant="subhead" color="secondary" style={styles.flex}>
+                  {line}
+                </AppText>
+              </View>
+            ))}
+          </View>
+          <Button
+            label="Got it"
+            onPress={() => setChangeSummary(null)}
+            style={styles.dialogBtn}
+          />
+        </View>
+      </Dialog>
 
-      {/* Delete account — the confirmation.
-          Three deliberate frictions, because this is the only action in the app
-          with no undo and no support path back:
-            1. it names what goes, rather than saying "all your data" — people
+      {/* ── The Danger zone's confirmation ───────────────────────────────
+          ONE dialog for every irreversible action, driven by the declaration
+          above. Three deliberate frictions, because these are the actions with
+          no undo and no support path back:
+            1. they NAME what goes, rather than saying "all your data" — people
                under-estimate that, then discover the loss later;
-            2. it requires typing DELETE, so it cannot be reached by tapping
-               through muscle memory in the same spot as "Reset data" above;
-            3. it can't be dismissed while running, so a tap on the scrim
+            2. they require typing a word, so neither can be reached by tapping
+               through muscle memory in the spot the other one occupies;
+            3. they can't be dismissed while running, so a tap on the scrim
                mid-teardown can't leave the user staring at a working app whose
                account is already gone. */}
-      <Modal
-        visible={showDeleteModal}
-        transparent
-        animationType="fade"
-        onRequestClose={closeDeleteModal}
-      >
-        <Pressable
-          style={[styles.summaryScrim, { backgroundColor: colors.scrim }]}
-          onPress={closeDeleteModal}
-          accessibilityRole="button"
-          accessibilityLabel="Dismiss"
-        >
-          {/* Swallows taps so pressing inside the card doesn't hit the scrim. */}
-          <Pressable
-            style={[
-              styles.summaryCard,
-              { backgroundColor: colors.surface, borderColor: alpha(colors.error, 0.35) },
-            ]}
-          >
-            <IconBadge name="warning" tone={colors.error} size={56} solid />
-            <AppText variant="title" align="center" style={styles.summaryTitle}>
-              Delete your account?
-            </AppText>
-            <AppText variant="subhead" color="secondary" align="center">
-              This cannot be undone. We&apos;ll permanently erase:
-            </AppText>
-
-            <View style={styles.summaryLines}>
-              {[
-                "Your profile, goals and health details",
-                "Every meal, workout, weight and water log",
-                "Your streaks, achievements and habits",
-                "Progress photos and anything Gozlin remembers",
-              ].map((line) => (
-                <View key={line} style={styles.summaryLine}>
-                  <Ionicons name="close-circle" size={16} color={colors.error} />
-                  <AppText variant="subhead" color="secondary" style={styles.flex}>
-                    {line}
-                  </AppText>
-                </View>
-              ))}
-            </View>
-
-            {/* IDENTITY. The typed word below proves the user meant it; this
-                proves it's their account. Without it an unlocked phone is
-                enough to erase someone's whole health history. Hidden entirely
-                for Google accounts, which have no password to give. */}
-            {needsPassword && (
-              <>
-                <AppText variant="caption" color="secondary" align="center">
-                  Confirm it&apos;s you
-                </AppText>
-                <TextInput
-                  value={deletePassword}
-                  onChangeText={(text) => {
-                    setDeletePassword(text);
-                    setDeleteError(null); // clear the error as they retype
-                  }}
-                  editable={!deleting}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  textContentType="password"
-                  placeholder="Your password"
-                  placeholderTextColor={colors.textSecondary}
-                  accessibilityLabel="Your password, to confirm account deletion"
-                  style={[
-                    styles.input,
-                    styles.deleteField,
-                    {
-                      color: colors.text,
-                      borderColor: deleteError ? colors.error : colors.divider,
-                      backgroundColor: colors.background,
-                    },
-                  ]}
-                />
-                {!!deleteError && (
-                  // `alert` so a screen reader announces the correction without
-                  // the user having to go looking for why nothing happened.
-                  <AppText
-                    variant="caption"
-                    align="center"
-                    accessibilityRole="alert"
-                    style={{ color: colors.error }}
-                  >
-                    {deleteError}
-                  </AppText>
-                )}
-              </>
-            )}
-
-            <AppText variant="caption" color="secondary" align="center">
-              Type {DELETE_PHRASE} to confirm.
-            </AppText>
-            <TextInput
-              value={deleteConfirmText}
-              onChangeText={setDeleteConfirmText}
-              editable={!deleting}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              placeholder={DELETE_PHRASE}
-              placeholderTextColor={colors.textSecondary}
-              accessibilityLabel={`Type ${DELETE_PHRASE} to confirm account deletion`}
-              style={[
-                styles.input,
-                styles.deleteField,
-                styles.deletePhrase,
-                {
-                  color: colors.text,
-                  borderColor: canConfirmDelete ? colors.error : colors.divider,
-                  backgroundColor: colors.background,
-                },
-              ]}
-            />
-
-            <Button
-              label={deleting ? "Deleting…" : "Delete my account"}
-              variant="danger"
-              fullWidth
-              loading={deleting}
-              disabled={!canConfirmDelete}
-              onPress={() => void handleDeleteAccount()}
-              accessibilityHint="Permanently erases your account and all data"
-              style={styles.summaryBtn}
-            />
-            <Button
-              label="Cancel"
-              variant="ghost"
-              fullWidth
-              disabled={deleting}
-              onPress={closeDeleteModal}
-            />
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <DangerConfirmDialog
+        action={danger}
+        phraseText={confirmText}
+        onPhraseText={setConfirmText}
+        password={confirmPassword}
+        onPassword={(text) => {
+          setConfirmPassword(text);
+          setConfirmError(null); // clear the correction as they retype
+        }}
+        error={confirmError}
+        armed={canConfirmDanger}
+        running={running}
+        onCancel={closeDanger}
+        onConfirm={() => void runDanger()}
+      />
     </>
   );
 }
 
 /* ───────────────────────────── Sub-components ──────────────────────────── */
+
+/**
+ * The page's section label — a quiet uppercase kicker with an optional line of
+ * context under it.
+ *
+ * Deliberately lighter than `SectionHeader` (18pt headline), which this page
+ * used nine times. On a screen that is nothing BUT sections, headline-weight
+ * labels compete with the controls instead of organising them.
+ */
+function GroupLabel({
+  label,
+  hint,
+  tone,
+}: {
+  label: string;
+  hint?: string;
+  tone?: string;
+}) {
+  return (
+    <View style={styles.groupLabel}>
+      <AppText variant="caption" color={tone ?? "tertiary"} uppercase>
+        {label}
+      </AppText>
+      {hint ? (
+        <AppText variant="footnote" color="tertiary" style={styles.groupHint}>
+          {hint}
+        </AppText>
+      ) : null}
+    </View>
+  );
+}
+
+/** One third of the masthead: a tinted glyph, the fact, and what it's a fact about. */
+function MastStat({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value: string;
+  tone: string;
+}) {
+  return (
+    <View style={styles.mastStat} accessible accessibilityLabel={`${label}: ${value}`}>
+      <Ionicons name={icon} size={18} color={tone} />
+      <AppText variant="callout" align="center" numberOfLines={1} style={styles.mastValue}>
+        {value}
+      </AppText>
+      <AppText variant="caption" color="tertiary" uppercase align="center">
+        {label}
+      </AppText>
+    </View>
+  );
+}
+
+/** One of the three tracking modes, as an equal-weight tile. */
+function FocusTile({
+  icon,
+  label,
+  active,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const { colors } = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessible
+      accessibilityRole="radio"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: active, checked: active }}
+      style={({ pressed }) => [
+        styles.focusTile,
+        {
+          backgroundColor: active
+            ? alpha(colors.primary, 0.16)
+            : colors.surfaceSunken,
+          borderColor: active ? colors.primary : colors.border,
+          opacity: pressed && !active ? 0.7 : 1,
+        },
+      ]}
+    >
+      <Ionicons
+        name={icon}
+        size={22}
+        color={active ? colors.primary : colors.textTertiary}
+      />
+      <AppText
+        variant="footnote"
+        color={active ? colors.primary : "secondary"}
+        style={styles.focusLabel}
+        numberOfLines={1}
+      >
+        {label}
+      </AppText>
+    </Pressable>
+  );
+}
+
+/** A goal tile: what it is on top, the number and its controls underneath. */
+function GoalTile({
+  icon,
+  tone,
+  label,
+  hint,
+  children,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  tone: string;
+  label: string;
+  hint: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card padding="lg" style={styles.goalTile}>
+      <View style={styles.tileHead}>
+        <IconBadge name={icon} tone={tone} size={32} />
+        <View style={styles.flex}>
+          <AppText variant="callout" numberOfLines={1}>
+            {label}
+          </AppText>
+          <AppText variant="caption" color="tertiary" numberOfLines={1}>
+            {hint}
+          </AppText>
+        </View>
+      </View>
+      <View style={styles.tileControl}>{children}</View>
+    </Card>
+  );
+}
+
+/**
+ * The macro target, as a proportion bar plus a legend.
+ *
+ * The split is by CALORIES (4/4/9 per gram), not by grams — a gram of fat
+ * carries more than twice the energy of a gram of protein, so a grams-width bar
+ * would draw a low-fat day as a fat-heavy one. The grams stay in the legend,
+ * because grams are what you actually eat against.
+ */
+function MacroSplit({
+  proteinG,
+  carbsG,
+  fatG,
+}: {
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+}) {
+  const { colors } = useColors();
+  const kcal = { protein: proteinG * 4, carbs: carbsG * 4, fat: fatG * 9 };
+  const total = kcal.protein + kcal.carbs + kcal.fat || 1;
+  const parts = [
+    { label: "Protein", grams: proteinG, share: kcal.protein / total, tone: colors.protein },
+    { label: "Carbs", grams: carbsG, share: kcal.carbs / total, tone: colors.carbs },
+    { label: "Fat", grams: fatG, share: kcal.fat / total, tone: colors.fat },
+  ];
+
+  return (
+    <View style={styles.macroBlock}>
+      <View
+        style={[styles.splitBar, { backgroundColor: colors.surfaceSunken }]}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
+        {parts.map((p) => (
+          <View key={p.label} style={{ flex: p.share, backgroundColor: p.tone }} />
+        ))}
+      </View>
+      <View style={styles.splitLegend}>
+        {parts.map((p) => (
+          <View
+            key={p.label}
+            style={styles.legendItem}
+            accessible
+            accessibilityLabel={`${p.label}: ${p.grams} grams`}
+          >
+            <View style={styles.legendHead}>
+              <View style={[styles.legendDot, { backgroundColor: p.tone }]} />
+              <AppText variant="callout" style={styles.legendValue}>
+                {p.grams}g
+              </AppText>
+            </View>
+            <AppText variant="caption" color="tertiary" uppercase>
+              {p.label}
+            </AppText>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
 
 /**
  * A titled control block inside a card: the icon/title/subtitle head, with the
@@ -1679,27 +1959,302 @@ function ControlBlock({
   );
 }
 
-/** One macro of the daily target — a colored dot, the grams, the name. */
-function MacroStat({
-  label,
-  grams,
-  tone,
+/**
+ * A centred dialog: blurred scrim, spring entrance, and it rides the keyboard.
+ *
+ * Not `Sheet`, deliberately — a bottom sheet's drag-to-dismiss is exactly the
+ * gesture the delete flow must be able to refuse mid-teardown, and refusing it
+ * leaves the panel stranded off its seat. A confirmation that can't be dragged
+ * away is the right shape for both dialogs here. What it takes from Sheet is
+ * the part that matters: one `progress` value driving the scrim and the panel
+ * together, so the dialog ARRIVES rather than merely appearing.
+ *
+ * `pointerEvents="box-none"` on the centring layer is what keeps the scrim
+ * tappable around the card while the card itself still scrolls.
+ */
+function Dialog({
+  visible,
+  onClose,
+  dismissable = true,
+  children,
 }: {
-  label: string;
-  grams: number;
-  tone: string;
+  visible: boolean;
+  onClose: () => void;
+  /** False while an irreversible action is running — see the delete flow. */
+  dismissable?: boolean;
+  children: React.ReactNode;
+}) {
+  const { isDark } = useColors();
+  const keyboard = useKeyboardInset();
+  const progress = useSharedValue(0);
+  // Tracked apart from `visible` so the exit animation plays before teardown.
+  const [mounted, setMounted] = useState(visible);
+
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      progress.value = withSpring(1, { damping: 20, stiffness: 260, mass: 0.9 });
+    } else if (mounted) {
+      progress.value = withTiming(0, { duration: 150 }, (done) => {
+        if (done) runOnJS(setMounted)(false);
+      });
+    }
+  }, [visible, mounted, progress]);
+
+  const scrimStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
+  const panelStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [{ scale: interpolate(progress.value, [0, 1], [0.93, 1]) }],
+  }));
+
+  if (!mounted) return null;
+
+  return (
+    <Modal
+      visible
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      <Animated.View style={[StyleSheet.absoluteFill, scrimStyle]}>
+        <BlurView
+          intensity={isDark ? 26 : 18}
+          tint={isDark ? "dark" : "light"}
+          style={StyleSheet.absoluteFill}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss"
+          onPress={dismissable ? onClose : undefined}
+          style={[StyleSheet.absoluteFill, { backgroundColor: alpha("#000000", 0.45) }]}
+        />
+      </Animated.View>
+
+      {/* The scroll region fills the window and centres the card in it, so a
+          dialog taller than the screen (the delete flow, on a small phone with
+          the keyboard up) scrolls instead of being clipped. `flexGrow` rather
+          than `flex` on the filler is what allows that: it fills a short
+          viewport but is free to exceed a cramped one. */}
+      <Animated.View style={[StyleSheet.absoluteFill, keyboard.containerStyle]}>
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={styles.dialogScroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Pressable
+            style={styles.dialogFill}
+            onPress={dismissable ? onClose : undefined}
+            // Hidden from assistive tech, but only this node — a full-screen
+            // button wrapping the card would swallow the card's own contents
+            // into one announcement. Screen-reader users get the dialog's
+            // explicit Cancel / Got it buttons and the hardware back gesture,
+            // both of which do the same thing this tap does.
+            accessible={false}
+            importantForAccessibility="no"
+          >
+            <Animated.View style={[styles.dialogPanel, panelStyle]}>
+              {/* Swallows taps so pressing inside the card doesn't dismiss it.
+                  A responder rather than a Pressable: it adds no button
+                  semantics to a view that isn't one. */}
+              <View onStartShouldSetResponder={() => true}>{children}</View>
+            </Animated.View>
+          </Pressable>
+        </ScrollView>
+      </Animated.View>
+    </Modal>
+  );
+}
+
+/**
+ * The confirmation every Danger zone action must pass through.
+ *
+ * It renders from the action itself, so there is one place where the friction
+ * lives and one place to change it — and, more to the point, no way to run a
+ * declared action without it. `action == null` closes the dialog, which is also
+ * how "nothing is pending" is expressed: there is no separate visible flag that
+ * could be true while the action is missing.
+ *
+ * The confirm button stays disabled until the phrase matches exactly (and the
+ * password is non-empty, where one is asked for), and the whole dialog refuses
+ * to dismiss while the action is running.
+ */
+function DangerConfirmDialog({
+  action,
+  phraseText,
+  onPhraseText,
+  password,
+  onPassword,
+  error,
+  armed,
+  running,
+  onCancel,
+  onConfirm,
+}: {
+  action: DangerAction | null;
+  phraseText: string;
+  onPhraseText: (text: string) => void;
+  password: string;
+  onPassword: (text: string) => void;
+  error: string | null;
+  /** The phrase (and password) are satisfied — the button may fire. */
+  armed: boolean;
+  running: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { colors } = useColors();
+  // Held so the copy doesn't blank out during the dialog's exit animation,
+  // which plays after `action` has already gone back to null.
+  const last = useRef<DangerAction | null>(action);
+  if (action) last.current = action;
+  const shown = action ?? last.current;
+  if (!shown) return null;
+  const { confirm } = shown;
+
+  return (
+    <Dialog visible={!!action} onClose={onCancel} dismissable={!running}>
+      <View
+        style={[
+          styles.dialogCard,
+          {
+            backgroundColor: colors.surfaceElevated,
+            borderColor: alpha(colors.error, 0.35),
+          },
+        ]}
+      >
+        <IconBadge name="warning" tone={colors.error} size={56} solid />
+        <AppText variant="title" align="center" style={styles.dialogTitle}>
+          {confirm.heading}
+        </AppText>
+        <AppText variant="subhead" color="secondary" align="center">
+          {confirm.lead}
+        </AppText>
+
+        <View style={styles.dialogLines}>
+          {confirm.bullets.map((line) => (
+            <View key={line} style={styles.dialogLine}>
+              <Ionicons name="close-circle" size={16} color={colors.error} />
+              <AppText variant="subhead" color="secondary" style={styles.flex}>
+                {line}
+              </AppText>
+            </View>
+          ))}
+        </View>
+
+        {confirm.footnote ? (
+          <AppText
+            variant="caption"
+            color="tertiary"
+            align="center"
+            style={styles.dialogFootnote}
+          >
+            {confirm.footnote}
+          </AppText>
+        ) : null}
+
+        {/* IDENTITY, where the action needs it. The typed word below proves the
+            user meant it; this proves it's their account. */}
+        {confirm.needsPassword ? (
+          <>
+            <AppText variant="caption" color="secondary" align="center">
+              Confirm it&apos;s you
+            </AppText>
+            <TextInput
+              value={password}
+              onChangeText={onPassword}
+              editable={!running}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="password"
+              placeholder="Your password"
+              placeholderTextColor={colors.textSecondary}
+              accessibilityLabel={`Your password, to confirm: ${shown.title}`}
+              style={[
+                styles.input,
+                styles.confirmField,
+                {
+                  color: colors.text,
+                  borderColor: error ? colors.error : colors.divider,
+                  backgroundColor: colors.surfaceSunken,
+                },
+              ]}
+            />
+            {error ? (
+              // `alert` so a screen reader announces the correction without the
+              // user having to go looking for why nothing happened.
+              <AppText
+                variant="caption"
+                align="center"
+                accessibilityRole="alert"
+                style={{ color: colors.error }}
+              >
+                {error}
+              </AppText>
+            ) : null}
+          </>
+        ) : null}
+
+        <AppText variant="caption" color="secondary" align="center">
+          Type {confirm.phrase} to confirm.
+        </AppText>
+        <TextInput
+          value={phraseText}
+          onChangeText={onPhraseText}
+          editable={!running}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          placeholder={confirm.phrase}
+          placeholderTextColor={colors.textSecondary}
+          accessibilityLabel={`Type ${confirm.phrase} to confirm: ${shown.title}`}
+          style={[
+            styles.input,
+            styles.confirmField,
+            styles.confirmPhrase,
+            {
+              color: colors.text,
+              borderColor: armed ? colors.error : colors.divider,
+              backgroundColor: colors.surfaceSunken,
+            },
+          ]}
+        />
+
+        <Button
+          label={running ? "Working…" : confirm.cta}
+          variant="danger"
+          fullWidth
+          loading={running}
+          disabled={!armed}
+          onPress={onConfirm}
+          accessibilityHint="This cannot be undone"
+          style={styles.dialogBtn}
+        />
+        <Button
+          label="Cancel"
+          variant="ghost"
+          fullWidth
+          disabled={running}
+          onPress={onCancel}
+        />
+      </View>
+    </Dialog>
+  );
+}
+
+/** A titled group of fields inside the bio editor. */
+function FormCard({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
 }) {
   return (
-    <View style={styles.macro} accessible accessibilityLabel={`${label}: ${grams} grams`}>
-      <View style={styles.macroHead}>
-        <View style={[styles.macroDot, { backgroundColor: tone }]} />
-        <AppText variant="callout" style={styles.macroValue}>
-          {grams}g
-        </AppText>
-      </View>
-      <AppText variant="caption" color="tertiary" uppercase>
-        {label}
-      </AppText>
+    <View style={styles.formCard}>
+      <GroupLabel label={title} />
+      <Card padding="lg">{children}</Card>
     </View>
   );
 }
@@ -1724,7 +2279,7 @@ function ChipGroup<T extends string>({
         {label}
       </AppText>
       {hint && (
-        <AppText variant="caption" color="tertiary" style={styles.groupHint}>
+        <AppText variant="caption" color="tertiary" style={styles.groupHintTight}>
           {hint}
         </AppText>
       )}
@@ -1742,32 +2297,60 @@ function ChipGroup<T extends string>({
   );
 }
 
-function Field({
-  label,
+/**
+ * One of the three numeric bio fields. Text in, text out — the parsing and the
+ * range check belong to the screen, which is the thing that has to decide
+ * whether Save is allowed. The border turns red the moment the value can't be
+ * used, rather than waiting for a failed save to say so.
+ */
+function NumberField({
+  limits,
   value,
+  invalid,
   onChangeText,
-  placeholder,
 }: {
-  label: string;
+  limits: { label: string; unit: string; min: number; max: number; decimals: boolean };
   value: string;
-  onChangeText: (t: string) => void;
-  placeholder: string;
+  invalid: boolean;
+  onChangeText: (text: string) => void;
 }) {
   const { colors } = useColors();
   return (
-    <View style={styles.field}>
+    <View style={styles.numberField}>
       <AppText variant="footnote" color="secondary" style={styles.fieldLabel}>
-        {label}
+        {limits.label}
       </AppText>
       <TextInput
-        style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+        style={[
+          styles.input,
+          styles.numberInput,
+          {
+            backgroundColor: colors.surfaceSunken,
+            color: colors.text,
+            borderColor: invalid ? colors.error : colors.border,
+          },
+        ]}
         value={value}
-        onChangeText={onChangeText}
-        keyboardType="numeric"
-        placeholder={placeholder}
+        onChangeText={(t) =>
+          // Strip anything the keypad can still produce (a pasted "72 kg", a
+          // second decimal point) rather than letting it reach the parser.
+          onChangeText(
+            limits.decimals
+              ? t.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1")
+              : t.replace(/[^0-9]/g, ""),
+          )
+        }
+        keyboardType={limits.decimals ? "decimal-pad" : "number-pad"}
+        placeholder="—"
         placeholderTextColor={colors.textTertiary}
+        maxLength={limits.decimals ? 5 : 3}
+        accessibilityLabel={`${limits.label} in ${limits.unit}`}
+        accessibilityHint={`Between ${limits.min} and ${limits.max}`}
         maxFontSizeMultiplier={1.3}
       />
+      <AppText variant="caption" color="tertiary" align="center" style={styles.numberUnit}>
+        {limits.unit}
+      </AppText>
     </View>
   );
 }
@@ -1776,7 +2359,6 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   bold: { fontWeight: "700" },
   subtle: { marginTop: 2 },
-  modeNote: { marginTop: 6, lineHeight: 17 },
   section: { marginTop: Spacing.xxl },
   /** Second and later cards within one section — a tighter gap than between
    *  sections, so a stack of cards still reads as ONE subject. */
@@ -1784,6 +2366,42 @@ const styles = StyleSheet.create({
 
   // Header
   headerRow: { paddingTop: Spacing.md, marginBottom: Spacing.sm },
+
+  // Group labels
+  groupLabel: { marginBottom: Spacing.sm, paddingHorizontal: Spacing.xs },
+  groupHint: { marginTop: 1 },
+  groupHintTight: { marginBottom: Spacing.sm },
+
+  // Masthead
+  masthead: { flexDirection: "row", alignItems: "stretch" },
+  mastStat: { flex: 1, alignItems: "center", gap: 5 },
+  mastValue: { fontWeight: "700" },
+  mastRule: { width: StyleSheet.hairlineWidth, marginHorizontal: Spacing.sm },
+
+  // Focus tiles
+  focusRow: { flexDirection: "row", gap: Spacing.sm },
+  focusTile: {
+    flex: 1,
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.xs,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+  },
+  focusLabel: { fontWeight: "600" },
+  focusNote: {
+    marginTop: Spacing.lg,
+    paddingTop: Spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  focusNoteLine: { marginTop: 3, lineHeight: 16 },
+
+  // Goal tiles
+  tileRow: { flexDirection: "row", gap: Spacing.md },
+  goalTile: { flex: 1 },
+  tileHead: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
+  tileControl: { marginTop: Spacing.lg },
 
   // Card head (icon + title above a control)
   cardRowHead: {
@@ -1795,19 +2413,20 @@ const styles = StyleSheet.create({
 
   // Nutrition targets
   calorieRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
-  macroRow: {
+  macroBlock: { marginTop: Spacing.lg },
+  splitBar: {
     flexDirection: "row",
-    marginTop: Spacing.lg,
-    paddingTop: Spacing.lg,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    height: 10,
+    borderRadius: Radius.pill,
+    overflow: "hidden",
   },
-  macro: { flex: 1, alignItems: "center", gap: 2 },
-  macroHead: { flexDirection: "row", alignItems: "center", gap: 6 },
-  macroDot: { width: 7, height: 7, borderRadius: Radius.pill },
-  macroValue: { fontWeight: "700" },
+  splitLegend: { flexDirection: "row", marginTop: Spacing.md },
+  legendItem: { flex: 1, alignItems: "center", gap: 2 },
+  legendHead: { flexDirection: "row", alignItems: "center", gap: 6 },
+  legendDot: { width: 7, height: 7, borderRadius: Radius.pill },
+  legendValue: { fontWeight: "700", fontVariant: ["tabular-nums"] },
 
   // Chips
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm },
   /**
    * Two per row, both stretching to fill it. `flexBasis: "45%"` is what forces
    * the wrap at two (two 45% items + the gap exceed 100%, three can't fit), and
@@ -1818,9 +2437,12 @@ const styles = StyleSheet.create({
    */
   cuisineGrid: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm },
   cuisineChip: { flexGrow: 1, flexBasis: "45%", justifyContent: "center" },
-  options: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm, marginBottom: Spacing.sm },
+  options: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm },
 
-  // Modal
+  // Danger zone
+  danger: { borderWidth: 1 },
+
+  // Bio editor
   modal: { flex: 1 },
   modalHeader: {
     flexDirection: "row",
@@ -1828,12 +2450,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: Spacing.screen,
     paddingVertical: Spacing.lg,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  headerActionOff: { opacity: 0.4 },
   modalBody: { padding: Spacing.screen, paddingBottom: Spacing.huge },
   modalIntro: { marginBottom: Spacing.lg, lineHeight: 18 },
-  field: { marginBottom: Spacing.lg },
-  fieldLabel: { marginBottom: Spacing.sm, marginTop: Spacing.sm },
+  formCard: { marginBottom: Spacing.xl },
+  fieldLabel: { marginBottom: Spacing.sm },
   input: {
     borderWidth: 1,
     borderRadius: Radius.md,
@@ -1841,38 +2464,48 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
     fontSize: 16,
   },
-  saveBtn: { marginTop: Spacing.xl },
+  numberRow: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  numberField: { flex: 1 },
+  numberInput: {
+    textAlign: "center",
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+    paddingHorizontal: Spacing.sm,
+  },
+  numberUnit: { marginTop: 4 },
+  saveBtn: { marginTop: Spacing.sm },
 
   // Chip group (edit form)
-  group: { marginBottom: Spacing.md },
-  groupHint: { marginBottom: Spacing.sm },
+  group: { marginBottom: Spacing.lg },
 
-  // Change-summary recap modal
-  summaryScrim: {
-    flex: 1,
+  // Dialogs
+  dialogScroll: { flexGrow: 1 },
+  dialogFill: {
+    flexGrow: 1,
     alignItems: "center",
     justifyContent: "center",
     padding: Spacing.xl,
   },
-  summaryCard: {
-    width: "100%",
-    maxWidth: 360,
+  dialogPanel: { width: "100%", maxWidth: 380 },
+  dialogCard: {
     borderWidth: 1,
     borderRadius: Radius.xxl,
     padding: Spacing.xl,
     alignItems: "center",
   },
-  summaryTitle: { marginTop: Spacing.md },
-  summaryLines: {
-    alignSelf: "stretch",
-    gap: Spacing.sm,
-    marginTop: Spacing.lg,
-  },
-  summaryLine: { flexDirection: "row", alignItems: "flex-start", gap: Spacing.sm },
-  summaryBtn: { alignSelf: "stretch", marginTop: Spacing.xl },
+  dialogTitle: { marginTop: Spacing.md },
+  dialogLines: { alignSelf: "stretch", gap: Spacing.sm, marginTop: Spacing.lg },
+  dialogLine: { flexDirection: "row", alignItems: "flex-start", gap: Spacing.sm },
+  dialogFootnote: { marginTop: Spacing.md, lineHeight: 16 },
+  dialogBtn: { alignSelf: "stretch", marginTop: Spacing.xl },
 
-  // Delete-account inputs. Shared layout…
-  deleteField: {
+  // Danger-confirmation inputs. Shared layout…
+  confirmField: {
     alignSelf: "stretch",
     marginTop: Spacing.sm,
     textAlign: "center",
@@ -1880,7 +2513,7 @@ const styles = StyleSheet.create({
   // …but only the typed word gets the letter-spaced treatment, so it reads as a
   // deliberate act rather than an ordinary form field. Applying this to the
   // password too would space out the secure-entry dots into nonsense.
-  deletePhrase: {
+  confirmPhrase: {
     letterSpacing: 2,
     fontWeight: "700",
   },

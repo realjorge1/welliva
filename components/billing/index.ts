@@ -1,19 +1,28 @@
 /**
- * Welliva billing UI — paywalls, gates and lock markers.
+ * Welliva billing UI — the storefront's copy, gates and lock markers.
  *
- *   import { PaywallGate, ProBadge, ProLockCard } from "@/components/billing";
+ *   import { PaywallGate, ProLockCard } from "@/components/billing";
  *
  * The tier list itself is data, in services/billing/tiers.ts.
  */
 export { PaywallGate } from "./PaywallGate";
-export { ProBadge } from "./ProBadge";
 export { ProLockCard } from "./ProLockCard";
+export { LOCK_COPY, toLockId, type LockCopy, type LockId } from "./lockCopy";
 export {
   ALWAYS_FREE_NOTE,
-  LOCK_COPY,
-  PRO_BENEFITS,
-  toLockId,
-  type LockCopy,
-  type LockId,
-  type ProBenefit,
-} from "./lockCopy";
+  bestAnnualSaving,
+  countLoggedDays,
+  FREE_PRICE,
+  historyReachLine,
+  PLAN_CARD_ORDER,
+  PLAN_IDENTITY,
+  periodLabel,
+  periodName,
+  priceView,
+  PRO_VALUE_NOTE,
+  proUpsell,
+  renewalDisclosure,
+  type PaidTier,
+  type PlanIdentity,
+  type PriceView,
+} from "./planCopy";

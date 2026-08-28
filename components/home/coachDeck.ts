@@ -43,19 +43,30 @@ function patternTone(p: HabitPattern): CoachInsight["tone"] {
  * Build the Gozlin habit card from the report, or null when there's nothing
  * evidence-backed to surface yet (a brand-new user).
  */
+/**
+ * One learned pattern as a coach card.
+ *
+ * Extracted so the weekly Home insight and the carousel card are the SAME
+ * object: tapping either opens the deep-dive on identical framing. Two
+ * hand-rolled mappings would eventually disagree about a pattern's title or
+ * tone, and the user would meet the same finding wearing two different faces.
+ */
+export function cardFromPattern(p: HabitPattern, id = "gozlin-habit"): CoachCard {
+  return {
+    id,
+    type: "motivation",
+    tone: patternTone(p),
+    icon: p.icon ?? "sparkles",
+    title: patternTitle(p),
+    message: p.message,
+    priority: 6,
+    isHabit: true,
+  };
+}
+
 export function buildHabitCard(report: GozlinHabitReport): CoachCard | null {
   if (report.patterns.length > 0) {
-    const p = report.patterns[0];
-    return {
-      id: "gozlin-habit",
-      type: "motivation",
-      tone: patternTone(p),
-      icon: p.icon ?? "sparkles",
-      title: patternTitle(p),
-      message: p.message,
-      priority: 6,
-      isHabit: true,
-    };
+    return cardFromPattern(report.patterns[0]);
   }
 
   // No learned pattern yet, but if we already have a real behavior read, cite the

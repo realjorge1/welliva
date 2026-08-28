@@ -91,8 +91,6 @@ export interface WorkoutDefinition {
   warmup: WorkoutBlockItem[];
   main: WorkoutBlockItem[];
   cooldown: WorkoutBlockItem[];
-  /** Beat that matches the session's tempo (player preselects it). */
-  suggestedBeatId?: string;
   /** Generated art tile: an icon on a themed gradient — original, code-drawn. */
   art: { icon: string; hue: ArtHue; pattern?: ArtPattern };
 }
@@ -206,17 +204,6 @@ export interface FitnessRecommendation {
   reasons: string[];
   /** One coach-voice insight line for the dashboard. */
   insight: string;
-}
-
-/* ─────────────────────────────── Beats ─────────────────────────────── */
-
-export interface BeatMeta {
-  id: string;
-  title: string;
-  bpm: number;
-  energy: EnergyLevel;
-  /** Short mood descriptor ("warm analog groove for winding down"). */
-  mood: string;
 }
 
 /* ─────────────────────────────── Progress ─────────────────────────────── */

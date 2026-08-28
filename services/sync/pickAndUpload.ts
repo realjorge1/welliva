@@ -37,6 +37,20 @@ function loadImagePicker(): typeof import("expo-image-picker") | null {
   }
 }
 
+/**
+ * Whether the OS image picker can actually open on this build.
+ *
+ * The pick functions below are fail-soft by design — cancel, permission denied
+ * and "the native module isn't in this build" all return null. That's right for
+ * the storage layer and wrong for a button: a user tapping "change photo" on a
+ * dev client that predates expo-image-picker gets a tap that does nothing, with
+ * no way to tell that from cancelling. Screens call this first so they can say
+ * which it was.
+ */
+export function isImagePickerAvailable(): boolean {
+  return loadImagePicker() !== null;
+}
+
 // ── base64 → ArrayBuffer (pure JS; no atob dependency) ──────────────────────
 const B64_CHARS =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -78,28 +92,68 @@ function contentTypeOf(asset: ImagePicker.ImagePickerAsset): string {
   return mime && CONTENT_EXT[mime] ? mime : "image/jpeg";
 }
 
-/** Ask for library access + open the picker; returns the chosen asset or null. */
-async function pickImage(
+/** Where a photo comes from. */
+export type PhotoSource = "library" | "camera";
+
+/**
+ * Why a pick produced no photo. `null` results can't say which, and a button
+ * that silently does nothing is indistinguishable from a broken one — screens
+ * need the reason to write the right sentence.
+ */
+export type PhotoFailure =
+  | "unavailable" // native module missing (dev client / Expo Go pre-rebuild)
+  | "permission" // user declined library or camera access
+  | "cancelled" // user backed out of the picker
+  | "failed"; // picker returned nothing usable, or the upload failed
+
+export type PhotoResult<T> = { ok: true; value: T } | { ok: false; reason: PhotoFailure };
+
+/**
+ * Ask for access + open the library picker or the camera.
+ *
+ * Returns a reason on every failure path so callers can distinguish "you
+ * cancelled" from "this build can't open the picker at all".
+ */
+async function pickImageResult(
+  source: PhotoSource,
   options: ImagePicker.ImagePickerOptions,
-): Promise<ImagePicker.ImagePickerAsset | null> {
+): Promise<PhotoResult<ImagePicker.ImagePickerAsset>> {
   const ImagePickerModule = loadImagePicker();
   if (!ImagePickerModule) {
     console.warn(
       "expo-image-picker native module unavailable (needs a native/EAS build). Photo pick skipped.",
     );
-    return null;
+    return { ok: false, reason: "unavailable" };
   }
-  const perm = await ImagePickerModule.requestMediaLibraryPermissionsAsync();
-  if (!perm.granted) return null;
-  const res = await ImagePickerModule.launchImageLibraryAsync({
+  const perm =
+    source === "camera"
+      ? await ImagePickerModule.requestCameraPermissionsAsync()
+      : await ImagePickerModule.requestMediaLibraryPermissionsAsync();
+  if (!perm.granted) return { ok: false, reason: "permission" };
+
+  const args: ImagePicker.ImagePickerOptions = {
     mediaTypes: ["images"],
     quality: 0.8,
     base64: true,
     ...options,
-  });
-  if (res.canceled) return null;
+  };
+  const res =
+    source === "camera"
+      ? await ImagePickerModule.launchCameraAsync(args)
+      : await ImagePickerModule.launchImageLibraryAsync(args);
+
+  if (res.canceled) return { ok: false, reason: "cancelled" };
   const asset = res.assets[0];
-  return asset?.base64 ? asset : null;
+  if (!asset?.base64) return { ok: false, reason: "failed" };
+  return { ok: true, value: asset };
+}
+
+/** Ask for library access + open the picker; returns the chosen asset or null. */
+async function pickImage(
+  options: ImagePicker.ImagePickerOptions,
+): Promise<ImagePicker.ImagePickerAsset | null> {
+  const res = await pickImageResult("library", options);
+  return res.ok ? res.value : null;
 }
 
 /**
@@ -118,21 +172,36 @@ export async function pickAvatar(userId: string): Promise<string | null> {
 }
 
 /**
- * Pick a progress/body photo and upload it to the private progress-photos
- * bucket under a timestamped name (upsert off — every photo is kept). Returns
- * the stored path, or null.
+ * Shoot or pick a progress/body photo and upload it to the private
+ * progress-photos bucket under a timestamped name (upsert off — every photo is
+ * kept, and the timestamp in the name is what dates the gallery when Storage
+ * doesn't report a creation time).
+ *
+ * Returns the stored path on success, or the reason nothing was added.
  */
-export async function pickProgressPhoto(userId: string): Promise<string | null> {
-  const asset = await pickImage({});
-  if (!asset?.base64) return null;
+export async function addProgressPhoto(
+  userId: string,
+  source: PhotoSource = "library",
+): Promise<PhotoResult<string>> {
+  const picked = await pickImageResult(source, {});
+  if (!picked.ok) return picked;
+
+  const asset = picked.value;
   const contentType = contentTypeOf(asset);
   const ext = CONTENT_EXT[contentType] ?? "jpg";
-  return uploadObject({
+  const path = await uploadObject({
     bucket: "progress-photos",
     userId,
     fileName: `progress-${Date.now()}.${ext}`,
-    data: base64ToArrayBuffer(asset.base64),
+    data: base64ToArrayBuffer(asset.base64!),
     contentType,
     upsert: false,
   });
+  return path ? { ok: true, value: path } : { ok: false, reason: "failed" };
+}
+
+/** Back-compat shim: the stored path, or null for any failure. */
+export async function pickProgressPhoto(userId: string): Promise<string | null> {
+  const res = await addProgressPhoto(userId, "library");
+  return res.ok ? res.value : null;
 }

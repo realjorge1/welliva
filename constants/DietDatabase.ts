@@ -62,6 +62,58 @@ export interface DietData {
   snackOptions: DietSnackOption[];
 }
 
+/**
+ * CONDITION MODE — the plans in this catalog that exist because of a diagnosis
+ * or a life stage, rather than because of a goal or a preference.
+ *
+ * A LABEL, NOT A LOCK. This list used to live in services/billing/tiers.ts and
+ * decide what a free user could not have; the whole catalog is free now (see the
+ * "diet catalog is FREE" section there), so it survives for the one thing it was
+ * always genuinely good at: telling someone that the plan they are looking at
+ * was authored around what their condition actually needs, not a generic diet
+ * with foods removed. Nothing here may ever be read as a price boundary again.
+ *
+ * The judgement calls, stated so they can be argued with rather than guessed at:
+ * anti-inflammatory, gut-health and immunity-boosting are included because each
+ * is authored around a physiological problem to manage. Bodybuilding,
+ * athlete-endurance, weight-gain and wellness-detox are excluded because each is
+ * authored around a GOAL — a goal is not a diagnosis, and blurring the two is
+ * how "condition" stops meaning anything.
+ *
+ * Ids must match entries in {@link DIET_DATABASE}, including the lazily loaded
+ * library — guarded by services/__tests__/dietTiers.test.ts.
+ */
+export const CONDITION_DIET_IDS: readonly string[] = [
+  "diabetic-friendly",
+  "pcos-friendly",
+  "thyroid-support",
+  "renal-friendly",
+  "liver-friendly",
+  "ulcer-gerd-friendly",
+  "iron-deficiency-recovery",
+  "postpartum-wellness",
+  "elderly-geriatric",
+  "low-sodium",
+  "anti-inflammatory",
+  "gut-health",
+  "immunity-boosting",
+];
+
+/** Is this diet a condition protocol? Drives the "Condition mode" card label. */
+export function isConditionDiet(dietId: string): boolean {
+  return CONDITION_DIET_IDS.includes(dietId);
+}
+
+/**
+ * Guard for the test suite: every id in {@link CONDITION_DIET_IDS} must exist in
+ * the catalog. Returns the ids that don't. Kept here so the invariant sits next
+ * to the data it constrains — a label naming a diet we no longer ship is a
+ * silent failure at runtime.
+ */
+export function missingConditionDietIds(knownIds: readonly string[]): string[] {
+  return CONDITION_DIET_IDS.filter((id) => !knownIds.includes(id));
+}
+
 export const DIET_DATABASE: DietData[] = [
   // ===============================================
   // DIET #1: MEDITERRANEAN DIET

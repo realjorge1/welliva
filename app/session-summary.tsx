@@ -3,6 +3,7 @@
  * exercise breakdown. Rebuilt on the Welliva design system; logging + nav kept.
  */
 
+import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { AmbientCanvas, AppText, Button, Card, IconBadge, MuscleMap, Pill, Ring, useColors } from "@/components/ui";
 import { TrainingNudgeSheet } from "@/components/onboarding/TrainingNudgeSheet";
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
@@ -320,3 +321,12 @@ const styles = StyleSheet.create({
 
   actions: { gap: Spacing.md, marginTop: Spacing.xl },
 });
+
+/**
+ * Route-level boundary. This screen is the last thing a workout touches, so a
+ * throw here reads to the athlete as "the app crashed during my session" — it
+ * shows a recoverable error screen instead.
+ */
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
+  return <ScreenErrorFallback error={error} onRetry={retry} surface="session-summary" />;
+}

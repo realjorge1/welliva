@@ -1,5 +1,6 @@
 /**
- * PaywallGate — render children for Pro, an upgrade prompt for everyone else.
+ * PaywallGate — render children for a tier that includes the feature, an upgrade
+ * prompt for everyone else.
  *
  *   <PaywallGate lock="insights">
  *     <CorrelationPanel />
@@ -8,10 +9,11 @@
  * WHAT THIS IS AND IS NOT FOR
  *
  * It is for feature SURFACES — a panel, a chart, a section of a screen. It is
- * not the right tool for a per-item lock inside a list (use ProBadge on the row
- * and check `isDietLocked` on tap), and it is not a security boundary: anything
- * that costs money to serve must also be gated where the money is spent, which
- * for the AI paths means server-side (docs/monetization/setup.md Part 6).
+ * not the right tool for a per-item lock inside a list — that pattern is gone
+ * with the diet catalog lock it existed for — and it is not a security
+ * boundary: anything that costs money to serve must also be gated where the
+ * money is spent, which for the AI paths means server-side
+ * (docs/monetization/setup.md Part 6).
  *
  * `fallback` lets a caller substitute something better than the default card —
  * a blurred preview of the real thing converts better than a description of it,
@@ -42,9 +44,11 @@ export function PaywallGate({
   optimistic?: boolean;
   compact?: boolean;
 }) {
-  const { hasProAccess, isHydrating } = useBilling();
+  // `allows` asks the tier this specific feature needs — a Plus subscriber sees
+  // a Plus surface and still gets the ask on a Pro one.
+  const { allows, isHydrating } = useBilling();
 
-  if (hasProAccess) return <>{children}</>;
+  if (allows(lock)) return <>{children}</>;
   if (optimistic && isHydrating) return <>{children}</>;
   if (fallback !== undefined) return <>{fallback}</>;
 

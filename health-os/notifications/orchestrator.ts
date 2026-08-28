@@ -13,7 +13,13 @@
  */
 import { parseLocalDate, toISOWithOffset } from "../platform/clock";
 
-export type NotificationCategory = "briefing" | "anticipation" | "story" | "reminder";
+export type NotificationCategory =
+  | "briefing"
+  | "anticipation"
+  | "story"
+  /** The subscriber's weekly read — see services/WeeklyDigestService.ts. */
+  | "digest"
+  | "reminder";
 
 export interface NotificationCandidate {
   /** Stable across days so the same nudge isn't re-sent (de-dupe + cadence key). */
@@ -45,7 +51,7 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
   quietStart: "21:30",
   quietEnd: "07:30",
   dailyBudget: 3,
-  cadenceDays: { briefing: 1, story: 7, anticipation: 0 },
+  cadenceDays: { briefing: 1, story: 7, digest: 7, anticipation: 0 },
 };
 
 export interface SentRecord {

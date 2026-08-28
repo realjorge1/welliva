@@ -8,6 +8,10 @@
  */
 import { AppText, Card, IconBadge, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
+// Pure data (no react-native imports), so naming the tier here costs nothing at
+// runtime and keeps the spoken label from promising the wrong plan when the
+// history window moves between tiers.
+import { featureMinTier, TIER_NAME } from "@/services/billing";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
@@ -193,7 +197,9 @@ export function TrendCard({
                 hitSlop={6}
                 accessibilityRole="button"
                 accessibilityLabel={
-                  s.locked ? `${s.label} — requires Welliva Pro` : s.label
+                  s.locked
+                    ? `${s.label} — requires ${TIER_NAME[featureMinTier("history")]}`
+                    : s.label
                 }
                 accessibilityState={{ selected: active, disabled: s.locked }}
                 style={[

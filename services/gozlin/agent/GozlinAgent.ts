@@ -27,6 +27,16 @@ import {
   recordGrounding,
   validateNumbers,
 } from "./grounding";
+import {
+  collectWithProvenance,
+  createLedger,
+  receiptsFor,
+} from "./receipts";
+import {
+  OUTPUT_FALLBACK,
+  recordOutputScreen,
+  screenOutput,
+} from "./outputSafety";
 import { findTool, type GozlinToolContext } from "./tools";
 
 /**
@@ -54,6 +64,14 @@ export interface CoachTurnRequest {
   signal?: AbortSignal;
   /** Streamed text deltas, for rendering into the bubble as they arrive. */
   onDelta?: (text: string) => void;
+  /**
+   * What KIND of turn this is, for a backend that wants to treat one
+   * differently — a deep dive (./deepDive.ts) needs a longer answer than a
+   * coach reply and says so here. Omitted for an ordinary turn, and a server
+   * that ignores it still answers correctly, so this is a hint and never a
+   * dependency.
+   */
+  mode?: string;
 }
 
 export interface CoachTurnResponse {
@@ -176,6 +194,11 @@ export async function runAgentTurn(
     twin: ctx.twin,
     identity: ctx.identity,
   });
+  // The same evidence, indexed by WHERE each figure came from. Built in
+  // lockstep with the allowed-set above so that anything grounding lets
+  // through has a receipt to show — the two must never disagree.
+  const ledger = createLedger();
+  collectWithProvenance(ctx.twin, "current-state", ledger);
   addDerivedGaps(allowed, [
     ctx.twin.today.calories,
     ctx.twin.today.protein,
@@ -222,7 +245,31 @@ export async function runAgentTurn(
           continue;
         }
 
-        return { message: coachMsg(reply, inferTone(ctx), now), source: "agent" };
+        // 4. OUTPUT SAFETY. Grounding proved the figures are real; this asks
+        //    whether the advice around them is safe to act on. Same shape as
+        //    grounding — one specific correction, then a floor that cannot be
+        //    wrong. See ./outputSafety.ts for why it screens actions, not words.
+        const risk = screenOutput(reply);
+        recordOutputScreen(risk);
+        if (risk) {
+          if (regenerations < MAX_REGENERATIONS) {
+            regenerations++;
+            messages.push({ role: "system", content: risk.correction });
+            continue;
+          }
+          // Regeneration already spent, or spent again on the same fault: send
+          // the deterministic reply for this risk rather than the model's.
+          return {
+            message: coachMsg(OUTPUT_FALLBACK[risk.kind], "gentle", now),
+            source: "clinical",
+          };
+        }
+
+        const message = coachMsg(reply, inferTone(ctx), now);
+        // Only the agent path gets receipts: it is the only one whose figures
+        // came from evidence rather than from copy we wrote ourselves.
+        message.receipts = receiptsFor(reply, ledger);
+        return { message, source: "agent" };
       }
 
       // 4. Tool round. Execute every call, return ALL results in ONE user
@@ -250,6 +297,7 @@ export async function runAgentTurn(
           try {
             const out = await tool.run(c.input ?? {}, ctx);
             collectAllowedNumbers(out, allowed);
+            collectWithProvenance(out, c.name ?? "tool", ledger);
             return {
               type: "tool_result",
               tool_use_id: c.id,

@@ -1,18 +1,18 @@
 /**
  * STORY SERVICE — long-horizon storytelling (Proactive Companion P6).
  *
- * Extends the proven MonthlyRecapService discipline (deterministic from real logs,
+ * Deterministic from real logs, emoji-contained, archived —
  * emoji-contained, archived) to the LONG horizons the monthly cadence can't tell:
  * the calendar year, a journey anniversary, a five-year arc, and a "documentary" of the
  * whole journey so far. Same rules: pure + deterministic (inject `now`), every number
- * traces to a persisted log (it reuses MonthlyRecapService's `RecapInput`), all copy lives
- * here, and emoji are contained behind a flag.
+ * traces to a persisted log (see `StoryInput`), all copy lives here, and emoji
+ * are contained behind a flag.
  *
  * Anniversaries also flow through the forward path: `ensureJourneyAnniversary` stamps a
  * recurring Life Context entry from `journeyStartedAt`, so the anticipation engine surfaces
  * it and the notification orchestrator can deliver it — one memory, many features.
  *
- * Home: `services/` (alongside MonthlyRecapService/JourneyService) so it can read both the
+ * Home: `services/` (alongside JourneyService) so it can read both the
  * health-os archive store and GozlinPersona; the dependency rule forbids the reverse.
  * See docs/companion/00-proactive-companion-blueprint.md §3.5.
  */
@@ -20,7 +20,32 @@ import { store, K, type LifeContextRepository } from "@/health-os";
 import { ACHIEVEMENTS, AchievementTier, TIER_META } from "./AchievementService";
 import { celebrate, closer } from "./gozlin/GozlinPersona";
 import { toLocalDateString } from "./OfflineStorage";
-import type { RecapInput } from "./MonthlyRecapService";
+import type { DietHistoryEntry } from "../models/diet";
+import type { SessionSummaryData } from "../models/session";
+import type { BodyLogEntry, WorkoutLogEntry } from "../models/workout";
+import type { StreakData } from "./StreakService";
+
+/**
+ * Every log a story is allowed to read.
+ *
+ * This used to be MonthlyRecapService's `StoryInput`, borrowed because the two
+ * features read the same shelf. The monthly recap has since been retired, so
+ * the shape lives here — with the same contract it always had: a story may
+ * state a number only if it can be counted from these arrays.
+ */
+export interface StoryInput {
+  workoutLog: WorkoutLogEntry[];
+  sessionHistory: SessionSummaryData[];
+  dietHistory: DietHistoryEntry[];
+  bodyLogs: BodyLogEntry[];
+  streak: StreakData;
+  /** achievementId → ISO unlocked (achievementRecord.earned). */
+  earnedAchievements: Record<string, string>;
+  /** Daily protein target (g) for adherence — from nutritionTargets, optional. */
+  proteinTargetG?: number | null;
+  /** Dates (YYYY-MM-DD) the hydration goal was reached. */
+  waterGoalDates?: string[];
+}
 
 // ──────────────────────────────────────────────
 // EMOJI (contained to the story surface — mirrors MonthlyRecapService)
@@ -158,7 +183,7 @@ function longestStreak(dates: Set<string>): number {
   return best;
 }
 
-export function aggregate(input: RecapInput, start: string, end: string): StoryStats {
+export function aggregate(input: StoryInput, start: string, end: string): StoryStats {
   const workouts = input.workoutLog.filter((w) => inRange(w.date, start, end));
   const sessions = input.sessionHistory.filter((s) => inRange(s.date, start, end));
   const diet = input.dietHistory.filter((d) => inRange(d.date, start, end));
@@ -186,7 +211,7 @@ export function aggregate(input: RecapInput, start: string, end: string): StoryS
     bodyDirection = bodyDeltaKg < -0.1 ? "down" : bodyDeltaKg > 0.1 ? "up" : "flat";
   }
 
-  // Milestones (achievements + challenges + trophies) whose timestamp lands in range.
+  // Milestones (achievements) whose timestamp lands in range.
   const tierRank: Record<AchievementTier, number> = {
     mythic: 5, platinum: 4, gold: 3, silver: 2, bronze: 1,
   };
@@ -203,18 +228,9 @@ export function aggregate(input: RecapInput, start: string, end: string): StoryS
       topAchievement = { name: def.name, tier: def.tier, tierLabel: meta.label, color: meta.color };
     }
   }
-  let challenges = 0;
-  for (const iso of Object.values(input.completedChallenges)) {
-    const d = isoDate(iso);
-    if (d && inRange(d, start, end)) challenges++;
-  }
-  const trophies = (input.trophies ?? []).filter((t) => {
-    const pk = t.periodKey; // YYYY-MM — count if the month falls in range
-    return pk && pk >= start.slice(0, 7) && pk <= end.slice(0, 7);
-  }).length;
 
   return {
-    hasActivity: active.size > 0 || achievements > 0 || challenges > 0 || body.length > 0,
+    hasActivity: active.size > 0 || achievements > 0 || body.length > 0,
     workouts: workouts.length,
     totalReps,
     minutes,
@@ -226,7 +242,7 @@ export function aggregate(input: RecapInput, start: string, end: string): StoryS
     weighIns: body.length,
     bodyDeltaKg,
     bodyDirection,
-    milestones: achievements + challenges + trophies,
+    milestones: achievements,
     topAchievement,
   };
 }
@@ -320,7 +336,7 @@ function emptyArtifact(
 // ──────────────────────────────────────────────
 
 /** The calendar year `year` (Jan 1 – Dec 31), wrapped. */
-export function buildYearStory(input: RecapInput, year: number, now: Date = new Date()): StoryArtifact {
+export function buildYearStory(input: StoryInput, year: number, now: Date = new Date()): StoryArtifact {
   const start = ymd(year, 1, 1);
   const end = ymd(year, 12, 31);
   const stats = aggregate(input, start, end);
@@ -351,7 +367,7 @@ function yearHeadline(stats: StoryStats, year: number): string {
 
 /** The most recently completed journey anniversary year, or null if under a year in. */
 export function buildAnniversaryStory(
-  input: RecapInput,
+  input: StoryInput,
   journeyStartedAt: string,
   now: Date = new Date(),
 ): StoryArtifact | null {
@@ -390,7 +406,7 @@ export function buildAnniversaryStory(
 
 /** The last five calendar years (or the whole journey if shorter). */
 export function buildFiveYearStory(
-  input: RecapInput,
+  input: StoryInput,
   journeyStartedAt: string | undefined,
   now: Date = new Date(),
 ): StoryArtifact {
@@ -423,7 +439,7 @@ export function buildFiveYearStory(
 
 /** A documentary of the whole journey so far (journeyStartedAt → today). */
 export function buildJourneyDocumentary(
-  input: RecapInput,
+  input: StoryInput,
   journeyStartedAt: string,
   now: Date = new Date(),
 ): StoryArtifact {
@@ -465,7 +481,7 @@ const ANNIVERSARY_WINDOW_DAYS = 14;
  * Highest-signal first.
  */
 export function buildDueStories(
-  input: RecapInput,
+  input: StoryInput,
   journeyStartedAt: string | undefined,
   now: Date = new Date(),
 ): StoryArtifact[] {
@@ -522,7 +538,7 @@ export async function archiveStory(artifact: StoryArtifact): Promise<void> {
 
 /** Generate + archive every ready story; returns what's now ready (for delivery/UI). */
 export async function generateDueStories(
-  input: RecapInput,
+  input: StoryInput,
   journeyStartedAt: string | undefined,
   now: Date = new Date(),
 ): Promise<StoryArtifact[]> {

@@ -1,7 +1,7 @@
 /**
  * Welliva motion — the shared motion language + animated primitives.
  *
- *   import { enterPhase, enterRise, RollingNumber } from "@/components/motion";
+ *   import { enterFade, enterRise, RollingNumber } from "@/components/motion";
  *
  * All timing derives from `Motion` in constants/theme; all animation runs on
  * the UI thread. Compose these — don't invent per-screen curves.
@@ -10,10 +10,8 @@ export {
   Ease,
   enterFade,
   enterHero,
-  enterPhase,
   enterRise,
   exitFade,
-  exitPhase,
   settleLayout,
   tickInDown,
   tickInUp,

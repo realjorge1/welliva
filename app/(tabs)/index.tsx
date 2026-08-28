@@ -24,7 +24,15 @@ import { ScreenTopBar } from "@/components/navigation";
 import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
 import { CrashTrigger, ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { CoachDeepDive } from "@/components/home/CoachDeepDive";
-import { buildCoachDeck, buildHabitCard, type CoachCard } from "@/components/home/coachDeck";
+import { NudgeCard } from "@/components/home/NudgeCard";
+import {
+  buildCoachDeck,
+  buildHabitCard,
+  cardFromPattern,
+  type CoachCard,
+} from "@/components/home/coachDeck";
+import { pickWeeklyInsight, WEEKLY_INSIGHT_EYEBROW } from "@/components/home/weeklyInsight";
+import { useBilling } from "@/contexts/BillingContext";
 import { Gradients, Radius, Spacing, alpha } from "@/constants/theme";
 import { useGamification, useNutrition, useProfile, useWorkout } from "@/contexts/AppContext";
 import { calculateProgress } from "@/services/NutritionService";
@@ -53,7 +61,7 @@ export default function HomeScreen() {
   const { width } = useWindowDimensions();
   const { nutritionTargets } = useProfile();
   const { consumedNutrition, todayDiet, coachInsights } = useNutrition();
-  const { streakData } = useGamification();
+  const { streakData, nudge } = useGamification();
   const { workoutPlan, workoutLog } = useWorkout();
 
   const { top: gozlinMoment } = useGozlinMoments("home");
@@ -61,6 +69,35 @@ export default function HomeScreen() {
   // Habit Awareness report powers the extra "habits" coach card + the deep-dive.
   const habitReport = useHabitReport();
   const habitCard = useMemo(() => buildHabitCard(habitReport), [habitReport]);
+
+  /**
+   * The week's one insight, promoted out of the carousel.
+   *
+   * It is the SAME finding the deep-dive leads with, deliberately: this card is
+   * the free proof that the paid layer is real, so it has to be a true thing
+   * about the user rather than a teaser for one. Null on a young account — see
+   * pickWeeklyInsight, which stays silent rather than inventing a pattern.
+   */
+  const weekly = useMemo(() => pickWeeklyInsight(habitReport, todayDate()), [habitReport]);
+
+  /**
+   * THE TRIAL TRIGGER.
+   *
+   * The 48-hour Pro window opens here — the first moment Welliva has an
+   * evidence-backed finding about this person — rather than at sign-up, when it
+   * would be spent against an empty database and expire before the product had
+   * anything to show. See services/billing/trial.ts.
+   *
+   * Firing it from the render that first shows `weekly` is deliberate: the trial
+   * and the proof arrive together, so the user is looking at a true thing about
+   * themselves at the exact moment the rest of the tier unlocks. The call is
+   * idempotent and self-declining (already used, already subscribed, gating off),
+   * so running it on every qualifying mount costs one guarded read.
+   */
+  const { startInsightTrial } = useBilling();
+  useEffect(() => {
+    if (weekly) void startInsightTrial();
+  }, [weekly, startInsightTrial]);
 
   // The full coach deck — distinct cards (adaptive insights + Gozlin's habit
   // card), capped at 4; more appear as the user logs more.
@@ -232,7 +269,7 @@ export default function HomeScreen() {
         // redundant on the screen you land on.
         title={
           <>
-            <AppText variant="subhead" color="brand" style={styles.brand} numberOfLines={1}>
+            <AppText variant="headline" color="brand" style={styles.brand} numberOfLines={1}>
               Welliva
             </AppText>
             {/* Only ever visible when something hasn't reached the cloud. */}
@@ -338,8 +375,18 @@ export default function HomeScreen() {
         </Card>
       </Reveal>
 
+      {/* ── Within reach: the one record/near-miss in range (MomentEngine).
+             Renders nothing on most days — see components/home/NudgeCard. ── */}
+      {nudge && (
+        <Reveal index={2}>
+          <View style={styles.gutter}>
+            <NudgeCard nudge={nudge} />
+          </View>
+        </Reveal>
+      )}
+
       {/* ── Today's plan (progress meters, real data) ── */}
-      <Reveal index={2}>
+      <Reveal index={3}>
         <Card style={styles.planCard} padding="lg">
           <View style={styles.planRow}>
             <PlanTile
@@ -396,7 +443,7 @@ export default function HomeScreen() {
       </Reveal>
 
       {/* ── Streak (card-less strip) ── */}
-      <Reveal index={3}>
+      <Reveal index={4}>
         <View style={[styles.gutter, styles.streakBlock]}>
           <View style={styles.streakStrip}>
             <StreakStat
@@ -435,7 +482,7 @@ export default function HomeScreen() {
       </Reveal>
 
       {/* ── Hydration ── */}
-      <Reveal index={4}>
+      <Reveal index={5}>
         <View style={styles.section}>
           <View style={styles.gutter}>
             <SectionHeader title="Hydration" weight="700" />
@@ -444,9 +491,46 @@ export default function HomeScreen() {
         </View>
       </Reveal>
 
+      {/* ── This week's insight ───────────────────────────────────────────
+             Promoted out of the carousel and given its own moment. The engine
+             that produces this is what Pro is sold on, and it used to be three
+             taps deep in a modal — which meant the people deciding whether to
+             pay for it had never seen it work on their own data. */}
+      {weekly && (
+        <Reveal index={6}>
+          <View style={[styles.section, styles.gutter]}>
+            <Pressable
+              onPress={() => setSelectedCard(cardFromPattern(weekly.pattern, "weekly-insight"))}
+              accessibilityRole="button"
+              accessibilityLabel={`${WEEKLY_INSIGHT_EYEBROW}: ${weekly.pattern.message}`}
+              accessibilityHint="Opens everything your coach has learned about you"
+            >
+              <Card padding="lg">
+                <View style={styles.weeklyHead}>
+                  <IconBadge
+                    name={(weekly.pattern.icon ?? "sparkles") as never}
+                    tone={colors.primary}
+                    size={38}
+                  />
+                  <View style={styles.flex}>
+                    <AppText variant="caption" color="tertiary" uppercase>
+                      {WEEKLY_INSIGHT_EYEBROW}
+                    </AppText>
+                    <AppText variant="callout" style={styles.weeklyMessage}>
+                      {weekly.pattern.message}
+                    </AppText>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                </View>
+              </Card>
+            </Pressable>
+          </View>
+        </Reveal>
+      )}
+
       {/* ── Coach (card-less carousel — tap any card for the deep-dive) ── */}
       {coachDeck.length > 0 && (
-        <Reveal index={5}>
+        <Reveal index={7}>
           <View style={styles.section}>
             <View style={styles.gutter}>
               <SectionHeader title="Your coach" subtitle="Tap a card for the full picture" weight="700" />
@@ -620,6 +704,8 @@ function StreakStat({
 }
 
 const styles = StyleSheet.create({
+  weeklyHead: { flexDirection: "row", alignItems: "center", gap: 12 },
+  weeklyMessage: { marginTop: 2 },
   flex: { flex: 1 },
   gutter: { marginHorizontal: Spacing.screen },
 
@@ -629,7 +715,7 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.sm,
     paddingBottom: Spacing.lg,
   },
-  brand: { fontWeight: "800", marginTop: 3, letterSpacing: 0.2 },
+  brand: { fontWeight: "900", marginTop: 3, letterSpacing: -0.2 },
   syncPill: { marginTop: Spacing.sm },
 
   // Hero

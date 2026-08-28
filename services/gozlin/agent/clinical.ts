@@ -45,19 +45,19 @@ const EMERGENCY =
 
 /** Symptom interpretation — "is this normal", "why does this hurt". */
 const SYMPTOM =
-  /\b(sharp pain|stabbing pain|shooting pain|pain in my (chest|head|joint|knee|back|shoulder|hip|stomach|abdomen)|swollen|swelling|dizzy|dizziness|nauseous|nausea|vomiting|fever|rash|lump|numb|tingling|palpitations?|irregular heartbeat|can'?t sleep at all|(what|why).{0,30}\b(hurts?|aching|ache)\b.{0,20}\?|is (it|this) normal (that|to|for).{0,40}(pain|hurt|blood|dizzy|numb))\b/i;
+  /\b(sharp pain|stabbing pain|shooting pain|pain in my (chest|head|joint|knee|back|shoulder|hip|stomach|abdomen)|swollen|swelling|dizzy|dizziness|light[- ]?headed|nauseous|nausea|vomiting|fever|rash|lump|numb|tingling|palpitations?|irregular heartbeat|can'?t sleep at all|(gives?|gave) (out|way)|buckl(es|ed|ing)|locks? up|clicks? and|pops? and|(what|why).{0,30}\b(hurts?|aching|ache)\b.{0,20}\?|is (it|this) normal (that|to|for).{0,40}(pain|hurt|blood|dizzy|numb))\b/i;
 
 /** Diagnosis-seeking. */
 const DIAGNOSIS =
-  /\b(do (i|you think i) have\b|am i (diabetic|anemic|hypothyroid|pregnant)|diagnose|is (this|it) (cancer|diabetes|a tear|broken|fractured|an infection)|what'?s wrong with me)\b/i;
+  /\b(do (i|you think i) have\b|am i (diabetic|an?a?emic|hypothyroid|pregnant|deficient)|diagnose|is (this|it) (cancer|diabetes|a tear|broken|fractured|an infection)|what'?s wrong with me|(could|might|maybe) (my|it be my) (thyroid|iron|b12|hormones?|blood sugar|metabolism)|(could|do you think) (i|this) (be|is|have) (an?|my)? ?(deficiency|thyroid|anemia|anaemia|infection)|(be|is) my (thyroid|iron|b12|hormones?) (off|low|the problem))\b/i;
 
 /** Medication / supplement-as-treatment. */
 const MEDICATION =
-  /\b(dosage|how much (should i take|of my)|mg of\b|should i (take|stop|start|skip|double|halve) (my |taking )?(meds?|medication|pill|insulin|metformin|statin|steroid|antibiotic|thyroid|blood thinner)|drug interaction|interact with my (meds?|medication)|instead of my (meds?|medication))\b/i;
+  /\b(dosage|how much (should i take|of my)|\d+ ?mg\b|mg of\b|(should|can|is it (ok|fine|safe)) (i |to )?(take|stop|start|skip|double|halve|come off|quit) (my |taking |taking my )?(meds?|medication|medicine|pill|insulin|metformin|statin|steroid|antibiotic|thyroid|blood thinner|antidepressants?|ssri|lithium|beta blocker|ozempic|semaglutide|wegovy)|(with|alongside|while (on|taking)) my (meds?|medication|medicine|insulin|lithium|statin|thyroid|antidepressants?|blood thinner|prescription)|(interact|interfere|mess) (with|up) (my )?(meds?|medication|thyroid|insulin|prescription)|drug interactions?|instead of my (meds?|medication)|(take|start|get|try) (ozempic|wegovy|semaglutide|mounjaro|tirzepatide))\b/i;
 
 /** Disordered-eating signals. Coach the person, never the behaviour. */
 const DISORDERED_EATING =
-  /\b(purge|purging|make myself (throw up|sick|vomit)|laxative|starve myself|not eat(ing)? (for|at all)|only eat \d{1,3}0{1,2} calories|500 calories a day|fast for \d+ days|burn off (what|everything) i ate|punish myself for eating|hate my body)\b/i;
+  /\b(purg(e|ing|ed)|make myself (throw up|sick|vomit)|threw up|throwing up|made myself sick|laxatives?|diet pills?|appetite suppressant|starv(e|ing) myself|not eat(ing)? (for|at all|today|anything)|skip(ping)? (eating|meals|food)|([0-9]|10)\d{2} calories? (a|per) day|(under|below|only) \d{3} calories|get (down )?to \d{2} ?kg|lose \d{2,3} ?(kg|kgs|lbs|pounds|kilos) (in|within) (a|one|\d+) (week|month|weeks|months)|fast(ing)? for \d+ ?(days?|weeks?)|water fast(ing)?|(burn|work) off (what|everything|all) i ate|cancel out (a|the|my|that) (binge|meal|eating)|compensate for (eating|the binge|overeating)|punish myself for eating|hate my body|disgusted (with|by) myself)\b/i;
 
 const REFER =
   "This needs someone who can actually examine you — please talk to a doctor or another qualified professional.";
@@ -102,7 +102,7 @@ export function screenForClinicalRisk(text: string): ClinicalRisk | null {
   // question; a false negative costs something we cannot take back. Inflections
   // matter — people write "ending my life", not the dictionary form.
   if (
-    /\b(suicidal|suicide|kill(ing)? myself|end(ing)? (my|it) (life|all)|want(ing)? to die|dont want to be here|no point (in )?living|self[- ]harm|hurt(ing)? myself)\b/i.test(
+    /\b(suicidal|suicide|kill(ing)? myself|end(ing)? (my|it|thing|things|this) ?(life|all)?|want(ing)? to die|do(n'?t| not) want to (be here|wake up|exist|go on)|no (point|reason) (in |to )?(living|keeping going|keep going|carry on|carrying on|going on)|do(n'?t| not) see a (point|reason) to (keep|carry) (going|on)|better off without me|everyone would be better off|self[- ]harm|hurt(ing)? myself|cut(ting)? myself|can'?t (do this|go on) any ?more|tired of (living|being alive))\b/i.test(
       t,
     )
   ) {

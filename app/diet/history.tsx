@@ -34,15 +34,15 @@ export default function DietHistoryScreen() {
   const { currentDate } = useSystem();
   const { dietHistory } = useNutrition();
   const { backlogPrompt, backlogMeal, permissionFor } = useMealPlan();
-  const { hasProAccess } = useBilling();
+  const { tier } = useBilling();
 
   // The free tier reads back 30 days. This bounds the VIEW, never the storage —
   // the entries stay on device and reappear in full the moment they upgrade.
   // Older days are still drawn, just dimmed and unselectable: seeing the shape
   // of the history you already own is the whole argument for opening it.
   const cutoff = useMemo(
-    () => historyCutoffDate(hasProAccess, parseLocalDate(currentDate)),
-    [hasProAccess, currentDate],
+    () => historyCutoffDate(tier, parseLocalDate(currentDate)),
+    [tier, currentDate],
   );
 
   const [selected, setSelected] = useState<string>(addDays(currentDate, -1));

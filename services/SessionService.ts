@@ -170,10 +170,34 @@ export class SessionService {
     return { ...state, phase: "COUNTDOWN", countdownValue: 3, timerValue: 0 };
   }
 
+  /**
+   * The player's own smooth 3-2-1-GO finished → open the first set.
+   *
+   * The countdown is owned by the UI (it animates sub-second, and the workout
+   * clock shouldn't start until GO), so it doesn't ride `tick`. `tickCountdown`
+   * below is kept as the pure fallback path.
+   */
+  beginFirstSet(state: SessionState): SessionState {
+    if (state.phase !== "COUNTDOWN") return state;
+    return {
+      ...state,
+      phase: "ACTIVE_SET",
+      timerValue: 0,
+      countdownValue: 0,
+      currentReps: 0,
+    };
+  }
+
   /** User tapped "+ Rep" */
   addRep(state: SessionState): SessionState {
     if (state.phase !== "ACTIVE_SET") return state;
     return { ...state, currentReps: state.currentReps + 1 };
+  }
+
+  /** Undo a mis-tapped rep. Never goes below zero. */
+  removeRep(state: SessionState): SessionState {
+    if (state.phase !== "ACTIVE_SET" || state.currentReps <= 0) return state;
+    return { ...state, currentReps: state.currentReps - 1 };
   }
 
   /** User tapped "Done" (complete current set manually) */
@@ -186,10 +210,23 @@ export class SessionService {
     return this.completeCurrentSet(state, reps, state.timerValue);
   }
 
-  /** Skip the rest period */
+  /**
+   * Skip the rest period — advances NOW rather than parking the clock on 1 and
+   * waiting for the next tick. "Start now" that takes up to a second to happen
+   * reads as a dropped tap.
+   */
   skipRest(state: SessionState): SessionState {
-    if (state.phase !== "REST" && state.phase !== "TRANSITION") return state;
-    return { ...state, timerValue: 1 }; // will auto-advance on next tick
+    if (state.phase === "REST") {
+      return {
+        ...state,
+        phase: "ACTIVE_SET",
+        timerValue: 0,
+        currentSet: state.currentSet + 1,
+        currentReps: 0,
+      };
+    }
+    if (state.phase === "TRANSITION") return this.advanceToNextExercise(state);
+    return state;
   }
 
   /** Give the athlete more recovery time (rest/transition only) */
@@ -414,9 +451,13 @@ export class SessionService {
     );
     const totalReps = state.results.reduce((sum, r) => sum + r.totalReps, 0);
 
-    // Estimate calories from elapsed time
+    // Estimate calories from elapsed time. Guard the divisor: a session whose
+    // exercise list resolved to nothing would otherwise divide by zero, and
+    // NaN is silent — `NaN > 0.7` is false, `NaN >= 50` is false, and
+    // JSON.stringify turns it into `null`. That is how a finished workout
+    // reaches the summary screen as a red "Keep going" ring at 0%.
     const intensity =
-      setsCompleted / totalSetsTarget > 0.7 ? "vigorous" : "moderate";
+      totalSetsTarget > 0 && setsCompleted / totalSetsTarget > 0.7 ? "vigorous" : "moderate";
     const durationMin = Math.round(state.elapsedSeconds / 60);
     const calories = estimateCaloriesBurned(durationMin, weightKg, intensity);
 
@@ -433,18 +474,28 @@ export class SessionService {
       totalReps,
       durationSeconds: state.elapsedSeconds,
       caloriesBurned: calories,
-      completionPercent: Math.round(
-        (completed.length / state.exercises.length) * 100,
-      ),
+      completionPercent:
+        state.exercises.length > 0
+          ? Math.round((completed.length / state.exercises.length) * 100)
+          : 0,
       completedAt: new Date().toISOString(),
     };
   }
 
-  /** Persist the summary to history */
+  /**
+   * Persist the summary to history.
+   *
+   * Idempotent by `sessionRunId`: the player saves the moment a session
+   * completes AND the summary screen saves again through
+   * `recordSessionSummary`, so the same run legitimately arrives twice. Without
+   * this guard the second call duplicated the session in history, inflating
+   * every "sessions completed" and total-volume figure derived from it.
+   */
   async saveSummary(summary: SessionSummaryData): Promise<void> {
     try {
       const raw = await AsyncStorage.getItem(SESSION_HISTORY_KEY);
       const history: SessionSummaryData[] = raw ? JSON.parse(raw) : [];
+      if (history.some((h) => h.sessionRunId === summary.sessionRunId)) return;
       history.unshift(summary);
       // Keep last 50 sessions. Already bounded — noted here because this is the
       // pattern services/sync/retention.ts generalises: an unbounded document

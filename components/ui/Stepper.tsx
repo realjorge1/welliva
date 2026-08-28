@@ -25,8 +25,16 @@ export interface StepperProps {
    * and every stepper on a settings page sounds identical without this.
    */
   label: string;
+  /**
+   * `md` (default) — the compact form that rides a ListRow's trailing edge.
+   * `lg` — the value becomes the headline of its own tile: bigger type, bigger
+   * targets, and the buttons pushed out to the tile's edges. Use it when the
+   * number IS the content rather than a control hanging off a label.
+   */
+  size?: "md" | "lg";
   /** Minimum width of the value column, so a changing value doesn't shuffle
-   *  the buttons left and right as digits are added. */
+   *  the buttons left and right as digits are added. Ignored at `lg`, where the
+   *  value already spans everything between the two buttons. */
   valueWidth?: number;
   style?: StyleProp<ViewStyle>;
 }
@@ -38,21 +46,25 @@ export function Stepper({
   canDecrement = true,
   canIncrement = true,
   label,
+  size = "md",
   valueWidth = 62,
   style,
 }: StepperProps) {
+  const lg = size === "lg";
   return (
-    <View style={[styles.row, style]}>
+    <View style={[styles.row, lg && styles.rowLg, style]}>
       <StepButton
         icon="remove"
         onPress={onDecrement}
         disabled={!canDecrement}
         label={`Decrease ${label}`}
+        size={size}
       />
       <AppText
-        variant="callout"
+        variant={lg ? "title" : "callout"}
         align="center"
-        style={[styles.value, { minWidth: valueWidth }]}
+        style={[styles.value, lg ? styles.valueLg : { minWidth: valueWidth }]}
+        numberOfLines={1}
         // Read as the stepper's own value; the buttons name themselves.
         accessibilityLabel={`${label}: ${value}`}
       >
@@ -63,6 +75,7 @@ export function Stepper({
         onPress={onIncrement}
         disabled={!canIncrement}
         label={`Increase ${label}`}
+        size={size}
       />
     </View>
   );
@@ -73,13 +86,16 @@ function StepButton({
   onPress,
   disabled,
   label,
+  size,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   onPress: () => void;
   disabled: boolean;
   label: string;
+  size: "md" | "lg";
 }) {
   const { colors } = useColors();
+  const lg = size === "lg";
   return (
     <Pressable
       onPress={() => {
@@ -93,6 +109,7 @@ function StepButton({
       accessibilityState={{ disabled }}
       style={({ pressed }) => [
         styles.btn,
+        lg && styles.btnLg,
         {
           backgroundColor: colors.surfaceSunken,
           borderColor: colors.border,
@@ -100,14 +117,17 @@ function StepButton({
         },
       ]}
     >
-      <Ionicons name={icon} size={17} color={colors.text} />
+      <Ionicons name={icon} size={lg ? 20 : 17} color={colors.text} />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
+  /** Buttons pinned to the tile's edges, the value filling the span between. */
+  rowLg: { alignSelf: "stretch", justifyContent: "space-between" },
   value: { fontWeight: "700", fontVariant: ["tabular-nums"] },
+  valueLg: { flex: 1 },
   btn: {
     width: 34,
     height: 34,
@@ -116,4 +136,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  btnLg: { width: 40, height: 40 },
 });

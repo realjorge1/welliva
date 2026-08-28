@@ -104,6 +104,46 @@ export const Gradients = {
  */
 export type ColorScheme = "light" | "dark";
 
+/* ─────────────────────────── Dark-mode card wash ─────────────────────────
+ * Every card/panel/inset in dark mode is ONE color at different strengths: a
+ * really light sky blue, `SKY_BASE`, laid over the black canvas at a low
+ * opacity. It replaces the old dark teal-petrol surfaces — the cards used to
+ * read as a murky green, and now read as pale frosted glass.
+ *
+ * The values are pre-composited over #000000 so they stay OPAQUE hexes: sheets,
+ * popovers and inputs paint over live content and must not show it through, and
+ * `alpha()` (used by <Card> and callers) needs a hex to work from. `SKY_BASE`
+ * + `skyWash()` are exported for anything that wants the translucent form.
+ */
+export const SKY_BASE = { r: 150, g: 205, b: 245 } as const;
+
+/** The wash as a translucent rgba — for surfaces stacked over the black canvas. */
+export function skyWash(opacity: number): string {
+  return `rgba(${SKY_BASE.r}, ${SKY_BASE.g}, ${SKY_BASE.b}, ${opacity})`;
+}
+
+/** The same wash pre-composited over pure black, as opaque hex. */
+function skyOver(opacity: number): string {
+  const mix = (c: number) => Math.round(c * opacity).toString(16).padStart(2, "0");
+  return `#${mix(SKY_BASE.r)}${mix(SKY_BASE.g)}${mix(SKY_BASE.b)}`.toUpperCase();
+}
+
+export const SKY_WASH = {
+  /** Standard card / panel. */
+  card: skyOver(0.085), //        #0D1115
+  /** Cards on cards, sheets, popovers — one step brighter. */
+  cardElevated: skyOver(0.12), // #12191D
+  /** Chips, tracks, tags sitting on the page. */
+  muted: skyOver(0.06), //        #090C0F
+  /** Recessed insets (inputs, segmented tracks). */
+  sunken: skyOver(0.04), //       #06080A
+  /** Hairlines, tinted to match — held a step above the fills so a card still
+   *  shows its edge now that the fill is nearly black. */
+  border: skyOver(0.14), //       #151D22
+  borderStrong: skyOver(0.21), // #202B33
+  divider: skyOver(0.1), //       #0F1519
+} as const;
+
 export interface ThemeColors {
   // Surfaces
   background: string;
@@ -244,13 +284,15 @@ export const Colors: Record<ColorScheme, ThemeColors> = {
     purpleLight: "rgba(108,119,224,0.16)",
   },
   dark: {
-    // ── Surfaces (true OLED black canvas; cards lift just enough off pure
-    //    black with a faint teal-petrol glass cast to read as distinct) ──
+    // ── Surfaces (true OLED black canvas; cards are a VERY LIGHT sky-blue
+    //    wash — rgb(150,205,245) laid over the black at 4–12% — so they read
+    //    as pale frosted glass, never as a colored panel. The canvas itself
+    //    stays pure black and the gold brand is untouched. ──
     background: "#000000",
-    surface: "#0B1416",
-    surfaceElevated: "#121F21",
-    surfaceSunken: "#050B0C",
-    surfaceMuted: "#0E191B",
+    surface: SKY_WASH.card,
+    surfaceElevated: SKY_WASH.cardElevated,
+    surfaceSunken: SKY_WASH.sunken,
+    surfaceMuted: SKY_WASH.muted,
 
     // ── Text (light with a faint cool-teal cast, restful) ──
     text: "#EAF4F1",
@@ -258,13 +300,13 @@ export const Colors: Record<ColorScheme, ThemeColors> = {
     textTertiary: "#6E827D",
     textInverse: "#000000",
 
-    // ── Lines (hairline, teal undertone — kept low so black stays pure) ──
-    border: "#1A2A2C",
-    borderStrong: "#243738",
-    divider: "#152325",
+    // ── Lines (hairline, same sky-blue undertone as the cards) ──
+    border: SKY_WASH.border,
+    borderStrong: SKY_WASH.borderStrong,
+    divider: SKY_WASH.divider,
     // Dark keeps its subtle per-metric track (rings/bars branch on isDark and
     // don't read this); value set for completeness only.
-    emptyTrack: "#0B1416",
+    emptyTrack: SKY_WASH.card,
 
     // ── Brand (rich, sharp gold-yellow — the dark-mode app color) ──
     primary: "#EDB623",
@@ -299,9 +341,9 @@ export const Colors: Record<ColorScheme, ThemeColors> = {
     tabIconSelected: "#EDB623",
     headerText: "#EAF4F1",
     secondaryText: "#9FB3AE",
-    cardBackground: "#0B1416",
-    cardBackgroundSecondary: "#121F21",
-    cardBorder: "#1A2A2C",
+    cardBackground: SKY_WASH.card,
+    cardBackgroundSecondary: SKY_WASH.cardElevated,
+    cardBorder: SKY_WASH.border,
     primaryLight: "rgba(237,182,35,0.14)",
     secondary: "#F0CC83",
     secondaryLight: "rgba(240,204,131,0.14)",

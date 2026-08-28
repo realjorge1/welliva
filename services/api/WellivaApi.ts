@@ -60,6 +60,33 @@ export interface ParseFoodResponse {
 }
 
 /**
+ * Meal-photo response — what the vision model SAW, never what it thinks the
+ * numbers are.
+ *
+ * The shape is deliberately `ParseFoodResponse` plus a slot: quantity, unit and
+ * food name, and no nutrition fields at all. A photo is a harder parse than a
+ * sentence, not a different KIND of parse, so it lands on the same rung of the
+ * same ladder — the model identifies and portions, the device resolves the
+ * numbers from the USDA / FAO reference tables, and anything unmatched is shown
+ * as unidentified rather than estimated (see GozlinFoodAnalyst.ts).
+ *
+ * Letting a vision model return calories directly would be the easiest possible
+ * way to put invented numbers into someone's daily total, and it would be
+ * invisible: a plausible number looks exactly like a measured one once summed.
+ * So the endpoint is contractually forbidden from sending them, and the client
+ * has nowhere to put them if it did.
+ */
+export interface MealPhotoResponse {
+  /** Foods the model identified, with its best portion estimate. */
+  items: { quantity: number; unit: string; food: string }[];
+  /** Which meal it looks like, when the model can tell. */
+  slot?: "breakfast" | "lunch" | "dinner" | "snack";
+  /** Optional one-line remark, shown above the parsed text. */
+  note?: string;
+  model: string;
+}
+
+/**
  * One candidate food from the lookup ladder.
  *
  * `origin` is the contract's most important field: it tells the app whether the
@@ -300,11 +327,22 @@ export const WellivaApi = {
   coachTurn(args: {
     messages: unknown[];
     promptVersion?: string;
+    /**
+     * Turn kind, for a server that wants to vary `max_tokens` by surface —
+     * "deep-dive" asks for a long-form research answer rather than a coach
+     * reply. Forward-compatible: a backend that does not know the field
+     * ignores it and answers normally.
+     */
+    mode?: string;
     onDelta?: (text: string) => void;
     signal?: AbortSignal;
   }): Promise<CoachTurnResult> {
-    const { messages, promptVersion, ...opts } = args;
-    return postStream("/v1/coach/turn", { messages, promptVersion }, { ...opts, timeoutMs: 60000 });
+    const { messages, promptVersion, mode, ...opts } = args;
+    return postStream(
+      "/v1/coach/turn",
+      { messages, promptVersion, mode },
+      { ...opts, timeoutMs: 60000 },
+    );
   },
 
   /** Generate one day's AI meal plan tailored to the user. */
@@ -338,6 +376,53 @@ export const WellivaApi = {
    */
   parseFood(args: { system: string; user: string }): Promise<ParseFoodResponse> {
     return post<ParseFoodResponse>("/v1/nutrition/parse", args, 12000);
+  },
+
+  /**
+   * Claim this account's one insight trial.
+   *
+   * The server owns the decision: it records the claim against the Supabase user
+   * id, returns the window it will itself enforce, and returns that same window
+   * (with `alreadyClaimed: true`) on every later call — including after it has
+   * expired. That makes the trial once per account rather than once per install,
+   * and makes it impossible for the app to believe someone is on Pro while the
+   * backend meters them as free.
+   *
+   * Short timeout and no retry: this sits behind a card the user is already
+   * reading, and services/billing/trial.ts degrades to a local grant on any
+   * failure — including the 404 it will get until the endpoint is deployed.
+   */
+  claimInsightTrial(): Promise<{
+    expiresAt: string;
+    claimedAt: string;
+    alreadyClaimed: boolean;
+  }> {
+    return post("/v1/billing/trial/claim", {}, 8000);
+  },
+
+  /**
+   * Identify the foods in a meal photo.
+   *
+   * Sends base64 image bytes and gets back names + portions — see
+   * {@link MealPhotoResponse} for why it must never return nutrition figures.
+   * The caller turns those into the same free-text line a user would have typed
+   * and runs it through the existing analyzer, so a photo log and a typed log
+   * are the same entry, with the same confidence rungs and the same per-item
+   * corrections.
+   *
+   * 25s: a vision call is legitimately slower than a text parse, and the user is
+   * watching a progress state they asked for. Past that the honest move is to
+   * fail and let them type it — which is one tap away on the same screen.
+   */
+  describeMealPhoto(args: {
+    /** Raw base64 (no `data:` prefix), as the image picker returns it. */
+    imageBase64: string;
+    /** e.g. "image/jpeg" — lets the server build the right media block. */
+    mimeType: string;
+    /** The user's region, so a local dish resolves the way they mean it. */
+    region?: string;
+  }): Promise<MealPhotoResponse> {
+    return post<MealPhotoResponse>("/v1/log/photo", args, 25000);
   },
 
   /**

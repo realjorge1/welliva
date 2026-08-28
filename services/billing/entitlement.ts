@@ -1,12 +1,12 @@
 /**
- * ENTITLEMENT STORE — "is this user Pro?", answerable synchronously.
+ * ENTITLEMENT STORE — "which tier is this user on?", answerable synchronously.
  *
  * WHY THIS EXISTS AS A PLAIN MODULE AND NOT A REACT CONTEXT
  *
  * The things that most need to ask the question aren't components. PlanSync,
  * RemoteGozlinProvider and GozlinFoodAnalyst are pure async services with no
- * React in scope — the same design note at the top of PlanSync.ts. Threading an
- * `isPro` argument down through every one of them would put a billing concern
+ * React in scope — the same design note at the top of PlanSync.ts. Threading a
+ * `tier` argument down through every one of them would put a billing concern
  * into signatures that have nothing to do with billing, and would have to be
  * re-plumbed every time a new AI path appears.
  *
@@ -25,15 +25,23 @@
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import { toTier, type Tier } from "./tiers";
+
 /** Cached entitlement snapshot. Persisted so it survives a cold offline start. */
 export interface Entitlement {
-  /** Whether the `pro` entitlement was active as of `checkedAt`. */
-  isPro: boolean;
+  /** The tier that was active as of `checkedAt`. */
+  tier: Tier;
   /**
    * ISO expiry of the current period, when known. `null` for a lifetime grant
    * or when the store didn't report one — both mean "no expiry to enforce".
    */
   expiresAt: string | null;
+  /**
+   * Whether the store says this period will roll over on its own. `false` means
+   * cancelled-but-still-inside-the-paid-period, which is exactly when the
+   * upgrade screen should offer to resubscribe rather than say "renews".
+   */
+  willRenew: boolean;
   /** ISO timestamp of the last successful read from RevenueCat. */
   checkedAt: string | null;
   /**
@@ -48,8 +56,9 @@ const STORAGE_KEY = "@welliva_entitlement";
 const DEV_OVERRIDE_KEY = "@welliva_entitlement_dev";
 
 export const FREE: Entitlement = {
-  isPro: false,
+  tier: "free",
   expiresAt: null,
+  willRenew: false,
   checkedAt: null,
   source: "unknown",
 };
@@ -62,19 +71,21 @@ let current: Entitlement = FREE;
  * Every lock in the app has to be exercisable before the RevenueCat account
  * exists — otherwise the paywall and the gated screens are written blind and
  * first get tested during store review, which is the worst possible time. This
- * lets Settings → Developer flip the whole app between tiers instantly.
+ * lets the upgrade screen's developer row flip the whole app between tiers
+ * instantly, including the middle one, which is the tier most likely to be
+ * mis-gated precisely because nobody can buy it yet.
  *
  * Stripped in release: the setter no-ops and the getter is never consulted when
  * `__DEV__` is false, so a production bundle cannot be talked into granting Pro.
  */
-let devOverride: boolean | null = null;
+let devOverride: Tier | null = null;
 
 type Listener = (e: Entitlement) => void;
 const listeners = new Set<Listener>();
 
-/** True when a cached entitlement is still inside its paid period. */
+/** True when a cached paid entitlement is still inside its paid period. */
 function stillValid(e: Entitlement): boolean {
-  if (!e.isPro) return false;
+  if (e.tier === "free") return false;
   if (!e.expiresAt) return true; // lifetime / no expiry reported
   return new Date(e.expiresAt).getTime() > Date.now();
 }
@@ -87,41 +98,59 @@ export function getEntitlement(): Entitlement {
   if (__DEV__ && devOverride !== null) {
     // Report the override through the same shape the UI already reads, so
     // flipping the dev switch re-renders every gated screen. Without this the
-    // React tree and `isPro()` would disagree — components would show the free
-    // tier while services behaved as Pro.
-    return { ...current, isPro: devOverride, expiresAt: null, source: "unknown" };
+    // React tree and `currentTier()` would disagree — components would show one
+    // tier while services behaved as another.
+    return { ...current, tier: devOverride, expiresAt: null, source: "unknown" };
   }
   return current;
 }
 
 /**
- * The one question the rest of the app asks. Expiry is re-checked on every call
- * so a subscription that lapses while the app sits open stops granting access
- * without needing a network round-trip to notice.
+ * THE question the rest of the app asks. Expiry is re-checked on every call so a
+ * subscription that lapses while the app sits open stops granting access without
+ * needing a network round-trip to notice.
+ *
+ * This is the REAL tier. Feature code wants `effectiveTier()` in gating.ts,
+ * which also honours the fail-open rule for builds that cannot sell anything.
  */
-export function isPro(): boolean {
+export function currentTier(): Tier {
   if (__DEV__ && devOverride !== null) return devOverride;
-  return stillValid(current);
+  return stillValid(current) ? current.tier : "free";
+}
+
+/** True on the top tier. Reporting only — locks should ask `allows()`. */
+export function isPro(): boolean {
+  return currentTier() === "pro";
+}
+
+/** True on the entry paid tier, specifically (not Pro). */
+export function isPlus(): boolean {
+  return currentTier() === "plus";
+}
+
+/** True on any paid tier — "is this person actually giving us money?" */
+export function isSubscriber(): boolean {
+  return currentTier() !== "free";
 }
 
 /**
  * Force the tier in development. Pass `null` to go back to the real entitlement.
  * No-ops in release builds.
  */
-export async function setDevProOverride(value: boolean | null): Promise<void> {
+export async function setDevTierOverride(value: Tier | null): Promise<void> {
   if (!__DEV__) return;
   devOverride = value;
   emit();
   try {
     if (value === null) await AsyncStorage.removeItem(DEV_OVERRIDE_KEY);
-    else await AsyncStorage.setItem(DEV_OVERRIDE_KEY, value ? "pro" : "free");
+    else await AsyncStorage.setItem(DEV_OVERRIDE_KEY, value);
   } catch {
     /* best-effort — the in-memory override still applies this session */
   }
 }
 
 /** The active dev override, or `null` when the real entitlement is in force. */
-export function getDevProOverride(): boolean | null {
+export function getDevTierOverride(): Tier | null {
   return __DEV__ ? devOverride : null;
 }
 
@@ -135,7 +164,7 @@ export function getDevProOverride(): boolean | null {
  * be collected there anyway.
  */
 export function canUseAI(isBillingConfigured: boolean): boolean {
-  return !isBillingConfigured || isPro();
+  return !isBillingConfigured || isSubscriber();
 }
 
 /** Subscribe to changes. Returns an unsubscribe fn. */
@@ -178,9 +207,30 @@ export async function setEntitlement(
 }
 
 /**
+ * Read a persisted record, including one written before tiers existed.
+ *
+ * The v1 cache stored `{ isPro: boolean }`. An install that upgrades across this
+ * change must not be downgraded to free on the first offline launch, so a legacy
+ * `isPro: true` is read as `pro` — the tier that user actually paid for, since
+ * Plus did not exist when the record was written.
+ */
+function parseStored(raw: string): Entitlement {
+  const parsed = JSON.parse(raw) as Partial<Entitlement> & { isPro?: boolean };
+  const tier: Tier =
+    parsed.tier !== undefined ? toTier(parsed.tier) : parsed.isPro ? "pro" : "free";
+  return {
+    tier,
+    expiresAt: parsed.expiresAt ?? null,
+    willRenew: parsed.willRenew ?? tier !== "free",
+    checkedAt: parsed.checkedAt ?? null,
+    source: "cache",
+  };
+}
+
+/**
  * Load the last known entitlement from disk. Call once at startup, before the
  * SDK has had a chance to answer, so the first render of a paying user is
- * already Pro rather than flashing the free tier.
+ * already on their tier rather than flashing free.
  *
  * An expired cache is dropped rather than trusted.
  */
@@ -190,8 +240,9 @@ export async function hydrateEntitlement(): Promise<Entitlement> {
     // back to the real tier mid-way through testing a lock.
     try {
       const flag = await AsyncStorage.getItem(DEV_OVERRIDE_KEY);
-      if (flag === "pro") devOverride = true;
-      else if (flag === "free") devOverride = false;
+      // "pro" / "free" also covers the pre-tiers dev flag, which used the same
+      // two words — a developer's stored switch survives the upgrade.
+      if (flag === "pro" || flag === "plus" || flag === "free") devOverride = flag;
     } catch {
       /* best-effort */
     }
@@ -199,10 +250,8 @@ export async function hydrateEntitlement(): Promise<Entitlement> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as Entitlement;
-      current = stillValid(parsed)
-        ? { ...parsed, source: "cache" }
-        : { ...FREE, checkedAt: parsed.checkedAt };
+      const parsed = parseStored(raw);
+      current = stillValid(parsed) ? parsed : { ...FREE, checkedAt: parsed.checkedAt };
     }
   } catch (e) {
     console.warn("[billing] failed to hydrate entitlement:", e);

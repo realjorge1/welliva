@@ -1,15 +1,14 @@
 /**
- * useGamificationState — streaks, achievements, challenges, the Consistency
- * League and journey chapters, extracted from AppContext (M4).
+ * useGamificationState — streaks, achievements and journey chapters, extracted
+ * from AppContext (M4).
  *
- * Owns the achievementStats hub derivation, the achievement/challenge/league
- * evaluations, the four reconcile effects (which unlock + celebrate), the
- * celebration queue writer, and the joinLeague / startNewChapter / refreshStreak
- * handlers. State + records stay owned by the provider and flow in via props +
+ * Owns the achievementStats hub derivation, the achievement evaluation, the two
+ * reconcile effects (which unlock + celebrate), the celebration queue writer,
+ * and the startNewChapter / refreshStreak handlers. State + records stay owned by the provider and flow in via props +
  * setters; the "latest record" refs and silent-first-pass guards live here since
  * only these effects use them. Pure move — identical bodies + dependency arrays.
  */
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
 import { Palette } from "../../constants/theme";
@@ -30,49 +29,31 @@ import {
   saveAchievementRecord,
 } from "../../services/AchievementService";
 import {
-  ChallengeRecord,
-  EvaluatedChallenge,
-  currentPeriodKey,
-  ensurePeriod,
-  evaluateChallenges,
-  getChallengeSummary,
-  periodLabel,
-  reconcileChallengeCompletions,
-  saveChallengeRecord,
-  type ChallengeSummary,
-} from "../../services/ChallengeService";
-import {
   Celebration,
   celebrationForChapter,
-  celebrationForTrophy,
   celebrationFromAchievement,
+  celebrationFromMoment,
 } from "../../services/CelebrationService";
-import {
-  computeBreakdown,
-  computeStandings,
-  enroll as enrollInLeague,
-  ensureLeaguePeriod,
-  computeUserScore,
-  getTrophies,
-  leaguePeriodLabel,
-  monthHasEnded,
-  resolveIfMonthEnded,
-  saveTournamentRecord,
-  type TournamentRecord,
-  type Trophy,
-} from "../../services/TournamentService";
-import { rivalBlurb, rivalLabel } from "../../services/RivalEngine";
 import {
   goalSignature,
   isGoalReached,
   JourneyRecord,
   saveJourney,
 } from "../../services/JourneyService";
+import {
+  detectMoments,
+  detectNudge,
+  loadMomentRecord,
+  saveMomentRecord,
+  EMPTY_MOMENT_RECORD,
+  type MomentInput,
+  type MomentRecord,
+  type Nudge,
+} from "../../services/MomentEngine";
 import { addEpisode, rememberMotivation } from "../../services/gozlin";
 import { calculateNutritionTargets } from "../../services/NutritionService";
 import {
   KEYS,
-  parseLocalDate,
   todayDate,
   writeJSON,
 } from "../../services/OfflineStorage";
@@ -103,12 +84,8 @@ interface Params {
   bodyLogs: BodyLogEntry[];
   streakData: StreakData;
   achievementRecord: AchievementRecord;
-  challengeRecord: ChallengeRecord;
-  tournamentRecord: TournamentRecord;
   journey: JourneyRecord;
   setAchievementRecord: Dispatch<SetStateAction<AchievementRecord>>;
-  setChallengeRecord: Dispatch<SetStateAction<ChallengeRecord>>;
-  setTournamentRecord: Dispatch<SetStateAction<TournamentRecord>>;
   setJourney: Dispatch<SetStateAction<JourneyRecord>>;
   setCelebrations: Dispatch<SetStateAction<Celebration[]>>;
   setStreakData: Dispatch<SetStateAction<StreakData>>;
@@ -133,12 +110,8 @@ export function useGamificationState({
   bodyLogs,
   streakData,
   achievementRecord,
-  challengeRecord,
-  tournamentRecord,
   journey,
   setAchievementRecord,
-  setChallengeRecord,
-  setTournamentRecord,
   setJourney,
   setCelebrations,
   setStreakData,
@@ -150,19 +123,11 @@ export function useGamificationState({
   // Latest records, readable inside effects without re-subscribing (avoids loops).
   const achievementRecordRef = useRef(achievementRecord);
   achievementRecordRef.current = achievementRecord;
-  const challengeRecordRef = useRef(challengeRecord);
-  challengeRecordRef.current = challengeRecord;
-  const tournamentRecordRef = useRef(tournamentRecord);
-  tournamentRecordRef.current = tournamentRecord;
   const journeyRef = useRef(journey);
   journeyRef.current = journey;
   // First reconcile after load is silent — pre-existing progress shouldn't
   // trigger a flood of celebrations; only genuinely new unlocks celebrate.
   const achievementsReconciledRef = useRef(false);
-  // Same silent-first-pass guard for the league's soft beats (lead change,
-  // final stretch). Trophy wins are guarded instead by the persisted `resolved`
-  // flag, so a real win still pops on a cold start in a new month.
-  const leagueReconciledRef = useRef(false);
 
   /**
    * Queue celebrations + record each as a lasting Gozlin memory, so the coach
@@ -257,44 +222,6 @@ export function useGamificationState({
     [achievementStats, achievementRecord],
   );
 
-  const challenges = useMemo<EvaluatedChallenge[]>(
-    () => evaluateChallenges(achievementStats, challengeRecord),
-    [achievementStats, challengeRecord],
-  );
-
-  const challengeSummary = useMemo<ChallengeSummary>(
-    () =>
-      getChallengeSummary(
-        challenges,
-        challengeRecord.periodKey || currentPeriodKey(),
-      ),
-    [challenges, challengeRecord.periodKey],
-  );
-
-  // Consistency League — live head-to-head against this month's AI pacer. Pure
-  // presentation derived from the persisted record + the same delta-measured
-  // stats the rest of the app uses, anchored to "today" so days-left and pacing
-  // re-derive on a day change.
-  const league = useMemo(() => {
-    if (!tournamentRecord.periodKey) return null;
-    const now = parseLocalDate(currentDate);
-    const standings = computeStandings(achievementStats, tournamentRecord, now);
-    const { archetype, name } = tournamentRecord.rival;
-    return {
-      enrolled: tournamentRecord.enrolled,
-      standings,
-      rival: { archetype, name, blurb: rivalBlurb(archetype), label: rivalLabel(archetype) },
-      daysLeft: standings.daysLeft,
-      periodLabel: leaguePeriodLabel(tournamentRecord, now),
-      breakdown: computeBreakdown(achievementStats, tournamentRecord, now),
-    };
-  }, [tournamentRecord, achievementStats, currentDate]);
-
-  const trophies = useMemo<Trophy[]>(
-    () => getTrophies(tournamentRecord),
-    [tournamentRecord],
-  );
-
   // Reactively unlock & celebrate achievements. The first pass after load is
   // silent so a user's pre-existing progress is reconciled without a pop flood.
   useEffect(() => {
@@ -319,103 +246,65 @@ export function useGamificationState({
     achievementsReconciledRef.current = true;
   }, [achievementStats, isLoading, pushCelebrations]);
 
-  // Seasonal challenges: roll the period (re-baselines on a new month) and
-  // celebrate any newly-completed challenge. Same delta-from-baseline engine.
+  // ── Coach-noticed moments (services/MomentEngine) ────────────────────────
+  //
+  // Runs alongside the achievement reconcile rather than inside it, because the
+  // two answer different questions: achievements ask "did you cross a number",
+  // moments ask "has this ever happened to you before". Same silent-first-pass
+  // guard, for the same reason — a returning user must not be told they broke
+  // four records the instant the app finishes loading.
+  const momentRecordRef = useRef<MomentRecord>(EMPTY_MOMENT_RECORD);
+  const momentsHydratedRef = useRef(false);
+  const momentsReconciledRef = useRef(false);
+  const [nudge, setNudge] = useState<Nudge | null>(null);
+
   useEffect(() => {
     if (isLoading) return;
-    const rolled = ensurePeriod(challengeRecordRef.current, achievementStats);
-    if (rolled !== challengeRecordRef.current) {
-      challengeRecordRef.current = rolled;
-      setChallengeRecord(rolled);
-      saveChallengeRecord(rolled);
-    }
-    const { record, newlyCompleted } = reconcileChallengeCompletions(
-      achievementStats,
-      rolled,
-    );
-    if (newlyCompleted.length > 0) {
-      // Challenge records still roll forward (the monthly recap/story narrative
-      // reads them), but the challenge SURFACE was retired, so no celebration is
-      // popped for an achievement the user can no longer see.
-      setChallengeRecord(record);
-      saveChallengeRecord(record);
-    }
-  }, [achievementStats, isLoading, pushCelebrations]);
+    let cancelled = false;
 
-  // Consistency League: settle a finished month (award a Trophy on a win — never
-  // a penalty), then roll into the new month (re-baseline + fresh rival), then
-  // record the soft Gozlin beats. Mirrors the challenge effect's delta engine.
-  useEffect(() => {
-    if (isLoading) return;
-    const now = parseLocalDate(currentDate);
-    let rec = tournamentRecordRef.current;
-
-    // 1. Settle the prior month FIRST (before re-baselining loses the baseline).
-    //    A trophy win pops even on a cold start — it's guarded by `resolved`,
-    //    not the silent-first-pass, so the user always sees a real win.
-    const wasResolvable =
-      rec.enrolled && !rec.resolved && monthHasEnded(rec.periodKey, now);
-    const finishedPeriodKey = rec.periodKey;
-    const finalScore = wasResolvable ? computeUserScore(achievementStats, rec, now) : 0;
-    const { record: resolved, awardedTrophy } = resolveIfMonthEnded(
-      achievementStats,
-      rec,
-      now,
-    );
-    if (resolved !== rec) {
-      rec = resolved;
-      tournamentRecordRef.current = rec;
-      setTournamentRecord(rec);
-      saveTournamentRecord(rec);
-      if (wasResolvable) {
-        if (awardedTrophy) {
-          // pushCelebrations also writes the win into Gozlin's memory.
-          pushCelebrations([celebrationForTrophy(awardedTrophy)]);
-        } else {
-          // No loss state — a warm "how far you moved" memory, never a red X.
-          addEpisode({
-            id: `league-result:${finishedPeriodKey}`,
-            date: todayDate(),
-            summary: `Wrapped the ${periodLabel(finishedPeriodKey)} league — moved ${finalScore} discipline points`,
-            kind: "note",
-          }).catch(() => {});
-        }
+    (async () => {
+      if (!momentsHydratedRef.current) {
+        momentRecordRef.current = await loadMomentRecord();
+        momentsHydratedRef.current = true;
       }
-    }
+      if (cancelled) return;
 
-    // 2. Roll into the current month (re-baseline + new rival; trophies kept).
-    const rolled = ensureLeaguePeriod(rec, achievementStats, now);
-    if (rolled !== rec) {
-      rec = rolled;
-      tournamentRecordRef.current = rec;
-      setTournamentRecord(rec);
-      saveTournamentRecord(rec);
-    }
+      const input: MomentInput = {
+        today: currentDate,
+        streak: streakData,
+        workoutLog,
+        sessionHistory,
+        dietHistory,
+      };
 
-    // 3. Soft beats — only while enrolled, and never on the silent first pass.
-    //    addEpisode de-dupes by id, so each fires at most once per period.
-    if (rec.enrolled && leagueReconciledRef.current && !monthHasEnded(rec.periodKey, now)) {
-      const standings = computeStandings(achievementStats, rec, now);
-      if (standings.leader === "user" && standings.userScore > 0) {
-        addEpisode({
-          id: `league-lead:${rec.periodKey}`,
-          date: todayDate(),
-          summary: `Took the lead over ${rec.rival.name} in the ${periodLabel(rec.periodKey)} league`,
-          kind: "win",
-        }).catch(() => {});
+      const { record, newly } = detectMoments(input, momentRecordRef.current);
+      // The record advances even on the silent pass — that is what stops the
+      // first post-install check from reporting a lifetime of "records".
+      momentRecordRef.current = record;
+      void saveMomentRecord(record);
+
+      if (newly.length > 0 && momentsReconciledRef.current) {
+        pushCelebrations(newly.map(celebrationFromMoment));
       }
-      if (standings.daysLeft > 0 && standings.daysLeft <= 3) {
-        addEpisode({
-          id: `league-final:${rec.periodKey}`,
-          date: todayDate(),
-          summary: `Final stretch of the ${periodLabel(rec.periodKey)} league — ${standings.daysLeft} days left`,
-          kind: "note",
-        }).catch(() => {});
-      }
-    }
 
-    leagueReconciledRef.current = true;
-  }, [achievementStats, isLoading, currentDate, pushCelebrations]);
+      // Pure derivation off the freshly-advanced record, so a nudge can never
+      // advertise a record the moment detector just consumed.
+      setNudge(detectNudge(input, record));
+      momentsReconciledRef.current = true;
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isLoading,
+    currentDate,
+    streakData,
+    workoutLog,
+    sessionHistory,
+    dietHistory,
+    pushCelebrations,
+  ]);
 
   // Goal reached → mark the chapter complete and invite the next one. Fires
   // exactly once per goal (signature-guarded across restarts).
@@ -465,26 +354,6 @@ export function useGamificationState({
   const dismissCelebration = useCallback(() => {
     setCelebrations((prev) => prev.slice(1));
   }, [setCelebrations]);
-
-  /**
-   * Opt in to this month's league. Ensures the period is current, re-baselines
-   * to the live stats (so only post-join activity counts — no retroactive
-   * credit), persists, and writes the join into Gozlin's memory.
-   */
-  const joinLeague = useCallback(async () => {
-    const now = new Date();
-    const current = ensureLeaguePeriod(tournamentRecordRef.current, achievementStats, now);
-    const enrolled = enrollInLeague(current, achievementStats, now);
-    tournamentRecordRef.current = enrolled;
-    setTournamentRecord(enrolled);
-    await saveTournamentRecord(enrolled);
-    addEpisode({
-      id: `league-join:${enrolled.periodKey}`,
-      date: todayDate(),
-      summary: `Joined the ${leaguePeriodLabel(enrolled, now)} Consistency League — pacing with ${enrolled.rival.name}`,
-      kind: "milestone",
-    }).catch(() => {});
-  }, [achievementStats]);
 
   /**
    * Re-consult: the user reached a goal and chose what's next. Updates the goal
@@ -564,13 +433,9 @@ export function useGamificationState({
   return {
     achievementStats,
     achievements,
-    challenges,
-    challengeSummary,
-    league,
-    trophies,
+    nudge,
     pushCelebrations,
     dismissCelebration,
-    joinLeague,
     startNewChapter,
     refreshStreak,
   };

@@ -358,14 +358,22 @@ export function useProfileState({
     [userBio, planState, refreshTodayDiet],
   );
 
-  const updateGoals = useCallback(
-    async (goals: Partial<UserGoals>) => {
-      const newGoals = { ...userGoals, ...goals };
-      setUserGoals(newGoals);
-      await writeJSON(KEYS.USER_GOALS, newGoals);
-    },
-    [userGoals],
-  );
+  /**
+   * Merge a partial goal update in.
+   *
+   * Functional, like `setTargetWeight` below, and for a reason the settings
+   * steppers made visible: reading `userGoals` from the closure meant two taps
+   * inside one render frame both merged onto the SAME pre-tap snapshot, so a
+   * quick double-tap on "+" moved the water goal one step instead of two. The
+   * updater always sees the latest value, so every tap lands.
+   */
+  const updateGoals = useCallback(async (goals: Partial<UserGoals>) => {
+    setUserGoals((prev) => {
+      const next: UserGoals = { ...prev, ...goals };
+      writeJSON(KEYS.USER_GOALS, next);
+      return next;
+    });
+  }, []);
 
   /** Record a weigh-in (one entry per day; re-logging today overwrites). */
   const logBodyMeasurement = useCallback(async (entry: BodyLogEntry) => {

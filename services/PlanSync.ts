@@ -31,7 +31,7 @@ import type { UserBio } from "../models/user";
 import type { GeneratedWorkoutPlan } from "../models/workout";
 import { ensureDietLibraryLoaded } from "../constants/DietDatabase";
 import { WellivaApi } from "./api/WellivaApi";
-import { allowPro } from "./billing/gating";
+import { allows } from "./billing/gating";
 import { generateDietPlan } from "./DietPlanGenerator";
 import { parseLocalDate, toLocalDateString } from "./OfflineStorage";
 import {
@@ -53,7 +53,10 @@ export interface EnsuredDiet {
  * effect on the next plan the app builds — no restart, no cache to invalidate.
  */
 function canGenerateWithAI(): boolean {
-  return WellivaApi.isConfigured && allowPro();
+  // `ai-plans` is the Pro-tier feature: Free and Plus are matched to the
+  // catalog by the local generator below, which is a genuinely good plan — the
+  // AI branch is what writes one against this specific body.
+  return WellivaApi.isConfigured && allows("ai-plans");
 }
 
 /**

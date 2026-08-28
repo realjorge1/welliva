@@ -28,7 +28,7 @@ import { AppState } from "react-native";
 import type { Habit, HabitLogs, HabitStats } from "../models/habit";
 import {
   computeStats,
-  isScheduled,
+  isDueToday,
   loadHabits,
   loadLogs,
   saveHabits,
@@ -205,7 +205,10 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
       color: v.habit.color,
       streak: v.stats.currentStreak,
       doneToday: v.stats.doneToday,
-      scheduledToday: isScheduled(v.habit, currentDate),
+      // "Due", not "scheduled" — a weekly-goal habit that already met its quota
+      // must drop out of the widget's ring exactly as it drops out of the
+      // screen's, or the two disagree about what today asks for.
+      scheduledToday: isDueToday(v.habit, v.done, currentDate),
     }));
     const scheduled = items.filter((i) => i.scheduledToday);
     void writeWidgetSnapshot({

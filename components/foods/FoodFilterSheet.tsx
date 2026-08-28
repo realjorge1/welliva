@@ -39,7 +39,12 @@ export interface FoodFilterSheetProps {
   active: Set<string>;
   onToggle: (key: string) => void;
   onClear: () => void;
-  /** How many foods the current selection leaves — shown on the apply button. */
+  /**
+   * How many foods the current selection leaves — shown on the apply button,
+   * but only once something is actually selected. With nothing on, that number
+   * is just the size of the bundled catalog, and printing it would understate
+   * the screen: it can also reach the user's own foods and the USDA/AI lookup.
+   */
   resultCount: number;
 }
 
@@ -161,7 +166,9 @@ export function FoodFilterSheet({
             label={
               resultCount === 0
                 ? "No foods match"
-                : `Show ${resultCount} food${resultCount === 1 ? "" : "s"}`
+                : active.size === 0
+                  ? "Show foods"
+                  : `Show ${resultCount} food${resultCount === 1 ? "" : "s"}`
             }
             fullWidth
             size="md"

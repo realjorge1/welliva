@@ -13,6 +13,8 @@
  */
 import { AppText, Card, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
+// Pure data (no react-native imports) — see the same note in TrendCard.tsx.
+import { featureMinTier, TIER_NAME } from "@/services/billing";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
@@ -168,7 +170,9 @@ export function MacroTrendsCard({
                   hitSlop={6}
                   accessibilityRole="button"
                   accessibilityLabel={
-                    r.locked ? `${r.label} — requires Welliva Pro` : r.label
+                    r.locked
+                      ? `${r.label} — requires ${TIER_NAME[featureMinTier("history")]}`
+                      : r.label
                   }
                   accessibilityState={{ selected: active, disabled: r.locked }}
                   style={[

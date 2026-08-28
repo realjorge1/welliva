@@ -3,24 +3,28 @@
  *
  * The daily launchpad: an explainable "today" recommendation (plan session,
  * library workout or rest), continue-where-you-left-off, recovery status,
- * weekly rhythm, and doorways into the Library / Progress / Calendar /
+ * weekly rhythm, and doorways into the Explore / Progress / Calendar /
  * Settings screens of the fitness module.
  *
  * Everything the previous tab did is preserved: the weekly plan view, the
  * tailored-match card, plan regeneration, recents, and the guided-session
  * launch contract (exerciseIds/sets/reps params) are unchanged. The exercise
- * browser moved to Library → Exercises with identical behaviour.
+ * browser moved to Explore → Exercises with identical behaviour.
  */
 
 import {
   AmbientCanvas,
   AppText,
+  AscendingMeter,
   Button,
   Card,
   IconBadge,
+  ListGroup,
+  ListRow,
   NAV_CLEARANCE,
   Pill,
   Reveal,
+  Ring,
   SectionHeader,
   useColors,
   useElasticScroll,
@@ -509,7 +513,7 @@ export default function ExerciseScreen() {
                   </AppText>
                   {isOnboardingComplete && (
                     <Button
-                      label="Browse the library"
+                      label="Browse workouts"
                       icon="search"
                       variant="tonal"
                       onPress={() => router.push("/fitness/library" as never)}
@@ -525,7 +529,7 @@ export default function ExerciseScreen() {
             <View style={styles.quickGrid}>
               {(
                 [
-                  { icon: "albums-outline", label: "Library", route: "/fitness/library" },
+                  { icon: "compass-outline", label: "Explore", route: "/fitness/library" },
                   { icon: "trending-up-outline", label: "Progress", route: "/fitness/progress" },
                   { icon: "calendar-outline", label: "Calendar", route: "/fitness/calendar" },
                   { icon: "options-outline", label: "Settings", route: "/fitness/settings" },
@@ -538,7 +542,14 @@ export default function ExerciseScreen() {
                   onPress={() => router.push(q.route as never)}
                 >
                   <View style={styles.quickInner}>
-                    <Ionicons name={q.icon} size={20} color={colors.primary} />
+                    <View
+                      style={[
+                        styles.quickIcon,
+                        { backgroundColor: alpha(colors.primary, 0.14) },
+                      ]}
+                    >
+                      <Ionicons name={q.icon} size={18} color={colors.primary} />
+                    </View>
                     <AppText variant="footnote" weight="600">
                       {q.label}
                     </AppText>
@@ -548,57 +559,76 @@ export default function ExerciseScreen() {
             </View>
           </Reveal>
 
-          {/* This week — three-ring weekly activity summary */}
+          {/* This week — CARD-LESS. The rings ARE the section: a border around
+              them only boxed in the one thing on this page that should breathe.
+              Title + goal line moved into the section header, so the legend
+              under the rings is the only text left in the block. */}
           <Reveal index={revealIndex++}>
-            <Card padding="xxl" style={[styles.block, styles.gaugeCard]}>
-              <AppText variant="caption" color="tertiary" uppercase style={styles.gaugeEyebrow}>
-                This week
-              </AppText>
+            <View style={styles.section}>
+              <SectionHeader
+                title="This week"
+                subtitle={
+                  weekStats.workouts >= weekStats.target
+                    ? `Weekly goal complete · ${weekStats.minutes} min logged`
+                    : `${weekStats.target - weekStats.workouts} more to close your rings · ${weekStats.minutes} min`
+                }
+                actionLabel="Progress"
+                onAction={() => router.push("/fitness/progress" as never)}
+                weight="700"
+              />
               <ActivityRings
                 metrics={weekRings}
                 centerValue={`${weekOverall}%`}
                 centerLabel="Complete"
                 animKey={`${weekStats.workouts}-${weekStats.minutes}`}
               />
-              <AppText variant="footnote" color="secondary" align="center" style={styles.gaugeSub}>
-                {weekStats.workouts >= weekStats.target
-                  ? `Weekly goal complete · ${weekStats.minutes} min logged`
-                  : `${weekStats.target - weekStats.workouts} more to close your rings · ${weekStats.minutes} min`}
-              </AppText>
-            </Card>
+            </View>
           </Reveal>
 
-          {/* Recovery */}
+          {/* Today's read — recovery + the coach line in ONE card. They were two
+              near-empty cards stacked on each other answering the same question
+              ("what should I do right now?"), which is what made the page read
+              as a pile of boxes. */}
           <Reveal index={revealIndex++}>
-            <Card padding="lg" style={styles.block}>
+            <Card style={styles.block} padding="lg">
+              <View style={styles.coachRow}>
+                <IconBadge name="bulb" tone={colors.gold} size={40} />
+                <View style={styles.flex}>
+                  <AppText variant="caption" color="tertiary" uppercase>
+                    Coach read
+                  </AppText>
+                  <AppText variant="subhead" color="secondary" style={styles.coachText}>
+                    {recommendation.insight}
+                  </AppText>
+                </View>
+              </View>
+
+              <View style={[styles.coachDivider, { backgroundColor: colors.divider }]} />
+
               <View style={styles.recoveryRow}>
-                <View>
+                <View style={styles.flex}>
                   <AppText variant="caption" color="tertiary" uppercase>
                     Recovery
                   </AppText>
-                  <AppText variant="metric" style={styles.duoValue} color={recoveryTone}>
-                    {recovery.score}
-                  </AppText>
+                  <View style={styles.recoveryScore}>
+                    <AppText variant="title" color={recoveryTone} style={styles.recoveryNum}>
+                      {recovery.score}
+                    </AppText>
+                    <AppText
+                      variant="subhead"
+                      color="secondary"
+                      numberOfLines={1}
+                      style={styles.flex}
+                    >
+                      {recovery.level === "green"
+                        ? "Ready to train"
+                        : recovery.level === "amber"
+                          ? "Train moderately"
+                          : "Prioritize recovery"}
+                    </AppText>
+                  </View>
                 </View>
-                <AppText variant="subhead" color="secondary" style={styles.recoveryText}>
-                  {recovery.level === "green"
-                    ? "Ready to train"
-                    : recovery.level === "amber"
-                      ? "Train moderately"
-                      : "Prioritize recovery"}
-                </AppText>
-              </View>
-            </Card>
-          </Reveal>
-
-          {/* Coach insight */}
-          <Reveal index={revealIndex++}>
-            <Card style={styles.block} padding="lg">
-              <View style={styles.insightRow}>
-                <IconBadge name="bulb-outline" tone={colors.gold} size={36} />
-                <AppText variant="subhead" color="secondary" style={styles.flex}>
-                  {recommendation.insight}
-                </AppText>
+                <AscendingMeter progress={recovery.score / 100} tone={recoveryTone} height={30} />
               </View>
             </Card>
           </Reveal>
@@ -608,11 +638,11 @@ export default function ExerciseScreen() {
             <Reveal index={revealIndex++}>
               <Card style={styles.block} padding="lg">
                 <View style={styles.matchHead}>
-                  <View style={[styles.matchPct, { backgroundColor: alpha(colors.primary, 0.14) }]}>
-                    <AppText variant="headline" color="brand" style={styles.matchPctText}>
+                  <Ring progress={planMatch.percent / 100} size={62} strokeWidth={6}>
+                    <AppText variant="callout" color="brand" style={styles.matchPctText}>
                       {planMatch.percent}%
                     </AppText>
-                  </View>
+                  </Ring>
                   <View style={styles.flex}>
                     <AppText variant="callout">Tailored to you</AppText>
                     <AppText variant="footnote" color="tertiary" style={styles.matchSub}>
@@ -626,11 +656,23 @@ export default function ExerciseScreen() {
             </Reveal>
           )}
 
-          {/* Week plan (preserved) */}
+          {/* Week plan — CARD-LESS too (the second "this week" view): a bare
+              schedule rail on the page where today is the only filled surface.
+              Regeneration moved into the section header, so the block ends on
+              the week itself instead of on a button. */}
           {workoutPlan && (
             <Reveal index={revealIndex++}>
-              <Card style={styles.block}>
-                <SectionHeader title="This week" weight="700" />
+              <View style={styles.section}>
+                <SectionHeader
+                  title="Week plan"
+                  subtitle={`${workoutPlan.sessions.length} sessions · ${Math.max(
+                    0,
+                    7 - workoutPlan.sessions.length,
+                  )} rest days`}
+                  actionLabel={isRegenerating ? "Generating…" : "Regenerate"}
+                  onAction={isRegenerating ? undefined : handleRegen}
+                  weight="700"
+                />
                 {WEEK.map((day, i) => {
                   const session = workoutPlan.sessions.find((s) => s.dayOfWeek === i);
                   const isToday = i === todayDayIndex;
@@ -639,21 +681,34 @@ export default function ExerciseScreen() {
                       key={day}
                       style={[
                         styles.weekRow,
-                        { borderBottomColor: colors.divider },
+                        i < WEEK.length - 1 && {
+                          borderBottomWidth: StyleSheet.hairlineWidth,
+                          borderBottomColor: colors.divider,
+                        },
                         isToday && {
                           backgroundColor: colors.primarySoft,
-                          borderRadius: Radius.sm,
-                          borderBottomColor: "transparent",
+                          borderRadius: Radius.lg,
+                          borderBottomWidth: 0,
                         },
                       ]}
                     >
                       <AppText
-                        variant="callout"
+                        variant="caption"
+                        uppercase
                         color={isToday ? "brand" : "tertiary"}
                         style={styles.weekDay}
                       >
                         {day}
                       </AppText>
+                      <View
+                        style={[
+                          styles.weekDot,
+                          {
+                            backgroundColor: session ? colors.primary : "transparent",
+                            borderColor: session ? colors.primary : colors.borderStrong,
+                          },
+                        ]}
+                      />
                       <AppText
                         variant="body"
                         color={session ? "primary" : "tertiary"}
@@ -666,37 +721,34 @@ export default function ExerciseScreen() {
                     </View>
                   );
                 })}
-                <Button
-                  label={isRegenerating ? "Generating…" : "Generate new plan"}
-                  icon="refresh"
-                  variant="ghost"
-                  size="sm"
-                  onPress={handleRegen}
-                  disabled={isRegenerating}
-                  loading={isRegenerating}
-                  style={styles.regenBtn}
-                />
-              </Card>
+              </View>
             </Reveal>
           )}
 
-          {/* Recent (preserved) */}
+          {/* Recent — the shared row language (inset hairlines, one badge size)
+              instead of a hand-rolled stack. */}
           {workoutLog.length > 0 && (
             <Reveal index={revealIndex++}>
-              <Card style={styles.block}>
-                <SectionHeader title="Recent" weight="700" />
-                {workoutLog.slice(0, 5).map((log) => (
-                  <View key={log.id} style={styles.historyRow}>
-                    <IconBadge name="checkmark-circle" tone={colors.success} size={32} />
-                    <AppText variant="body" style={styles.flex} numberOfLines={1}>
-                      {log.sessionLabel}
-                    </AppText>
-                    <AppText variant="footnote" color="tertiary">
-                      {log.date}
-                    </AppText>
-                  </View>
-                ))}
-              </Card>
+              <View style={styles.section}>
+                <SectionHeader
+                  title="Recent"
+                  actionLabel="Calendar"
+                  onAction={() => router.push("/fitness/calendar" as never)}
+                  weight="700"
+                />
+                <ListGroup>
+                  {workoutLog.slice(0, 5).map((log) => (
+                    <ListRow
+                      key={log.id}
+                      icon="checkmark-circle"
+                      tone={colors.success}
+                      title={log.sessionLabel}
+                      subtitle={log.date}
+                      value={log.durationMinutes ? `${log.durationMinutes} min` : undefined}
+                    />
+                  ))}
+                </ListGroup>
+              </View>
             </Reveal>
           )}
         </ScrollView>,
@@ -709,6 +761,12 @@ export default function ExerciseScreen() {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   block: { marginBottom: Spacing.xl },
+  /**
+   * A CARD-LESS section. Content sits straight on the ambient canvas, so the
+   * only thing separating it from its neighbours is air — hence the wider
+   * bottom margin than a card's `block`.
+   */
+  section: { marginBottom: Spacing.xxxl },
 
   header: {
     paddingHorizontal: Spacing.screen,
@@ -779,51 +837,45 @@ const styles = StyleSheet.create({
   quickGrid: {
     flexDirection: "row",
     gap: Spacing.sm,
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.xxl,
   },
   quickTile: { flex: 1 },
-  quickInner: { alignItems: "center", gap: 6 },
+  quickInner: { alignItems: "center", gap: Spacing.sm },
+  quickIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 
-  // Duo cards
-  duoValue: { marginVertical: 2 },
-  gaugeCard: { alignItems: "center" },
-  gaugeEyebrow: { marginBottom: Spacing.md },
-  gaugeSub: { marginTop: Spacing.md, maxWidth: 260 },
-  recoveryRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: Spacing.md },
-  recoveryText: { flex: 1, textAlign: "right" },
+  // Today's read (coach line + recovery)
+  coachRow: { flexDirection: "row", alignItems: "flex-start", gap: Spacing.md },
+  coachText: { marginTop: 3 },
+  coachDivider: { height: StyleSheet.hairlineWidth, marginVertical: Spacing.lg },
+  recoveryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: Spacing.lg,
+  },
+  recoveryScore: { flexDirection: "row", alignItems: "baseline", gap: Spacing.sm, marginTop: 2 },
+  recoveryNum: { fontWeight: "800", fontVariant: ["tabular-nums"] },
 
-  insightRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
-
-  // Week
+  // Week rail (card-less)
   weekRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.md,
     paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.sm,
-    borderBottomWidth: 1,
+    paddingHorizontal: Spacing.md,
   },
-  weekDay: { width: 44, fontWeight: "700" },
-  regenBtn: { marginTop: Spacing.md },
-
-  // History
-  historyRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
+  weekDay: { width: 34, letterSpacing: 0.6, fontWeight: "700" },
+  weekDot: { width: 8, height: 8, borderRadius: 4, borderWidth: 1.5 },
 
   // Tailored match
-  matchHead: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
-  matchPct: {
-    width: 58,
-    height: 58,
-    borderRadius: Radius.lg,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  matchPctText: { fontWeight: "800" },
+  matchHead: { flexDirection: "row", alignItems: "center", gap: Spacing.lg },
+  matchPctText: { fontWeight: "800", fontVariant: ["tabular-nums"] },
   matchSub: { marginTop: 2 },
 });
 

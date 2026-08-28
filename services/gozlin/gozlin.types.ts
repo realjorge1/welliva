@@ -13,6 +13,7 @@
  * See docs/gozlin/02-intelligence-architecture.md for the full design.
  */
 
+import type { Receipt } from "./agent/receipts";
 import type { DietHistoryEntry, TodayDiet } from "../../models/diet";
 import type { NutritionTargets } from "../../models/nutrition";
 import type { SessionSummaryData } from "../../models/session";
@@ -789,6 +790,45 @@ export interface GozlinMessage {
   tone?: GozlinTone;
   structured?: GozlinStructured;
   createdAt: number;
+  /**
+   * Provenance for every figure in `content` — see
+   * services/gozlin/agent/receipts.ts.
+   *
+   * Present only on replies the AGENT LOOP produced. A deterministic
+   * fallback composes its own engine copy and a clinical refusal carries no
+   * figures at all, so neither has anything to show — and an empty receipt
+   * is worse than none, because it invites a tap that answers nothing.
+   *
+   * Persisted with the conversation, so an old message still opens its
+   * receipts long after the tool results that backed it are gone.
+   */
+  receipts?: Receipt[];
+  /**
+   * The reader's verdict on a coach reply, from the actions under the bubble.
+   *
+   * Stored ON the message rather than in a side table, because that is what it
+   * is about — it travels with the reply into the archive, survives a reload,
+   * and disappears with it when memory is cleared. Nothing is sent anywhere:
+   * this is a local signal, and the honest reason to collect it is that a
+   * thumbs-down is the cheapest way for someone to say "that was wrong"
+   * without having to type it.
+   */
+  feedback?: "up" | "down";
+  /**
+   * A cached DEEP DIVE for this reply — the research expansion behind it (see
+   * services/gozlin/agent/deepDive.ts).
+   *
+   * Cached deliberately: dives are metered on the free tier, so re-opening one
+   * that has already been written must cost nothing, and reading it again
+   * offline must work.
+   */
+  deepDive?: string;
+  /**
+   * True when the user rewrote this message and the thread was re-answered
+   * from it. Purely presentational — the bubble shows an "edited" mark so a
+   * conversation that no longer matches someone's memory of it explains itself.
+   */
+  edited?: boolean;
 }
 
 export interface GozlinSession {

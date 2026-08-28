@@ -74,7 +74,12 @@ export function CheckinModal({ visible, existing, onClose, onSave }: Props) {
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={[styles.scrim, { backgroundColor: colors.scrim }]} onPress={onClose} />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+        style={[styles.scrim, { backgroundColor: colors.scrim }]}
+        onPress={onClose}
+      />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.sheetWrap}
@@ -159,6 +164,12 @@ function Scale({
             <Pressable
               key={n}
               onPress={() => onChange(n)}
+              accessibilityRole="radio"
+              accessibilityState={{ selected }}
+              // The dot reads "1" on screen; spoken, the scale it belongs to
+              // and which end is which are the whole meaning.
+              accessibilityLabel={`${label}: ${n} of 5`}
+              accessibilityHint={`1 is ${lowLabel}, 5 is ${highLabel}`}
               style={[
                 styles.dot,
                 {

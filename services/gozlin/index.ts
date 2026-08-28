@@ -118,10 +118,14 @@ export type {
 export {
   addCheckin,
   addEpisode,
+  archiveConversation,
+  clearArchive,
   clearGozlinMemory,
+  deleteArchivedConversation,
   getLastBriefing,
   getLastWeeklyReview,
   getTodayCheckin,
+  loadArchive,
   loadBehavioral,
   loadCheckins,
   loadConversation,
@@ -137,4 +141,4 @@ export {
   setLastBriefing,
   setLastWeeklyReview,
 } from "./GozlinMemoryStore";
-export type { LastBriefingMeta } from "./GozlinMemoryStore";
+export type { ArchivedConversation, LastBriefingMeta } from "./GozlinMemoryStore";

@@ -33,6 +33,8 @@ import { ensureFoodDictionaryLoaded } from "@/constants/FoodDictionary";
 import { ensureWorkoutExercisesLoaded } from "@/services/WorkoutGenerator";
 import { installBackendWarmup } from "@/services/api/warmup";
 import { initNotifications } from "@/services/notifications/init";
+import { refreshFitnessReminders } from "@/fitness/services/FitnessNotifications";
+import { useDataEpoch } from "@/services/sync/dataEpoch";
 import { installNetworkProbe } from "@/services/sync/networkProbe";
 import { setRetentionCompactor } from "@/services/sync/retention";
 import { memory } from "@/health-os";
@@ -98,6 +100,8 @@ if (__DEV__) {
 function RootLayoutContent() {
   const { currentTheme } = useTheme();
   const { user, isLoading: authLoading } = useAuth();
+  // Bumped by "Reset data" once the wipe has landed — see the provider key below.
+  const dataEpoch = useDataEpoch();
 
   // Drop the native splash only once the session is restored. Fonts are already
   // guaranteed — RootLayout doesn't render this component until they've loaded.
@@ -118,6 +122,12 @@ function RootLayoutContent() {
     // Set the foreground handler + Android reminders channel once, so scheduled
     // habit/fitness reminders present correctly in a release build. Fail-soft.
     initNotifications();
+    // Re-derive the fitness reminder schedule from the stored profile. A
+    // schedule can go missing between launches — permission granted in OS
+    // Settings after opting in, an OS-cleared queue, a restore that brought
+    // storage back but not the pending notifications — and this repairs it.
+    // Idempotent (it cancels its own ids first) and a no-op when nothing is on.
+    void refreshFitnessReminders();
     // Wake the backend now (and on every foreground) so its 30-50s cold start
     // has already happened by the time someone opens the coach. Fire-and-forget.
     return installBackendWarmup();
@@ -139,6 +149,11 @@ function RootLayoutContent() {
        * one account's in-memory state can never linger into another's session.
        * Keyed on the STABLE user id (not the session object) so a token refresh
        * doesn't needlessly remount.
+       *
+       * The data epoch rides the same key for the same reason: "Reset data"
+       * empties storage, but every provider loads exactly once on mount — so
+       * without a remount the wiped data simply stays in memory, and gets
+       * written straight back on the next edit. See services/sync/dataEpoch.ts.
        */}
       {/*
        * Billing sits ABOVE the account re-key on purpose. It has to survive an
@@ -147,7 +162,7 @@ function RootLayoutContent() {
        * the RevenueCat SDK on every switch — which it explicitly guards against.
        */}
       <BillingProvider>
-      <AppProvider key={user?.id ?? "signed-out"}>
+      <AppProvider key={`${user?.id ?? "signed-out"}:${dataEpoch}`}>
         {/* Composes over AppContext — reads its clock, owns plan periods,
             custom menus, food logging and tracking mode. */}
         <MealPlanProvider>
@@ -208,11 +223,11 @@ function RootLayoutContent() {
             <Stack.Screen name="session-summary" />
             <Stack.Screen name="habit/[id]" />
             <Stack.Screen name="habit/new" options={{ presentation: "modal" }} />
-            {/* Paywall: a modal, never a route the app redirects INTO. A lock
-                offers the upgrade; it never traps the user on the ask. */}
-            <Stack.Screen name="paywall" options={{ presentation: "modal" }} />
+            {/* The purchase surface is `/upgrade`, a menu destination inside
+                (tabs) — not a modal stacked over whatever you were doing. A lock
+                navigates there; the menu is always one tap away, so the ask can
+                never trap the user. */}
             <Stack.Screen name="new-chapter" options={{ presentation: "modal" }} />
-            <Stack.Screen name="recap/[period]" options={{ presentation: "modal" }} />
             {/* Flexible meal planning */}
             <Stack.Screen name="diet/plan-menu" />
             <Stack.Screen name="diet/history" />

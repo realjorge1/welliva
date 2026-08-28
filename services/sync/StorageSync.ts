@@ -132,27 +132,75 @@ export function clearSignedUrlCache(): void {
 // Listing / deletion
 // ---------------------------------------------------------------------------
 
+/** One stored object, as the UI needs it: where it lives and when it landed. */
+export interface StoredObject {
+  /** Full "<uid>/<name>" path — what every other function here takes. */
+  path: string;
+  /** Just the file name, without the owner folder. */
+  name: string;
+  /** ISO creation time from Storage, or null if the API didn't report one. */
+  createdAt: string | null;
+}
+
+/**
+ * Storage's `list` caps a response at 100 rows, so a single call silently
+ * truncates anyone with a longer history. These pull every page.
+ */
+const LIST_PAGE_SIZE = 100;
+/**
+ * Hard stop on paging (200k objects). A real account never reaches it — it
+ * exists so a misbehaving/stubbed API that keeps returning full pages can't
+ * spin this loop forever.
+ */
+const LIST_MAX_PAGES = 2000;
+
+/**
+ * List the caller's objects in a bucket, newest first, with their timestamps.
+ *
+ * Pages until the bucket is exhausted: a user with a year of weekly progress
+ * photos passes 100 objects, and the single-page version used to drop the
+ * oldest ones — the exact photos a "how far I've come" gallery exists to show.
+ */
+export async function listObjectsDetailed(
+  bucket: Bucket,
+  userId: string,
+): Promise<StoredObject[]> {
+  const out: StoredObject[] = [];
+  try {
+    for (let page = 0; page < LIST_MAX_PAGES; page++) {
+      const { data, error } = await supabase.storage.from(bucket).list(userId, {
+        limit: LIST_PAGE_SIZE,
+        offset: page * LIST_PAGE_SIZE,
+        sortBy: { column: "created_at", order: "desc" },
+      });
+      if (error) {
+        console.warn(`StorageSync.listObjects(${bucket}):`, error.message);
+        break;
+      }
+      const rows = data ?? [];
+      for (const o of rows) {
+        if (!o?.name) continue;
+        // `list` returns names relative to the folder; callers want full paths.
+        out.push({
+          path: `${userId}/${o.name}`,
+          name: o.name,
+          createdAt: o.created_at ?? null,
+        });
+      }
+      if (rows.length < LIST_PAGE_SIZE) break;
+    }
+  } catch (e) {
+    console.warn(`StorageSync.listObjects(${bucket}) (threw):`, e);
+  }
+  return out;
+}
+
 /** List the caller's object paths in a bucket (newest first). */
 export async function listObjects(
   bucket: Bucket,
   userId: string,
 ): Promise<string[]> {
-  try {
-    const { data, error } = await supabase.storage.from(bucket).list(userId, {
-      sortBy: { column: "created_at", order: "desc" },
-    });
-    if (error) {
-      console.warn(`StorageSync.listObjects(${bucket}):`, error.message);
-      return [];
-    }
-    // `list` returns names relative to the folder; callers want full paths.
-    return (data ?? [])
-      .filter((o) => !!o.name)
-      .map((o) => `${userId}/${o.name}`);
-  } catch (e) {
-    console.warn(`StorageSync.listObjects(${bucket}) (threw):`, e);
-    return [];
-  }
+  return (await listObjectsDetailed(bucket, userId)).map((o) => o.path);
 }
 
 /** Hard-delete an object. Returns whether it went. */

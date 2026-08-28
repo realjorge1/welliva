@@ -20,6 +20,17 @@
  * reference table has them, undo, and no plan requirement — all of which
  * already existed on the other path and none of which this screen could reach.
  *
+ * ── LAYOUT ──────────────────────────────────────────────────────────────────
+ * "Foods" is the only thing pinned to the screen. Search, the filter chips and
+ * the group chips ride INSIDE the list and parallax away as it scrolls (see
+ * PARALLAX) — they're controls for the catalog, not identity, and a third of
+ * the screen permanently spent on controls is a third not spent on food. The
+ * rows themselves are bare: no card, no fill, no border. See FoodRow.
+ *
+ * Nothing on this screen prints a catalog size. A food can come from the
+ * bundled dictionary, the user's own list, or the USDA/AI lookup, so any count
+ * would be advertising the smallest of the three as the whole answer.
+ *
  * ── VIRTUALIZED ─────────────────────────────────────────────────────────────
  * The screen renders the whole catalog (~200 foods, each row a half-dozen
  * nodes), so it's a SectionList and only the visible window is mounted:
@@ -62,7 +73,7 @@ import {
   fitsDiet,
   hasDietConstraints,
 } from "@/constants/foodTags";
-import { LightCard, Radius, Spacing, alpha } from "@/constants/theme";
+import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useProfile } from "@/contexts/AppContext";
 import { useMealPlan } from "@/contexts/MealPlanContext";
 import type { MealType } from "@/models/diet";
@@ -93,7 +104,15 @@ import {
   StyleSheet,
   TextInput,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
+import Animated, {
+  Extrapolation,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+} from "react-native-reanimated";
 
 /**
  * A row, carrying its own list key.
@@ -115,7 +134,7 @@ interface FoodSection {
   pinned?: boolean;
 }
 
-/** Where a row sits in its section — drives the continuous-card rounding. */
+/** Where a row sits in its section — decides whether it draws a top hairline. */
 type RowPosition = "only" | "first" | "middle" | "last";
 
 function positionOf(index: number, count: number): RowPosition {
@@ -134,8 +153,35 @@ interface Toast {
 /** How long an undo stays offered. Long enough to notice, short enough to pass. */
 const TOAST_MS = 5000;
 
+/**
+ * PARALLAX — how each header row leaves the screen.
+ *
+ * Search, filters and groups sit INSIDE the list, so the native scroller
+ * already carries them off at 1:1. `rate` only adds the DIFFERENCE: a fraction
+ * of the offset pushed back down against the scroll, so each row travels a
+ * little slower than the food under it. Staggering the three rates is what
+ * makes the block separate as it goes and read as depth rather than as one slab
+ * sliding at the wrong speed.
+ *
+ * Because the base motion is native, a late frame on the shared value can only
+ * ever cost a point or two of drift — nothing can visibly detach from the list.
+ *
+ * `fade` is the scroll distance each row dissolves over, and it's deliberately
+ * shorter than the travel it would need to reach the rows beneath it: by the
+ * time a lagging row has drifted far enough to collide with the catalog, it is
+ * already transparent.
+ */
+const PARALLAX = {
+  search: { rate: 0.34, fade: 86 },
+  filters: { rate: 0.22, fade: 108 },
+  groups: { rate: 0.12, fade: 130 },
+} as const;
+
+/** Scroll distance over which the rule under the pinned title fades in. */
+const RULE_IN = 28;
+
 export default function FoodsScreen() {
-  const { colors } = useColors();
+  const { colors, isDark } = useColors();
   const { logCatalogFood, removeLoggedFood } = useMealPlan();
   const { userBio } = useProfile();
 
@@ -220,7 +266,7 @@ export default function FoodsScreen() {
 
   // ── The user's own diet, as an exclusion set ──────────────────────────────
   // Computed once from the bio rather than per-food, since it's the same answer
-  // for all 205 rows.
+  // for every row.
   const dietProfile = useMemo(
     () => ({
       dietaryRestriction: userBio?.dietaryRestriction,
@@ -312,11 +358,6 @@ export default function FoodsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, group, ready, applyFilters, favorites, recents, customMatches]);
 
-  const total = useMemo(
-    () => sections.reduce((n, b) => n + b.data.length, 0),
-    [sections],
-  );
-
   // ── Actions ───────────────────────────────────────────────────────────────
   // Stable across renders so the memo'd rows aren't invalidated every time the
   // parent re-renders (a toast, a keystroke). Without this, `React.memo` on
@@ -381,11 +422,11 @@ export default function FoodsScreen() {
   /**
    * Whether to offer "search the web for this".
    *
-   * `total` is the count AFTER search, filters and group scoping across BOTH
-   * the catalog and the user's own foods — so the offer appears only on a real
-   * miss. Deliberately gated on the unfiltered miss too: a food hidden by an
-   * active "low carb" chip is a food we HAVE, and offering to go find it would
-   * be both wasteful and confusing.
+   * `localHitCount` counts matches across BOTH the catalog and the user's own
+   * foods, BEFORE the filters and the group chip narrow them — so the offer
+   * appears only on a real miss. Deliberately gated on the unfiltered miss: a
+   * food hidden by an active "low carb" chip is a food we HAVE, and offering to
+   * go find it would be both wasteful and confusing.
    */
   const localHitCount = useMemo(
     () => searchFoods(search).length + customMatches.length,
@@ -475,7 +516,7 @@ export default function FoodsScreen() {
           />
         ) : null}
         <AppText variant="caption" color="tertiary" uppercase>
-          {section.title} · {section.data.length}
+          {section.title}
         </AppText>
       </View>
     ),
@@ -484,9 +525,52 @@ export default function FoodsScreen() {
 
   const keyExtractor = useCallback((item: FoodRowItem) => item.key, []);
 
+  // ── Scroll position ───────────────────────────────────────────────────────
+  // One number, shared with the UI thread, driving every piece of scroll-linked
+  // chrome on this screen (see PARALLAX). The elastic hook forwards the list's
+  // scroll events, so there is still exactly one `onScroll` on the list.
+  const scrollY = useSharedValue(0);
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      scrollY.value = e.nativeEvent.contentOffset.y;
+    },
+    [scrollY],
+  );
+
   // The SectionList owns the scroll here rather than Screen's ScrollView, so it
   // has to ask for the elastic ends itself.
-  const elastic = useElasticScroll();
+  const elastic = useElasticScroll({ onScroll });
+
+  // Clamped at zero on every row: iOS reports a negative offset while bouncing
+  // at the top, and a header that lifts INTO the title on overscroll reads as a
+  // glitch rather than as give.
+  const searchStyle = useAnimatedStyle(() => {
+    const y = Math.max(0, scrollY.value);
+    return {
+      opacity: interpolate(y, [0, PARALLAX.search.fade], [1, 0], Extrapolation.CLAMP),
+      transform: [{ translateY: y * PARALLAX.search.rate }],
+    };
+  });
+
+  const filtersStyle = useAnimatedStyle(() => {
+    const y = Math.max(0, scrollY.value);
+    return {
+      opacity: interpolate(y, [0, PARALLAX.filters.fade], [1, 0], Extrapolation.CLAMP),
+      transform: [{ translateY: y * PARALLAX.filters.rate }],
+    };
+  });
+
+  const groupsStyle = useAnimatedStyle(() => {
+    const y = Math.max(0, scrollY.value);
+    return {
+      opacity: interpolate(y, [0, PARALLAX.groups.fade], [1, 0], Extrapolation.CLAMP),
+      transform: [{ translateY: y * PARALLAX.groups.rate }],
+    };
+  });
+
+  const ruleStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [0, RULE_IN], [0, 1], Extrapolation.CLAMP),
+  }));
 
   // Chip and FilterRow supply their own selection haptic; this only owns state.
   const toggleFilter = useCallback((key: string) => {
@@ -512,6 +596,15 @@ export default function FoodsScreen() {
     [applyFilters, ready],
   );
 
+  /**
+   * The only thing pinned to the screen.
+   *
+   * No count under the title. The catalog is one of three places a food can now
+   * come from — the bundled dictionary, the user's own foods, and whatever the
+   * USDA/AI lookup finds — so a number here would advertise the smallest of the
+   * three as if it were the whole answer, and be wrong the moment someone adds
+   * a food. Same reason the group sections no longer carry one.
+   */
   const header = (
     <View>
       <ScreenTopBar
@@ -520,17 +613,39 @@ export default function FoodsScreen() {
           <>
             <AppText variant="title">Foods</AppText>
             <AppText variant="footnote" color="tertiary">
-              {FOOD_DICTIONARY.length} whole foods · tap for the full label
+              Search anything you eat · tap for the full label
             </AppText>
           </>
         }
       />
 
+      {/* Arrives as soon as the list moves, so the pinned title keeps an edge
+          once the search row has drifted out from under it. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.headerRule,
+          // Same ink tint as the row hairlines — see FoodRow.
+          { backgroundColor: alpha(colors.text, isDark ? 0.1 : 0.08) },
+          ruleStyle,
+        ]}
+      />
+    </View>
+  );
+
+  /**
+   * Everything else rides the list. Search, filters and groups are controls for
+   * the catalog, not identity — once you're reading the catalog they should get
+   * out of the way, and they're one flick back when you want them.
+   */
+  const listHeader = (
+    <View style={styles.listHeader}>
       {/* Search */}
-      <View
+      <Animated.View
         style={[
           styles.search,
           { backgroundColor: alpha(colors.text, 0.06), borderColor: colors.border },
+          searchStyle,
         ]}
       >
         <Ionicons name="search" size={18} color={colors.textTertiary} />
@@ -553,71 +668,79 @@ export default function FoodsScreen() {
             <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
           </Pressable>
         )}
-      </View>
+      </Animated.View>
 
       {/* Macro + diet filters. Separate row from the groups because they compose
-          with them rather than replacing them: "Vegetables" ∩ "High protein". */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chipsRow}
-      >
-        {/* The door to everything else, first so its count is the first thing
-            read when filters are on. */}
-        <FilterButton count={filters.size} onPress={() => setFilterSheet(true)} />
+          with them rather than replacing them: "Vegetables" ∩ "High protein".
+          Wrapped rather than animated in place: the transform belongs to the
+          row's box, and a horizontal scroller has enough going on inside it. */}
+      <Animated.View style={filtersStyle}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipsRow}
+        >
+          {/* The door to everything else, first so its count is the first thing
+              read when filters are on. */}
+          <FilterButton count={filters.size} onPress={() => setFilterSheet(true)} />
 
-        {canFilterByDiet && (
-          <Chip
-            label="Fits my diet"
-            icon="shield-checkmark"
-            size="sm"
-            hint="Hides foods your dietary restriction, allergies or dislikes rule out"
-            active={dietOnly}
-            onPress={() => setDietOnly((d) => !d)}
-          />
-        )}
-
-        {/* A handful of quick chips. The other fifteen live in the sheet. */}
-        {QUICK_FILTER_KEYS.map((key) => {
-          const f = getFilter(key);
-          if (!f) return null;
-          return (
+          {canFilterByDiet && (
             <Chip
-              key={f.key}
-              label={f.label}
-              hint={f.description}
+              label="Fits my diet"
+              icon="shield-checkmark"
               size="sm"
-              active={filters.has(f.key)}
-              onPress={() => toggleFilter(f.key)}
+              hint="Hides foods your dietary restriction, allergies or dislikes rule out"
+              active={dietOnly}
+              onPress={() => setDietOnly((d) => !d)}
             />
-          );
-        })}
-      </ScrollView>
+          )}
 
-      {/* Group chips */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.groupChipsRow}
-      >
-        <Chip label="All" size="sm" active={group === null} onPress={() => setGroup(null)} />
-        {FOOD_GROUPS.map((g) => (
-          <Chip
-            key={g}
-            label={g}
-            size="sm"
-            active={group === g}
-            onPress={() => setGroup(group === g ? null : g)}
-          />
-        ))}
-      </ScrollView>
+          {/* A handful of quick chips. The other fifteen live in the sheet. */}
+          {QUICK_FILTER_KEYS.map((key) => {
+            const f = getFilter(key);
+            if (!f) return null;
+            return (
+              <Chip
+                key={f.key}
+                label={f.label}
+                hint={f.description}
+                size="sm"
+                active={filters.has(f.key)}
+                onPress={() => toggleFilter(f.key)}
+              />
+            );
+          })}
+        </ScrollView>
+      </Animated.View>
 
-      {dietOnly && (
-        <AppText variant="caption" color="tertiary" style={styles.dietNote}>
-          Hiding foods your profile rules out. A browse filter, not an ingredient
-          check — always read the label on anything packaged.
-        </AppText>
-      )}
+      {/* Group chips, and the diet caveat that belongs with them. One wrapper,
+          not two: an animated style drives the view it's attached to, so the
+          two rows share a rate by sharing a box. */}
+      <Animated.View style={groupsStyle}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.groupChipsRow}
+        >
+          <Chip label="All" size="sm" active={group === null} onPress={() => setGroup(null)} />
+          {FOOD_GROUPS.map((g) => (
+            <Chip
+              key={g}
+              label={g}
+              size="sm"
+              active={group === g}
+              onPress={() => setGroup(group === g ? null : g)}
+            />
+          ))}
+        </ScrollView>
+
+        {dietOnly && (
+          <AppText variant="caption" color="tertiary" style={styles.dietNote}>
+            Hiding foods your profile rules out. A browse filter, not an ingredient
+            check — always read the label on anything packaged.
+          </AppText>
+        )}
+      </Animated.View>
     </View>
   );
 
@@ -661,29 +784,33 @@ export default function FoodsScreen() {
     // `scroll={false}`: the SectionList owns the scroll. Nesting it inside the
     // Screen's ScrollView would render every row and warn.
     <Screen header={header} scroll={false}>
-      {total === 0
-        ? empty
-        : elastic.wrap(
-            <SectionList
-              sections={sections}
-              keyExtractor={keyExtractor}
-              renderItem={renderItem}
-              renderSectionHeader={renderSectionHeader}
-              stickySectionHeadersEnabled={false}
-              showsVerticalScrollIndicator={false}
-              {...elastic.scrollProps}
-              contentContainerStyle={{ paddingBottom: NAV_CLEARANCE }}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
-              // Tuned for low-end Android: a small first paint, small batches, and a
-              // modest retained window. `removeClippedSubviews` is deliberately NOT
-              // set — it intermittently blanks rows on Android with layered children
-              // like these, and the row count here doesn't need it.
-              initialNumToRender={12}
-              maxToRenderPerBatch={8}
-              windowSize={7}
-            />,
-          )}
+      {/* The list is rendered even with nothing in it, and the miss state goes
+          through `ListEmptyComponent`. It has to: search and the filters live in
+          the list header now, and swapping the whole list out for a card would
+          take away the only controls that can undo the miss. */}
+      {elastic.wrap(
+        <SectionList
+          sections={sections}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          renderSectionHeader={renderSectionHeader}
+          ListHeaderComponent={listHeader}
+          ListEmptyComponent={empty}
+          stickySectionHeadersEnabled={false}
+          showsVerticalScrollIndicator={false}
+          {...elastic.scrollProps}
+          contentContainerStyle={{ paddingBottom: NAV_CLEARANCE }}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          // Tuned for low-end Android: a small first paint, small batches, and a
+          // modest retained window. `removeClippedSubviews` is deliberately NOT
+          // set — it intermittently blanks rows on Android with layered children
+          // like these, and the row count here doesn't need it.
+          initialNumToRender={12}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+        />,
+      )}
 
       <FoodDetailSheet
         food={selected}
@@ -748,10 +875,15 @@ export default function FoodsScreen() {
  * re-renders its window whenever the parent renders, and without this every
  * visible row would rebuild on each keystroke and each toast tick.
  *
- * The rows used to live inside a single `<Card>` per group. A virtualized list
- * flattens sections, so the card surface moves onto the row itself and the
- * corners are rounded by the row's position within its section — visually
- * identical, one mounted view per row instead of one per group.
+ * NO CARD. The rows sit bare on the ambient canvas — no fill, no border, no
+ * corners. A catalog is a long unbroken run of one kind of thing, and plating
+ * every entry drew a box around each one and a seam between every pair, which
+ * made scrolling feel like paging through containers instead of reading a list.
+ * The section label does the grouping; the only ink left between rows is a
+ * hairline, and the first row of each section doesn't even get that.
+ *
+ * `position` therefore survives the card that introduced it, but only to answer
+ * "is this the top of its section?" for that hairline.
  *
  * Tapping OPENS the food; it no longer logs it. That's the point of the rewrite:
  * a row this easy to hit while scrolling must not be able to write to the user's
@@ -770,20 +902,6 @@ const FoodRow = React.memo(function FoodRow({
 }) {
   const { colors, isDark } = useColors();
   const top = position === "first" || position === "only";
-  const bottom = position === "last" || position === "only";
-
-  const surface = {
-    backgroundColor: isDark ? alpha(colors.surface, 0.66) : LightCard.base,
-    borderColor: isDark ? alpha(colors.borderStrong, 0.55) : LightCard.border,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderTopWidth: top ? 1 : 0,
-    borderBottomWidth: bottom ? 1 : 0,
-    borderTopLeftRadius: top ? Radius.xl : 0,
-    borderTopRightRadius: top ? Radius.xl : 0,
-    borderBottomLeftRadius: bottom ? Radius.xl : 0,
-    borderBottomRightRadius: bottom ? Radius.xl : 0,
-  };
 
   return (
     <Pressable
@@ -795,8 +913,14 @@ const FoodRow = React.memo(function FoodRow({
       accessibilityHint="Opens the full label, where you choose a portion and log it"
       style={({ pressed }) => [
         styles.row,
-        surface,
-        !top && { borderTopWidth: 1, borderTopColor: colors.divider },
+        // A TINT OF THE INK, not `colors.divider`. That token is tuned to read
+        // against a card — on dark it's a near-black teal that all but vanishes
+        // on the bare canvas these rows now sit on. A few per cent of the text
+        // colour has contrast against whatever the page is, in either theme.
+        !top && {
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: alpha(colors.text, isDark ? 0.09 : 0.07),
+        },
         pressed && { opacity: 0.6 },
       ]}
     >
@@ -836,6 +960,8 @@ const FoodRow = React.memo(function FoodRow({
 
 const styles = StyleSheet.create({
   headerRow: { paddingTop: Spacing.xs, paddingBottom: Spacing.md },
+  headerRule: { height: StyleSheet.hairlineWidth },
+  listHeader: { paddingTop: Spacing.md },
   search: {
     flexDirection: "row",
     alignItems: "center",
@@ -862,19 +988,25 @@ const styles = StyleSheet.create({
     paddingRight: Spacing.md,
   },
   dietNote: { marginBottom: Spacing.md, lineHeight: 15 },
+  // With the cards gone the section label is the only thing separating one run
+  // of foods from the next, so it gets the air the card's top edge used to.
   groupLabelRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
+    marginTop: Spacing.lg,
     marginBottom: Spacing.sm,
     marginLeft: Spacing.xs,
   },
+  // `paddingHorizontal` matches the section label's inset, so the food names
+  // line up under their heading instead of sitting where a card's padding once
+  // pushed them.
   row: {
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.md,
     paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.sm,
+    paddingHorizontal: Spacing.xs,
   },
   nameRow: {
     flexDirection: "row",

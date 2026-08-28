@@ -25,6 +25,7 @@ import Animated, {
   useSharedValue,
   withRepeat,
   withTiming,
+  type SharedValue,
 } from "react-native-reanimated";
 import Svg, { Circle, G, Rect } from "react-native-svg";
 import { AppText } from "./Text";
@@ -141,46 +142,97 @@ export function MuscleMap({
     };
   }, [pulse, reduced, active.size]);
 
-  const pulseProps = useAnimatedProps(() => ({ opacity: pulse.value }));
-
   const width = (height * VB_W) / VB_H;
   const silhouette = alpha(colors.text, 0.1);
 
-  const renderFigure = (shapes: Capsule[], visible: readonly MuscleRegion[]) => {
-    const lit = shapes.filter((s) => s.region && active.has(s.region) && visible.includes(s.region));
-    const dim = shapes.filter((s) => !lit.includes(s));
-    const capsule = (s: Capsule, i: number, fill: string) => (
-      <Rect key={i} x={s.x} y={s.y} width={s.w} height={s.h} rx={s.rx} fill={fill} />
-    );
-    return (
+  return (
+    <View style={styles.row}>
+      <Figure
+        shapes={FRONT_SHAPES}
+        visible={FRONT_REGIONS}
+        active={active}
+        width={width}
+        height={height}
+        tint={tint}
+        silhouette={silhouette}
+        pulse={pulse}
+        reduced={reduced}
+        label={labels ? "Front" : undefined}
+      />
+      <Figure
+        shapes={BACK_SHAPES}
+        visible={BACK_REGIONS}
+        active={active}
+        width={width}
+        height={height}
+        tint={tint}
+        silhouette={silhouette}
+        pulse={pulse}
+        reduced={reduced}
+        label={labels ? "Back" : undefined}
+      />
+    </View>
+  );
+}
+
+/**
+ * One figure. It owns its OWN `useAnimatedProps` on purpose: a single
+ * animated-props object is a binding to one view, and attaching the same one to
+ * both the front and the back `<G>` left the two figures fighting over one
+ * descriptor. They share the `pulse` shared value instead, which is what
+ * actually needs to be common — both breathe in step, each drives itself.
+ */
+function Figure({
+  shapes,
+  visible,
+  active,
+  width,
+  height,
+  tint,
+  silhouette,
+  pulse,
+  reduced,
+  label,
+}: {
+  shapes: Capsule[];
+  visible: readonly MuscleRegion[];
+  active: Set<MuscleRegion>;
+  width: number;
+  height: number;
+  tint: string;
+  silhouette: string;
+  pulse: SharedValue<number>;
+  reduced: boolean;
+  label?: string;
+}) {
+  const pulseProps = useAnimatedProps(() => ({ opacity: pulse.value }));
+
+  const lit = shapes.filter(
+    (s) => s.region && active.has(s.region) && visible.includes(s.region),
+  );
+  const dim = shapes.filter((s) => !lit.includes(s));
+  const capsule = (s: Capsule, i: number, fill: string) => (
+    <Rect key={i} x={s.x} y={s.y} width={s.w} height={s.h} rx={s.rx} fill={fill} />
+  );
+
+  return (
+    <View style={styles.figure}>
       <Svg width={width} height={height} viewBox={`0 0 ${VB_W} ${VB_H}`}>
         <Circle cx={head.cx} cy={head.cy} r={head.r} fill={silhouette} />
         {dim.map((s, i) => capsule(s, i, silhouette))}
-        <AnimatedG animatedProps={reduced ? undefined : pulseProps}>
-          {lit.map((s, i) => capsule(s, i, tint))}
-        </AnimatedG>
+        {reduced ? (
+          <G>{lit.map((s, i) => capsule(s, i, tint))}</G>
+        ) : (
+          <AnimatedG animatedProps={pulseProps}>
+            {lit.map((s, i) => capsule(s, i, tint))}
+          </AnimatedG>
+        )}
       </Svg>
-    );
-  };
-
-  return (
-    <View style={styles.row}>
-      <View style={styles.figure}>
-        {renderFigure(FRONT_SHAPES, FRONT_REGIONS)}
-        {labels && (
-          <AppText variant="caption" color="tertiary" uppercase>
-            Front
-          </AppText>
-        )}
-      </View>
-      <View style={styles.figure}>
-        {renderFigure(BACK_SHAPES, BACK_REGIONS)}
-        {labels && (
-          <AppText variant="caption" color="tertiary" uppercase>
-            Back
-          </AppText>
-        )}
-      </View>
+      {label && (
+        <AppText variant="caption" color="tertiary" uppercase>
+          {label}
+        </AppText>
+      )}
     </View>
   );
 }

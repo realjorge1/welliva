@@ -78,7 +78,12 @@ export function WeighInModal({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={[styles.scrim, { backgroundColor: colors.scrim }]} onPress={onClose} />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+        style={[styles.scrim, { backgroundColor: colors.scrim }]}
+        onPress={onClose}
+      />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.sheetWrap}

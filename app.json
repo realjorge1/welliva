@@ -56,7 +56,6 @@
           "locationWhenInUsePermission": "Welliva uses your location only to fetch local weather, so your coach can suggest indoor or outdoor workouts."
         }
       ],
-      "expo-audio",
       [
         "expo-notifications",
         {
@@ -67,7 +66,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Welliva accesses your photos so you can set a profile picture and add progress photos. They upload only to your private account storage."
+          "photosPermission": "Welliva accesses your photos so you can log a meal from a picture, set a profile picture and add progress photos. A meal photo is read once to identify the foods and is never stored; the rest upload only to your private account storage.",
+          "cameraPermission": "Welliva uses your camera so you can log a meal by photographing it. The picture is read once to identify the foods and is never stored or uploaded."
         }
       ]
     ],

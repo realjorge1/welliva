@@ -853,6 +853,35 @@ export function getAchievementSummary(
   };
 }
 
+/**
+ * The most recently unlocked achievement — the one line worth showing when
+ * there's only room for one.
+ *
+ * Ties are broken by tier value rather than array order: two achievements
+ * earned in the same reconcile pass share a timestamp to the millisecond, and
+ * "you just hit Hydration Legend" is a better thing to have surfaced than the
+ * bronze that came with it.
+ */
+export function getLatestUnlocked(
+  evaluated: EvaluatedAchievement[],
+): EvaluatedAchievement | null {
+  let best: EvaluatedAchievement | null = null;
+  for (const a of evaluated) {
+    if (!a.unlocked || !a.earnedAt) continue;
+    if (!best) {
+      best = a;
+      continue;
+    }
+    if (a.earnedAt > best.earnedAt!) {
+      best = a;
+    } else if (a.earnedAt === best.earnedAt! &&
+      TIER_META[a.def.tier].points > TIER_META[best.def.tier].points) {
+      best = a;
+    }
+  }
+  return best;
+}
+
 /** Next not-yet-reached streak milestone, for the "X days to …" nudge. */
 export function getNextStreakMilestone(
   currentStreak: number,

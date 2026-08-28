@@ -70,6 +70,7 @@ export default function TabLayout() {
       <Tabs.Screen name="knows" options={{ title: "Memory" }} />
 
       {/* Pinned separately in the menu, ordinary screens here. */}
+      <Tabs.Screen name="upgrade" options={{ title: "Upgrade" }} />
       <Tabs.Screen name="settings" options={{ title: "Settings" }} />
       <Tabs.Screen name="profile" options={{ title: "Profile" }} />
     </Tabs>

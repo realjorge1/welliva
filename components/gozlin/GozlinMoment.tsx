@@ -69,6 +69,9 @@ export function GozlinMomentCard({
   return (
     <Pressable
       onPress={open}
+      accessibilityRole="button"
+      accessibilityLabel={`${meta.eyebrow}. ${moment.title}. ${moment.message}`}
+      accessibilityHint={cta}
       style={({ pressed }) => [
         styles.card,
         {
@@ -79,37 +82,39 @@ export function GozlinMomentCard({
         style,
       ]}
     >
-      {/* Tone rail — a quiet signal of register. */}
-      <View style={[styles.rail, { backgroundColor: accent }]} />
-
-      <View style={styles.body}>
-        <View style={styles.head}>
-          <GozlinAvatar size={34} pulsing={celebratory} />
-          <View style={styles.flex}>
-            <View style={styles.eyebrowRow}>
-              <View style={[styles.kindIcon, { backgroundColor: alpha(accent, 0.16) }]}>
-                <Ionicons name={moment.icon as IconName} size={11} color={accent} />
-              </View>
-              <AppText variant="caption" uppercase style={[styles.eyebrow, { color: accent }]}>
-                {meta.eyebrow}
-              </AppText>
-            </View>
-            <AppText variant="callout" style={styles.title}>
-              {moment.title}
+      {/* NO SIDE RAIL. A 4pt bar down the left edge read as an alert stripe —
+          wrong register for a coach who is usually just noticing something —
+          and it forced the card's whole body to sit off-centre from every
+          other card on the page. The tone now lives where the eye already is:
+          the kind badge, the tinted border, and the CTA. */}
+      <View style={styles.head}>
+        <GozlinAvatar size={34} pulsing={celebratory} />
+        <View style={styles.flex}>
+          {/* Icon and label as one pill, so the eyebrow is a single object
+              rather than a square chip with a word floating beside it. */}
+          <View style={[styles.kindPill, { backgroundColor: alpha(accent, 0.14) }]}>
+            <Ionicons name={moment.icon as IconName} size={11} color={accent} />
+            <AppText variant="caption" uppercase style={[styles.eyebrow, { color: accent }]}>
+              {meta.eyebrow}
             </AppText>
           </View>
-        </View>
-
-        <AppText variant="subhead" color="secondary" style={styles.message}>
-          {moment.message}
-        </AppText>
-
-        <View style={styles.footer}>
-          <AppText variant="footnote" style={[styles.cta, { color: accent }]}>
-            {cta}
+          <AppText variant="callout" style={styles.title}>
+            {moment.title}
           </AppText>
-          <Ionicons name="arrow-forward" size={14} color={accent} />
         </View>
+      </View>
+
+      <AppText variant="subhead" color="secondary" style={styles.message}>
+        {moment.message}
+      </AppText>
+
+      {/* A full-width doorway under a hairline, not a link floating at the end
+          of the copy — it's the whole card's action, so it spans the card. */}
+      <View style={[styles.footer, { borderTopColor: colors.divider }]}>
+        <AppText variant="footnote" style={[styles.cta, { color: accent, flex: 1 }]}>
+          {cta}
+        </AppText>
+        <Ionicons name="arrow-forward" size={15} color={accent} />
       </View>
     </Pressable>
   );
@@ -118,25 +123,32 @@ export function GozlinMomentCard({
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   card: {
-    flexDirection: "row",
     borderRadius: Radius.xl,
     borderWidth: 1,
     overflow: "hidden",
+    padding: Spacing.lg,
+    gap: Spacing.sm,
   },
-  rail: { width: 4 },
-  body: { flex: 1, padding: Spacing.lg, gap: Spacing.sm },
   head: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
-  eyebrowRow: { flexDirection: "row", alignItems: "center", gap: 5 },
-  kindIcon: {
-    width: 18,
-    height: 18,
-    borderRadius: Radius.xs,
+  kindPill: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    alignSelf: "flex-start",
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: Radius.pill,
   },
   eyebrow: { letterSpacing: 0.6, fontWeight: "700" },
-  title: { marginTop: 2 },
+  title: { marginTop: 3 },
   message: { lineHeight: 19 },
-  footer: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 },
+  footer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: Spacing.xs,
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+  },
   cta: { fontWeight: "700" },
 });

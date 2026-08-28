@@ -15,7 +15,7 @@
 import { useEffect, useState } from "react";
 import * as Network from "expo-network";
 
-import { allowPro } from "../billing/gating";
+import { allows } from "../billing/gating";
 import { getLastSyncAt, pendingWriteCount } from "./SyncEngine";
 
 export type SyncState = "synced" | "pending" | "offline" | "error" | "local";
@@ -27,7 +27,8 @@ export interface SyncStatus {
   lastSyncAt: string | null;
   online: boolean;
   /**
-   * Cloud backup is off because this account is on the free tier — NOT because
+   * Cloud backup is off because this account is on the free tier (it starts at
+   * Plus) — NOT because
    * anything failed. Without this the pill would read "All changes saved" (the
    * outbox is empty, since a free tier never queues), which implies a backup
    * that did not happen. Saying "saved on this device" is the honest version
@@ -49,7 +50,7 @@ export function useSyncStatus(): SyncStatus {
   const [pendingSince, setPendingSince] = useState<number | null>(null);
   // Sampled on the same tick rather than through BillingContext, to keep this
   // hook usable outside the provider. A 4s lag after an upgrade is invisible.
-  const [cloudDisabled, setCloudDisabled] = useState(() => !allowPro());
+  const [cloudDisabled, setCloudDisabled] = useState(() => !allows("sync"));
 
   useEffect(() => {
     let alive = true;
@@ -58,7 +59,7 @@ export function useSyncStatus(): SyncStatus {
       if (!alive) return;
       setPendingCount(count);
       setLastSyncAt(at);
-      setCloudDisabled(!allowPro());
+      setCloudDisabled(!allows("sync"));
       setPendingSince((prev) => (count > 0 ? (prev ?? Date.now()) : null));
     };
     void tick();

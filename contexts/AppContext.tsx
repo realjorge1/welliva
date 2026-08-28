@@ -55,7 +55,7 @@ import { useWorkoutState } from "./domain/useWorkoutState";
 import { useNutritionState } from "./domain/useNutritionState";
 import { useProfileState } from "./domain/useProfileState";
 import { useGamificationState } from "./domain/useGamificationState";
-import { useMonthlyRecap } from "./domain/useMonthlyRecap";
+import { useStories } from "./domain/useStories";
 import {
   CoachInsight,
   generateCoachInsights,
@@ -82,32 +82,13 @@ import {
   EvaluatedAchievement,
   loadAchievementRecord,
 } from "../services/AchievementService";
-import {
-  ChallengeRecord,
-  EMPTY_CHALLENGE_RECORD,
-  EvaluatedChallenge,
-  loadChallengeRecord,
-  type ChallengeSummary,
-} from "../services/ChallengeService";
 import { Celebration } from "../services/CelebrationService";
-import {
-  EMPTY_TOURNAMENT_RECORD,
-  loadTournamentRecord,
-  type ScoreBreakdownRow,
-  type Standings,
-  type TournamentRecord,
-  type Trophy,
-} from "../services/TournamentService";
+import type { Nudge } from "../services/MomentEngine";
 import {
   JourneyRecord,
   EMPTY_JOURNEY,
   loadJourney,
 } from "../services/JourneyService";
-import {
-  loadRecapSeen,
-  type MonthlyRecap,
-  type RecapPeriod,
-} from "../services/MonthlyRecapService";
 import { ensureDietBuffer, ensureDietForDate } from "../services/PlanSync";
 import type { PrimaryGoal } from "../models/user";
 import { type WorkoutAdaptation } from "../services/gozlin";
@@ -231,39 +212,14 @@ interface AppContextType {
   /** Aggregated stats snapshot the achievements are evaluated against. */
   achievementStats: AchievementStats;
 
-  // Seasonal challenges (monthly, delta-measured — see ChallengeService)
-  /** This month's challenges resolved against the period baseline. */
-  challenges: EvaluatedChallenge[];
-  /** Period label, season name, points, days-left for the challenges header. */
-  challengeSummary: ChallengeSummary;
-
-  // Consistency League (monthly AI-pacer tournament — see TournamentService)
   /**
-   * The active league, or null until initialized. Opt-in and off by default:
-   * `enrolled` is false until the user joins; everything else is the live
-   * head-to-head against this month's calibrated AI pacer.
+   * The single thing within reach right now — a record two days out, one
+   * session from the biggest week. Null far more often than not, and that is
+   * correct: a nudge that is always present is wallpaper, not a pull.
    */
-  league: {
-    enrolled: boolean;
-    standings: Standings;
-    rival: {
-      archetype: import("../services/RivalEngine").RivalArchetype;
-      name: string;
-      blurb: string;
-      label: string;
-    };
-    daysLeft: number;
-    /** "June 2026" — the active league month. */
-    periodLabel: string;
-    /** Per-metric discipline-score breakdown (for the league screen). */
-    breakdown: ScoreBreakdownRow[];
-  } | null;
-  /** The permanent trophy case (newest month first). Upside-only — only ever adds. */
-  trophies: Trophy[];
-  /** Opt in to this month's league (re-baselines so only post-join activity counts). */
-  joinLeague: () => Promise<void>;
+  nudge: Nudge | null;
 
-  // Unified celebration queue (achievements + challenges + chapters + trophies)
+  // Unified celebration queue (achievements + chapters + coach-noticed moments)
   /** Queue of just-earned moments awaiting their celebration. */
   celebrations: Celebration[];
   /** Dismiss the front celebration (call after showing it). */
@@ -280,20 +236,6 @@ interface AppContextType {
     targetWeightKg?: number;
     motivation?: string;
   }) => Promise<void>;
-
-  // Monthly "Welliva Wrapped" recap (see MonthlyRecapService)
-  /**
-   * The just-completed prior month, when it has real activity and its recap
-   * hasn't been seen yet. Calm delivery: surfaced as a dismissible Profile
-   * banner, never auto-pushed. Null when nothing is waiting.
-   */
-  recapAvailable: { periodKey: string; label: string } | null;
-  /** Past months with data, newest first — the permanent recap archive. */
-  availableRecapPeriods: RecapPeriod[];
-  /** Build the full, data-driven recap for a period (deterministic). */
-  buildRecap: (periodKey: string) => MonthlyRecap;
-  /** Mark a period's recap seen (dismiss the banner / on open). */
-  markRecapSeen: (periodKey: string) => void;
 
   // State
   isLoading: boolean;
@@ -377,24 +319,20 @@ type WorkoutSlice = Pick<
   | "applyWorkoutAdaptation"
 >;
 
-/** Streaks, achievements, challenges, league & journey chapters. */
+/** Streaks, achievements & journey chapters. */
 type GamificationSlice = Pick<
   AppContextType,
   | "streakData"
   | "refreshStreak"
   | "achievements"
   | "achievementStats"
-  | "challenges"
-  | "challengeSummary"
-  | "league"
-  | "trophies"
-  | "joinLeague"
+  | "nudge"
   | "journeyChapter"
   | "goalAchievedPending"
   | "startNewChapter"
 >;
 
-/** Cross-cutting app/system: celebrations, loading, date, recap, plan state. */
+/** Cross-cutting app/system: celebrations, loading, date, plan state. */
 type SystemSlice = Pick<
   AppContextType,
   | "celebrations"
@@ -402,10 +340,6 @@ type SystemSlice = Pick<
   | "isLoading"
   | "isProfileReconciled"
   | "currentDate"
-  | "recapAvailable"
-  | "availableRecapPeriods"
-  | "buildRecap"
-  | "markRecapSeen"
   | "planState"
 >;
 
@@ -449,23 +383,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   });
   const [achievementRecord, setAchievementRecord] =
     useState<AchievementRecord>(EMPTY_RECORD);
-  const [challengeRecord, setChallengeRecord] = useState<ChallengeRecord>(
-    EMPTY_CHALLENGE_RECORD,
-  );
-  const [tournamentRecord, setTournamentRecord] = useState<TournamentRecord>(
-    EMPTY_TOURNAMENT_RECORD,
-  );
   const [journey, setJourney] = useState<JourneyRecord>(EMPTY_JOURNEY);
   const [celebrations, setCelebrations] = useState<Celebration[]>([]);
-  // Monthly recap delivery gate: the last period whose recap was presented, and
-  // the prior month currently waiting (calm banner, never auto-pushed).
-  const [recapSeen, setRecapSeenState] = useState<string | null>(null);
-  const [recapAvailable, setRecapAvailable] = useState<
-    { periodKey: string; label: string } | null
-  >(null);
-  // The gamification "latest record" refs + silent-first-pass guards and the
-  // pushCelebrations writer now live in useGamificationState; the recap
-  // once-per-session guard lives in useMonthlyRecap (M4).
+  // The gamification "latest record" refs, silent-first-pass guards and the
+  // pushCelebrations writer all live in useGamificationState (M4).
 
   // ============================================================================
   // NUTRITION — consumed total + diet/water handlers
@@ -584,12 +505,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const {
     achievementStats,
     achievements,
-    challenges,
-    challengeSummary,
-    league,
-    trophies,
+    nudge,
     dismissCelebration,
-    joinLeague,
     startNewChapter,
     refreshStreak,
   } = useGamificationState({
@@ -607,12 +524,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     bodyLogs,
     streakData,
     achievementRecord,
-    challengeRecord,
-    tournamentRecord,
     journey,
     setAchievementRecord,
-    setChallengeRecord,
-    setTournamentRecord,
     setJourney,
     setCelebrations,
     setStreakData,
@@ -623,13 +536,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   });
 
   // ============================================================================
-  // MONTHLY RECAP ("Welliva Wrapped") — contexts/domain/useMonthlyRecap (M4).
-  // Needs trophies from the gamification hook above.
+  // LONG-HORIZON STORYTELLING (P6) — contexts/domain/useStories.
   // ============================================================================
 
-  const { availableRecapPeriods, buildRecap, markRecapSeen } = useMonthlyRecap({
+  useStories({
     isLoading,
-    currentDate,
     userGoals,
     workoutLog,
     sessionHistory,
@@ -637,18 +548,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     bodyLogs,
     streakData,
     achievementRecord,
-    challengeRecord,
-    trophies,
     nutritionTargets,
-    recapSeen,
-    setRecapSeenState,
-    setRecapAvailable,
   });
 
-  // The gamification reconcile effects (achievements / challenges / league /
-  // goal-reached), the recap-availability + long-horizon storytelling effects,
-  // and the dismissCelebration / joinLeague / startNewChapter handlers now live
-  // in useGamificationState + useMonthlyRecap (M4), wired above.
+  // The gamification reconcile effects (achievements / moments / goal-reached),
+  // the storytelling effects, and the dismissCelebration / startNewChapter
+  // handlers all live in useGamificationState + useStories, wired above.
 
   // ============================================================================
   // INITIALIZATION
@@ -796,13 +701,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const streak = await resetWeekIfNeeded(today);
       setStreakData(streak);
 
-      // Load achievement record (earned set + hydration counter), the active
-      // challenge season, and the journey/chapter record.
+      // Load the achievement record (earned set + hydration counter) and the
+      // journey/chapter record.
       setAchievementRecord(await loadAchievementRecord());
-      setChallengeRecord(await loadChallengeRecord());
-      setTournamentRecord(await loadTournamentRecord());
       setJourney(await loadJourney());
-      setRecapSeenState(await loadRecapSeen());
     } catch (error) {
       console.error("Error loading app data:", error);
     } finally {
@@ -844,6 +746,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     workoutPlan,
     planState,
     currentDate,
+    workoutLog,
+    sessionHistory,
     setWorkoutPlan,
     setWorkoutLog,
     setSessionHistory,
@@ -971,11 +875,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       refreshStreak,
       achievements,
       achievementStats,
-      challenges,
-      challengeSummary,
-      league,
-      trophies,
-      joinLeague,
+      nudge,
       journeyChapter: journey.chapter,
       goalAchievedPending: journey.goalAchievedPending,
       startNewChapter,
@@ -985,11 +885,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       refreshStreak,
       achievements,
       achievementStats,
-      challenges,
-      challengeSummary,
-      league,
-      trophies,
-      joinLeague,
+      nudge,
       journey.chapter,
       journey.goalAchievedPending,
       startNewChapter,
@@ -1003,10 +899,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       isProfileReconciled,
       currentDate,
-      recapAvailable,
-      availableRecapPeriods,
-      buildRecap,
-      markRecapSeen,
       planState,
     }),
     [
@@ -1015,10 +907,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       isProfileReconciled,
       currentDate,
-      recapAvailable,
-      availableRecapPeriods,
-      buildRecap,
-      markRecapSeen,
       planState,
     ],
   );
@@ -1068,12 +956,12 @@ export function useWorkout(): WorkoutSlice {
   return useDomain(WorkoutContext, "useWorkout");
 }
 
-/** Streaks, achievements, challenges, league & journey chapters. */
+/** Streaks, achievements & journey chapters. */
 export function useGamification(): GamificationSlice {
   return useDomain(GamificationContext, "useGamification");
 }
 
-/** Cross-cutting app/system: celebrations, loading, date, recap, plan state. */
+/** Cross-cutting app/system: celebrations, loading, date, plan state. */
 export function useSystem(): SystemSlice {
   return useDomain(SystemContext, "useSystem");
 }

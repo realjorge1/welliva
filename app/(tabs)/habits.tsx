@@ -8,6 +8,7 @@ import { HabitRow } from "@/components/habits/HabitRow";
 import { ScreenTopBar } from "@/components/navigation";
 import { Card } from "@/components/ui/Card";
 import { Divider } from "@/components/ui/Divider";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { IconBadge } from "@/components/ui/IconBadge";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { Screen } from "@/components/ui/Screen";
@@ -18,31 +19,42 @@ import { ProLockCard } from "@/components/billing";
 import { useProfile, useSystem } from "@/contexts/AppContext";
 import { useBilling } from "@/contexts/BillingContext";
 import { useHabits } from "@/contexts/HabitsContext";
-import { EVERY_DAY } from "@/models/habit";
+import { EVERY_DAY, frequencyLabel } from "@/models/habit";
 import { canCreateHabit, habitLimit } from "@/services/billing";
-import { isScheduled } from "@/services/HabitService";
+import { isDueToday } from "@/services/HabitService";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
-/** A curated, wellness-leaning shelf of habits to add in one tap. `goals`
- *  loosely biases ordering toward the user's primary goal (never filters). */
+/**
+ * A curated, wellness-leaning shelf of habits to add in one tap.
+ *
+ * AgoalsA loosely biases ordering toward the user's primary goal (never
+ * filters). AweeklyGoalA is the TARGET the habit arrives with: omit it for the
+ * rituals that only work daily, and set a quota for the ones that need slack.
+ * A one-tap habit that lands as "every day" when nobody stretches every day is
+ * a broken streak waiting to happen, so the shelf ships its own answers rather
+ * than making every added habit start at seven-out-of-seven.
+ */
 interface Suggestion {
   name: string;
   icon: string;
   color: string;
   goals?: string[];
+  /** Times per week, 1–6. Omitted means every day. */
+  weeklyGoal?: number;
 }
 
 const SUGGESTIONS: Suggestion[] = [
   { name: "Sleep 8 hours", icon: "bed", color: "#8B7CFF" },
-  { name: "10k steps", icon: "footsteps", color: "#A8E05F", goals: ["lose", "weight", "fat", "lean"] },
-  { name: "Stretch", icon: "body", color: "#2DD0B0" },
+  { name: "10k steps", icon: "footsteps", color: "#A8E05F", weeklyGoal: 5, goals: ["lose", "weight", "fat", "lean"] },
+  { name: "Stretch", icon: "body", color: "#2DD0B0", weeklyGoal: 4 },
   { name: "Meditate", icon: "leaf", color: "#3FDD78" },
   { name: "Morning sunlight", icon: "sunny", color: "#F5C542" },
   { name: "Take vitamins", icon: "medical", color: "#FF5D55" },
   { name: "Read 10 min", icon: "book", color: "#38C6ED" },
+  { name: "Strength session", icon: "barbell", color: "#3E9BFF", weeklyGoal: 4, goals: ["muscle", "gain", "strength", "build"] },
   { name: "No late-night snacks", icon: "moon", color: "#FF6FA5", goals: ["lose", "weight", "fat"] },
   { name: "Protein every meal", icon: "nutrition", color: "#FFA13B", goals: ["muscle", "gain", "strength", "build"] },
 ];
@@ -53,7 +65,7 @@ export default function HabitsScreen() {
   const { views, toggleToday, createHabit, loading } = useHabits();
   const { currentDate } = useSystem();
   const { userBio } = useProfile();
-  const { hasProAccess, openPaywall } = useBilling();
+  const { tier, openUpgrade } = useBilling();
 
   const [adding, setAdding] = useState<Set<string>>(new Set());
 
@@ -63,16 +75,19 @@ export default function HabitsScreen() {
     () => views.filter((v) => v.habit.source === "manual").length,
     [views],
   );
-  const canAddHabit = canCreateHabit(manualCount, hasProAccess);
-  const freeSlots = habitLimit(hasProAccess);
+  const canAddHabit = canCreateHabit(manualCount, tier);
+  const freeSlots = habitLimit(tier);
 
-  // Today's scheduled habits → the summary readout.
-  const scheduledToday = useMemo(
-    () => views.filter((v) => isScheduled(v.habit, currentDate)),
+  // Today's readout. "Due" rather than "scheduled": a 4×-a-week habit that
+  // already banked its four drops out of today's count instead of sitting there
+  // asking for a fifth, so the number at the top of the screen is a thing that
+  // can actually be finished.
+  const dueToday = useMemo(
+    () => views.filter((v) => isDueToday(v.habit, v.done, currentDate)),
     [views, currentDate],
   );
-  const doneToday = scheduledToday.filter((v) => v.stats.doneToday).length;
-  const totalToday = scheduledToday.length;
+  const doneToday = dueToday.filter((v) => v.stats.doneToday).length;
+  const totalToday = dueToday.length;
   const pct = totalToday > 0 ? doneToday / totalToday : 0;
   const allDone = totalToday > 0 && doneToday === totalToday;
 
@@ -89,7 +104,7 @@ export default function HabitsScreen() {
   const addSuggestion = async (s: Suggestion) => {
     if (adding.has(s.name)) return;
     if (!canAddHabit) {
-      openPaywall("habits");
+      openUpgrade("habits");
       return;
     }
     setAdding((prev) => new Set(prev).add(s.name));
@@ -98,7 +113,10 @@ export default function HabitsScreen() {
         name: s.name,
         icon: s.icon,
         color: s.color,
+        // A quota habit is any-day-you-like, so it keeps the full weekday set;
+        // AweeklyGoalA is what everything downstream actually measures against.
         days: EVERY_DAY,
+        weeklyGoal: s.weeklyGoal ?? null,
         source: "manual",
         reminder: null,
       });
@@ -119,9 +137,9 @@ export default function HabitsScreen() {
         <Pressable
           hitSlop={12}
           onPress={() =>
-            canAddHabit ? router.push("/habit/new" as any) : openPaywall("habits")
+            canAddHabit ? router.push("/habit/new" as any) : openUpgrade("habits")
           }
-          accessibilityLabel={canAddHabit ? "New habit" : "New habit — requires Welliva Pro"}
+          accessibilityLabel={canAddHabit ? "New habit" : "New habit — requires Welliva Plus"}
           style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
         >
           <Ionicons
@@ -168,15 +186,19 @@ export default function HabitsScreen() {
         </Card>
       )}
 
-      {/* Empty state (only when the user has cleared every habit) */}
+      {/* Day one. Names what the screen holds, says why it is worth filling,
+          and hands over the tap that fills it — see components/ui/EmptyState. */}
       {!loading && views.length === 0 && (
-        <Card padding="xxl" style={styles.emptyCard}>
-          <AppText variant="headline">No habits yet</AppText>
-          <AppText variant="subhead" color="secondary" style={styles.emptySub}>
-            Add one below, or tap + to create your own. Water, meals and workouts
-            can track themselves from what you already log.
-          </AppText>
-        </Card>
+        <EmptyState
+          icon="repeat"
+          title="Your daily habits"
+          body="Water, meals and workouts can track themselves from what you already log — so a streak starts without any extra tapping."
+          action={{
+            label: "Create a habit",
+            onPress: () => router.push("/habit/new" as never),
+          }}
+          style={styles.emptyCard}
+        />
       )}
 
       {/* Your habits */}
@@ -214,15 +236,28 @@ export default function HabitsScreen() {
                 <Pressable
                   onPress={() => addSuggestion(s)}
                   disabled={adding.has(s.name)}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    canAddHabit
+                      ? `Add ${s.name}, ${frequencyLabel(EVERY_DAY, s.weeklyGoal ?? null).toLowerCase()}`
+                      : `Add ${s.name} — requires Welliva Plus`
+                  }
                   style={({ pressed }) => [
                     styles.suggestRow,
                     (pressed || adding.has(s.name)) && { opacity: 0.55 },
                   ]}
                 >
                   <IconBadge name={s.icon as any} tone={s.color} size={38} />
-                  <AppText variant="bodyLg" weight="600" style={styles.flex} numberOfLines={1}>
-                    {s.name}
-                  </AppText>
+                  <View style={styles.flex}>
+                    <AppText variant="bodyLg" weight="600" numberOfLines={1}>
+                      {s.name}
+                    </AppText>
+                    {/* State the target before it's added, not after — the
+                        goal is half of what you're agreeing to. */}
+                    <AppText variant="footnote" color="tertiary" numberOfLines={1}>
+                      {frequencyLabel(EVERY_DAY, s.weeklyGoal ?? null)}
+                    </AppText>
+                  </View>
                   <View
                     style={[
                       styles.addBtn,
@@ -255,7 +290,7 @@ export default function HabitsScreen() {
           lock="habits"
           compact
           title={`You're using all ${freeSlots} free habits`}
-          blurb="Pro removes the limit, so you can track as many as you want. Your auto-tracked water, meal and workout habits never count toward it."
+          blurb="Plus removes the limit, so you can track as many as you want. Your auto-tracked water, meal and workout habits never count toward it."
           style={styles.lockCard}
         />
       )}

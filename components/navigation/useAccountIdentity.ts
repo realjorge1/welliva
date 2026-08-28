@@ -8,15 +8,28 @@
  */
 
 import { useAuth } from "@/components/SupabaseAuthProvider";
-import { useProfile } from "@/contexts/AppContext";
+import { useGamification } from "@/contexts/AppContext";
+import {
+  getLatestUnlocked,
+  type EvaluatedAchievement,
+} from "@/services/AchievementService";
 import { fetchAvatarUrl } from "@/services/sync/StorageSync";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export interface AccountIdentity {
   name: string;
   /** Uploaded avatar, else the OAuth provider's photo, else undefined. */
   photo?: string;
-  /** "34 yrs · 78 kg · 180 cm", or the nudge to finish setup. */
+  /**
+   * The most recent achievement unlocked, or null.
+   *
+   * This line used to be the body stats — "34 yrs · 78 kg · 180 cm". Those are
+   * facts about a body, not about a person's week; they never change, so the
+   * line never had anything to say, and they're already on the profile screen
+   * one tap away. The latest achievement earns its place by moving.
+   */
+  latestAchievement: EvaluatedAchievement | null;
+  /** The achievement's name, or the nudge to finish setup / get started. */
   subtitle: string;
 }
 
@@ -50,9 +63,14 @@ function providerAvatar(meta: Record<string, any> | undefined): string | undefin
 
 export function useAccountIdentity(): AccountIdentity {
   const { user } = useAuth();
-  const { userBio } = useProfile();
+  const { achievements } = useGamification();
 
   const meta = user?.user_metadata as Record<string, any> | undefined;
+
+  const latestAchievement = useMemo(
+    () => getLatestUnlocked(achievements),
+    [achievements],
+  );
 
   // Prefer the avatar uploaded in-app (users.avatar_url) over the OAuth
   // provider photo; fall back to the provider's when none has been set.
@@ -74,15 +92,11 @@ export function useAccountIdentity(): AccountIdentity {
   return {
     name: displayName(meta, user?.email ?? undefined),
     photo: uploaded ?? providerAvatar(meta),
-    // Single spaces around the separator, not double: this line lives in a
-    // ~55%-width menu panel, where the extra padding is what pushes it into an
-    // ellipsis.
-    subtitle: userBio
-      ? [
-          `${userBio.age} yrs`,
-          `${Math.round(userBio.weightKg)} kg`,
-          `${userBio.heightCm} cm`,
-        ].join(" · ")
-      : "Finish your setup to personalise your plan",
+    latestAchievement,
+    // Before the first unlock there's nothing to celebrate yet, and saying so
+    // beats an empty line or a fake one.
+    subtitle: latestAchievement
+      ? latestAchievement.def.name
+      : "Your first achievement is waiting",
   };
 }

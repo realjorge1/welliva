@@ -3,7 +3,8 @@
  *
  * Identity first (photo, name, the one line that says who this person is to
  * Welliva), then the destinations in the order they were specified, then the two
- * exploratory surfaces below a hairline, then Settings pinned to the floor.
+ * exploratory surfaces below a hairline, then Upgrade and Settings pinned to the
+ * floor.
  *
  * EVERYTHING MOVES OFF `progress`, not off mount. The panel's parallax, its
  * scale and fade, and each row's own staggered slide are all interpolations of
@@ -31,7 +32,7 @@
  * each time the active row moves.
  */
 
-import { GozlinAvatar } from "@/components/gozlin/GozlinAvatar";
+import AILogoIcon from "@/components/gozlin/AILogoIcon";
 import { AppText } from "@/components/ui/Text";
 import { useColors } from "@/components/ui/useColors";
 import { Radius, Spacing, alpha } from "@/constants/theme";
@@ -55,6 +56,7 @@ import {
   PROFILE_ITEM,
   SECONDARY_ITEMS,
   SETTINGS_ITEM,
+  UPGRADE_ITEM,
   type MenuItem,
 } from "./menu";
 import { useAccountIdentity } from "./useAccountIdentity";
@@ -173,9 +175,19 @@ export function SideMenu({
           ))}
         </ScrollView>
 
-        {/* Settings — pinned to the floor, alone, so there is exactly one door
-            to it and it never scrolls out of reach. */}
+        {/* Upgrade and Settings — pinned to the floor so neither ever scrolls
+            out of reach. Both are about the app rather than about your data,
+            and Upgrade leads because "what am I paying for" is a question
+            people arrive with, not one they browse to. */}
         <View style={styles.footer}>
+          <Row
+            item={UPGRADE_ITEM}
+            index={row++}
+            progress={progress}
+            playIntro={playIntro}
+            active={activePath === UPGRADE_ITEM.href}
+            onPress={() => onNavigate(UPGRADE_ITEM)}
+          />
           <Row
             item={SETTINGS_ITEM}
             index={row}
@@ -202,7 +214,7 @@ function ProfileHeader({
   active: boolean;
 }) {
   const { colors } = useColors();
-  const { name, photo, subtitle } = useAccountIdentity();
+  const { name, photo, subtitle, latestAchievement } = useAccountIdentity();
 
   const style = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [0, 0.4], [0, 1], Extrapolation.CLAMP),
@@ -269,14 +281,22 @@ function ProfileHeader({
           >
             {name}
           </AppText>
-          <AppText
-            variant="footnote"
-            color="secondary"
-            numberOfLines={1}
-            style={styles.profileSub}
-          >
-            {subtitle}
-          </AppText>
+          {/* The one line under the name: the latest achievement, with its
+              own trophy in gold so it reads as a prize rather than a caption.
+              Body stats used to live here — see useAccountIdentity. */}
+          <View style={styles.profileSub}>
+            {latestAchievement ? (
+              <Ionicons name={latestAchievement.def.icon} size={12} color={colors.gold} />
+            ) : null}
+            <AppText
+              variant="footnote"
+              color={latestAchievement ? colors.gold : "secondary"}
+              numberOfLines={1}
+              style={styles.flex}
+            >
+              {subtitle}
+            </AppText>
+          </View>
         </View>
         {/* No chevron. At this panel width its 24pt is the difference between
             the bio line reading in full and ellipsizing, and a menu's own header
@@ -364,12 +384,15 @@ function Row({
           pressed && { backgroundColor: alpha(colors.text, 0.05) },
         ]}
       >
-        {/* Fixed-width slot, sized for the active glyph — see the file header. */}
+        {/* Fixed-width slot, sized for the active glyph — see the file header.
+            Gozlin keeps its own mark; what it does NOT keep is its own colour.
+            The brand-gradient badge that used to render here was lit whether or
+            not you were on the screen, so it out-shouted the genuinely active
+            row. Monochrome, it takes the same tint as every other mark and the
+            menu's one rule holds: gold means "you are here". */}
         <View style={styles.markSlot}>
           {item.mark === "gozlin" ? (
-            // The coach keeps its own mark. Pulsing only when it's the live
-            // screen — a breathing icon in a closed menu is just noise.
-            <GozlinAvatar size={active ? MARK_ACTIVE : MARK_REST} pulsing={active} />
+            <AILogoIcon size={active ? MARK_ACTIVE : MARK_REST} color={tint} />
           ) : (
             <Ionicons
               name={active ? item.activeIcon : item.icon}
@@ -438,7 +461,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
   },
   avatarFallback: { alignItems: "center", justifyContent: "center" },
-  profileSub: { marginTop: 1 },
+  profileSub: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 1 },
 
   // List
   list: {

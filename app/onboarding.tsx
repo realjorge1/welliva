@@ -27,18 +27,17 @@ import {
   Button,
   Card,
   IconBadge,
-  ProgressBar,
   Reveal,
   Ring,
   Stat,
   ThemedIcon,
   useColors,
+  useKeyboardInset,
 } from "@/components/ui";
 import AILogoBadge from "@/components/gozlin/AILogoBadge";
 import { DisclaimerNote } from "@/components/legal";
 import { TargetGuidanceNote } from "@/components/nutrition/TargetGuidanceNote";
 import { OrbField, useOrbTouch } from "@/components/OrbField";
-import { HeroAura } from "@/components/onboarding/HeroAura";
 import { hasSeenNotificationPrimer } from "@/services/notifications/primer";
 import { Gradients, Radius, Spacing, alpha, brandGradientDark } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
@@ -50,15 +49,15 @@ import {
   Alert,
   Animated,
   Dimensions,
-  KeyboardAvoidingView,
-  Platform,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import Reanimated from "react-native-reanimated";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../contexts/AppContext";
 import { ensureDietLibraryLoaded } from "../constants/DietDatabase";
 import { recommendDiets } from "../services/intelligence";
@@ -82,6 +81,21 @@ import {
 import { Equipment } from "../models/workout";
 
 const { width } = Dimensions.get("window");
+
+/** Step hand-over: a short, confident nudge rather than a full-width whip — the
+ *  screen changes without the content ever looking thrown across it. */
+const STEP_SLIDE = 36;
+const STEP_OUT_MS = 130;
+const STEP_IN_MS = 220;
+
+/**
+ * Option grids are MEASURED, not wrapped. Every row — including a short last
+ * row, whose cells stretch to share the leftover space — spans the full content
+ * width, so a block of options can never hang to one side of the screen.
+ */
+const GRID_GAP = Spacing.sm;
+const GRID_WIDTH = width - Spacing.screen * 2;
+const gridCell = (columns: number) => (GRID_WIDTH - GRID_GAP * (columns - 1)) / columns;
 
 type Step =
   | "welcome"
@@ -225,56 +239,94 @@ const MEALS_OPTIONS: { value: 3 | 4; label: string; desc: string }[] = [
   { value: 4, label: "4 meals", desc: "Three meals + two snacks" },
 ];
 
-const ALLERGY_OPTIONS: CommonAllergy[] = [
-  "peanuts",
-  "tree_nuts",
-  "dairy",
-  "eggs",
-  "shellfish",
-  "fish",
-  "wheat",
-  "soy",
-  "gluten",
+const ALLERGY_OPTIONS: { value: CommonAllergy; label: string }[] = [
+  { value: "peanuts", label: "Peanuts" },
+  { value: "tree_nuts", label: "Tree nuts" },
+  { value: "dairy", label: "Dairy" },
+  { value: "eggs", label: "Eggs" },
+  { value: "shellfish", label: "Shellfish" },
+  { value: "fish", label: "Fish" },
+  { value: "wheat", label: "Wheat" },
+  { value: "soy", label: "Soy" },
+  { value: "gluten", label: "Gluten" },
 ];
 
-const MEDICAL_OPTIONS: { value: MedicalCondition; label: string }[] = [
-  // Heart & metabolic
-  { value: "hypertension", label: "Hypertension" },
-  { value: "high_cholesterol", label: "High cholesterol" },
-  { value: "diabetes_type2", label: "Type 2 diabetes" },
-  { value: "diabetes_type1", label: "Type 1 diabetes" },
-  { value: "prediabetes", label: "Prediabetes" },
-  { value: "metabolic_syndrome", label: "Metabolic syndrome" },
-  // Digestive
-  { value: "gerd", label: "Acid reflux / GERD" },
-  { value: "ibs", label: "IBS" },
-  { value: "ibd", label: "IBD (Crohn's / colitis)" },
-  { value: "celiac", label: "Celiac / gluten" },
-  { value: "diverticulitis", label: "Diverticulitis" },
-  { value: "constipation", label: "Constipation" },
-  { value: "lactose_intolerance", label: "Lactose intolerance" },
-  // Liver, kidney & endocrine
-  { value: "renal_issues", label: "Kidney issues" },
-  { value: "fatty_liver", label: "Fatty liver" },
-  { value: "gallbladder", label: "Gallbladder issues" },
-  { value: "pancreatitis", label: "Pancreatitis" },
-  { value: "hypothyroidism", label: "Hypothyroidism" },
-  { value: "hyperthyroidism", label: "Hyperthyroidism" },
-  { value: "gout", label: "Gout" },
-  // Hormonal & life-stage
-  { value: "pcos", label: "PCOS" },
-  { value: "endometriosis", label: "Endometriosis" },
-  { value: "pregnancy", label: "Pregnancy" },
-  { value: "postpartum", label: "Postpartum" },
-  { value: "menopause", label: "Menopause" },
-  // Immune, blood & musculoskeletal
-  { value: "anemia", label: "Anemia (iron)" },
-  { value: "arthritis", label: "Arthritis" },
-  { value: "osteoporosis", label: "Osteoporosis" },
-  // Neurological
-  { value: "migraine", label: "Migraine" },
-  { value: "none", label: "None" },
+/**
+ * Medical conditions, GROUPED. Thirty flat pills read as an intimidating wall
+ * and wrap into a ragged, one-sided block; five labelled groups of measured
+ * tiles read as a short scan. "None" is lifted out into its own full-width
+ * row above the groups (see the health step) rather than buried at the end.
+ */
+const MEDICAL_GROUPS: {
+  title: string;
+  items: { value: MedicalCondition; label: string }[];
+}[] = [
+  {
+    title: "Heart & metabolic",
+    items: [
+      { value: "hypertension", label: "Hypertension" },
+      { value: "high_cholesterol", label: "High cholesterol" },
+      { value: "diabetes_type2", label: "Type 2 diabetes" },
+      { value: "diabetes_type1", label: "Type 1 diabetes" },
+      { value: "prediabetes", label: "Prediabetes" },
+      { value: "metabolic_syndrome", label: "Metabolic syndrome" },
+    ],
+  },
+  {
+    title: "Digestive",
+    items: [
+      { value: "gerd", label: "Acid reflux / GERD" },
+      { value: "ibs", label: "IBS" },
+      { value: "ibd", label: "IBD (Crohn's / colitis)" },
+      { value: "celiac", label: "Celiac / gluten" },
+      { value: "diverticulitis", label: "Diverticulitis" },
+      { value: "constipation", label: "Constipation" },
+      { value: "lactose_intolerance", label: "Lactose intolerance" },
+    ],
+  },
+  {
+    title: "Liver, kidney & thyroid",
+    items: [
+      { value: "renal_issues", label: "Kidney issues" },
+      { value: "fatty_liver", label: "Fatty liver" },
+      { value: "gallbladder", label: "Gallbladder issues" },
+      { value: "pancreatitis", label: "Pancreatitis" },
+      { value: "hypothyroidism", label: "Hypothyroidism" },
+      { value: "hyperthyroidism", label: "Hyperthyroidism" },
+      { value: "gout", label: "Gout" },
+    ],
+  },
+  {
+    title: "Hormonal & life stage",
+    items: [
+      { value: "pcos", label: "PCOS" },
+      { value: "endometriosis", label: "Endometriosis" },
+      { value: "pregnancy", label: "Pregnancy" },
+      { value: "postpartum", label: "Postpartum" },
+      { value: "menopause", label: "Menopause" },
+    ],
+  },
+  {
+    title: "Bones, blood & other",
+    items: [
+      { value: "anemia", label: "Anemia (iron)" },
+      { value: "arthritis", label: "Arthritis" },
+      { value: "osteoporosis", label: "Osteoporosis" },
+      { value: "migraine", label: "Migraine" },
+    ],
+  },
 ];
+
+/** A short name for the beat the user is in — shown under the progress rail so
+ *  the header says WHERE they are, not just how far along. */
+const STEP_KICKER: Partial<Record<Step, string>> = {
+  goal: "Your goals",
+  about: "About you",
+  activity: "Daily activity",
+  training: "Training",
+  food: "Food",
+  health: "Health & safety",
+};
 
 const BUILD_LINES = [
   "Calculating your calorie target…",
@@ -289,6 +341,11 @@ export default function OnboardingScreen() {
   const router = useRouter();
   const { completeOnboarding } = useProfile();
   const { colors } = useColors();
+  const insets = useSafeAreaInsets();
+  // The keyboard is consumed as a window inset, not a resize (edge-to-edge is
+  // on), so the flow pads itself frame-by-frame from the system's own animation
+  // instead of leaning on a KeyboardAvoidingView that has nothing to react to.
+  const kb = useKeyboardInset({ bottomInset: insets.bottom, gap: Spacing.lg });
   // Bubble-phase touch observers — any press or swipe landing on a background
   // orb bounces it off elastically, without interfering with the flow itself.
   const { touch, touchHandlers } = useOrbTouch();
@@ -363,6 +420,7 @@ export default function OnboardingScreen() {
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
   const buildPulse = useRef(new Animated.Value(1)).current;
+  const buildRing = useRef(new Animated.Value(0)).current;
   const [buildLineIdx, setBuildLineIdx] = useState(0);
 
   // Detect region + a starting cuisine silently on mount — no screen, no prompt.
@@ -376,15 +434,35 @@ export default function OnboardingScreen() {
   }, []);
 
   const animateTransition = (direction: "forward" | "back") => {
-    const slideValue = direction === "forward" ? -width : width;
+    const out = direction === "forward" ? -STEP_SLIDE : STEP_SLIDE;
     Animated.parallel([
-      Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
-      Animated.timing(slideAnim, { toValue: slideValue, duration: 150, useNativeDriver: true }),
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: STEP_OUT_MS,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: out,
+        duration: STEP_OUT_MS,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
     ]).start(() => {
-      slideAnim.setValue(direction === "forward" ? width : -width);
+      slideAnim.setValue(-out);
       Animated.parallel([
-        Animated.timing(fadeAnim, { toValue: 1, duration: 150, useNativeDriver: true }),
-        Animated.timing(slideAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: STEP_IN_MS,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: STEP_IN_MS,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
       ]).start();
     });
   };
@@ -394,7 +472,7 @@ export default function OnboardingScreen() {
     if (idx >= 0 && idx < STEPS.length - 1) {
       if (!validateCurrentStep()) return;
       animateTransition("forward");
-      setTimeout(() => setCurrentStep(STEPS[idx + 1]), 150);
+      setTimeout(() => setCurrentStep(STEPS[idx + 1]), STEP_OUT_MS);
     }
   };
 
@@ -402,7 +480,7 @@ export default function OnboardingScreen() {
     const idx = STEPS.indexOf(currentStep);
     if (idx > 0) {
       animateTransition("back");
-      setTimeout(() => setCurrentStep(STEPS[idx - 1]), 150);
+      setTimeout(() => setCurrentStep(STEPS[idx - 1]), STEP_OUT_MS);
     }
   };
 
@@ -413,7 +491,7 @@ export default function OnboardingScreen() {
     const idx = STEPS.indexOf(step);
     if (idx >= 0 && idx < STEPS.length - 1) {
       animateTransition("forward");
-      setTimeout(() => setCurrentStep(STEPS[idx + 1]), 150);
+      setTimeout(() => setCurrentStep(STEPS[idx + 1]), STEP_OUT_MS);
     }
   };
 
@@ -428,29 +506,62 @@ export default function OnboardingScreen() {
       ]),
     );
     loop.start();
+    // A single hairline ring that swells out of the badge and dissolves — the
+    // "working" signal, carried by motion rather than by a glow.
+    buildRing.setValue(0);
+    const ringLoop = Animated.loop(
+      Animated.timing(buildRing, {
+        toValue: 1,
+        duration: 1800,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    );
+    ringLoop.start();
     const lineTimer = setInterval(
       () => setBuildLineIdx((i) => Math.min(i + 1, BUILD_LINES.length - 1)),
       480,
     );
     const advance = setTimeout(() => {
       Animated.parallel([
-        Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
-        Animated.timing(slideAnim, { toValue: -width, duration: 150, useNativeDriver: true }),
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: STEP_OUT_MS,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: -STEP_SLIDE,
+          duration: STEP_OUT_MS,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
       ]).start(() => {
-        slideAnim.setValue(width);
+        slideAnim.setValue(STEP_SLIDE);
         setCurrentStep("plan");
         Animated.parallel([
-          Animated.timing(fadeAnim, { toValue: 1, duration: 150, useNativeDriver: true }),
-          Animated.timing(slideAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: STEP_IN_MS,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.timing(slideAnim, {
+            toValue: 0,
+            duration: STEP_IN_MS,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
         ]).start();
       });
     }, 2000);
     return () => {
       loop.stop();
+      ringLoop.stop();
       clearInterval(lineTimer);
       clearTimeout(advance);
     };
-  }, [currentStep, buildPulse, fadeAnim, slideAnim]);
+  }, [currentStep, buildPulse, buildRing, fadeAnim, slideAnim]);
 
   const validateCurrentStep = (): boolean => {
     switch (currentStep) {
@@ -625,7 +736,9 @@ export default function OnboardingScreen() {
   const toggleMedicalCondition = (condition: MedicalCondition) => {
     tapHaptic();
     if (condition === "none") {
-      setMedicalConditions(["none"]);
+      // Un-tickable: tapping the row again clears it rather than locking the
+      // user into a "None" they picked by accident.
+      setMedicalConditions((prev) => (prev.includes("none") ? [] : ["none"]));
     } else {
       setMedicalConditions((prev) => {
         const filtered = prev.filter((c) => c !== "none");
@@ -639,7 +752,6 @@ export default function OnboardingScreen() {
   const formIndex = FORM_STEPS.indexOf(currentStep);
   const showHeader = formIndex >= 0;
   const showNav = currentStep !== "building" && currentStep !== "plan";
-  const progress = showHeader ? (formIndex + 1) / FORM_STEPS.length : 0;
   const currentStepIndex = STEPS.indexOf(currentStep);
   const isLastForm = formIndex === FORM_STEPS.length - 1;
 
@@ -653,35 +765,52 @@ export default function OnboardingScreen() {
       case "welcome":
         return (
           <View style={styles.welcomeWrap}>
-            <View style={styles.welcomeHero}>
-              <View style={styles.auraLayer} pointerEvents="none">
-                <HeroAura mode="glow" size={260} />
-              </View>
-              <AILogoBadge size={68} />
-            </View>
-            <AppText variant="displayLg" align="center" style={styles.welcomeTitle}>
-              Let&apos;s build your plan
-            </AppText>
-            <AppText variant="bodyLg" color="secondary" align="center" style={styles.welcomeSub}>
-              A few quick questions and I&apos;ll shape a diet and training plan around your life. About 2 minutes.
-            </AppText>
-            <View style={styles.welcomeChips}>
-              {[
-                { icon: "restaurant-outline", text: "Meals for your goals" },
-                { icon: "barbell-outline", text: "Training that fits" },
-                { icon: "shield-checkmark-outline", text: "Safe by design" },
-              ].map((p) => (
-                <View
-                  key={p.text}
-                  style={[styles.welcomeChip, { borderColor: colors.border, backgroundColor: colors.surface }]}
-                >
-                  <Ionicons name={p.icon as any} size={16} color={colors.primary} />
-                  <AppText variant="footnote" color="secondary">
-                    {p.text}
-                  </AppText>
+            <Reveal index={0} style={styles.stretch}>
+              <View style={styles.welcomeHero}>
+                {/* Three concentric hairlines instead of a bloom: the badge is
+                    held by structure, not by light. */}
+                <View style={styles.centerLayer} pointerEvents="none">
+                  <View style={[styles.ring, styles.ringOuter, { borderColor: alpha(colors.primary, 0.07) }]}>
+                    <View style={[styles.ring, styles.ringMid, { borderColor: alpha(colors.primary, 0.13) }]}>
+                      <View style={[styles.ring, styles.ringInner, { borderColor: alpha(colors.primary, 0.22) }]} />
+                    </View>
+                  </View>
                 </View>
-              ))}
-            </View>
+                <AILogoBadge size={68} />
+              </View>
+            </Reveal>
+            <Reveal index={1} style={styles.stretch}>
+              <AppText variant="caption" color="brand" uppercase align="center">
+                Welliva
+              </AppText>
+              <AppText variant="displayLg" align="center" style={styles.welcomeTitle}>
+                Let&apos;s build your plan
+              </AppText>
+            </Reveal>
+            <Reveal index={2} style={styles.stretch}>
+              <AppText variant="bodyLg" color="secondary" align="center" style={styles.welcomeSub}>
+                A few quick questions and I&apos;ll shape a diet and training plan around your life. About 2 minutes.
+              </AppText>
+            </Reveal>
+            <Reveal index={3} style={styles.stretch}>
+              <View style={styles.welcomeChips}>
+                {[
+                  { icon: "restaurant-outline", text: "Meals for your goals" },
+                  { icon: "barbell-outline", text: "Training that fits" },
+                  { icon: "shield-checkmark-outline", text: "Safe by design" },
+                ].map((p) => (
+                  <View
+                    key={p.text}
+                    style={[styles.welcomeChip, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                  >
+                    <Ionicons name={p.icon as any} size={16} color={colors.primary} />
+                    <AppText variant="footnote" color="secondary">
+                      {p.text}
+                    </AppText>
+                  </View>
+                ))}
+              </View>
+            </Reveal>
           </View>
         );
 
@@ -704,11 +833,16 @@ export default function OnboardingScreen() {
                       colors={colors}
                       style={styles.goalCard}
                     >
-                      <IconBadge
-                        name={option.icon as any}
-                        tone={selected ? colors.primary : colors.textTertiary}
-                        size={38}
-                      />
+                      <View style={styles.goalTop}>
+                        <IconBadge
+                          name={option.icon as any}
+                          tone={selected ? colors.primary : colors.textTertiary}
+                          size={38}
+                        />
+                        {selected && (
+                          <Ionicons name="checkmark-circle" size={19} color={colors.primary} />
+                        )}
+                      </View>
                       <AppText
                         variant="callout"
                         color={selected ? "brand" : "secondary"}
@@ -731,7 +865,6 @@ export default function OnboardingScreen() {
             contentContainerStyle={styles.formScroll}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
-            automaticallyAdjustKeyboardInsets
           >
             <View style={[styles.step, styles.stepCompact]}>
               <StepHead
@@ -912,6 +1045,9 @@ export default function OnboardingScreen() {
                             {option.desc}
                           </AppText>
                         </View>
+                        {selected && (
+                          <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
+                        )}
                       </SelectableCard>
                     );
                   })}
@@ -946,7 +1082,6 @@ export default function OnboardingScreen() {
             contentContainerStyle={styles.formScroll}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
-            automaticallyAdjustKeyboardInsets
           >
             <View style={styles.step}>
               <StepHead
@@ -1054,7 +1189,6 @@ export default function OnboardingScreen() {
             contentContainerStyle={styles.formScroll}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
-            automaticallyAdjustKeyboardInsets
           >
             <View style={styles.step}>
               <StepHead
@@ -1064,22 +1198,36 @@ export default function OnboardingScreen() {
               {/* The most sensitive screen in the app. The reminder that this
                   shapes a plan, not a treatment, belongs right here. */}
               <DisclaimerNote compact />
+
               <View style={styles.group}>
-                <AppText variant="callout">Medical conditions</AppText>
-                <View style={styles.chips}>
-                  {MEDICAL_OPTIONS.map((option) => (
-                    <Chip
-                      key={option.value}
-                      label={option.label}
-                      selected={medicalConditions.includes(option.value)}
-                      onPress={() => toggleMedicalCondition(option.value)}
+                <SectionLabel icon="pulse-outline" text="Medical conditions" colors={colors} />
+                {/* Lifted out of the groups: the fastest honest answer on this
+                    screen is "nothing", and it should be the first thing here. */}
+                <OptionTile
+                  label="Nothing applies"
+                  selected={medicalConditions.includes("none")}
+                  onPress={() => toggleMedicalCondition("none")}
+                  colors={colors}
+                  cellWidth={GRID_WIDTH}
+                />
+                {MEDICAL_GROUPS.map((group) => (
+                  <View key={group.title} style={styles.groupTight}>
+                    <AppText variant="caption" color="tertiary" uppercase>
+                      {group.title}
+                    </AppText>
+                    <OptionGrid
+                      options={group.items}
+                      selected={medicalConditions}
+                      onToggle={toggleMedicalCondition}
+                      columns={2}
                       colors={colors}
                     />
-                  ))}
-                </View>
+                  </View>
+                ))}
               </View>
+
               <View style={styles.group}>
-                <AppText variant="callout">Injuries or pain</AppText>
+                <SectionLabel icon="bandage-outline" text="Injuries or pain" colors={colors} />
                 <TextInput
                   style={[inputStyle, styles.textArea]}
                   value={injuries}
@@ -1089,8 +1237,9 @@ export default function OnboardingScreen() {
                   multiline
                 />
               </View>
+
               <View style={styles.group}>
-                <AppText variant="callout">Medications</AppText>
+                <SectionLabel icon="medkit-outline" text="Medications" colors={colors} />
                 <TextInput
                   style={[inputStyle, styles.textArea]}
                   value={medications}
@@ -1100,20 +1249,17 @@ export default function OnboardingScreen() {
                   multiline
                 />
               </View>
+
               <View style={styles.group}>
-                <AppText variant="callout">Food allergies</AppText>
-                <View style={styles.chips}>
-                  {ALLERGY_OPTIONS.map((allergy) => (
-                    <Chip
-                      key={allergy}
-                      label={allergy.replace("_", " ")}
-                      selected={allergies.includes(allergy)}
-                      onPress={() => toggleAllergy(allergy)}
-                      colors={colors}
-                      capitalize
-                    />
-                  ))}
-                </View>
+                <SectionLabel icon="alert-circle-outline" text="Food allergies" colors={colors} />
+                <OptionGrid
+                  options={ALLERGY_OPTIONS}
+                  selected={allergies}
+                  onToggle={toggleAllergy}
+                  columns={3}
+                  colors={colors}
+                  align="center"
+                />
                 <TextInput
                   style={inputStyle}
                   value={customAllergy}
@@ -1130,8 +1276,27 @@ export default function OnboardingScreen() {
         return (
           <View style={styles.buildingWrap}>
             <View style={styles.buildingHero}>
-              <View style={styles.auraLayer} pointerEvents="none">
-                <HeroAura size={300} />
+              <View style={styles.centerLayer} pointerEvents="none">
+                <Animated.View
+                  style={[
+                    styles.pulseRing,
+                    {
+                      borderColor: colors.primary,
+                      opacity: buildRing.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.4, 0],
+                      }),
+                      transform: [
+                        {
+                          scale: buildRing.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [0.72, 1.5],
+                          }),
+                        },
+                      ],
+                    },
+                  ]}
+                />
               </View>
               <Animated.View style={{ transform: [{ scale: buildPulse }] }}>
                 <AILogoBadge size={84} />
@@ -1143,6 +1308,20 @@ export default function OnboardingScreen() {
             <AppText variant="bodyLg" color="secondary" align="center">
               {BUILD_LINES[buildLineIdx]}
             </AppText>
+            <View style={styles.buildRail}>
+              {BUILD_LINES.map((line, i) => (
+                <View
+                  key={line}
+                  style={[
+                    styles.buildSeg,
+                    {
+                      backgroundColor:
+                        i <= buildLineIdx ? colors.primary : alpha(colors.primary, 0.16),
+                    },
+                  ]}
+                />
+              ))}
+            </View>
           </View>
         );
 
@@ -1169,14 +1348,14 @@ export default function OnboardingScreen() {
     return (
       <ScrollView
         style={styles.flex}
-        contentContainerStyle={styles.planContent}
+        contentContainerStyle={[
+          styles.planContent,
+          { paddingBottom: Spacing.xxxl + insets.bottom },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         <Reveal index={0}>
           <View style={styles.planHero}>
-            <View style={styles.auraLayer} pointerEvents="none">
-              <HeroAura size={260} animated={false} />
-            </View>
             <AppText variant="caption" color="brand" uppercase align="center">
               Your personalized plan
             </AppText>
@@ -1326,22 +1505,38 @@ export default function OnboardingScreen() {
           over the onboarding background. Persists across every onboarding step;
           above the base gradient, below content. */}
       <OrbField color={brandGradientDark[0]} opacityScale={0.65} touch={touch} />
-      <SafeAreaView style={styles.flex} edges={["top", "bottom"]}>
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          {/* Header */}
-          {showHeader && (
-            <View style={styles.header}>
-              <ProgressBar progress={progress} gradient={colors.brandGradient} height={6} />
-              <AppText variant="footnote" color="tertiary" align="center" style={styles.progressText}>
-                Step {formIndex + 1} of {FORM_STEPS.length}
+      <SafeAreaView style={styles.flex} edges={["top"]}>
+        {/* Header — a segmented rail rather than one long bar: the flow reads as
+            a countable handful of beats, and the beat you're in has a name. */}
+        {showHeader && (
+          <View style={styles.header}>
+            <View style={styles.rail}>
+              {FORM_STEPS.map((s, i) => (
+                <View
+                  key={s}
+                  style={[
+                    styles.railSeg,
+                    i <= formIndex
+                      ? { backgroundColor: colors.primary, opacity: i === formIndex ? 1 : 0.5 }
+                      : { backgroundColor: alpha(colors.primary, 0.14) },
+                  ]}
+                />
+              ))}
+            </View>
+            <View style={styles.headerMeta}>
+              <AppText variant="caption" color="brand" uppercase>
+                {STEP_KICKER[currentStep] ?? ""}
+              </AppText>
+              <AppText variant="caption" color="tertiary">
+                {formIndex + 1} / {FORM_STEPS.length}
               </AppText>
             </View>
-          )}
+          </View>
+        )}
 
-          {/* Content */}
+        {/* Content + nav share one container, so the keyboard inset lifts the
+            action bar and shrinks the form together, in one motion. */}
+        <Reanimated.View style={[styles.flex, kb.containerStyle]}>
           <Animated.View
             style={[
               styles.content,
@@ -1351,9 +1546,10 @@ export default function OnboardingScreen() {
             {renderStepContent()}
           </Animated.View>
 
-          {/* Navigation */}
           {showNav && (
-            <View style={styles.nav}>
+            <Reanimated.View
+              style={[styles.nav, { borderTopColor: colors.border }, kb.restingStyle]}
+            >
               {currentStepIndex > 0 ? (
                 <Button label="Back" icon="arrow-back" variant="tonal" fullWidth={false} onPress={prevStep} />
               ) : (
@@ -1367,9 +1563,9 @@ export default function OnboardingScreen() {
                 fullWidth={false}
                 onPress={nextStep}
               />
-            </View>
+            </Reanimated.View>
           )}
-        </KeyboardAvoidingView>
+        </Reanimated.View>
       </SafeAreaView>
     </View>
   );
@@ -1469,6 +1665,109 @@ function SelectableCard({
   );
 }
 
+/**
+ * OptionTile — one measured, tickable option. Unlike a wrapping pill it is
+ * given its width, which is what lets a grid of them stay flush on both edges.
+ */
+function OptionTile({
+  label,
+  selected,
+  onPress,
+  colors,
+  cellWidth,
+  align = "left",
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  colors: ReturnType<typeof useColors>["colors"];
+  cellWidth: number;
+  align?: "left" | "center";
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="checkbox"
+      accessibilityLabel={label}
+      accessibilityState={{ checked: selected }}
+      style={({ pressed }) => [
+        styles.tile,
+        align === "center" && styles.tileCenter,
+        {
+          width: cellWidth,
+          backgroundColor: selected ? colors.primarySoft : colors.surfaceMuted,
+          borderColor: selected ? colors.primary : colors.border,
+        },
+        pressed && { opacity: 0.7 },
+      ]}
+    >
+      {align === "left" && (
+        <View
+          style={[
+            styles.tileCheck,
+            {
+              borderColor: selected ? colors.primary : colors.borderStrong,
+              backgroundColor: selected ? colors.primary : "transparent",
+            },
+          ]}
+        >
+          {selected && <Ionicons name="checkmark" size={11} color={colors.onPrimary} />}
+        </View>
+      )}
+      <AppText
+        variant="subhead"
+        color={selected ? "brand" : "secondary"}
+        numberOfLines={2}
+        align={align === "center" ? "center" : undefined}
+        style={styles.tileLabel}
+      >
+        {label}
+      </AppText>
+    </Pressable>
+  );
+}
+
+/**
+ * OptionGrid — a set of options laid out in fixed columns.
+ *
+ * The point of measuring rather than wrapping: a short LAST row stretches its
+ * cells to share the full width, so a block of 7 options in 2 columns still
+ * ends flush with both margins instead of trailing off to one side.
+ */
+function OptionGrid<T extends string>({
+  options,
+  selected,
+  onToggle,
+  columns,
+  colors,
+  align = "left",
+}: {
+  options: { value: T; label: string }[];
+  selected: readonly string[];
+  onToggle: (value: T) => void;
+  columns: number;
+  colors: ReturnType<typeof useColors>["colors"];
+  align?: "left" | "center";
+}) {
+  const remainder = options.length % columns;
+  const lastRowStart = options.length - remainder;
+  return (
+    <View style={styles.grid}>
+      {options.map((option, i) => (
+        <OptionTile
+          key={option.value}
+          label={option.label}
+          selected={selected.includes(option.value)}
+          onPress={() => onToggle(option.value)}
+          colors={colors}
+          align={align}
+          cellWidth={gridCell(remainder !== 0 && i >= lastRowStart ? remainder : columns)}
+        />
+      ))}
+    </View>
+  );
+}
+
 function Chip({
   label,
   selected,
@@ -1511,9 +1810,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.screen,
     paddingTop: Spacing.md,
     paddingBottom: Spacing.xl,
-    gap: Spacing.sm,
+    gap: Spacing.md,
   },
-  progressText: {},
+  rail: { flexDirection: "row", gap: 5 },
+  railSeg: { flex: 1, height: 3, borderRadius: 2 },
+  headerMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
 
   content: { flex: 1, paddingHorizontal: Spacing.screen },
 
@@ -1528,15 +1833,21 @@ const styles = StyleSheet.create({
 
   // Welcome
   welcomeWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: Spacing.lg, paddingHorizontal: Spacing.lg },
-  welcomeHero: { alignItems: "center", justifyContent: "center", height: 140 },
-  /** Centered, non-interactive glow layer — symmetric centering keeps the aura
-   *  behind the hero content regardless of the container's width. */
-  auraLayer: {
+  welcomeHero: { alignItems: "center", justifyContent: "center", height: 200 },
+  /** Centered, non-interactive decoration layer — symmetric centering keeps the
+   *  rings behind the hero content regardless of the container's width. */
+  centerLayer: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
   },
-  welcomeTitle: { marginTop: Spacing.sm },
+  /** Concentric hairlines, nested so each one centres inside the last. */
+  ring: { borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  ringOuter: { width: 196, height: 196, borderRadius: 98 },
+  ringMid: { width: 146, height: 146, borderRadius: 73 },
+  ringInner: { width: 102, height: 102, borderRadius: 51 },
+  stretch: { alignSelf: "stretch" },
+  welcomeTitle: { marginTop: Spacing.xs },
   welcomeSub: { paddingHorizontal: Spacing.md },
   welcomeChips: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: Spacing.sm, marginTop: Spacing.sm },
   welcomeChip: {
@@ -1608,6 +1919,35 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   goalLabel: { marginTop: 2 },
+  goalTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    alignSelf: "stretch",
+  },
+
+  /* Balanced option grids (health step). */
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: GRID_GAP },
+  tile: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    minHeight: 50,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderWidth: 1,
+    borderRadius: Radius.md,
+  },
+  tileCenter: { justifyContent: "center" },
+  tileCheck: {
+    width: 19,
+    height: 19,
+    borderRadius: Radius.pill,
+    borderWidth: 1.5,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tileLabel: { flexShrink: 1 },
 
   // Building beat
   buildingWrap: {
@@ -1617,8 +1957,12 @@ const styles = StyleSheet.create({
     gap: Spacing.lg,
     paddingHorizontal: Spacing.screen,
   },
-  buildingHero: { alignItems: "center", justifyContent: "center", height: 150 },
+  buildingHero: { alignItems: "center", justifyContent: "center", height: 190 },
   buildingTitle: { marginTop: Spacing.sm },
+  /** The "working" signal: one hairline that swells out of the badge and goes. */
+  pulseRing: { width: 150, height: 150, borderRadius: 75, borderWidth: 1.5 },
+  buildRail: { flexDirection: "row", gap: 5, marginTop: Spacing.sm },
+  buildSeg: { width: 26, height: 3, borderRadius: 2 },
 
   // Plan reveal
   planContent: { paddingBottom: Spacing.xxxl, gap: Spacing.lg },
@@ -1658,7 +2002,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: Spacing.screen,
-    paddingVertical: Spacing.lg,
+    paddingTop: Spacing.lg,
     gap: Spacing.md,
+    // A hairline lifts the actions off the form so they read as a fixed bar.
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
 });

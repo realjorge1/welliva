@@ -21,15 +21,26 @@ export interface NotificationCandidateInput {
   briefing?: GozlinBriefing | null;
   /** Ranked anticipations (AnticipationResult.anticipations). */
   anticipations?: Anticipation[];
+  /**
+   * The subscriber's weekly digest, when one was built. Already gated on a paid
+   * tier by the caller — the planner stays a pure mapping and knows nothing
+   * about billing.
+   */
+  digest?: { weekStart: string; title: string; body: string } | null;
   /** A ready story recap (P6), if any. */
   story?: { id: string; title: string; body: string; route?: string } | null;
   /** Only anticipations at/above this leverage become candidates. */
   minAnticipationPriority?: number;
   /** Preferred local delivery times ("HH:MM"). */
-  times?: { briefing?: string; anticipation?: string; story?: string };
+  times?: { briefing?: string; anticipation?: string; story?: string; digest?: string };
 }
 
-const DEFAULT_TIMES = { briefing: "08:00", anticipation: "18:00", story: "10:00" };
+const DEFAULT_TIMES = {
+  briefing: "08:00",
+  anticipation: "18:00",
+  story: "10:00",
+  digest: "09:00",
+};
 
 /** Trim a coaching line to a notification-friendly length on a sentence boundary. */
 function clip(text: string, max = 140): string {
@@ -60,6 +71,22 @@ export function buildNotificationCandidates(
       priority: 50,
       preferredTime: times.briefing,
       route: "/gozlin",
+    });
+  }
+
+  // ── the weekly digest (id keyed on the week, so it sends once per week) ──
+  if (input.digest) {
+    out.push({
+      id: `digest:${input.digest.weekStart}`,
+      category: "digest",
+      title: input.digest.title,
+      body: clip(input.digest.body),
+      // Above the briefing: this is the thing a paying user is owed, and on the
+      // one morning a week it exists it should not lose a budget slot to a
+      // routine nudge that recurs every day anyway.
+      priority: 60,
+      preferredTime: times.digest,
+      route: "/knows",
     });
   }
 

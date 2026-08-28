@@ -329,9 +329,16 @@ export function FoodDetailSheet({
             />
           </View>
 
-          {/* ── The label ────────────────────────────────────────────────── */}
+          {/* ── The label ──────────────────────────────────────────────────
+              Bare, like the slot picker above it. It's the last and by far the
+              longest thing on the sheet — a card around it would have boxed in
+              most of the screen, indented every label row and %DV bar by the
+              card's padding, and drawn a frame whose only content is the frame
+              it already sits in. "NUTRITION" is a heading on the page now, not
+              a card's title. */}
           <View style={styles.block}>
             <NutrientPanel
+              surface="bare"
               panel={resolved.nutrients}
               confidence={resolved.confidence}
               source={resolved.source}

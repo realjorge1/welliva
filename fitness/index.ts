@@ -6,7 +6,7 @@
  *   import { getAllWorkouts, recommendToday } from "@/fitness";
  *
  * Layering (see docs/fitness/architecture.md):
- *   data/      — authored content (workouts, coaches, beats)
+ *   data/      — authored content (workouts, coaches)
  *   services/  — pure logic + module-owned storage
  *   hooks/     — React bindings (profile, audio, voice)
  *   components — presentational building blocks
@@ -23,7 +23,6 @@ export * from "./types";
 // Data
 export { COACHES, getCoach, type CoachPersona } from "./data/coaches";
 export { WORKOUTS, WORKOUT_BY_ID } from "./data/workouts";
-export { BEATS, BEAT_BY_ID, defaultBeatForEnergy, nextBeatId } from "./data/beatMeta";
 
 // Services (pure)
 export {
@@ -73,19 +72,19 @@ export {
 export {
   cancelFitnessReminders,
   hasNotificationPermission,
+  refreshFitnessReminders,
   requestNotificationPermission,
   syncFitnessReminders,
   toExpoWeekday,
+  type FitnessReminderStatus,
+  type FitnessReminderSync,
 } from "./services/FitnessNotifications";
 
 // Hooks
 export { useFitnessProfile } from "./hooks/useFitnessProfile";
-export { useBeatPlayer, type UseBeatPlayer } from "./hooks/useBeatPlayer";
-export { useVoiceCoach, voiceLineFor } from "./hooks/useVoiceCoach";
 
 // Components
 export { ArtTile } from "./components/ArtTile";
 export { CoachBadge } from "./components/CoachBadge";
-export { MusicDock } from "./components/MusicDock";
 export { WeekBars } from "./components/WeekBars";
 export { WorkoutCard } from "./components/WorkoutCard";

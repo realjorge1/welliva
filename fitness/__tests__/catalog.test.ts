@@ -9,7 +9,6 @@
 import { describe, expect, it } from "vitest";
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
 import { COACHES } from "@/fitness/data/coaches";
-import { BEATS } from "@/fitness/data/beatMeta";
 import { WORKOUTS } from "@/fitness/data/workouts";
 import {
   filterWorkouts,
@@ -26,7 +25,6 @@ import type { UserBio } from "@/models/user";
 
 const DB_IDS = new Set(EXERCISE_DATABASE.map((e) => e.id));
 const COACH_IDS = new Set(COACHES.map((c) => c.id));
-const BEAT_IDS = new Set(BEATS.map((b) => b.id));
 
 const BIO: UserBio = {
   age: 30,
@@ -64,10 +62,9 @@ describe("workout library integrity", () => {
     }
   });
 
-  it("uses valid coach ids and beat ids", () => {
+  it("uses valid coach ids", () => {
     for (const w of WORKOUTS) {
       expect(COACH_IDS.has(w.coachId), w.id).toBe(true);
-      if (w.suggestedBeatId) expect(BEAT_IDS.has(w.suggestedBeatId), w.id).toBe(true);
     }
   });
 

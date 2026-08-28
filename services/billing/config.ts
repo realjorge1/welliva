@@ -50,14 +50,42 @@ export const REVENUECAT_KEY: string | null = looksValid ? rawKey! : null;
 export const isBillingConfigured = REVENUECAT_KEY !== null;
 
 /**
- * The single entitlement identifier the app checks. Must match the identifier
- * created in RevenueCat → Entitlements. One entitlement covering every paid
- * product means adding a lifetime tier or a promo later needs no app change.
+ * The two entitlement identifiers the app checks. Each must match an identifier
+ * created in RevenueCat → Entitlements, and every product in a tier must be
+ * attached to that tier's entitlement (the monthly AND the annual one).
+ *
+ * Two entitlements rather than one-with-metadata because the store is the only
+ * thing that actually knows what someone bought: reading two booleans off
+ * `customerInfo` needs no product-id table in the client, so adding a promo
+ * price, a regional plan or a lifetime SKU later is a console change with no app
+ * update. `PRO` outranks `PLUS` when both are somehow active (a mid-cycle
+ * upgrade leaves both live until the old one lapses) — see `higherTier`.
  */
 export const PRO_ENTITLEMENT = "pro";
+export const PLUS_ENTITLEMENT = "plus";
 
 /** The offering to display. `default` is the one marked current in RevenueCat. */
 export const DEFAULT_OFFERING = "default";
+
+/**
+ * Offering identifiers, when the two tiers are modelled as two offerings.
+ *
+ * BOTH LAYOUTS ARE SUPPORTED, because RevenueCat allows either and the console
+ * is not ours to constrain from here:
+ *
+ *  1. TWO OFFERINGS — `plus` and `pro`, each with its own monthly + annual
+ *     package. Cleanest, and what docs/monetization/setup.md walks through.
+ *  2. ONE OFFERING — the current one, holding all four packages, each package
+ *     or product id naming its tier ("welliva_plus_annual", "$rc_pro_monthly").
+ *
+ * `Billing.ts` tries (1) and falls back to (2), classifying by the substrings
+ * below. A package that names neither tier is treated as Pro: mislabelling the
+ * *higher* plan as the lower one would sell full access at the lower price.
+ */
+export const TIER_OFFERINGS = { plus: "plus", pro: "pro" } as const;
+
+/** Substrings that identify a tier inside a package or product identifier. */
+export const TIER_ID_HINTS = { plus: "plus", pro: "pro" } as const;
 
 /** Where "Manage subscription" sends the user. Required by both stores. */
 export const MANAGE_SUBSCRIPTION_URL = Platform.select({

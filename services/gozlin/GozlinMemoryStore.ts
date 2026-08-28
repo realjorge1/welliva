@@ -25,6 +25,7 @@ const G_KEYS = {
   EPISODIC: "@gozlin_episodic",
   BEHAVIORAL: "@gozlin_behavioral",
   CONVERSATION: "@gozlin_conversation",
+  ARCHIVE: "@gozlin_conversation_archive",
   CHECKINS: "@gozlin_checkins",
   LAST_BRIEFING: "@gozlin_last_briefing",
   LAST_WEEKLY_REVIEW: "@gozlin_last_weekly_review",
@@ -34,6 +35,10 @@ const G_KEYS = {
 const EPISODE_CAP = 100;
 const EPISODE_MAX_AGE_DAYS = 90;
 const CONVERSATION_CAP = 60;
+/** How many past conversations the history list keeps. */
+const ARCHIVE_CAP = 40;
+/** Below this a thread is an opener nobody replied to — not worth keeping. */
+const ARCHIVE_MIN_MESSAGES = 2;
 const CHECKIN_CAP = 120;
 const CHECKIN_MAX_AGE_DAYS = 90;
 
@@ -160,6 +165,79 @@ export async function loadConversation(): Promise<GozlinMessage[]> {
 /** Persist the rolling conversation, capped to the most recent turns. */
 export async function saveConversation(messages: GozlinMessage[]): Promise<void> {
   await writeJSON(G_KEYS.CONVERSATION, messages.slice(-CONVERSATION_CAP));
+}
+
+// ── Conversation archive (chat history) ──────────────────────────
+//
+// "New conversation" used to DELETE the thread. That is a strange thing for a
+// coach whose entire pitch is that it remembers you: the advice survived in the
+// memory tiers, but the conversation people actually wanted to re-read was
+// gone. Starting a new chat now files the old one here instead, and the coach
+// screen offers it back as history.
+//
+// This is a convenience record, not a memory tier. Nothing reasons over it —
+// the engines read Identity/Episodic/Behavioral — so capping it is free, and
+// "Forget what you know" still takes it with everything else (it's in G_KEYS).
+
+export interface ArchivedConversation {
+  id: string;
+  /** First user line, trimmed — what the row is titled with. */
+  title: string;
+  messages: GozlinMessage[];
+  startedAt: number;
+  endedAt: number;
+}
+
+export async function loadArchive(): Promise<ArchivedConversation[]> {
+  return readJSON<ArchivedConversation[]>(G_KEYS.ARCHIVE, []);
+}
+
+/**
+ * File a finished thread, newest first. Returns the updated list.
+ *
+ * A thread that never got past the day's briefing opener is dropped rather than
+ * archived — a history full of "Good morning" entries nobody wrote is worse
+ * than no history.
+ */
+export async function archiveConversation(
+  messages: GozlinMessage[],
+): Promise<ArchivedConversation[]> {
+  const archive = await loadArchive();
+  if (messages.length < ARCHIVE_MIN_MESSAGES || !messages.some((m) => m.role === "user")) {
+    return archive;
+  }
+
+  const entry: ArchivedConversation = {
+    id: `gzc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    title: conversationTitle(messages),
+    messages: messages.slice(-CONVERSATION_CAP),
+    startedAt: messages[0]?.createdAt ?? Date.now(),
+    endedAt: messages[messages.length - 1]?.createdAt ?? Date.now(),
+  };
+
+  const next = [entry, ...archive].slice(0, ARCHIVE_CAP);
+  await writeJSON(G_KEYS.ARCHIVE, next);
+  return next;
+}
+
+export async function deleteArchivedConversation(
+  id: string,
+): Promise<ArchivedConversation[]> {
+  const next = (await loadArchive()).filter((c) => c.id !== id);
+  await writeJSON(G_KEYS.ARCHIVE, next);
+  return next;
+}
+
+export async function clearArchive(): Promise<void> {
+  await remove(G_KEYS.ARCHIVE);
+}
+
+/** The user's own first words — the only honest title for their conversation. */
+function conversationTitle(messages: GozlinMessage[]): string {
+  const first = messages.find((m) => m.role === "user")?.content.trim();
+  if (!first) return "Conversation";
+  const oneLine = first.replace(/\s+/g, " ");
+  return oneLine.length > 60 ? `${oneLine.slice(0, 59)}…` : oneLine;
 }
 
 // ── Meta gates ───────────────────────────────────────────────────

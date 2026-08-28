@@ -9,7 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useRef } from "react";
 import { Animated, Pressable, StyleSheet, View } from "react-native";
 import { buildHeatWeeks } from "../../services/HabitService";
-import { frequencyLabel } from "../../models/habit";
+import { frequencyLabel, streakLabel } from "../../models/habit";
 import type { HabitView } from "../../contexts/HabitsContext";
 import { IconBadge } from "../ui/IconBadge";
 import { AppText } from "../ui/Text";
@@ -41,11 +41,24 @@ export function HabitRow({ view, today, onPress, onToggle }: HabitRowProps) {
     }).start();
   };
 
-  const streakLine = `${stats.currentStreak}-day streak  ·  ${frequencyLabel(habit.days)}`;
+  // A goal habit leads with the thing its owner is actually tracking — how much
+  // of this week's quota is left — and only mentions the streak once there is
+  // one. A weekday habit has nothing to count down to, so it keeps the streak.
+  const quota = habit.weeklyGoal != null;
+  const streakLine = quota
+    ? `${stats.weekDone}/${stats.weekTarget} this week  ·  ${
+        stats.currentStreak > 0 ? streakLabel(stats) : frequencyLabel(habit.days, habit.weeklyGoal)
+      }`
+    : `${streakLabel(stats)}  ·  ${frequencyLabel(habit.days, habit.weeklyGoal)}`;
 
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      // The row is several text nodes and a grid; named as one thing it reads
+      // as a habit, unnamed it reads as a stream of fragments.
+      accessibilityLabel={`${habit.name}. ${streakLine.replace(/\s+·\s+/g, ", ")}`}
+      accessibilityHint="Opens this habit's history"
       style={({ pressed }) => [styles.row, pressed && { opacity: 0.75 }]}
     >
       <IconBadge name={habit.icon as any} tone={habit.color} size={44} />
@@ -68,6 +81,9 @@ export function HabitRow({ view, today, onPress, onToggle }: HabitRowProps) {
             pop();
             onToggle();
           }}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: stats.doneToday }}
+          accessibilityLabel={`Mark ${habit.name} done today`}
           style={styles.checkWrap}
         >
           <Animated.View

@@ -7,6 +7,7 @@
  * how-to) get a full guide even though they aren't in the local DB.
  */
 
+import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { AmbientCanvas, AppText, Button, Card, IconBadge, MuscleMap, Pill, useColors } from "@/components/ui";
 import { useWorkout } from "@/contexts/AppContext";
 import { EXERCISE_DATABASE, ExerciseDBEntry } from "@/constants/ExerciseDatabase";
@@ -177,6 +178,8 @@ export default function ExerciseDetailScreen() {
             onPress={() => router.back()}
             style={[styles.topBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
           >
             <Ionicons name="arrow-back" size={20} color={colors.text} />
           </Pressable>
@@ -199,14 +202,14 @@ export default function ExerciseDetailScreen() {
           </View>
 
           {/* Animated movement demonstration (Skia, native — no external
-              media). Front + side of the same movement, muscles it trains
-              shaded warm. Resolves from the exercise's movement pattern. */}
+              media). A flat pictogram athlete, front + side of the same
+              movement on one rep clock. Resolves from the movement pattern;
+              the muscles it trains are the MuscleMap section below. */}
           <View style={styles.demo}>
             <ExerciseFigure
               exerciseId={id}
               motion={view.movementPattern as FigureMotion}
-              muscles={view.targetMuscles}
-              size={158}
+              size={172}
             />
           </View>
 
@@ -435,3 +438,12 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
   },
 });
+
+/**
+ * Route-level boundary — a throw while rendering an exercise (a malformed plan
+ * entry, a missing catalog field) shows a recoverable error screen naming the
+ * failure instead of taking the app down.
+ */
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
+  return <ScreenErrorFallback error={error} onRetry={retry} surface="exercise-detail" />;
+}

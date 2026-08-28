@@ -10,6 +10,21 @@
  * "unmatched" and "did you mean" paths usable. Without it, a mis-parsed food
  * would silently land in the day's totals and the user would have no idea why
  * their numbers looked wrong.
+ *
+ * PHOTO LOGGING LIVES HERE TOO, AND DELIBERATELY SO
+ *
+ * The camera does not open a second logging flow. It fills in this screen's text
+ * box — the vision endpoint returns food names and portions only, never numbers
+ * (services/nutrition/MealPhotoCapture.ts explains why), and everything after
+ * that is the path above, unchanged: same resolver, same confidence rungs, same
+ * corrections, same commit.
+ *
+ * Two things fall out of that, both of them the point:
+ *   • A photo log and a typed log are the same entry. There is no second-class
+ *     "scanned" record with different provenance sitting in the day's totals.
+ *   • Every way the photo path can fail — no camera in this build, permission
+ *     refused, endpoint down, plate unreadable — lands the user on a screen
+ *     where they can simply type it instead. The fallback is the host.
  */
 
 import { Ionicons } from "@expo/vector-icons";
@@ -28,8 +43,15 @@ import {
 import { NutrientPanel } from "@/components/nutrition/NutrientPanel";
 import { AppText, Button, Card, Screen, useColors } from "@/components/ui";
 import { Radius, Spacing } from "@/constants/theme";
+import { useProfile } from "@/contexts/AppContext";
+import { useBilling } from "@/contexts/BillingContext";
 import { useMealPlan } from "@/contexts/MealPlanContext";
 import type { MealType } from "@/models/diet";
+import { checkPhotoScanQuota, spendPhotoScan } from "@/services/billing";
+import {
+  captureMealPhoto,
+  isMealPhotoAvailable,
+} from "@/services/nutrition/MealPhotoCapture";
 import {
   CONFIDENCE_LABEL,
   describeSource,
@@ -56,6 +78,8 @@ export default function LogFoodScreen() {
   const { colors } = useColors();
   const params = useLocalSearchParams<{ slot?: string; date?: string }>();
   const { analyzeFood, logFoodAnalysis, permissionFor } = useMealPlan();
+  const { userBio } = useProfile();
+  const { openUpgrade } = useBilling();
 
   const [text, setText] = useState("");
   const [slot, setSlot] = useState<MealType | null>(
@@ -67,24 +91,126 @@ export default function LogFoodScreen() {
   const [aiError, setAiError] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
 
+  /** Which capture is in flight, so only that button spins. */
+  const [capturing, setCapturing] = useState<"camera" | "library" | null>(null);
+  /** What the photo path wants to say — a remark, or why it couldn't help. */
+  const [photoNote, setPhotoNote] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+
+  /**
+   * Whether the camera can open in THIS build. expo-image-picker is native, so a
+   * dev client made before it was added has no module — the buttons hide rather
+   * than pretending, because a tap that silently does nothing is the one thing
+   * worse than no button.
+   */
+  const photoAvailable = useMemo(() => isMealPhotoAvailable(), []);
+
   const targetDate = params.date;
   const permission = targetDate ? permissionFor(targetDate) : "open";
   const locked = permission === "locked" || permission === "future";
 
-  const run = useCallback(async () => {
-    const input = text.trim();
-    if (!input) return;
-    setAnalyzing(true);
-    Haptics.selectionAsync().catch(() => {});
-    try {
-      const result = await analyzeFood(input, slot);
-      setAnalysis(result.analysis);
-      setUsedAI(result.usedAI);
-      setAiError(result.aiError);
-    } finally {
-      setAnalyzing(false);
-    }
-  }, [text, slot, analyzeFood]);
+  /**
+   * Analyse what's in the box.
+   *
+   * Takes explicit overrides because the photo path needs to analyse the line it
+   * just produced in the same tick it sets it — reading `text`/`slot` from state
+   * there would analyse the PREVIOUS value, which is the classic version of this
+   * bug and shows up as "the first photo logs the meal before it".
+   */
+  const run = useCallback(
+    async (override?: { text?: string; slot?: MealType | null }) => {
+      const input = (override?.text ?? text).trim();
+      if (!input) return;
+      const useSlot = override?.slot !== undefined ? override.slot : slot;
+      setAnalyzing(true);
+      Haptics.selectionAsync().catch(() => {});
+      try {
+        const result = await analyzeFood(input, useSlot);
+        setAnalysis(result.analysis);
+        setUsedAI(result.usedAI);
+        setAiError(result.aiError);
+      } finally {
+        setAnalyzing(false);
+      }
+    },
+    [text, slot, analyzeFood],
+  );
+
+  /**
+   * Shoot or pick a meal photo, then hand the result to the text pipeline.
+   *
+   * QUOTA ORDER MATTERS. The check happens before the camera opens, so someone
+   * out of scans is told BEFORE framing a shot rather than after. The spend
+   * happens only once the endpoint has actually returned food — a cancelled
+   * pick, a refused permission, a dead endpoint or an unreadable plate must
+   * never cost a scan, exactly as a failed coach turn never costs a message.
+   */
+  const capture = useCallback(
+    async (camera: boolean) => {
+      if (capturing || locked) return;
+      setPhotoError(null);
+      setPhotoNote(null);
+
+      const quota = await checkPhotoScanQuota();
+      if (!quota.allowed) {
+        openUpgrade("photo-log");
+        return;
+      }
+
+      setCapturing(camera ? "camera" : "library");
+      try {
+        const outcome = await captureMealPhoto({
+          camera,
+          ...(userBio?.region ? { region: userBio.region } : {}),
+        });
+
+        switch (outcome.status) {
+          case "ok": {
+            await spendPhotoScan();
+            Haptics.selectionAsync().catch(() => {});
+            setText(outcome.text);
+            if (outcome.slot) setSlot(outcome.slot);
+            setPhotoNote(
+              outcome.note ??
+                "Read from your photo — check it below and fix anything that's off.",
+            );
+            // Analyse immediately: the user has already confirmed intent twice
+            // (opened the camera, took the shot). Making them press a third
+            // button to see numbers would be ceremony.
+            await run({ text: outcome.text, slot: outcome.slot ?? slot });
+            break;
+          }
+          case "cancelled":
+            break; // a normal outcome — say nothing
+          case "unavailable":
+            setPhotoError(
+              "Photo logging needs the app from the store. You can describe the meal instead.",
+            );
+            break;
+          case "denied":
+            setPhotoError(
+              camera
+                ? "Camera access is off, so nothing was taken. You can turn it on in Settings, or just describe the meal."
+                : "Photo access is off. You can turn it on in Settings, or just describe the meal.",
+            );
+            break;
+          case "unreadable":
+            setPhotoError(
+              "Gozlin couldn't make out any food in that one. Try a clearer shot of the plate, or describe it below — that didn't use one of your scans.",
+            );
+            break;
+          case "failed":
+            setPhotoError(
+              "Couldn't read that photo just now. Describe the meal below and it'll log the same way — that didn't use one of your scans.",
+            );
+            break;
+        }
+      } finally {
+        setCapturing(null);
+      }
+    },
+    [capturing, locked, openUpgrade, userBio?.region, run, slot],
+  );
 
   const save = useCallback(async () => {
     if (!analysis) return;
@@ -142,7 +268,44 @@ export default function LogFoodScreen() {
             </Card>
           ) : null}
 
+          {photoAvailable ? (
+            <View style={styles.photoRow}>
+              <Button
+                label="Take a photo"
+                icon="camera"
+                variant="tonal"
+                onPress={() => void capture(true)}
+                loading={capturing === "camera"}
+                disabled={locked || capturing !== null || analyzing}
+                style={styles.flex}
+              />
+              <Button
+                label="From library"
+                icon="images-outline"
+                variant="tonal"
+                onPress={() => void capture(false)}
+                loading={capturing === "library"}
+                disabled={locked || capturing !== null || analyzing}
+                style={styles.flex}
+              />
+            </View>
+          ) : null}
+
+          {photoError ? (
+            <AppText variant="caption" color="secondary">
+              {photoError}
+            </AppText>
+          ) : null}
+
           <Card padding="lg">
+            {photoNote ? (
+              <View style={styles.photoNote}>
+                <Ionicons name="camera" size={13} color={colors.textSecondary} />
+                <AppText variant="caption" color="secondary" style={styles.flex}>
+                  {photoNote}
+                </AppText>
+              </View>
+            ) : null}
             <TextInput
               value={text}
               onChangeText={setText}
@@ -151,7 +314,7 @@ export default function LogFoodScreen() {
               multiline
               editable={!locked}
               style={[styles.input, { color: colors.text }]}
-              onSubmitEditing={run}
+              onSubmitEditing={() => void run()}
               returnKeyType="go"
             />
             <View style={styles.slots}>
@@ -183,7 +346,7 @@ export default function LogFoodScreen() {
             <Button
               label={analyzing ? "Reading…" : "Work it out"}
               icon={analyzing ? undefined : "sparkles"}
-              onPress={run}
+              onPress={() => void run()}
               loading={analyzing}
               disabled={!text.trim() || locked}
               fullWidth
@@ -387,6 +550,13 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: Radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
+  },
+  photoRow: { flexDirection: "row", gap: Spacing.sm },
+  photoNote: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
   },
   examples: { gap: Spacing.sm },
   exampleRow: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },

@@ -1,18 +1,24 @@
 /**
  * ExerciseGuideSheet — the on-demand "How to" reference for the exercise being
- * performed. Everything instructional lives HERE (demo GIF, setup position,
- * steps, muscle map, form cues) so the live set screen can stay a single-focus
- * counter. Opened from the player's "How to" pill; sections rise in one at a
- * time with the standard stagger.
+ * performed. Everything instructional lives HERE (the animated demonstration,
+ * setup position, steps, muscle map, form cues) so the live set screen can stay
+ * a single-focus counter.
+ *
+ * It rides the shared `Sheet`, which UNMOUNTS while closed. That matters more
+ * than it sounds: the previous version kept a bare `Modal` in the tree for the
+ * whole workout, so two animated Skia demonstration panels stayed mounted and
+ * running behind every set of every session. Closing the sheet now genuinely
+ * stops the work, and `playing` freezes the rep clock the instant it starts to
+ * dismiss.
  */
 import { enterRise } from "@/components/motion";
-import { AppText, MuscleMap, Pill, useColors } from "@/components/ui";
+import { AppText, MuscleMap, Pill, Sheet, useColors } from "@/components/ui";
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
-import { Palette, Radius, Spacing, alpha } from "@/constants/theme";
+import { Palette, Spacing, alpha } from "@/constants/theme";
 import type { SessionExerciseInfo } from "@/models/session";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import Animated from "react-native-reanimated";
 import { ExerciseFigure } from "./ExerciseFigure";
 
@@ -49,94 +55,96 @@ export function ExerciseGuideSheet({ visible, onClose, exercise }: ExerciseGuide
 
   let section = 0;
 
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.scrim}>
-        <Pressable style={styles.flex} onPress={onClose} accessibilityLabel="Close guide" />
-        <View style={[styles.sheet, { backgroundColor: colors.surface }]}>
-          <View style={styles.handleRow}>
-            <View style={[styles.handle, { backgroundColor: colors.border }]} />
-          </View>
-
-          <View style={styles.head}>
-            <View style={styles.flex}>
-              <AppText variant="headline" numberOfLines={2}>
-                {exercise.name}
-              </AppText>
-            </View>
-            <Pill
-              label={exercise.difficulty.charAt(0).toUpperCase() + exercise.difficulty.slice(1)}
-              tone={difficultyColor(exercise.difficulty)}
-              size="sm"
-            />
-            <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
-              <Ionicons name="close" size={22} color={colors.text} />
-            </Pressable>
-          </View>
-
-          <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
-            <Animated.View entering={enterRise(section++)} style={styles.demo}>
-              <ExerciseFigure
-                exerciseId={exercise.exerciseId}
-                category={exercise.category}
-                muscles={muscles}
-                size={150}
-              />
-            </Animated.View>
-
-            {!!exercise.setupPosition && (
-              <Animated.View entering={enterRise(section++)} style={styles.section}>
-                <SectionLabel icon="body" text="Setup" tint={colors.primary} />
-                <AppText variant="body" color="secondary">
-                  {exercise.setupPosition}
-                </AppText>
-              </Animated.View>
-            )}
-
-            {exercise.instructions.length > 0 && (
-              <Animated.View entering={enterRise(section++)} style={styles.section}>
-                <SectionLabel icon="list" text="How to perform" tint={colors.primary} />
-                {exercise.instructions.map((step, i) => (
-                  <View key={i} style={styles.stepRow}>
-                    <View style={[styles.stepNum, { backgroundColor: alpha(colors.primary, 0.14) }]}>
-                      <AppText variant="caption" color="brand">
-                        {i + 1}
-                      </AppText>
-                    </View>
-                    <AppText variant="body" color="secondary" style={styles.flex}>
-                      {step}
-                    </AppText>
-                  </View>
-                ))}
-              </Animated.View>
-            )}
-
-            {muscles.length > 0 && (
-              <Animated.View entering={enterRise(section++)} style={styles.section}>
-                <SectionLabel icon="body-outline" text="Muscles worked" tint={colors.primary} />
-                <MuscleMap muscles={muscles} height={132} labels />
-              </Animated.View>
-            )}
-
-            {exercise.coachCues.length > 0 && (
-              <Animated.View entering={enterRise(section++)} style={styles.section}>
-                <SectionLabel icon="megaphone" text="Form focus" tint={colors.primary} />
-                {exercise.coachCues.map((cue, i) => (
-                  <View key={i} style={styles.cueRow}>
-                    <Ionicons name="checkmark-circle" size={14} color={colors.primary} />
-                    <AppText variant="body" color="secondary" style={styles.flex}>
-                      {cue}
-                    </AppText>
-                  </View>
-                ))}
-              </Animated.View>
-            )}
-
-            <View style={styles.footerPad} />
-          </ScrollView>
-        </View>
+  const header = (
+    <View style={styles.head}>
+      <View style={styles.flex}>
+        <AppText variant="caption" color="tertiary" uppercase>
+          How to perform
+        </AppText>
+        <AppText variant="headline" numberOfLines={2}>
+          {exercise.name}
+        </AppText>
       </View>
-    </Modal>
+      <Pill
+        label={exercise.difficulty.charAt(0).toUpperCase() + exercise.difficulty.slice(1)}
+        tone={difficultyColor(exercise.difficulty)}
+        size="sm"
+      />
+      <Pressable
+        onPress={onClose}
+        hitSlop={12}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+        style={[styles.close, { backgroundColor: colors.surfaceMuted }]}
+      >
+        <Ionicons name="close" size={18} color={colors.text} />
+      </Pressable>
+    </View>
+  );
+
+  return (
+    <Sheet visible={visible} onClose={onClose} header={header} maxHeightRatio={0.86}>
+      <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
+        <Animated.View entering={enterRise(section++)}>
+          <ExerciseFigure
+            exerciseId={exercise.exerciseId}
+            category={exercise.category}
+            size={176}
+            playing={visible}
+          />
+        </Animated.View>
+
+        {!!exercise.setupPosition && (
+          <Animated.View entering={enterRise(section++)} style={styles.section}>
+            <SectionLabel icon="body" text="Setup" tint={colors.primary} />
+            <AppText variant="body" color="secondary">
+              {exercise.setupPosition}
+            </AppText>
+          </Animated.View>
+        )}
+
+        {exercise.instructions.length > 0 && (
+          <Animated.View entering={enterRise(section++)} style={styles.section}>
+            <SectionLabel icon="list" text="Step by step" tint={colors.primary} />
+            {exercise.instructions.map((step, i) => (
+              <View key={i} style={styles.stepRow}>
+                <View style={[styles.stepNum, { backgroundColor: alpha(colors.primary, 0.14) }]}>
+                  <AppText variant="caption" color="brand">
+                    {i + 1}
+                  </AppText>
+                </View>
+                <AppText variant="body" color="secondary" style={styles.flex}>
+                  {step}
+                </AppText>
+              </View>
+            ))}
+          </Animated.View>
+        )}
+
+        {muscles.length > 0 && (
+          <Animated.View entering={enterRise(section++)} style={styles.section}>
+            <SectionLabel icon="body-outline" text="Muscles worked" tint={colors.primary} />
+            <MuscleMap muscles={muscles} height={132} labels />
+          </Animated.View>
+        )}
+
+        {exercise.coachCues.length > 0 && (
+          <Animated.View entering={enterRise(section++)} style={styles.section}>
+            <SectionLabel icon="megaphone" text="Form focus" tint={colors.primary} />
+            {exercise.coachCues.map((cue, i) => (
+              <View key={i} style={styles.cueRow}>
+                <Ionicons name="checkmark-circle" size={14} color={colors.primary} />
+                <AppText variant="body" color="secondary" style={styles.flex}>
+                  {cue}
+                </AppText>
+              </View>
+            ))}
+          </Animated.View>
+        )}
+
+        <View style={styles.footerPad} />
+      </ScrollView>
+    </Sheet>
   );
 }
 
@@ -161,24 +169,22 @@ function SectionLabel({
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  scrim: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)" },
-  sheet: {
-    maxHeight: "82%",
-    borderTopLeftRadius: Radius.xxl,
-    borderTopRightRadius: Radius.xxl,
-    paddingHorizontal: Spacing.screen,
-  },
-  handleRow: { alignItems: "center", paddingTop: Spacing.sm },
-  handle: { width: 40, height: 4, borderRadius: 2 },
   head: {
     flexDirection: "row",
     alignItems: "center",
-    gap: Spacing.md,
-    paddingVertical: Spacing.md,
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingBottom: Spacing.md,
   },
-  body: { flexGrow: 0 },
-  demo: { marginBottom: Spacing.sm, alignItems: "center" },
-  section: { marginTop: Spacing.lg },
+  close: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  body: { flexGrow: 0, paddingHorizontal: Spacing.sm },
+  section: { marginTop: Spacing.xl },
   sectionLabel: {
     flexDirection: "row",
     alignItems: "center",

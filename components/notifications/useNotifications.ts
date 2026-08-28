@@ -24,6 +24,8 @@ import {
 } from "@/health-os";
 import { buildBriefing, buildNotificationCandidates } from "@/services/gozlin";
 import { listArchivedStories, storyNotification } from "@/services/StoryService";
+import { hasPaidAccess } from "@/services/billing";
+import { buildWeeklyDigest } from "@/services/WeeklyDigestService";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /** The three goal buckets the bandit's context is keyed on. */
@@ -101,11 +103,34 @@ export function useProactiveDelivery(): void {
       const stories = await listArchivedStories();
       const story = stories[0] ? storyNotification(stories[0]) : null;
 
+      /**
+       * The subscriber's weekly read.
+       *
+       * Gated on a PAID tier rather than on a `FeatureId`, because this is not
+       * a lock anyone can bump into — there is no withheld surface to show a
+       * free user, only a thing that does or does not arrive. `hasPaidAccess()`
+       * also covers the trial and dev builds, so both see what they are meant
+       * to be evaluating.
+       *
+       * The digest de-dupes on its own week key and the orchestrator holds the
+       * category to a 7-day cadence, so building it on every app open is free:
+       * six of those seven days it resolves to a candidate that is already sent.
+       */
+      const digest = hasPaidAccess()
+        ? buildWeeklyDigest({
+            forDate: today,
+            dietHistory: app.dietHistory,
+            workoutLog: app.workoutLog,
+            bodyLogs: app.bodyLogs,
+          })
+        : null;
+
       const candidates = buildNotificationCandidates({
         forDate: today,
         briefing,
         anticipations: ant.anticipations,
         story,
+        digest,
       });
 
       // ── The learning loop's write side ────────────────────────────────

@@ -6,8 +6,9 @@
  * Everything here runs on the UI thread (Reanimated worklets), so animation
  * never competes with JS work.
  *
- *   enterPhase / exitPhase — crossfade+drift for phase-level content swaps
- *                            (the guided session's countdown → set → rest)
+ *   enterFade / exitFade   — crossfade for content swapping inside a fixed
+ *                            region (the guided session's countdown → set →
+ *                            rest all trade places inside one stage)
  *   enterRise(index)       — staggered entrance for cards/sections
  *   enterHero              — a single hero element landing (springy, rare)
  *   tickIn / tickOut       — micro roll used by RollingNumber digits
@@ -35,14 +36,6 @@ export const Ease = {
   decelerate: Easing.bezier(dx1, dy1, dx2, dy2),
   accelerate: Easing.bezier(ax1, ay1, ax2, ay2),
 } as const;
-
-/* ── Phase-level transitions (screen regions swapping content) ── */
-
-export const enterPhase = () =>
-  FadeInDown.duration(Motion.duration.slow).easing(Ease.decelerate);
-
-export const exitPhase = () =>
-  FadeOut.duration(Motion.duration.base).easing(Ease.accelerate);
 
 /* ── Section/card entrances ── */
 

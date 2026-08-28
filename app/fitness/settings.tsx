@@ -1,5 +1,5 @@
 /**
- * FITNESS SETTINGS — music, voice, reminders, training prefs and data safety.
+ * FITNESS SETTINGS — reminders, training prefs and data safety.
  *
  * Every preference the setup flow captures is editable here, plus the data
  * controls: export fitness data, reset recommendations, and reset the
@@ -31,16 +31,41 @@ import { Alert, Pressable, Share, StyleSheet, Switch, View } from "react-native"
 
 const REMINDER_HOURS = [6, 7, 8, 12, 17, 18, 19, 20];
 
+/** The boolean keys of a failed opt-in patch, flipped back off. */
+function offSwitches(patch: Partial<ReminderPrefs>): Partial<ReminderPrefs> {
+  const off: Partial<ReminderPrefs> = {};
+  if (patch.workouts) off.workouts = false;
+  if (patch.hydration) off.hydration = false;
+  if (patch.stretch) off.stretch = false;
+  if (patch.weeklySummary) off.weeklySummary = false;
+  return off;
+}
+
 export default function FitnessSettingsScreen() {
   const { colors } = useColors();
   const { profile, update } = useFitnessProfile();
   const { workoutLog, sessionHistory } = useWorkout();
 
+  /**
+   * Every reminder write goes through here so a switch can never end up "on"
+   * with nothing scheduled behind it. Three ways that happens, all handled:
+   * permission refused, no training days to hang the workout nudge on, and a
+   * native schedule call that throws. In each case the switch goes back off and
+   * the user is told why — a silently dead reminder is worse than none.
+   */
   const setReminders = useCallback(
     async (patch: Partial<ReminderPrefs>) => {
-      const next = { ...profile.reminders, ...patch };
       const turningOn =
         (patch.workouts || patch.hydration || patch.stretch || patch.weeklySummary) === true;
+
+      if (patch.workouts === true && profile.daysAvailable.length === 0) {
+        Alert.alert(
+          "No training days picked",
+          "Choose your training days in Edit training preferences, and we'll nudge you on those days.",
+        );
+        return;
+      }
+
       if (turningOn) {
         const granted = await requestNotificationPermission();
         if (!granted) {
@@ -51,10 +76,22 @@ export default function FitnessSettingsScreen() {
           return;
         }
       }
-      await update({ reminders: next });
-      await syncFitnessReminders(await loadFitnessProfile());
+
+      await update({ reminders: patch });
+      const result = await syncFitnessReminders(await loadFitnessProfile());
+
+      if (turningOn && result.status !== "ok") {
+        // The schedule didn't take — roll the switch back rather than leave it
+        // claiming a reminder that will never arrive.
+        await update({ reminders: { ...patch, ...offSwitches(patch) } });
+        await syncFitnessReminders(await loadFitnessProfile());
+        Alert.alert(
+          "Reminders couldn't be set",
+          "Enable notifications for Welliva in your device settings, then switch this back on.",
+        );
+      }
     },
-    [profile.reminders, update],
+    [profile.daysAvailable.length, update],
   );
 
   const exportData = useCallback(async () => {
@@ -178,7 +215,11 @@ export default function FitnessSettingsScreen() {
         <Row
           icon="barbell-outline"
           label="Training days"
-          sub="On the days you chose in setup"
+          sub={
+            profile.daysAvailable.length === 0
+              ? "Pick your training days first"
+              : `${profile.daysAvailable.length}× a week at ${String(profile.reminders.hour).padStart(2, "0")}:00`
+          }
           right={
             <Switch
               value={profile.reminders.workouts}

@@ -7,6 +7,14 @@
  */
 
 export { runAgentTurn } from "./GozlinAgent";
+
+export { DEEP_DIVE_MODE, runDeepDive } from "./deepDive";
+export type {
+  DeepDiveFailure,
+  DeepDiveInput,
+  DeepDiveOptions,
+  DeepDiveResult,
+} from "./deepDive";
 export type {
   AgentTurnOptions,
   AgentTurnResult,
@@ -37,9 +45,28 @@ export { conditionRules, screenForClinicalRisk } from "./clinical";
 export type { ClinicalRisk, ClinicalRiskKind } from "./clinical";
 
 export {
+  OUTPUT_FALLBACK,
+  outputSafetyStats,
+  recordOutputScreen,
+  resetOutputSafetyStats,
+  screenOutput,
+} from "./outputSafety";
+export type { OutputRisk, OutputRiskKind } from "./outputSafety";
+
+export {
   collectAllowedNumbers,
   groundingStats,
   resetGroundingStats,
   validateNumbers,
 } from "./grounding";
 export type { GroundingResult } from "./grounding";
+
+export {
+  collectWithProvenance,
+  createLedger,
+  originLabel,
+  pathLabel,
+  receiptsFor,
+  sourcesFor,
+} from "./receipts";
+export type { NumberLedger, NumberSource, Receipt } from "./receipts";

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { LifeContextRepository } from "@/health-os";
-import type { RecapInput } from "@/services/MonthlyRecapService";
+import type { StoryInput } from "@/services/StoryService";
 import {
   aggregate,
   buildAnniversaryStory,
@@ -11,26 +11,24 @@ import {
   storyNotification,
 } from "@/services/StoryService";
 
-function input(): RecapInput {
+function input(): StoryInput {
   return {
     workoutLog: [
       { date: "2025-06-01", completionPercent: 100, durationMinutes: 45 },
       { date: "2025-06-02", completionPercent: 80, durationMinutes: 30 },
-    ] as unknown as RecapInput["workoutLog"],
+    ] as unknown as StoryInput["workoutLog"],
     sessionHistory: [
       { date: "2025-06-01", totalReps: 200 },
-    ] as unknown as RecapInput["sessionHistory"],
+    ] as unknown as StoryInput["sessionHistory"],
     dietHistory: [
       { date: "2025-06-01", mealsConsumed: 4, status: "completed" },
-    ] as unknown as RecapInput["dietHistory"],
+    ] as unknown as StoryInput["dietHistory"],
     bodyLogs: [
       { date: "2025-02-01", weightKg: 80 },
       { date: "2026-01-10", weightKg: 78 },
-    ] as unknown as RecapInput["bodyLogs"],
-    streak: { longestStreak: 5 } as unknown as RecapInput["streak"],
+    ] as unknown as StoryInput["bodyLogs"],
+    streak: { longestStreak: 5 } as unknown as StoryInput["streak"],
     earnedAchievements: {},
-    completedChallenges: {},
-    trophies: [],
     proteinTargetG: null,
     waterGoalDates: [],
   };

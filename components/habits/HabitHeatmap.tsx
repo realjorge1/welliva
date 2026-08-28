@@ -1,11 +1,18 @@
 /**
  * HabitHeatmap — the GitHub-style consistency grid, in two sizes:
- *   • mini (list rows): bare grid, ~12 weeks
- *   • full (detail "History" card): month labels on top, M/W/F row labels left
+ *   • mini (list rows): bare grid, ~12 weeks, fixed tiny cells
+ *   • full (detail history): month labels on top, M/W/F row labels left
+ *
+ * SIZING IS A CONTRACT, NOT A GUESS. The full grid used to take a hardcoded
+ * `cellSize`, which meant its total width was `weeks × (cell + gap)` — a number
+ * that had nothing to do with the screen it was drawn on. Twenty weeks at 12pt
+ * needs 328pt; a 360pt phone offers about 280 inside a card, so the last month
+ * of history simply hung off the right edge. Pass `fitWidth` instead and the
+ * component solves for the cell size, so the grid ends exactly where its
+ * container does on every device.
  *
  * Pure Views — hundreds of tiny rounded squares render cheaply and stay
- * theme-correct via useColors (inside a light-mode cyan Card they invert
- * automatically).
+ * theme-correct via useColors.
  */
 import { alpha } from "@/constants/theme";
 import React from "react";
@@ -19,19 +26,39 @@ export interface HabitHeatmapProps {
   color: string;
   cellSize?: number;
   gap?: number;
+  /**
+   * Total width the grid must fit inside, in points. Overrides `cellSize`:
+   * the cell is derived so the columns span exactly this width, labels
+   * included. Measure it with `onLayout` on the parent.
+   */
+  fitWidth?: number;
   /** Month labels per week column (from monthLabels()); enables the top row. */
   months?: string[];
   /** Show M/W/F weekday labels on the left. */
   dayLabels?: boolean;
 }
 
-const DAY_ROWS: Record<number, string> = { 0: "M", 2: "W", 4: "F" };
+/**
+ * Every weekday, Mon→Sun.
+ *
+ * This used to label only Monday, Wednesday and Friday — GitHub's convention,
+ * borrowed without its reason. GitHub's grid is a year wide, so labelling every
+ * row would crowd it; a habit's history is twenty weeks and the rows are the
+ * thing you read it BY ("I always miss Thursdays"). Four unlabelled rows out of
+ * seven means counting down from the nearest letter to answer that.
+ */
+const DAY_ROWS = ["M", "T", "W", "T", "F", "S", "S"];
+
+const LABEL_W = 16;
+/** Below this a cell stops reading as a square and starts reading as noise. */
+const MIN_CELL = 5;
 
 export function HabitHeatmap({
   weeks,
   color,
   cellSize = 7,
   gap = 2.5,
+  fitWidth,
   months,
   dayLabels = false,
 }: HabitHeatmapProps) {
@@ -47,12 +74,20 @@ export function HabitHeatmap({
     return scheduled ? missedColor : restColor;
   };
 
-  const step = cellSize + gap;
+  // Solve for the cell. Each column occupies `cell + gap`, so the row's true
+  // width is `labels + weeks × step − gap` (the last column's trailing gap
+  // falls off the end) — inverting that is what makes the grid land flush.
+  const labelW = dayLabels ? LABEL_W : 0;
+  const size =
+    fitWidth && weeks.length > 0
+      ? Math.max(MIN_CELL, (fitWidth - labelW + gap) / weeks.length - gap)
+      : cellSize;
+  const step = size + gap;
 
   return (
     <View style={styles.wrap}>
       {months && (
-        <View style={[styles.monthRow, dayLabels && { marginLeft: LABEL_W }]}>
+        <View style={[styles.monthRow, dayLabels && { marginLeft: labelW }]}>
           {months.map((m, i) => (
             <View key={i} style={{ width: step }}>
               {m ? (
@@ -66,14 +101,15 @@ export function HabitHeatmap({
       )}
       <View style={styles.gridRow}>
         {dayLabels && (
-          <View style={[styles.dayCol, { width: LABEL_W }]}>
-            {Array.from({ length: 7 }, (_, r) => (
+          <View style={[styles.dayCol, { width: labelW }]}>
+            {DAY_ROWS.map((letter, r) => (
+              // `caption` (15pt line box), not `footnote` (17pt) — a row is only
+              // `step` tall, and now that EVERY row carries a letter any
+              // overflow would show up seven times instead of three.
               <View key={r} style={{ height: step, justifyContent: "center" }}>
-                {DAY_ROWS[r] ? (
-                  <AppText variant="footnote" color="tertiary">
-                    {DAY_ROWS[r]}
-                  </AppText>
-                ) : null}
+                <AppText variant="caption" color="tertiary">
+                  {letter}
+                </AppText>
               </View>
             ))}
           </View>
@@ -84,10 +120,10 @@ export function HabitHeatmap({
               <View
                 key={cell.date}
                 style={{
-                  width: cellSize,
-                  height: cellSize,
+                  width: size,
+                  height: size,
                   marginBottom: gap,
-                  borderRadius: cellSize * 0.28,
+                  borderRadius: size * 0.28,
                   backgroundColor: cellFor(cell.done, cell.scheduled, cell.outside),
                 }}
               />
@@ -98,8 +134,6 @@ export function HabitHeatmap({
     </View>
   );
 }
-
-const LABEL_W = 18;
 
 const styles = StyleSheet.create({
   wrap: {},

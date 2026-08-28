@@ -15,7 +15,7 @@
  * on Skia. Everything animates on the UI thread.
  */
 import { useApp } from "@/contexts/AppContext";
-import { PaywallGate } from "@/components/billing";
+import { LOCK_COPY, PaywallGate, ProLockCard } from "@/components/billing";
 import { useGozlinSnapshot } from "@/components/gozlin";
 import { Ease } from "@/components/motion/motion";
 import {
@@ -68,6 +68,36 @@ export function CoachDeepDive({
   onClose: () => void;
 }) {
   const { colors } = useColors();
+
+  /**
+   * How much is behind the lock, and the sentence that says so.
+   *
+   * Counting the real thing matters more than it looks. "Unlock insights" is a
+   * category; "3 more patterns and 2 things I see coming" is an inventory of
+   * work already done on data the user already gave us — and it is checkable,
+   * which is what stops it reading as marketing. It also self-suppresses: when
+   * there is nothing else to show the count is zero and no lock renders at all.
+   */
+  const morePatterns = Math.max(0, Math.min(3, report.patterns.length) - 1);
+  const moreRisks = Math.min(2, report.risks.length);
+  const lockedInsightCount = morePatterns + moreRisks;
+
+  const lockedInsightTitle =
+    report.patterns.length > 0 ? "There's more where that came from" : "Gozlin actually knows you";
+
+  const lockedInsightBlurb = useMemo(() => {
+    const parts: string[] = [];
+    if (morePatterns > 0) {
+      parts.push(`${morePatterns} more pattern${morePatterns === 1 ? "" : "s"} in your logs`);
+    }
+    if (moreRisks > 0) {
+      parts.push(`${moreRisks} thing${moreRisks === 1 ? "" : "s"} I can see coming`);
+    }
+    const found = parts.length === 2 ? `${parts[0]} and ${parts[1]}` : (parts[0] ?? "");
+    return found
+      ? `I've found ${found}. Pro shows you all of it, keeps reading as you log, and tells you before it happens rather than after.`
+      : LOCK_COPY.insights.blurb;
+  }, [morePatterns, moreRisks]);
   const app = useApp();
   const { twin } = useGozlinSnapshot();
 
@@ -364,95 +394,108 @@ export function CoachDeepDive({
                   Everything above this point is today's own numbers and the
                   insight the user already tapped — free, because it is what
                   brings them back daily. What follows is the accumulated
-                  "Gozlin knows you" layer, and it is what Pro sells. One gate
-                  wraps both sections so a free user gets a single calm card
-                  rather than two stacked upsells. */}
-              {/* Guarded on there being something to show: with no patterns and
-                  no risks yet (a brand-new account) the gate would advertise
-                  depth that does not exist for anyone, free or paid. */}
-              {(report.patterns.length > 0 || report.risks.length > 0) && (
-              <PaywallGate lock="insights">
-              {/* ── What Gozlin has learned ── */}
+                  "Gozlin knows you" layer, and it is what Pro sells.
+
+                  BUT THE FIRST FINDING IS FREE, ON PURPOSE.
+
+                  A lock that says "Pro has insights" asks someone to buy a
+                  category. A lock that says "here is a true thing about you,
+                  and there are four more" asks them to buy something they have
+                  already seen work. The engine derives all of these from logs
+                  the user already owns, so showing one costs nothing and is the
+                  only version of this card that proves the feature is real
+                  rather than describing it.
+
+                  So: pattern #1 always renders. Everything after it — the
+                  remaining patterns and every prediction — sits behind one gate
+                  that says exactly how much is behind it. */}
               {report.patterns.length > 0 && (
                 <>
                   <SectionHeader title="What I've learned about you" />
                   <Card style={styles.block}>
-                    {report.patterns.slice(0, 3).map((p, i) => (
-                      <View
-                        key={i}
-                        style={[
-                          styles.learnRow,
-                          i < Math.min(3, report.patterns.length) - 1 && {
-                            borderBottomWidth: 1,
-                            borderBottomColor: colors.divider,
-                          },
-                        ]}
-                      >
-                        <Ionicons
-                          name={(p.icon ?? "ellipse-outline") as IconName}
-                          size={17}
-                          color={colors.primary}
-                          style={styles.learnIcon}
-                        />
-                        <AppText variant="subhead" color="secondary" style={styles.flex}>
-                          {p.message}
-                        </AppText>
-                      </View>
-                    ))}
+                    <PatternRow pattern={report.patterns[0]} divider={false} />
                   </Card>
                 </>
               )}
 
-              {/* ── What I see coming ── */}
-              {report.risks.length > 0 && (
-                <>
-                  <SectionHeader title="What I see coming" />
-                  <Card style={styles.block}>
-                    {report.risks.slice(0, 2).map((r, i) => {
-                      const c =
-                        r.likelihood >= 0.66
-                          ? colors.error
-                          : r.likelihood >= 0.4
-                            ? colors.warning
-                            : colors.textSecondary;
-                      return (
-                        <View
-                          key={i}
-                          style={[
-                            styles.riskRow,
-                            i < Math.min(2, report.risks.length) - 1 && {
-                              borderBottomWidth: 1,
-                              borderBottomColor: colors.divider,
-                            },
-                          ]}
-                        >
-                          <View style={[styles.riskIcon, { backgroundColor: alpha(c, 0.14) }]}>
-                            <Ionicons name={r.icon as IconName} size={15} color={c} />
-                          </View>
-                          <View style={styles.flex}>
-                            <View style={styles.riskHead}>
-                              <AppText variant="callout" style={styles.flex}>
-                                {r.title}
-                              </AppText>
-                              <View style={[styles.whenPill, { backgroundColor: alpha(c, 0.14) }]}>
-                                <AppText variant="caption" style={{ color: c }}>
-                                  {r.whenLabel}
-                                </AppText>
+              {/* The locked remainder. Rendered only when there IS a remainder:
+                  with one pattern and no predictions yet, a lock would be
+                  advertising depth that does not exist for anyone, free or
+                  paid — and a paywall over nothing is how a user learns to
+                  distrust every other one in the app. */}
+              {lockedInsightCount > 0 && (
+                <PaywallGate
+                  lock="insights"
+                  fallback={
+                    <ProLockCard
+                      lock="insights"
+                      title={lockedInsightTitle}
+                      blurb={lockedInsightBlurb}
+                      style={styles.block}
+                    />
+                  }
+                >
+                  {/* ── The rest of what Gozlin has learned ── */}
+                  {report.patterns.length > 1 && (
+                    <Card style={styles.block}>
+                      {report.patterns.slice(1, 3).map((p, i, arr) => (
+                        <PatternRow key={i} pattern={p} divider={i < arr.length - 1} />
+                      ))}
+                    </Card>
+                  )}
+
+                  {/* ── What I see coming ── */}
+                  {report.risks.length > 0 && (
+                    <>
+                      <SectionHeader title="What I see coming" />
+                      <Card style={styles.block}>
+                        {report.risks.slice(0, 2).map((r, i) => {
+                          const c =
+                            r.likelihood >= 0.66
+                              ? colors.error
+                              : r.likelihood >= 0.4
+                                ? colors.warning
+                                : colors.textSecondary;
+                          return (
+                            <View
+                              key={i}
+                              style={[
+                                styles.riskRow,
+                                i < Math.min(2, report.risks.length) - 1 && {
+                                  borderBottomWidth: 1,
+                                  borderBottomColor: colors.divider,
+                                },
+                              ]}
+                            >
+                              <View style={[styles.riskIcon, { backgroundColor: alpha(c, 0.14) }]}>
+                                <Ionicons name={r.icon as IconName} size={15} color={c} />
+                              </View>
+                              <View style={styles.flex}>
+                                <View style={styles.riskHead}>
+                                  <AppText variant="callout" style={styles.flex}>
+                                    {r.title}
+                                  </AppText>
+                                  <View
+                                    style={[styles.whenPill, { backgroundColor: alpha(c, 0.14) }]}
+                                  >
+                                    <AppText variant="caption" style={{ color: c }}>
+                                      {r.whenLabel}
+                                    </AppText>
+                                  </View>
+                                </View>
+                                {r.why.length > 0 && (
+                                  <AppText variant="caption" color="tertiary">
+                                    {r.why.join(" · ")}
+                                  </AppText>
+                                )}
                               </View>
                             </View>
-                            {r.why.length > 0 && (
-                              <AppText variant="caption" color="tertiary">
-                                {r.why.join(" · ")}
-                              </AppText>
-                            )}
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </Card>
-                </>
-              )}
-              </PaywallGate>
+                          );
+                        })}
+                      </Card>
+                    </>
+                  )}
+                </PaywallGate>
               )}
 
               {/* ── CTA ── */}
@@ -591,6 +634,40 @@ function JourneyPoint({
 
 function fmtKg(kg: number | null): string {
   return kg == null ? "—" : (Math.round(kg * 10) / 10).toString();
+}
+
+/**
+ * One learned pattern. Extracted because the same row now renders on both sides
+ * of the paywall — the free first finding and the locked remainder — and two
+ * copies of it would be two places for the locked version to drift into looking
+ * like a different, lesser feature than the one that sold it.
+ */
+function PatternRow({
+  pattern,
+  divider,
+}: {
+  pattern: GozlinHabitReport["patterns"][number];
+  divider: boolean;
+}) {
+  const { colors } = useColors();
+  return (
+    <View
+      style={[
+        styles.learnRow,
+        divider && { borderBottomWidth: 1, borderBottomColor: colors.divider },
+      ]}
+    >
+      <Ionicons
+        name={(pattern.icon ?? "ellipse-outline") as IconName}
+        size={17}
+        color={colors.primary}
+        style={styles.learnIcon}
+      />
+      <AppText variant="subhead" color="secondary" style={styles.flex}>
+        {pattern.message}
+      </AppText>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
