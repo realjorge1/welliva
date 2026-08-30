@@ -92,6 +92,29 @@ export default function SessionSummaryScreen() {
   useEffect(() => {
     if (!summary || loggedRunRef.current === summary.sessionRunId) return;
     loggedRunRef.current = summary.sessionRunId;
+
+    /**
+     * A SESSION WITH NO WORK IN IT IS NOT A WORKOUT.
+     *
+     * Opening the player and ending it immediately used to write a full log
+     * entry: zero sets, zero exercises, zero minutes. That entry then counted
+     * as a training day EVERYWHERE — the day streak, "3 workouts this week",
+     * the biggest-week record, the consistency heatmap, the Progress rings.
+     * Every one of those cards says it counts sessions, so every one of them
+     * was overstating by however many times the user had opened the player and
+     * changed their mind.
+     *
+     * One completed set is the bar, not one completed exercise: stopping after
+     * a single set is a short workout, and the log has always been right to
+     * keep it (see services/__tests__/sessionCompletion.test.ts). Zero is the
+     * only case this excludes.
+     *
+     * The SUMMARY still renders, and the per-exercise record below is still
+     * kept — bailing out is real information about the session, and Gozlin's
+     * adaptive layer reads it. What doesn't happen is a workout being counted.
+     */
+    const didWork = summary.setsCompleted > 0 || summary.exercisesCompleted > 0;
+
     const logEntry: WorkoutLogEntry = {
       id: summary.sessionRunId,
       date: summary.date,
@@ -103,9 +126,10 @@ export default function SessionSummaryScreen() {
       durationMinutes: Math.round(summary.durationSeconds / 60),
       completedAt: summary.completedAt,
     };
-    logWorkout(logEntry);
+    if (didWork) logWorkout(logEntry);
     // Persist the full per-exercise summary so Gozlin's Adaptive Workout
-    // Intelligence can read reps/skips over time (progress vs avoidance).
+    // Intelligence can read reps/skips over time (progress vs avoidance). This
+    // one is kept even for an abandoned run — see above.
     recordSessionSummary(summary);
   }, [summary, logWorkout, recordSessionSummary]);
 

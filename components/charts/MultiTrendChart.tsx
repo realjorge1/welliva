@@ -32,6 +32,7 @@ import Svg, {
   Path as SvgPath,
 } from "react-native-svg";
 import type { SkiaMultiTrendChartProps, SkiaSeries } from "./MultiTrendChart.skia";
+import { sharedDomain } from "./series";
 
 let SkiaChart: React.ComponentType<SkiaMultiTrendChartProps> | null = null;
 if (isSkiaAvailable) {
@@ -65,7 +66,20 @@ export interface MultiTrendChartProps {
   onActiveChange?: (index: number, scrubbing: boolean) => void;
 }
 
-/** Shared scale across the visible series; per-series ys, nulls preserved. */
+/**
+ * Shared scale across ALL series; per-series ys, nulls preserved.
+ *
+ * THE DOMAIN IGNORES VISIBILITY, DELIBERATELY. It used to be built from the
+ * visible series only, which meant toggling a macro off silently rescaled the
+ * plot: hide calories and the carbs line jumped up to sit exactly where
+ * calories had been. Two people comparing the same week would see the same
+ * curve at two different heights depending on which chips they'd tapped, and a
+ * line that moves when you hide a DIFFERENT line is not a line anyone can read.
+ *
+ * A legend chip is a FILTER, not a zoom. Every series is already indexed to its
+ * own first day = 100 (`indexToStart`), so one domain over all of them is the
+ * honest one — and it means a hidden line comes back exactly where it left.
+ */
 function computeGeometry(
   series: MultiSeries[],
   length: number,
@@ -75,26 +89,8 @@ function computeGeometry(
   const innerW = width - PAD_L - PAD_R;
   const top = PAD_T;
   const bottom = height - PAD_B;
-  const vals: number[] = [];
-  for (const s of series) {
-    if (!s.visible) continue;
-    for (const v of s.values) {
-      if (v != null && Number.isFinite(v)) vals.push(v);
-    }
-  }
-  let lo = Math.min(...vals);
-  let hi = Math.max(...vals);
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
-    lo = 0;
-    hi = 1;
-  }
-  if (lo === hi) {
-    lo -= 1;
-    hi += 1;
-  }
-  const padV = (hi - lo) * 0.18;
-  lo -= padV;
-  hi += padV;
+  // Every series, hidden ones included — see `sharedDomain`.
+  const [lo, hi] = sharedDomain(series.map((s) => s.values));
   const xs = Array.from({ length }, (_, i) =>
     length > 1 ? PAD_L + (i / (length - 1)) * innerW : PAD_L + innerW / 2,
   );

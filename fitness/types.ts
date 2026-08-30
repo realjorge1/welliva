@@ -11,6 +11,7 @@
  */
 
 import type { Difficulty } from "@/models/exercise";
+import type { SessionEffort } from "@/models/session";
 import type { PrimaryGoal } from "@/models/user";
 
 /* ────────────────────────────── Workouts ────────────────────────────── */
@@ -181,6 +182,20 @@ export interface FitnessProfile {
   favorites: string[]; // workout ids
   /** Recommendation ids the user was shown but didn't do (adaptation memory). */
   recommendationHistory: RecommendationMemory[];
+  /** How recent sessions felt — the completion screen's single question. */
+  effortHistory: EffortMemory[];
+}
+
+/**
+ * How one finished session felt. The player asks once, pre-filled, on the
+ * completion screen; the recommendation engine is what it's for — a run of
+ * "hard" is the signal to back off, a run of "easy" the signal to progress.
+ */
+export interface EffortMemory {
+  date: string; // YYYY-MM-DD
+  /** Library id, plan session id, or "single". */
+  workoutId: string;
+  effort: SessionEffort;
 }
 
 /** One day's recommendation outcome — lets the engine adapt to skips. */

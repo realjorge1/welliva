@@ -142,3 +142,15 @@ export {
   setLastWeeklyReview,
 } from "./GozlinMemoryStore";
 export type { ArchivedConversation, LastBriefingMeta } from "./GozlinMemoryStore";
+
+// What a conversation is about, and whether it was ever finished
+export {
+  COACH_SUBHEADS,
+  CONTINUE_NUDGES,
+  deriveConversationTitle,
+  findOpenThread,
+  OPEN_MAX_AGE_MS,
+  OPEN_MIN_AGE_MS,
+  pickCoachSubhead,
+} from "./conversationTitle";
+export type { OpenThread } from "./conversationTitle";

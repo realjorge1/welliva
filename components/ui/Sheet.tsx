@@ -64,6 +64,18 @@ export interface SheetProps {
   /** Cap the panel's height as a fraction of the screen. Omit to hug content. */
   maxHeightRatio?: number;
   /**
+   * Fired once the close animation has finished AND the panel has unmounted —
+   * not when `onClose` was requested.
+   *
+   * WHY THIS EXISTS. This sheet is a `Modal`, and React Native will not present
+   * a second Modal while a first one is still mounted: it simply never appears,
+   * with no error. So an option that opens another modal (the weigh-in and
+   * check-in sheets) cannot run on the tap — the close animation still has
+   * ~170ms to play. Hang that work here and it runs when the screen is
+   * genuinely clear, without anybody guessing at a delay.
+   */
+  onClosed?: () => void;
+  /**
    * Extra styling for the panel. An ANIMATED style is accepted as well: the
    * panel is an Animated.View, and a sheet that holds a text field has to be
    * able to ride the keyboard (see components/ui/useKeyboardInset.ts).
@@ -86,6 +98,7 @@ export function Sheet({
   children,
   header,
   maxHeightRatio,
+  onClosed,
   style,
 }: SheetProps) {
   const { colors, isDark } = useColors();
@@ -97,7 +110,12 @@ export function Sheet({
   // Tracked apart from `visible` so the close animation plays before teardown.
   const [mounted, setMounted] = useState(visible);
 
-  const finishClose = useCallback(() => setMounted(false), []);
+  // Both exits — the button/scrim path and the drag path — converge here, so
+  // this is the one place that can truthfully say the Modal is gone.
+  const finishClose = useCallback(() => {
+    setMounted(false);
+    onClosed?.();
+  }, [onClosed]);
 
   const animateClosed = useCallback(() => {
     progress.value = withTiming(0, { duration: 170, easing: Easing.in(Easing.quad) });

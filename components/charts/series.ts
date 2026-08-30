@@ -311,3 +311,50 @@ export function buildWeightTrend(
     fullLabel: fullDate(e.date),
   }));
 }
+
+/* ─────────────────────────── plot domain ─────────────────────────── */
+
+/**
+ * The shared y-domain for a set of overlaid series, as `[lo, hi]`.
+ *
+ * IT IGNORES VISIBILITY ON PURPOSE — callers pass every series, hidden ones
+ * included. The domain used to be built from the visible series only, so
+ * toggling one macro off silently rescaled the plot: hide calories and the
+ * carbs line jumped up to sit exactly where calories had been. A line that
+ * moves because you hid a DIFFERENT line cannot be read, and two people looking
+ * at the same week would see the same curve at two different heights depending
+ * on which chips they had tapped.
+ *
+ * A legend chip is a FILTER, not a zoom. One domain over everything means a
+ * hidden line comes back exactly where it left.
+ *
+ * Degenerate input is handled rather than propagated: no finite values at all
+ * yields [0, 1], and a flat series is opened out by ±1 so the divide that maps
+ * a value to a pixel can never be by zero.
+ */
+export function sharedDomain(
+  seriesValues: readonly (readonly (number | null)[])[],
+  /** Fraction of the span added above and below, so strokes clear the edges. */
+  padFraction = 0.18,
+): [number, number] {
+  const vals: number[] = [];
+  for (const values of seriesValues) {
+    for (const v of values) {
+      if (v != null && Number.isFinite(v)) vals.push(v);
+    }
+  }
+
+  let lo = Math.min(...vals);
+  let hi = Math.max(...vals);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
+    lo = 0;
+    hi = 1;
+  }
+  if (lo === hi) {
+    lo -= 1;
+    hi += 1;
+  }
+
+  const padV = (hi - lo) * padFraction;
+  return [lo - padV, hi + padV];
+}

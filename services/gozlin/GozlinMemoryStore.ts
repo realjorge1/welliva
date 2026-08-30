@@ -11,6 +11,7 @@
  */
 
 import { parseLocalDate, readJSON, writeJSON, remove } from "../OfflineStorage";
+import { deriveConversationTitle } from "./conversationTitle";
 import type {
   GozlinCheckin,
   GozlinEpisode,
@@ -232,12 +233,18 @@ export async function clearArchive(): Promise<void> {
   await remove(G_KEYS.ARCHIVE);
 }
 
-/** The user's own first words — the only honest title for their conversation. */
+/**
+ * What the archived thread is called.
+ *
+ * It used to be the user's first line, verbatim, clipped at sixty characters —
+ * which made a history list of half-sentences trailing into ellipses. It is now
+ * the SAME topic title the coach header shows while you are in the conversation
+ * (./conversationTitle), so the row you tap and the header you land on say the
+ * identical thing. That is the only way a history list reads as a filing
+ * cabinet rather than as a log.
+ */
 function conversationTitle(messages: GozlinMessage[]): string {
-  const first = messages.find((m) => m.role === "user")?.content.trim();
-  if (!first) return "Conversation";
-  const oneLine = first.replace(/\s+/g, " ");
-  return oneLine.length > 60 ? `${oneLine.slice(0, 59)}…` : oneLine;
+  return deriveConversationTitle(messages) ?? "Conversation";
 }
 
 // ── Meta gates ───────────────────────────────────────────────────

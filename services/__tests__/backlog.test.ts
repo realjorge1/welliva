@@ -61,7 +61,8 @@ function schedule(date: string): DaySchedule {
 }
 
 beforeEach(async () => {
-  await AsyncStorage.removeItem(KEYS.SCHEDULED_DIETS);
+  await AsyncStorage.multiRemove([KEYS.SCHEDULED_DIETS,
+    KEYS.INTAKE_LEDGER, KEYS.INTAKE_LEDGER]);
   await AsyncStorage.removeItem(KEYS.DIET_HISTORY);
 });
 

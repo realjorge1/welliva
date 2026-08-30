@@ -13,12 +13,24 @@
  * correct on a button tap and completely wrong on a drag, which is the whole
  * reason this is built on a shared value instead of `Reveal`.
  *
- * THE ONE EXCEPTION IS THE COLD-START BOUNCE (`playIntro`). The very first time
- * the menu opens in a launch, the rows spring in with a soft overshoot on top of
- * the progress-driven reveal — the app introducing itself. Every open after that
- * is the plain reveal again, because a bounce you see forty times a day is not a
- * flourish, it's a tax. The latch that decides this lives in AppDrawer, at
- * module scope, so it resets when the app is killed and not before.
+ * TWO EXCEPTIONS, ONE PER WAY IN (`openIntent`). How the menu was ASKED for
+ * changes what it does on arrival, because the two requests turn up carrying
+ * completely different amounts of motion:
+ *
+ *   · BUTTON — the cascade. A tap is a discrete request with no movement of its
+ *     own, so the panel supplies all of it: each row slides in from the left
+ *     with a soft overshoot, staggered down the list. This plays on EVERY press,
+ *     not once per launch — a tap is a deliberate act each time, and the reply
+ *     to it shouldn't quietly stop coming.
+ *   · SWIPE — the ripple. The drag already animated the reveal under the finger
+ *     at the finger's own speed; re-running an entrance on top of that fights
+ *     the gesture and reads as a stutter. So nothing is re-hidden and nothing
+ *     travels sideways. Instead, as the panel lands, a small vertical settle
+ *     runs down the rows — each dips and springs back a few points, one after
+ *     the next, like weight arriving. Same idea, orthogonal axis, half the size.
+ *
+ * Both are layered ON TOP of the progress reveal and both rest at neutral, so a
+ * row that receives neither is simply at home.
  *
  * ACTIVE ROWS ARE NOT PLATES — THEY ARE BIGGER. The current screen is marked by
  * gold on both the mark and the label, a heavy weight, and a genuine jump in
@@ -41,16 +53,24 @@ import { Image } from "expo-image";
 import React, { useEffect } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import Animated, {
+  Easing,
   Extrapolation,
   interpolate,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
+  withSequence,
   withSpring,
+  withTiming,
   type SharedValue,
 } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { MENU_HAIRLINE, MENU_PARALLAX, MENU_SURFACE } from "./DrawerContext";
+import {
+  MENU_HAIRLINE,
+  MENU_PARALLAX,
+  MENU_SURFACE,
+  type DrawerOpenIntent,
+} from "./DrawerContext";
 import {
   PRIMARY_ITEMS,
   PROFILE_ITEM,
@@ -67,8 +87,12 @@ export interface SideMenuProps {
   /** Current pathname, so exactly one row can read as active. */
   activePath: string;
   onNavigate: (item: MenuItem) => void;
-  /** First open of this launch — play the entrance bounce. See the header. */
-  playIntro?: boolean;
+  /**
+   * How this open was asked for, restamped every time. Its `nonce` is what
+   * makes the entrance replay on each open; its `source` picks which one. Null
+   * before the drawer has ever been opened. See the header.
+   */
+  openIntent?: DrawerOpenIntent | null;
 }
 
 /* Row stagger: each row's fade-in window starts slightly later than the last,
@@ -98,12 +122,33 @@ const INTRO_STAGGER = 32;
 /** How far left of home a row starts its bounce. */
 const INTRO_SLIDE = 36;
 
+/* ── The swipe ripple ─────────────────────────────────────────────────────
+ * The other entrance, and deliberately the quieter of the two. A drag has
+ * already done the revealing, so this adds no fade and no horizontal travel —
+ * only a short vertical dip that springs back, running down the panel one row
+ * at a time as the drawer settles. Nine points is enough to read as a wave and
+ * small enough that it never looks like the list moved.
+ */
+const RIPPLE_DIP = 9;
+/** Down-stroke: how long a row takes to reach the bottom of its dip. */
+const RIPPLE_FALL_MS = 130;
+/** Milliseconds between neighbouring rows — tighter than the cascade, so the
+ *  wave crosses the panel in roughly the time the drawer's own spring takes. */
+const RIPPLE_STAGGER = 26;
+/** The way back up. Nearly critically damped: it settles, it does not bounce —
+ *  overshoot is the BUTTON's signature and has to stay exclusive to it. */
+const RIPPLE_SPRING = {
+  damping: 17,
+  stiffness: 210,
+  mass: 0.7,
+} as const;
+
 export function SideMenu({
   progress,
   width,
   activePath,
   onNavigate,
-  playIntro = false,
+  openIntent = null,
 }: SideMenuProps) {
   const panelStyle = useAnimatedStyle(() => ({
     opacity: interpolate(
@@ -153,7 +198,7 @@ export function SideMenu({
               item={item}
               index={row++}
               progress={progress}
-              playIntro={playIntro}
+              openIntent={openIntent}
               active={activePath === item.href}
               onPress={() => onNavigate(item)}
             />
@@ -167,7 +212,7 @@ export function SideMenu({
               item={item}
               index={row++}
               progress={progress}
-              playIntro={playIntro}
+              openIntent={openIntent}
               active={activePath === item.href}
               onPress={() => onNavigate(item)}
               muted
@@ -184,7 +229,7 @@ export function SideMenu({
             item={UPGRADE_ITEM}
             index={row++}
             progress={progress}
-            playIntro={playIntro}
+            openIntent={openIntent}
             active={activePath === UPGRADE_ITEM.href}
             onPress={() => onNavigate(UPGRADE_ITEM)}
           />
@@ -192,7 +237,7 @@ export function SideMenu({
             item={SETTINGS_ITEM}
             index={row}
             progress={progress}
-            playIntro={playIntro}
+            openIntent={openIntent}
             active={activePath === SETTINGS_ITEM.href}
             onPress={() => onNavigate(SETTINGS_ITEM)}
           />
@@ -312,7 +357,7 @@ function Row({
   item,
   index,
   progress,
-  playIntro,
+  openIntent,
   active,
   onPress,
   muted = false,
@@ -320,25 +365,44 @@ function Row({
   item: MenuItem;
   index: number;
   progress: SharedValue<number>;
-  playIntro: boolean;
+  openIntent: DrawerOpenIntent | null;
   active: boolean;
   onPress: () => void;
   muted?: boolean;
 }) {
   const { colors } = useColors();
 
-  /* The cold-start bounce, layered ON TOP of the progress reveal below.
-   * It rests at 1 so a row that never gets an intro (every open after the
-   * first, and any remount) is simply at home — the animation is opt-in, and
-   * its absence can never leave a row parked off-screen. */
+  /* The BUTTON cascade, layered ON TOP of the progress reveal below. Rests at
+   * 1 — a row that never receives one (a swipe open, a remount) is simply at
+   * home, so the animation is opt-in and its absence can never leave a row
+   * parked off-screen or invisible. */
   const intro = useSharedValue(1);
+  /* The SWIPE ripple. Rests at 0 for the same reason, and touches nothing but
+   * translateY, so it can run over an already-visible row without a flicker. */
+  const ripple = useSharedValue(0);
+
+  const source = openIntent?.source ?? null;
+  const nonce = openIntent?.nonce ?? 0;
   useEffect(() => {
-    if (!playIntro) return;
-    // Armed the instant the drawer starts opening, while the rows are still at
-    // zero opacity — so the reset to 0 is never seen, only its spring back.
-    intro.value = 0;
-    intro.value = withDelay(index * INTRO_STAGGER, withSpring(1, INTRO_SPRING));
-  }, [playIntro, index, intro]);
+    if (!nonce) return;
+    if (source === "button") {
+      // Armed the instant the drawer starts opening, while the rows are still
+      // at zero opacity — so the reset to 0 is never seen, only its spring back.
+      intro.value = 0;
+      intro.value = withDelay(index * INTRO_STAGGER, withSpring(1, INTRO_SPRING));
+      return;
+    }
+    // Swipe: the row is already on screen and already faded in, so it is never
+    // reset. It dips, then settles. The sequence sits INSIDE the delay so each
+    // row's fall and recovery stay one uninterrupted run.
+    ripple.value = withDelay(
+      index * RIPPLE_STAGGER,
+      withSequence(
+        withTiming(1, { duration: RIPPLE_FALL_MS, easing: Easing.out(Easing.quad) }),
+        withSpring(0, RIPPLE_SPRING),
+      ),
+    );
+  }, [nonce, source, index, intro, ripple]);
 
   const style = useAnimatedStyle(() => {
     const start = 0.08 + index * STAGGER_STEP;
@@ -354,13 +418,16 @@ function Row({
     // A row still waiting out its stagger delay is HIDDEN, not parked: without
     // this the later rows would fade fully in at their pre-bounce offset and sit
     // there until their turn, which reads as a hop rather than a cascade. At
-    // rest (b = 1, every open after the first) this is exactly 1 and the reveal
-    // is the plain progress-driven one.
+    // rest (b = 1 — every swipe open, and any render with no cascade running)
+    // this is exactly 1 and the reveal is the plain progress-driven one.
     const fade = Math.min(1, Math.max(0, b * 1.6));
     return {
       opacity: t * fade,
       transform: [
         { translateX: (1 - t) * -22 + (1 - b) * -INTRO_SLIDE },
+        // The ripple's whole contribution: a few points of vertical give,
+        // nothing else. At rest (0) this term vanishes entirely.
+        { translateY: ripple.value * RIPPLE_DIP },
         { scale: 0.93 + b * 0.07 },
       ],
     };

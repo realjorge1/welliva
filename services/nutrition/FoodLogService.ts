@@ -6,10 +6,13 @@
  * hold, because a schedule slot is a yes/no tick against a meal we chose, while
  * this is an arbitrary food the user names themselves.
  *
- * They're kept in separate stores and merged only at read time (dayNutrients).
+ * They are kept in separate stores and summed only at read time, by
+ * services/nutrition/DayTotals — the one module that states a day’s intake.
  * Writing ad-hoc foods into the schedule would corrupt adherence: eating a
  * banana isn't evidence you ate the planned lunch, and the end-of-period report
- * would quietly start scoring the wrong thing.
+ * would quietly start scoring the wrong thing. Adding them up for a TOTAL is a
+ * different act from filing them in the same drawer, and only the second one
+ * lies.
  *
  * The same back-log window that governs meal ticking governs this, for the same
  * reason — a log you can rewrite indefinitely stops being a record.
@@ -22,102 +25,35 @@ import {
   weakestConfidence,
   type FoodAnalysis,
   type NutrientConfidence,
-  type NutrientKey,
-  type NutrientPanel,
   type ResolvedFoodItem,
 } from "../../models/nutrients";
-import { KEYS, readJSON, writeJSON } from "../OfflineStorage";
-import { canLogForDate, logPermissionFor } from "../ScheduleService";
-import { pruneDatedRecord, RETENTION_DAYS } from "../sync/retention";
+import {
+  newId,
+  readStore,
+  withLock,
+  writeStore,
+  type FoodLogEntry,
+} from "./foodLogStore";
+import { canLogForDate, logPermissionFor } from "./logWindow";
 import { resolveCatalogFood, resolveKnownFood } from "./NutrientResolver";
 
-export interface FoodLogEntry {
-  id: string;
-  /** Local YYYY-MM-DD. */
-  date: string;
-  /** Slot the user attributed it to, or null for "just something I ate". */
-  slot: MealType | null;
-  /** Display label — the user's own words where they typed them. */
-  label: string;
-  items: ResolvedFoodItem[];
-  totals: NutrientPanel;
-  /** Nutrients only some items measured — shown as "at least", never as exact. */
-  partialKeys: NutrientKey[];
-  confidence: NutrientConfidence;
-  /** How it got here, for the UI's provenance line. */
-  origin: "gozlin" | "catalog" | "manual";
-  loggedAt: string;
-}
-
-type LogStore = Record<string, FoodLogEntry[]>;
-
-let opChain: Promise<unknown> = Promise.resolve();
-function withLock<T>(op: () => Promise<T>): Promise<T> {
-  const result = opChain.then(op, op);
-  opChain = result.then(
-    () => undefined,
-    () => undefined,
-  );
-  return result;
-}
-
-function newId(): string {
-  return `log_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-async function readStore(): Promise<LogStore> {
-  return readJSON<LogStore>(KEYS.FOOD_LOG, {});
-}
-
-/**
- * The single write path, so retention can't be forgotten at one of the five
- * call sites. This document had no cap at all: it's a Record of every day a
- * user has ever logged an ad-hoc food, re-uploaded IN FULL on every tap (see
- * services/sync/retention.ts). Days beyond the window are compacted into the
- * health-os day summaries before they're dropped, so history survives.
- */
-async function writeStore(store: LogStore): Promise<void> {
-  const pruned = await pruneDatedRecord(store, RETENTION_DAYS.FOOD_LOG);
-  await writeJSON(KEYS.FOOD_LOG, pruned);
-}
-
-// ============================================================================
-// READ
-// ============================================================================
-
-export async function getFoodLogForDate(date: string): Promise<FoodLogEntry[]> {
-  const store = await readStore();
-  return store[date] ?? [];
-}
-
-export async function getFoodLogRange(
-  start: string,
-  end: string,
-): Promise<FoodLogEntry[]> {
-  const store = await readStore();
-  return Object.entries(store)
-    .filter(([date]) => date >= start && date <= end)
-    .flatMap(([, entries]) => entries)
-    .sort((a, b) => a.loggedAt.localeCompare(b.loggedAt));
-}
-
-/**
- * Everything logged on a date, summed.
+/*
+ * THE STORE ITSELF LIVES IN ./foodLogStore.
  *
- * Uses sumPanels, so a nutrient measured for only some entries is reported in
- * `partialKeys` rather than presented as a complete daily total. A day of
- * "banana + a catalog-only meal" must not read as though it contained only the
- * banana's iron.
+ * Everything below needs NutrientResolver (and the food catalogs behind it) to
+ * turn "2 slices of bread" into numbers. Reading the log back needs none of
+ * that, and ScheduleService has to read it to close a day honestly — so the
+ * store is a leaf and this module is the resolver-backed half on top of it.
+ * Re-exported here so every existing import of FoodLogService is unchanged.
  */
-export async function dayNutrients(date: string): Promise<{
-  totals: NutrientPanel;
-  partialKeys: NutrientKey[];
-  entryCount: number;
-}> {
-  const entries = await getFoodLogForDate(date);
-  const { totals, partialKeys } = sumPanels(entries.map((e) => e.totals));
-  return { totals, partialKeys, entryCount: entries.length };
-}
+export {
+  dayNutrients,
+  getFoodLogForDate,
+  getFoodLogRange,
+  pruneFoodLog,
+  type FoodLogEntry,
+  type LogStore,
+} from "./foodLogStore";
 
 // ============================================================================
 // WRITE
@@ -325,22 +261,4 @@ function worst(list: NutrientConfidence[]): NutrientConfidence {
 /** Whether the UI should enable logging controls for a date, and why not. */
 export function loggingState(date: string) {
   return logPermissionFor(date);
-}
-
-/**
- * Drop logs older than `keepDays`. The nutrient panels are the largest thing
- * this app stores per day, and a year of them is dead weight once the period
- * they belonged to has been reported on.
- */
-export async function pruneFoodLog(
-  before: string,
-): Promise<number> {
-  return withLock(async () => {
-    const store = await readStore();
-    const stale = Object.keys(store).filter((date) => date < before);
-    if (stale.length === 0) return 0;
-    for (const date of stale) delete store[date];
-    await writeStore(store);
-    return stale.length;
-  });
 }

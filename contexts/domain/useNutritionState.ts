@@ -24,7 +24,8 @@ import {
   creditWaterGoalDay,
   saveAchievementRecord,
 } from "../../services/AchievementService";
-import { calculateConsumedNutrition } from "../../services/DietPlanGenerator";
+import { sumMacros, type MacroTotals } from "../../services/nutrition/DayTotals";
+import { readDayIntake } from "../../services/nutrition/todayIntake";
 import {
   KEYS,
   currentWeekStart,
@@ -48,11 +49,16 @@ interface Params {
   userBio: UserBio | null;
   nutritionTargets: NutritionTargets | null;
   planState: PlanState;
-  currentDate: string;
   userGoals: UserGoals;
   todayDiet: TodayDiet | null;
+  /** The ticked-meal half of today's intake, UNROUNDED (see refreshTodayDiet). */
+  intakeMacros: MacroTotals;
+  /** The free-form half of today's intake, UNROUNDED (see refreshTodayDiet). */
+  foodLogMacros: MacroTotals;
   waterMl: number;
   setTodayDiet: Dispatch<SetStateAction<TodayDiet | null>>;
+  setIntakeMacros: Dispatch<SetStateAction<MacroTotals>>;
+  setFoodLogMacros: Dispatch<SetStateAction<MacroTotals>>;
   setDietHistory: Dispatch<SetStateAction<DietHistoryEntry[]>>;
   setPlanState: Dispatch<SetStateAction<PlanState>>;
   setWaterMl: Dispatch<SetStateAction<number>>;
@@ -64,29 +70,83 @@ export function useNutritionState({
   userBio,
   nutritionTargets,
   planState,
-  currentDate,
   userGoals,
   todayDiet,
+  intakeMacros,
+  foodLogMacros,
   waterMl,
   setTodayDiet,
+  setIntakeMacros,
+  setFoodLogMacros,
   setDietHistory,
   setPlanState,
   setWaterMl,
   setStreakData,
   setAchievementRecord,
 }: Params) {
-  // Consumed nutrition derived from the schedule's isConsumed flags (SSOT).
-  const consumedNutrition: ConsumedNutrition = useMemo(() => {
-    if (!todayDiet?.schedule) {
-      return { calories: 0, proteinG: 0, fatG: 0, carbsG: 0, waterMl };
-    }
-    const n = calculateConsumedNutrition(todayDiet.schedule);
-    return { ...n, waterMl };
-  }, [todayDiet?.schedule, waterMl]);
+  /**
+   * TODAY'S INTAKE — from the two RECORDS of what was eaten.
+   *
+   * Deliberately NOT re-derived from `todayDiet.schedule`. That is the plan,
+   * and the plan is rewritten by the generator, the rollover, the custom-menu
+   * projection, a swap and the cloud sync — so a total read off it was only
+   * ever as durable as the least careful of those writers, and the symptom was
+   * a day of logged food reading 0% after a relaunch. Both halves now come from
+   * append-only records instead: the intake ledger (meals ticked, with the
+   * macros they had at the tick) and the free-form food log.
+   *
+   * Still derived, never stored, so the number cannot drift from the records.
+   * See services/nutrition/IntakeLedger and services/nutrition/DayTotals.
+   */
+  const consumedNutrition: ConsumedNutrition = useMemo(
+    () => ({ ...sumMacros(intakeMacros, foodLogMacros), waterMl }),
+    [intakeMacros, foodLogMacros, waterMl],
+  );
 
+  /**
+   * Reload today's numbers from disk — the plan, the intake ledger and the
+   * free-form log.
+   *
+   * All three, deliberately, behind one call. They are written by different
+   * screens, and a refresher that reloaded only some of them is how a total
+   * goes stale in the first place: every existing call site already means
+   * "today's food changed, re-read it", and that is exactly what it does.
+   *
+   * ORDER MATTERS. getTodayDiet() reconciles the day against the ledger first
+   * (adopting any tick the ledger hadn't recorded), so reading the ledger after
+   * it — not in parallel with it — is what makes the very first launch after
+   * this shipped show a returning user's existing ticks instead of zero.
+   *
+   * NO PART CAN COST ANOTHER ONE. Each read is settled on its own, because a
+   * single `await` chain over three documents lets the FIRST failure decide all
+   * three — and the shape that takes on screen is a day reading zero with its
+   * meals still ticked, which is this bug's exact signature. Note also that the
+   * day's calories DO NOT DEPEND ON THE PLAN: the plan read stays first only
+   * for its reconcile side effect. See services/nutrition/todayIntake for the
+   * "could not read" / "genuinely nothing" distinction the halves carry.
+   */
   const refreshTodayDiet = useCallback(async () => {
-    const diet = await getTodayDiet();
-    setTodayDiet(diet);
+    // todayDate() rather than the provider's `currentDate`, to match what
+    // getTodayDiet() resolves against. The two must never read different days:
+    // at a rollover the provider's clock lags by up to a minute, and a total
+    // taken from yesterday's records against today's plan is worse than either.
+    const today = todayDate();
+
+    // First, and on its own: resolving the plan is also what reconciles the
+    // ledger against it (ScheduleService.reconcileWithLedger), so the reads
+    // below must see the day AFTER that repair, not during it.
+    try {
+      setTodayDiet(await getTodayDiet());
+    } catch (e) {
+      console.error("useNutritionState: today's plan could not be read:", e);
+    }
+
+    // Held UNROUNDED, so the memo above can add both halves and round once.
+    // A null half is one that could not be READ — keep the value already on
+    // screen rather than replacing it with a zero the user would believe.
+    const { intake, foodLog } = await readDayIntake(today);
+    if (intake) setIntakeMacros(intake);
+    if (foodLog) setFoodLogMacros(foodLog);
   }, []);
 
   const refreshDietHistory = useCallback(async () => {
@@ -167,21 +227,30 @@ export function useNutritionState({
   );
 
   /**
-   * Mark a meal as consumed. No manual addNutrition — consumed totals
-   * are derived from the schedule's isConsumed flags via useMemo.
+   * Mark a meal as consumed. No manual addNutrition — the day's total is the
+   * sum of the intake ledger's records, which this write appends to.
+   *
+   * ONE CLOCK. The date is resolved HERE, at the moment of the write, rather
+   * than taken from the provider's `currentDate`. That value is only as fresh
+   * as the last tick of a one-minute interval — an interval the OS suspends
+   * while the app is backgrounded — so just after midnight, or just after a
+   * resume, it can still name YESTERDAY. Every read (refreshTodayDiet,
+   * getTodayDiet) resolves the real local date instead, and a write that
+   * lands on a day nothing reads is a tick that visibly does nothing.
    */
   const markMealAsConsumed = useCallback(
     async (
       mealType: "breakfast" | "lunch" | "dinner" | "snack",
       snackIndex?: number,
     ) => {
-      await markMealConsumed(currentDate, mealType, snackIndex);
+      const date = todayDate();
+      await markMealConsumed(date, mealType, snackIndex);
       await refreshTodayDiet();
       // Record activity for streaks
-      const { data: updatedStreak } = await recordActivity(currentDate);
+      const { data: updatedStreak } = await recordActivity(date);
       setStreakData(updatedStreak);
     },
-    [currentDate, refreshTodayDiet],
+    [refreshTodayDiet],
   );
 
   /**
@@ -193,10 +262,12 @@ export function useNutritionState({
       mealType: "breakfast" | "lunch" | "dinner" | "snack",
       snackIndex?: number,
     ) => {
-      await toggleMealConsumed(currentDate, mealType, snackIndex);
+      // Resolved at the write, never from the provider's clock — see
+      // markMealAsConsumed above for why those two can disagree.
+      await toggleMealConsumed(todayDate(), mealType, snackIndex);
       await refreshTodayDiet();
     },
-    [currentDate, refreshTodayDiet],
+    [refreshTodayDiet],
   );
 
   /**
@@ -208,10 +279,10 @@ export function useNutritionState({
       newMeal: ScheduledMeal,
       snackIndex?: number,
     ) => {
-      await swapMealInSchedule(currentDate, mealType, newMeal, snackIndex);
+      await swapMealInSchedule(todayDate(), mealType, newMeal, snackIndex);
       await refreshTodayDiet();
     },
-    [currentDate, refreshTodayDiet],
+    [refreshTodayDiet],
   );
 
   /**
@@ -234,15 +305,16 @@ export function useNutritionState({
         isConsumed: true,
         consumedAt: new Date().toISOString(),
       };
-      const ok = await addSnackToSchedule(currentDate, meal);
+      const date = todayDate();
+      const ok = await addSnackToSchedule(date, meal);
       if (ok) {
         await refreshTodayDiet();
-        const { data: updatedStreak } = await recordActivity(currentDate);
+        const { data: updatedStreak } = await recordActivity(date);
         setStreakData(updatedStreak);
       }
       return ok;
     },
-    [currentDate, refreshTodayDiet],
+    [refreshTodayDiet],
   );
 
   const addWater = useCallback(

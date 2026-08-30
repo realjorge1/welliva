@@ -1,53 +1,81 @@
 /**
  * GUIDED SESSION — the live workout player.
  *
- * ONE instrument, ONE stage, ONE dock. The old player rebuilt the whole screen
- * for every phase, which is what made the flow feel like it kept starting over;
- * this one keeps a single persistent SessionCore on stage and changes only what
- * it says. Phases flow through it:
+ * TIME IS THE UNIT OF WORK. Every set is boxed to a clock — a hold carries its
+ * own, a rep set gets one derived from its prescription — and reps are text the
+ * athlete reads ("aim for 10–15"), never a counter they tap. Nobody can hold a
+ * phone through a set of squats, so the player never asks them to: the only
+ * touch a set needs is the one that ends it.
  *
- *   INTRO ("about this session")
- *     → COUNTDOWN (a smooth 3-2-1-GO the player owns itself, not the 1Hz tick)
- *       → ACTIVE_SET (reps / seconds)  ⇄  REST / TRANSITION
- *         → COMPLETE (celebration) → summary
+ *   INTRO (the prescription — pre-filled, tap a row to adjust)
+ *     → COUNTDOWN (a smooth 3-2-1-GO over a figure already in position)
+ *       → ACTIVE_SET (the box counts down; past zero it counts UP in gold)
+ *         ⇄ REST / TRANSITION (the only place controls live — including the
+ *            pre-filled reps stepper that confirms the set just banked)
+ *           → COMPLETE (celebration, then one question) → summary
  *
- * The stage is four fixed-height zones — caption, hero, hint, dock — so nothing
- * ever reflows as the phase changes and no control moves under a thumb that was
- * already reaching for it. The dock keeps the same shape in every phase: one
- * primary action, then Previous · context · Pause · Skip.
+ * THE FIGURE IS THE SCREEN. The demonstration used to be hidden behind a "How
+ * to" button; it is now the hero of every live phase, standing inside the
+ * instrument ring. The ring is the frame, not the star: one arc per set, the
+ * live one filling, gold overtime hand on the outside (see SessionRing).
+ *
+ * The clock is anchored to WALL TIME, not to tick count — the screen is kept
+ * awake and dims to a glance state after twenty seconds of stillness, and a
+ * player that counted intervals would quietly lose minutes to a backgrounded
+ * app. The interval below catches up on however much real time has passed.
  *
  * SessionService owns the state machine, persistence and results; it is pure,
  * and every side effect (saving, leaving) lives in an effect here rather than
- * inside a setState updater. Sessions are never endless: a rep set eases into
- * rest once its target is reached (with a visible, cancellable grace window),
- * a timed set finishes on the clock. Fully offline; an in-progress session
- * persists so it can be resumed from the last position.
+ * inside a setState updater. Fully offline; an in-progress session persists so
+ * it can be resumed from the last position.
  */
 
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { Confetti } from "@/components/Confetti";
-import { RollingNumber, enterFade, enterHero, exitFade } from "@/components/motion";
-import { AmbientCanvas, AppText, Button, IconBadge, Sheet, useColors } from "@/components/ui";
+import { enterFade, enterHero, enterRise, exitFade } from "@/components/motion";
+import {
+  AmbientCanvas,
+  AppText,
+  Button,
+  IconBadge,
+  Sheet,
+  Stepper,
+  useColors,
+} from "@/components/ui";
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
 import { Gradients, Palette, Radius, Spacing, alpha, type ThemeColors } from "@/constants/theme";
 import { useWorkout } from "@/contexts/AppContext";
+import {
+  resolveFigureMotion,
+  type FigureMotion,
+} from "@/fitness/animation/movementProfiles";
+import {
+  ExerciseFigure,
+  primaryView,
+  secondaryView,
+  useFigureClock,
+} from "@/fitness/components/ExerciseFigure";
 import { ExerciseGuideSheet } from "@/fitness/components/ExerciseGuideSheet";
 import { SessionCore } from "@/fitness/components/SessionCore";
+import { RestingFace } from "@/fitness/components/RestingFace";
+import { SessionRing } from "@/fitness/components/SessionRing";
+import { rememberSessionEffort } from "@/fitness/services/FitnessProfileStore";
 import { workoutFromSessionId } from "@/fitness/services/WorkoutCatalog";
 import {
+  SessionEffort,
   SessionExerciseInfo,
   SessionState,
-  parseTargetReps,
+  resolveWorkSeconds,
 } from "@/models/session";
 import type { PlannedExercise } from "@/models/workout";
 import { getCountdownLine } from "@/services/CoachEngine";
 import { SessionService } from "@/services/SessionService";
 import * as Haptics from "@/utils/haptics";
 import { Ionicons } from "@expo/vector-icons";
+import { useKeepAwake } from "expo-keep-awake";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -55,23 +83,73 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import Reanimated from "react-native-reanimated";
-import { SafeAreaView } from "react-native-safe-area-context";
+import Reanimated, {
+  Easing,
+  cancelAnimation,
+  interpolateColor,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 const service = SessionService.getInstance();
 
-/** Triumphant gold ramp for the completion core + "target reached" state. */
+/** Triumphant gold ramp for overtime, the final push and completion. */
 const GOLD_GRADIENT = ["#FFE39A", "#F5C451", "#E39B2E"] as const;
 
-/** How long a rep set lingers after hitting target before easing into rest. */
-const GRACE_MS = 3000;
 /** The 3-2-1-GO the player runs itself, so it never rides the 1Hz session tick. */
 const COUNT_FROM = 3;
 const GO_HOLD_MS = 450;
 
-/** Fixed stage zones — the reason nothing on this screen ever moves. */
-const CAPTION_ZONE = 96;
-const HINT_ZONE = 58;
+/** How long the stage stays fully lit with nobody touching it. */
+const IDLE_DIM_MS = 20000;
+/** How dark the chrome goes in glance mode — a hint of shape, nothing more. */
+const DIM_OPACITY = 0.11;
+
+/** How much real time a single catch-up may replay, so a long background gap
+ *  can never freeze the JS thread replaying an hour of ticks. */
+const MAX_CATCH_UP_TICKS = 900;
+
+/** The "How to" glow: two seconds lit, four seconds dark, forever. A beat that
+ *  keeps running without ever nagging. */
+const GLOW_MS = 1000;
+const GLOW_REST_MS = 4000;
+
+/** Anything above the stage: the header row plus the exercise segments. */
+const HEADER_ZONE = 68;
+/** The dock: one primary button, the four-slot icon row, and the gap between. */
+const DOCK_ZONE = 142;
+
+/**
+ * The stage's fixed zones, in two sizes.
+ *
+ * They are what stops anything on this screen from ever moving — a crossfading
+ * caption or a rolling clock can't nudge the figure by a pixel — but they also
+ * eat the height the figure needs, so a short phone gets the compact set and
+ * the hero is then sized from whatever is genuinely left over.
+ */
+function stageMetrics(compact: boolean) {
+  return {
+    caption: compact ? 76 : 88,
+    readout: compact ? 78 : 98,
+    hint: compact ? 56 : 64,
+    clockFont: compact ? 44 : 62,
+    clockLine: compact ? 50 : 70,
+    // REST INVERTS THE HIERARCHY. During work the clock is the headline and the
+    // word under it is a label; during rest the WORD is the headline and the
+    // clock is the detail — because "rest" is the instruction and the seconds
+    // are only how long it lasts. Same zone, opposite emphasis.
+    restWordFont: compact ? 26 : 32,
+    restWordLine: compact ? 30 : 37,
+    restFont: compact ? 24 : 30,
+    restLine: compact ? 28 : 35,
+  };
+}
 
 function getDifficultyColor(d: string): string {
   switch (d) {
@@ -92,6 +170,22 @@ function formatTime(totalSec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+/** "3 × 10–15" for reps, "3 × 45s" for a hold — always the LIVE prescription. */
+function prescriptionText(ex: SessionExerciseInfo): string {
+  return ex.exerciseType === "timed"
+    ? `${ex.sets} × ${resolveWorkSeconds(ex)}s`
+    : `${ex.sets} × ${ex.reps}`;
+}
+
+/** Rough wall-clock length of the whole session, for the prescription header. */
+function estimateSessionSeconds(exercises: SessionExerciseInfo[]): number {
+  return exercises.reduce((sum, e) => {
+    const work = resolveWorkSeconds(e) * e.sets;
+    const rest = e.restSeconds * Math.max(0, e.sets - 1);
+    return sum + work + rest + e.transitionSeconds;
+  }, 0);
+}
+
 const PATTERN_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
   push: "arrow-up",
   pull: "arrow-down",
@@ -105,6 +199,59 @@ const PATTERN_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 function getPatternIcon(pattern: string): keyof typeof Ionicons.glyphMap {
   return PATTERN_ICON[pattern] || "barbell";
+}
+
+/**
+ * Which corner the second camera angle sits in.
+ *
+ * Hashed off the exercise id rather than drawn from `Math.random` on purpose:
+ * it still varies across a session, but it can't flip mid-set on a re-render,
+ * which is the one thing that would make it feel broken instead of incidental.
+ */
+function auxCornerFor(id: string): "left" | "right" {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return (h & 1) === 0 ? "left" : "right";
+}
+
+/** Air between the second angle's panel and the ring's outer edge. */
+const AUX_RING_CLEARANCE = 8;
+/** Height the FRONT / SIDE caption adds under the panel. */
+const AUX_LABEL_HEIGHT = 15;
+/** Below this it stops being a demonstration and becomes a smudge. */
+const AUX_MIN_SIZE = 54;
+
+/**
+ * How big the second camera angle can be drawn in a stage corner.
+ *
+ * THIS USED TO BE A YES/NO GATE, and on most phones the answer was no. It
+ * asked for one and a half panel-widths of clear gutter beside the ring, which
+ * a 390pt-wide screen doesn't have — so the second angle simply never rendered,
+ * silently, on the exact devices it was written for. Nothing was wrong with the
+ * panel; it was never mounted.
+ *
+ * A ring is a CIRCLE, so the corners of the square it sits in are free even
+ * when the gutter beside it is not. This measures the real diagonal to the
+ * corner the panel occupies and returns the largest size that still clears the
+ * graduation band, shrinking rather than disappearing. It always returns
+ * something drawable — the panel is never conditionally absent again.
+ */
+function secondAngleSize(
+  stageWidth: number,
+  heroRoom: number,
+  heroSize: number,
+  /** Panel width as a fraction of its height — 0.94 front, 0.78 side. */
+  aspect: number,
+): number {
+  const cx = stageWidth / 2;
+  const cy = Math.max(0, (heroRoom - heroSize) / 2) + heroSize / 2;
+  const r = heroSize / 2 + AUX_RING_CLEARANCE;
+  for (let s = Math.round(heroSize * 0.42); s > AUX_MIN_SIZE; s -= 2) {
+    const dx = cx - s * aspect;
+    const dy = cy - (s + AUX_LABEL_HEIGHT);
+    if (dx * dx + dy * dy >= r * r) return s;
+  }
+  return AUX_MIN_SIZE;
 }
 
 /**
@@ -175,8 +322,6 @@ function buildExerciseList(
     .filter(Boolean) as SessionExerciseInfo[];
 }
 
-type SetPhase = "counting" | "grace" | "extended";
-
 export default function GuidedSessionScreen() {
   const params = useLocalSearchParams<{
     exerciseIds: string;
@@ -192,9 +337,36 @@ export default function GuidedSessionScreen() {
   const { workoutPlan } = useWorkout();
   const { width, height } = useWindowDimensions();
 
-  // The hero core sizes to the viewport — bounded by BOTH axes so the caption /
-  // core / hint / dock stack never collides on shorter screens.
-  const coreSize = Math.min(width - 112, height * 0.3, 300);
+  // The screen stays lit for the whole session: the demonstration figure is the
+  // interface, and a sleeping screen would take it away exactly when someone
+  // has put the phone on the floor and needs it most. Glance mode below is what
+  // saves the battery instead.
+  useKeepAwake("welliva-session");
+
+  // The instrument takes the height nothing else claimed. Sizing it off a
+  // fraction of the viewport is what lets a hero overlap the clock on a short
+  // phone, so it is measured against the real zones instead — width still caps
+  // it, and it never grows past the point where the figure stops gaining.
+  const insets = useSafeAreaInsets();
+  const metrics = stageMetrics(height < 720);
+  const heroRoom =
+    height -
+    insets.top -
+    insets.bottom -
+    HEADER_ZONE -
+    DOCK_ZONE -
+    metrics.caption -
+    metrics.readout -
+    metrics.hint -
+    Spacing.lg;
+  // The ring gives back a sliver of that room so the second camera angle has a
+  // corner to live in that is genuinely OUTSIDE the circle — a small panel laid
+  // over the graduation band would read as a mistake.
+  const heroSize = Math.max(150, Math.min(width - 52, heroRoom * 0.8, 300));
+  // Air between the figure and the ring: at 0.62 even the wide front-view pose
+  // clears the graduation band, so the two never read as one crowded object.
+  const figureSize = Math.round(heroSize * 0.62);
+  const stageWidth = width - Spacing.screen * 2;
 
   // Map every plan exercise by id so AI-generated moves (not in the local DB)
   // resolve with their how-to.
@@ -214,7 +386,7 @@ export default function GuidedSessionScreen() {
   const isResume = params.resume === "1";
 
   // `null` only while a resumed session is being restored from storage —
-  // fresh sessions initialize synchronously (starting on the INTRO screen).
+  // fresh sessions initialize synchronously (starting on the prescription).
   const [state, setState] = useState<SessionState | null>(() =>
     isResume
       ? null
@@ -266,38 +438,58 @@ export default function GuidedSessionScreen() {
 
   const [showDrills, setShowDrills] = useState(false);
   /**
-   * Which exercise the how-to is open on, or null when it's closed. Holding the
-   * exercise itself (rather than a boolean plus "whatever is current") is what
-   * lets the guide be opened from the intro list and the drill list — the
-   * how-to should never be something you can only reach mid-set.
+   * Which exercise the how-to is open on, or null when it's closed. The figure
+   * is on stage throughout now, so this sheet is the DEEP reference (steps,
+   * muscle map, both camera angles) rather than the only way to see the move.
    */
   const [guideFor, setGuideFor] = useState<SessionExerciseInfo | null>(null);
   const closeGuide = useCallback(() => setGuideFor(null), []);
 
-  /** Open the how-to from the drill list without stacking sheet on sheet. */
+  /** Open the how-to from a list without stacking sheet on sheet. */
   const openGuideFromDrills = useCallback((ex: SessionExerciseInfo) => {
     setShowDrills(false);
     setGuideFor(ex);
   }, []);
 
-  /* ── Tick loop ────────────────────────────────────────────────────────
-   * COUNTDOWN is deliberately excluded: the player runs its own smooth 3-2-1
+  /** Which exercise the prescription sheet is adjusting (index), or null. */
+  const [prescribeIndex, setPrescribeIndex] = useState<number | null>(null);
+
+  /* ── Tick loop, anchored to WALL TIME ─────────────────────────────────
+   * The state machine still steps one pure second at a time, but how many
+   * steps are owed is read off the clock rather than counted. A backgrounded
+   * app, a throttled timer or a dimmed screen therefore costs no session time:
+   * the next interval replays whatever really elapsed.
+   *
+   * COUNTDOWN is deliberately excluded — the player runs its own smooth 3-2-1
    * below, and the workout clock only starts once the first set opens. */
+  const tickAnchor = useRef({ at: 0, applied: 0 });
   useEffect(() => {
     if (
       !phase ||
       phase === "INTRO" ||
       phase === "COUNTDOWN" ||
       phase === "COMPLETE" ||
-      phase === "SUMMARY"
+      phase === "SUMMARY" ||
+      isPaused
     ) {
       return;
     }
+    tickAnchor.current = { at: Date.now(), applied: 0 };
     const id = setInterval(() => {
-      setState((prev) => (prev && !prev.isPaused ? service.tick(prev) : prev));
-    }, 1000);
+      const due = Math.floor((Date.now() - tickAnchor.current.at) / 1000);
+      const owed = due - tickAnchor.current.applied;
+      if (owed <= 0) return;
+      tickAnchor.current.applied = due;
+      const steps = Math.min(owed, MAX_CATCH_UP_TICKS);
+      setState((prev) => {
+        if (!prev || prev.isPaused) return prev;
+        let next = prev;
+        for (let i = 0; i < steps; i++) next = service.tick(next);
+        return next;
+      });
+    }, 250);
     return () => clearInterval(id);
-  }, [phase]);
+  }, [phase, isPaused]);
 
   /* ── Persistence ──────────────────────────────────────────────────────
    * Checkpointed rather than written on every tick: each phase/set change and
@@ -314,21 +506,7 @@ export default function GuidedSessionScreen() {
 
   useEffect(() => {
     if (phase !== "COMPLETE") return;
-    const s = stateRef.current;
-    if (!s) return;
-    const summary = service.buildSummary(s);
-    void service.saveSummary(summary);
-    void service.clearSession();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    // Let the celebration land before the summary takes over.
-    const timer = setTimeout(() => {
-      router.replace({
-        pathname: "/session-summary",
-        params: { data: JSON.stringify(summary) },
-      });
-    }, 2600);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
   /** Mutate state through the service. Pure — persistence is the effect above. */
@@ -343,15 +521,6 @@ export default function GuidedSessionScreen() {
 
   const handleBeginFirstSet = useCallback(() => {
     applyAction((s) => service.beginFirstSet(s));
-  }, [applyAction]);
-
-  const handleAddRep = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    applyAction((s) => service.addRep(s));
-  }, [applyAction]);
-
-  const handleUndoRep = useCallback(() => {
-    applyAction((s) => service.removeRep(s));
   }, [applyAction]);
 
   const handleCompleteSet = useCallback(() => {
@@ -381,42 +550,104 @@ export default function GuidedSessionScreen() {
     applyAction((s) => service.togglePause(s));
   }, [applyAction]);
 
-  /** End the workout now → tally what was done and roll into the summary. */
-  const handleEnd = useCallback(() => {
-    Alert.alert("End session?", "We'll tally what you've done so far.", [
-      { text: "Keep training", style: "cancel" },
-      {
-        text: "End session",
-        style: "destructive",
-        onPress: () => applyAction((s) => service.stopSession(s)),
-      },
-    ]);
-  }, [applyAction]);
+  const handleAdjustReps = useCallback(
+    (delta: number) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      applyAction((s) => {
+        const current = service.lastSetReps(s);
+        return current === null ? s : service.adjustLastSetReps(s, current + delta);
+      });
+    },
+    [applyAction],
+  );
 
-  /** Leave the player but keep the session — it stays resumable from Fitness. */
+  const handlePrescribe = useCallback(
+    (index: number, patch: Partial<SessionExerciseInfo>) => {
+      applyAction((s) => service.updateExercise(s, index, patch));
+    },
+    [applyAction],
+  );
+
+  /* ── Getting out ──────────────────────────────────────────────────────
+   * There used to be no way to END a session except from inside the pause
+   * screen, which is why the flow felt like it could run forever: pause,
+   * continue, rest, continue, with nothing that said "I'm finished". Every
+   * exit now goes through ONE sheet with both answers spelled out — the ✕ in
+   * the header opens it, and so does the pause screen. */
+  const [showExit, setShowExit] = useState(false);
+
   const handleLeave = useCallback(() => {
     const s = stateRef.current;
-    // On the intro (never started) there's nothing to resume — just go back.
+    // On the prescription (never started) there's nothing to end or resume.
     if (!s || s.phase === "INTRO") {
       router.back();
       return;
     }
-    Alert.alert("Leave workout?", "Your progress is saved — resume anytime.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Leave",
-        onPress: () => {
-          void service.saveSession({ ...s, isPaused: true });
-          router.back();
-        },
-      },
-    ]);
+    setShowExit(true);
   }, [router]);
+
+  /** Finish here: tally everything done so far and roll into the summary. */
+  const handleEndSession = useCallback(() => {
+    setShowExit(false);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    applyAction((s) => service.stopSession(s));
+  }, [applyAction]);
+
+  /** Step away but keep the session — it stays resumable from Fitness. */
+  const handleLeaveForNow = useCallback(() => {
+    setShowExit(false);
+    const s = stateRef.current;
+    if (s) void service.saveSession({ ...s, isPaused: true });
+    router.back();
+  }, [router]);
+
+  /**
+   * The one question, answered → bank the session and hand over to the summary.
+   *
+   * Nothing is written until this point on purpose: bail out at the question
+   * and the run stays a resumable in-progress session rather than a half-saved
+   * record. `saveSummary` is idempotent by run id, so the summary screen's own
+   * write is still safe.
+   */
+  const handleFinish = useCallback(
+    (effort: SessionEffort) => {
+      const s = stateRef.current;
+      if (!s) return;
+      const summary = service.buildSummary(s, 70, effort);
+      void service.saveSummary(summary);
+      void service.clearSession();
+      void rememberSessionEffort({
+        date: summary.date,
+        workoutId: summary.workoutSessionId,
+        effort,
+      });
+      const target = {
+        pathname: "/session-summary" as const,
+        params: { data: JSON.stringify(summary) },
+      };
+      // Clear the screens the player was launched FROM out from under the
+      // summary. Without this, a back gesture off the summary lands on
+      // whatever opened the session — typically the detail page of the very
+      // exercise you just finished, sitting there with a Start button, which
+      // reads as the session having looped back to the beginning.
+      try {
+        if (router.canDismiss()) {
+          router.dismissAll();
+          router.push(target);
+          return;
+        }
+      } catch {
+        // Nothing to dismiss, or a navigator without it — the replace below
+        // still takes the player itself off the stack, as it always did.
+      }
+      router.replace(target);
+    },
+    [router],
+  );
 
   /* ── The player's own countdown ───────────────────────────────────────
    * Anchored to wall-clock time so the digits land on the second even if the
-   * JS thread hiccups, and paired with a core that charges continuously rather
-   * than stepping three times. */
+   * JS thread hiccups, over a figure that is already in position. */
   const [countdown, setCountdown] = useState(COUNT_FROM);
   useEffect(() => {
     if (phase !== "COUNTDOWN" || isPaused) return;
@@ -435,49 +666,80 @@ export default function GuidedSessionScreen() {
     return () => timers.forEach(clearTimeout);
   }, [phase, isPaused, handleBeginFirstSet]);
 
-  /* ── Rep-set lifecycle ────────────────────────────────────────────────
-   * Count toward the recommended reps → on hitting them the set eases into
-   * rest through a VISIBLE grace window the athlete can cancel by carrying on. */
-  const [setPhase, setSetPhase] = useState<SetPhase>("counting");
-  const [graceLeft, setGraceLeft] = useState(0);
+  /* ── Glance mode ──────────────────────────────────────────────────────
+   * Twenty seconds into a set with nobody touching the screen, the chrome
+   * fades out and the stage keeps only what you can read from the floor: the
+   * figure, the clock, the ring. The next touch anywhere wakes it and does
+   * NOTHING else — so a blind tap can never skip an exercise. */
+  const [dimmed, setDimmed] = useState(false);
+  const [wakeNonce, setWakeNonce] = useState(0);
+  const wake = useCallback(() => setWakeNonce((n) => n + 1), []);
 
+  const sheetOpen = guideFor !== null || showDrills;
   useEffect(() => {
-    setSetPhase("counting");
-  }, [state?.currentExerciseIndex, state?.currentSet, phase]);
+    // Reading the how-to is not idling — the timer only runs against a stage
+    // nobody is looking at.
+    if (phase !== "ACTIVE_SET" || isPaused || sheetOpen) {
+      setDimmed(false);
+      return;
+    }
+    setDimmed(false);
+    const id = setTimeout(() => setDimmed(true), IDLE_DIM_MS);
+    return () => clearTimeout(id);
+  }, [phase, isPaused, sheetOpen, wakeNonce, state?.currentSet, state?.currentExerciseIndex]);
+
+  const chrome = useSharedValue(1);
+  useEffect(() => {
+    chrome.value = withTiming(dimmed ? DIM_OPACITY : 1, { duration: dimmed ? 900 : 220 });
+  }, [dimmed, chrome]);
+  const chromeStyle = useAnimatedStyle(() => ({ opacity: chrome.value }));
 
   const currentEx = state?.exercises[state.currentExerciseIndex];
-  const isTimed = currentEx?.exerciseType === "timed";
-  const targetReps = currentEx && !isTimed ? parseTargetReps(currentEx.reps) : 0;
-  const targetSec = currentEx && isTimed ? parseTargetReps(currentEx.reps) : 0;
-  const reps = state?.currentReps ?? 0;
-  const reachedTarget =
-    phase === "ACTIVE_SET" && !isTimed && targetReps > 0 && reps >= targetReps;
 
-  useEffect(() => {
-    if (setPhase === "counting" && reachedTarget) {
-      setSetPhase("grace");
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    }
-  }, [reachedTarget, setPhase]);
-
-  useEffect(() => {
-    if (setPhase !== "grace") return;
-    setGraceLeft(Math.round(GRACE_MS / 1000));
-    const iv = setInterval(() => setGraceLeft((v) => Math.max(0, v - 1)), 1000);
-    const done = setTimeout(handleCompleteSet, GRACE_MS);
-    return () => {
-      clearInterval(iv);
-      clearTimeout(done);
-    };
-  }, [setPhase, handleCompleteSet]);
-
-  /** Tapping the core during grace means "I'm doing more" → stay in the set. */
-  const tapRep = useCallback(() => {
-    setSetPhase((p) => (p === "grace" ? "extended" : p));
-    handleAddRep();
-  }, [handleAddRep]);
-
-  const keepGoing = useCallback(() => setSetPhase("extended"), []);
+  /* ── The demonstration ────────────────────────────────────────────────
+   * During a transition the move on stage is the one COMING, so the athlete
+   * sees what they're about to do while they walk to it. */
+  const figureExercise = state
+    ? state.phase === "TRANSITION"
+      ? state.exercises[state.currentExerciseIndex + 1]
+      : currentEx
+    : undefined;
+  const exerciseMotion = figureExercise
+    ? resolveFigureMotion(figureExercise.exerciseId, figureExercise.category)
+    : "neutral";
+  /** REST is the one phase with nothing to demonstrate — the face takes over. */
+  const resting = phase === "REST";
+  /**
+   * THE FIGURE STOPS WHEN THE ATHLETE DOES.
+   *
+   * A round ends and the player walks to the next exercise — and the figure
+   * used to keep grinding out reps of a move nobody is doing. Rest already had
+   * its answer (the sleeping face); a transition had none, so the stage looked
+   * like it hadn't noticed the set was over.
+   *
+   * TRANSITION now shows the same body AT EASE: an idle stand-and-breathe in
+   * place of the movement, on its own slow clock. The exercise itself starts
+   * moving again the moment the next round does.
+   */
+  const idling = phase === "TRANSITION";
+  const figureMotion: FigureMotion = idling ? "idle" : exerciseMotion;
+  /**
+   * ONE clock for both panels. Two ExerciseFigures each running their own loop
+   * drift apart the moment either remounts, and two copies of the same body out
+   * of step is worse than showing one angle.
+   */
+  const figureClock = useFigureClock(figureMotion, !isPaused && !resting);
+  // The camera angles stay chosen by the EXERCISE, not by the idle pose, so
+  // the stage doesn't swing its cameras around during the walk between moves.
+  const mainAngle = primaryView(exerciseMotion);
+  const auxAngle = secondaryView(exerciseMotion);
+  const auxCorner = auxCornerFor(figureExercise?.exerciseId ?? "");
+  const auxSize = secondAngleSize(
+    stageWidth,
+    heroRoom,
+    heroSize,
+    auxAngle === "side" ? 0.78 : 0.94,
+  );
 
   // While a resumed session is being restored, hold a quiet placeholder.
   if (!state) {
@@ -493,7 +755,7 @@ export default function GuidedSessionScreen() {
   }
 
   // A session with nothing in it can't be played — say so instead of counting
-  // reps of nothing.
+  // seconds of nothing.
   if (state.exercises.length === 0) {
     return (
       <View style={styles.flex}>
@@ -527,95 +789,97 @@ export default function GuidedSessionScreen() {
   const isTransition = phase === "TRANSITION";
   const nextExercise = state.exercises[state.currentExerciseIndex + 1];
   /** Which move the caption's info affordance and the dock's "How to" open. */
-  const guideTarget = isTransition ? nextExercise : currentEx;
+  const guideTarget = figureExercise;
+  const isTimed = currentEx?.exerciseType === "timed";
 
-  /* ── What the one instrument is showing right now ─────────────────── */
+  /* ── The clock ────────────────────────────────────────────────────── */
 
+  const workSeconds = currentEx ? resolveWorkSeconds(currentEx) : 0;
   const restTotal = isTransition
     ? nextExercise?.transitionSeconds ?? 30
     : currentEx?.restSeconds ?? 60;
   const timer = state.timerValue;
+  const remaining = Math.max(0, workSeconds - timer);
+  const overtime = phase === "ACTIVE_SET" ? Math.max(0, timer - workSeconds) : 0;
 
-  // The final five seconds of a timed hold run hot, as does a rep set that has
-  // already hit its target.
-  const hot =
-    phase === "ACTIVE_SET" &&
-    (isTimed
-      ? targetSec > 0 && targetSec - timer <= 5 && targetSec - timer >= 0 && timer > 0
-      : setPhase !== "counting");
+  // The last five seconds of the box run hot, and so does every second past it.
+  const hot = phase === "ACTIVE_SET" && (overtime > 0 || (remaining > 0 && remaining <= 5));
 
-  let coreProgress = 0;
-  let coreLinear = false;
-  let coreDuration = 520;
-  let coreGradient: readonly [string, string, ...string[]] = colors.brandGradient;
+  /* ── What the instrument is showing right now ─────────────────────── */
 
-  if (phase === "COUNTDOWN") {
-    // Charges up as the count runs down. The target is always one step AHEAD
-    // of the digit on screen, so the cell glides continuously across the three
-    // seconds and lands exactly full on GO instead of trailing a second behind.
-    coreProgress = Math.min(1, (COUNT_FROM - countdown + 1) / COUNT_FROM);
-    coreLinear = true;
-    coreDuration = 1000;
-  } else if (phase === "ACTIVE_SET") {
-    coreProgress = isTimed
-      ? targetSec > 0
-        ? Math.min(1, timer / targetSec)
-        : 0
-      : targetReps > 0
-        ? Math.min(1, reps / targetReps)
-        : 0;
-    coreLinear = isTimed;
-    coreDuration = isTimed ? 1000 : 420;
-    coreGradient = hot ? GOLD_GRADIENT : colors.brandGradient;
+  let ringProgress = 0;
+  let ringLinear = false;
+  let ringDuration = 520;
+  let ringGradient: readonly [string, string, ...string[]] = colors.brandGradient;
+  const ringSegments = isResting ? 1 : currentEx?.sets ?? 1;
+  const ringCurrent = isResting ? 1 : state.currentSet;
+
+  if (phase === "ACTIVE_SET") {
+    ringProgress = workSeconds > 0 ? Math.min(1, timer / workSeconds) : 0;
+    ringLinear = true;
+    ringDuration = 1000;
+    ringGradient = hot ? GOLD_GRADIENT : colors.brandGradient;
   } else if (isResting) {
-    coreProgress = restTotal > 0 ? Math.max(0, Math.min(1, timer / restTotal)) : 0;
-    coreLinear = true;
-    coreDuration = 1000;
-    coreGradient = isTransition ? colors.brandGradient : Gradients.water;
+    ringProgress = restTotal > 0 ? Math.max(0, Math.min(1, timer / restTotal)) : 0;
+    ringLinear = true;
+    ringDuration = 1000;
+    ringGradient = isTransition ? colors.brandGradient : Gradients.water;
   }
 
-  const corePulse = isResting || hot || phase === "COUNTDOWN";
+  const ringPulse = isResting || hot || phase === "COUNTDOWN";
 
-  /* ── Caption / readout / hint / dock, per phase ────────────────────── */
+  /* ── Caption / hint / dock, per phase ──────────────────────────────── */
 
   const caption =
     phase === "COUNTDOWN"
-      ? { eyebrow: "Get ready", title: currentEx?.name ?? "", sub: "" }
+      ? { eyebrow: "Get ready", title: currentEx?.name ?? "" }
       : phase === "ACTIVE_SET"
-        ? { eyebrow: `Exercise ${exerciseProgress}`, title: currentEx?.name ?? "", sub: "" }
+        ? { eyebrow: `Exercise ${exerciseProgress}`, title: currentEx?.name ?? "" }
         : isTransition
-          ? { eyebrow: "Up next", title: nextExercise?.name ?? "", sub: nextExercise ? `${nextExercise.sets} ${lapWord.toLowerCase()}${nextExercise.sets === 1 ? "" : "s"} × ${nextExercise.reps}` : "" }
-          : {
-              eyebrow: "Recover",
-              title: currentEx?.name ?? "",
-              sub: `Next · ${lapWord} ${state.currentSet + 1} of ${currentEx?.sets ?? 0}`,
-            };
+          ? { eyebrow: "Up next", title: nextExercise?.name ?? "" }
+          : { eyebrow: "Recover", title: currentEx?.name ?? "" };
 
-  const coachCue = currentEx?.coachCues?.[0] ?? getCountdownLine(countdown).text;
+  // One cue per set, walked through the exercise's list — a written coach that
+  // says something new each round instead of repeating line one four times.
+  const coachCue =
+    currentEx?.coachCues?.length
+      ? currentEx.coachCues[(state.currentSet - 1) % currentEx.coachCues.length]
+      : getCountdownLine(countdown).text;
 
   const primary =
     phase === "COUNTDOWN"
       ? { label: "Start now", icon: "flash" as const, variant: "tonal" as const, onPress: handleBeginFirstSet }
       : phase === "ACTIVE_SET"
-        ? { label: `Done ${lapWord.toLowerCase()}`, icon: "checkmark" as const, variant: "primary" as const, onPress: handleCompleteSet }
+        ? {
+            label: `Done ${lapWord.toLowerCase()}`,
+            icon: "checkmark" as const,
+            variant: "primary" as const,
+            onPress: handleCompleteSet,
+          }
         : isTransition
-          ? { label: "Start now", icon: "flash" as const, variant: "primary" as const, onPress: handleSkipRest }
+          ? { label: "Start next", icon: "flash" as const, variant: "primary" as const, onPress: handleSkipRest }
           : { label: "Skip rest", icon: "play-forward" as const, variant: "primary" as const, onPress: handleSkipRest };
 
   // Slot two of the dock carries whatever this phase actually needs there —
   // never a dead button.
   const contextAction = isResting
     ? { icon: "add" as const, label: "+20s", onPress: handleAddRest, disabled: false }
-    : phase === "ACTIVE_SET" && !isTimed
-      ? { icon: "arrow-undo" as const, label: "Undo rep", onPress: handleUndoRep, disabled: reps === 0 }
-      : { icon: "help-circle" as const, label: "How to", onPress: () => guideTarget && setGuideFor(guideTarget), disabled: !guideTarget };
+    : {
+        icon: "help-circle" as const,
+        label: "How to",
+        onPress: () => guideTarget && setGuideFor(guideTarget),
+        disabled: !guideTarget,
+      };
+
+  /** Reps banked for the set that just finished — the rest screen's stepper. */
+  const bankedReps = isResting ? service.lastSetReps(state) : null;
 
   return (
     <View style={styles.flex}>
       <AmbientCanvas />
       <SafeAreaView style={styles.flex}>
         {isLivePhase && (
-          <>
+          <Reanimated.View style={chromeStyle} pointerEvents={dimmed ? "none" : "auto"}>
             <SessionHeader
               label={state.sessionLabel}
               elapsed={formatTime(state.elapsedSeconds)}
@@ -629,19 +893,19 @@ export default function GuidedSessionScreen() {
               currentIndex={state.currentExerciseIndex}
               colors={colors}
             />
-          </>
+          </Reanimated.View>
         )}
 
         <View style={styles.main}>
           {phase === "INTRO" && (
-            <IntroView
+            <PrescriptionView
               label={state.sessionLabel}
               exercises={state.exercises}
               lapWord={lapWord}
               colors={colors}
               onStart={handleStart}
               onBack={handleLeave}
-              onShowGuide={setGuideFor}
+              onAdjust={setPrescribeIndex}
             />
           )}
 
@@ -652,14 +916,14 @@ export default function GuidedSessionScreen() {
               exerciseProgress={exerciseProgress}
               colors={colors}
               onResume={handleTogglePause}
-              onEnd={handleEnd}
+              onEnd={handleLeave}
             />
           )}
 
           {isLivePhase && !isPaused && (
             <View style={styles.stage}>
               {/* ── Caption ─────────────────────────────────────────── */}
-              <View style={styles.captionZone}>
+              <Reanimated.View style={[styles.captionZone, { height: metrics.caption }, chromeStyle]}>
                 <Reanimated.View
                   key={`cap-${phase}-${state.currentExerciseIndex}`}
                   entering={enterFade()}
@@ -686,7 +950,7 @@ export default function GuidedSessionScreen() {
                     </AppText>
                     <Ionicons name="information-circle" size={18} color={colors.primary} />
                   </Pressable>
-                  {phase === "ACTIVE_SET" && currentEx ? (
+                  {currentEx && !isTransition ? (
                     <SetPips
                       total={currentEx.sets}
                       current={state.currentSet}
@@ -696,84 +960,150 @@ export default function GuidedSessionScreen() {
                     />
                   ) : (
                     <AppText variant="footnote" color="tertiary">
-                      {caption.sub}
+                      {nextExercise ? prescriptionText(nextExercise) : ""}
                     </AppText>
                   )}
                 </Reanimated.View>
-              </View>
+              </Reanimated.View>
 
-              {/* ── Hero: one persistent instrument ─────────────────── */}
+              {/* ── Hero: the demonstration, framed by the instrument ── */}
               <View style={styles.heroZone}>
-                <Pressable
-                  onPress={tapRep}
-                  disabled={phase !== "ACTIVE_SET" || isTimed}
-                  accessibilityRole="button"
-                  accessibilityLabel="Count a rep"
-                  style={({ pressed }) => [
-                    styles.heroTap,
-                    pressed && phase === "ACTIVE_SET" && !isTimed && styles.heroPressed,
-                  ]}
+                <SessionRing
+                  progress={ringProgress}
+                  segments={ringSegments}
+                  currentSegment={ringCurrent}
+                  size={heroSize}
+                  gradient={ringGradient}
+                  overtimeSeconds={overtime}
+                  pulse={ringPulse}
+                  linear={ringLinear}
+                  duration={ringDuration}
                 >
-                  <View style={{ width: coreSize, height: coreSize }}>
-                    <SessionCore
-                      progress={coreProgress}
-                      size={coreSize}
-                      gradient={coreGradient}
-                      pulse={corePulse}
-                      linear={coreLinear}
-                      duration={coreDuration}
-                    />
+                  {resting ? (
+                    <RestingFace size={figureSize} playing />
+                  ) : (
+                    figureExercise && (
+                      <ExerciseFigure
+                        key={`${figureExercise.exerciseId}-main-${idling ? "idle" : "work"}`}
+                        motion={figureMotion}
+                        views={[mainAngle]}
+                        size={figureSize}
+                        // At ease the body reads as standing by, not as the
+                        // demonstration — same figure, one step back.
+                        color={idling ? alpha(colors.text, 0.55) : colors.text}
+                        bare
+                        clock={figureClock}
+                      />
+                    )
+                  )}
+                  {phase === "COUNTDOWN" && (
                     <View style={[StyleSheet.absoluteFill, styles.centerAll]} pointerEvents="none">
-                      <Reanimated.View
-                        key={`read-${phase}`}
-                        entering={enterFade()}
-                        style={styles.centerAll}
+                      <View
+                        style={[
+                          styles.countScrim,
+                          {
+                            width: figureSize * 1.12,
+                            height: figureSize * 1.12,
+                            borderRadius: figureSize * 0.56,
+                            backgroundColor: alpha(colors.background, 0.62),
+                          },
+                        ]}
+                      />
+                      <Reanimated.Text
+                        key={countdown}
+                        entering={enterHero()}
+                        style={[
+                          styles.bigNumber,
+                          {
+                            color: countdown <= 0 ? colors.primary : colors.text,
+                            fontSize: Math.round(heroSize * (countdown <= 0 ? 0.24 : 0.32)),
+                            lineHeight: Math.round(heroSize * (countdown <= 0 ? 0.28 : 0.36)),
+                          },
+                        ]}
                       >
-                        <CoreReadout
-                          phase={phase}
-                          countdown={countdown}
-                          reps={reps}
-                          timer={timer}
-                          isTimed={!!isTimed}
-                          target={currentEx?.reps ?? ""}
-                          size={coreSize}
-                          hot={hot}
-                          colors={colors}
-                        />
-                      </Reanimated.View>
+                        {countdown <= 0 ? "GO" : countdown}
+                      </Reanimated.Text>
                     </View>
+                  )}
+                </SessionRing>
+
+                {/* The other camera angle — small, unframed, in a stage corner
+                    the ring's circle leaves empty, and beating on the SAME
+                    clock as the figure inside the ring. Sized to fit rather
+                    than gated on fitting: see secondAngleSize. */}
+                {!resting && figureExercise && (
+                  <View
+                    style={[styles.auxFigure, auxCorner === "left" ? { left: 0 } : { right: 0 }]}
+                    pointerEvents="none"
+                  >
+                    <ExerciseFigure
+                      key={`${figureExercise.exerciseId}-aux-${idling ? "idle" : "work"}`}
+                      motion={figureMotion}
+                      views={[auxAngle]}
+                      size={auxSize}
+                      color={alpha(colors.text, idling ? 0.4 : 0.82)}
+                      bare
+                      clock={figureClock}
+                    />
+                    <AppText variant="caption" color="tertiary" uppercase align="center">
+                      {auxAngle}
+                    </AppText>
                   </View>
-                </Pressable>
+                )}
               </View>
 
-              {/* ── Hint ────────────────────────────────────────────── */}
-              <View style={styles.hintZone}>
-                {phase === "ACTIVE_SET" && setPhase === "grace" ? (
-                  <GraceBar
-                    secondsLeft={graceLeft}
+              {/* ── Readout: the clock, big enough to read from the floor ── */}
+              <View style={[styles.readoutZone, { height: metrics.readout }]}>
+                <Reanimated.View key={`read-${phase}`} entering={enterFade()} style={styles.zoneFill}>
+                  <StageReadout
+                    phase={phase}
+                    remaining={remaining}
+                    overtime={overtime}
+                    restLeft={timer}
+                    isTimed={!!isTimed}
+                    prescription={currentEx?.reps ?? ""}
+                    lapWord={lapWord}
+                    nextName={nextExercise?.name}
+                    metrics={metrics}
+                    colors={colors}
+                  />
+                </Reanimated.View>
+              </View>
+
+              {/* ── Hint / the rest screen's one input ─────────────────── */}
+              <Reanimated.View
+                style={[styles.hintZone, { height: metrics.hint }, chromeStyle]}
+                pointerEvents={dimmed ? "none" : "auto"}
+              >
+                {isResting && bankedReps !== null ? (
+                  <RepConfirm
+                    reps={bankedReps}
                     lapWord={lapWord}
                     colors={colors}
-                    onKeepGoing={keepGoing}
+                    onAdjust={handleAdjustReps}
                   />
                 ) : (
                   <Reanimated.View
-                    key={`hint-${phase}-${setPhase}`}
+                    key={`hint-${phase}-${overtime > 0 ? "over" : "in"}`}
                     entering={enterFade()}
                     style={styles.zoneFill}
                   >
                     <HintPill
                       phase={phase}
-                      setPhase={setPhase}
+                      overtime={overtime > 0}
                       isTimed={!!isTimed}
                       cue={coachCue}
                       colors={colors}
                     />
                   </Reanimated.View>
                 )}
-              </View>
+              </Reanimated.View>
 
               {/* ── Dock: same shape in every phase ─────────────────── */}
-              <View style={styles.dock}>
+              <Reanimated.View
+                style={[styles.dock, chromeStyle]}
+                pointerEvents={dimmed ? "none" : "auto"}
+              >
                 <Button
                   label={primary.label}
                   icon={primary.icon}
@@ -796,6 +1126,7 @@ export default function GuidedSessionScreen() {
                     label={contextAction.label}
                     onPress={contextAction.onPress}
                     disabled={contextAction.disabled}
+                    attention={phase === "ACTIVE_SET" && !dimmed}
                     colors={colors}
                   />
                   <DockButton
@@ -811,15 +1142,37 @@ export default function GuidedSessionScreen() {
                     colors={colors}
                   />
                 </View>
-              </View>
+              </Reanimated.View>
             </View>
           )}
 
           {phase === "COMPLETE" && (
-            <CompletionView state={state} colors={colors} size={coreSize} />
+            <CompletionView state={state} colors={colors} size={heroSize} onFinish={handleFinish} />
           )}
         </View>
       </SafeAreaView>
+
+      {/* Glance mode's wake layer: while the stage is dim the FIRST touch only
+          brings the chrome back. Nothing underneath it can be hit blind. */}
+      {dimmed && (
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={wake}
+          accessibilityRole="button"
+          accessibilityLabel="Wake the session controls"
+        />
+      )}
+
+      {/* The only exit, and it names both ways out. */}
+      <ExitSheet
+        visible={showExit}
+        elapsed={formatTime(state.elapsedSeconds)}
+        exerciseProgress={exerciseProgress}
+        colors={colors}
+        onClose={() => setShowExit(false)}
+        onEnd={handleEndSession}
+        onLeave={handleLeaveForNow}
+      />
 
       {/* "This session" — the whole workout at a glance */}
       <DrillSheet
@@ -830,8 +1183,21 @@ export default function GuidedSessionScreen() {
         onShowGuide={openGuideFromDrills}
       />
 
-      {/* How-to guide — demo, steps, muscle map; everything instructional lives
-          here so the live set screen stays a single-focus counter. */}
+      {/* Adjust one exercise's prescription before the clock starts. */}
+      <PrescribeSheet
+        index={prescribeIndex}
+        exercise={prescribeIndex === null ? undefined : state.exercises[prescribeIndex]}
+        lapWord={lapWord}
+        colors={colors}
+        onClose={() => setPrescribeIndex(null)}
+        onChange={handlePrescribe}
+        onShowGuide={(ex) => {
+          setPrescribeIndex(null);
+          setGuideFor(ex);
+        }}
+      />
+
+      {/* How-to — the deep reference: both angles, steps, muscle map. */}
       <ExerciseGuideSheet
         visible={guideFor !== null}
         onClose={closeGuide}
@@ -860,7 +1226,24 @@ function SessionHeader({
 }) {
   return (
     <View style={styles.topBar}>
-      <HeaderButton icon="close" label="Leave workout" onPress={onLeave} colors={colors} />
+      {/* Not a bare ✕. An unlabelled cross could mean end, leave, or cancel,
+          and which one it meant was exactly what nobody could tell. */}
+      <Pressable
+        onPress={onLeave}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="End or leave this workout"
+        style={({ pressed }) => [
+          styles.endBtn,
+          { backgroundColor: colors.surfaceMuted, borderColor: colors.border },
+          pressed && styles.pressed,
+        ]}
+      >
+        <Ionicons name="close" size={15} color={colors.text} />
+        <AppText variant="caption" weight="700">
+          End
+        </AppText>
+      </Pressable>
       <View style={styles.topCenter}>
         <AppText variant="callout" numberOfLines={1}>
           {label}
@@ -872,7 +1255,9 @@ function SessionHeader({
           </AppText>
         </View>
       </View>
-      <HeaderButton icon="list" label="This session" onPress={onDrills} colors={colors} />
+      <View style={styles.topRight}>
+        <HeaderButton icon="list" label="This session" onPress={onDrills} colors={colors} />
+      </View>
     </View>
   );
 }
@@ -973,63 +1358,67 @@ function SetPips({
   );
 }
 
-/** The number in the middle of the core — the only thing that ever changes size. */
-function CoreReadout({
+/**
+ * The clock under the figure — the one number on this screen, sized to be read
+ * from a phone lying on the floor. Counts the box DOWN, then counts UP in gold
+ * once the box is spent, because a set that runs long is not a failure state.
+ *
+ * Deliberately NOT a `RollingNumber`. An odometer is right for a value that
+ * changes now and then; on a 1Hz clock whose digits turn over at different
+ * rates it is a stutter once a second, and the seconds column is never still
+ * long enough for the roll to finish cleanly. Plain tabular numerals don't
+ * move at all — the ring carries the motion, which is what it's for.
+ */
+function StageReadout({
   phase,
-  countdown,
-  reps,
-  timer,
+  remaining,
+  overtime,
+  restLeft,
   isTimed,
-  target,
-  size,
-  hot,
+  prescription,
+  lapWord,
+  nextName,
+  metrics,
   colors,
 }: {
   phase: string | undefined;
-  countdown: number;
-  reps: number;
-  timer: number;
+  remaining: number;
+  overtime: number;
+  restLeft: number;
   isTimed: boolean;
-  target: string;
-  size: number;
-  hot: boolean;
+  prescription: string;
+  lapWord: string;
+  nextName?: string;
+  metrics: ReturnType<typeof stageMetrics>;
   colors: ThemeColors;
 }) {
   if (phase === "COUNTDOWN") {
-    const isGo = countdown <= 0;
     return (
-      <Reanimated.Text
-        key={countdown}
-        entering={enterHero()}
-        style={[
-          styles.bigNumber,
-          {
-            color: isGo ? colors.primary : colors.text,
-            fontSize: Math.round(size * (isGo ? 0.26 : 0.34)),
-            lineHeight: Math.round(size * (isGo ? 0.3 : 0.38)),
-          },
-        ]}
-      >
-        {isGo ? "GO" : countdown}
-      </Reanimated.Text>
+      <AppText variant="subhead" color="secondary">
+        {isTimed ? `Hold for ${prescription}` : `Aim for ${prescription} reps`}
+      </AppText>
     );
   }
 
   if (phase === "ACTIVE_SET") {
+    const over = overtime > 0;
     return (
       <View style={styles.centerAll}>
-        <RollingNumber
-          value={isTimed ? formatTime(timer) : reps}
-          color={hot ? Palette.warning : colors.text}
-          textStyle={[
-            styles.readoutNumber,
-            isTimed
-              ? { fontSize: Math.round(size * 0.2), lineHeight: Math.round(size * 0.23) }
-              : { fontSize: Math.round(size * 0.3), lineHeight: Math.round(size * 0.34) },
+        <Text
+          style={[
+            styles.clockNumber,
+            {
+              color: over ? colors.gold : colors.text,
+              fontSize: metrics.clockFont - (over ? 6 : 0),
+              lineHeight: metrics.clockLine - (over ? 6 : 0),
+            },
           ]}
-        />
+          allowFontScaling={false}
+        >
+          {over ? `+${formatTime(overtime)}` : formatTime(remaining)}
+        </Text>
         <AppText variant="footnote" color="tertiary">
-          {isTimed ? `of ${target}` : `of ${target} reps`}
+          {isTimed ? "hold the position" : `aim for ${prescription} reps`}
         </AppText>
       </View>
     );
@@ -1037,61 +1426,106 @@ function CoreReadout({
 
   return (
     <View style={styles.centerAll}>
-      <AppText variant="caption" color="tertiary" uppercase>
-        {phase === "TRANSITION" ? "Starts in" : "Rest"}
-      </AppText>
-      <RollingNumber
-        value={formatTime(timer)}
-        direction="down"
-        color={colors.text}
-        textStyle={[
-          styles.readoutNumber,
-          { fontSize: Math.round(size * 0.22), lineHeight: Math.round(size * 0.26) },
+      <Text
+        style={[
+          styles.restWord,
+          {
+            color: colors.text,
+            fontSize: metrics.restWordFont,
+            lineHeight: metrics.restWordLine,
+          },
         ]}
-      />
+        allowFontScaling={false}
+      >
+        {phase === "TRANSITION" ? "NEXT UP" : "REST"}
+      </Text>
+      <Text
+        style={[
+          styles.restNumber,
+          {
+            color: colors.textSecondary,
+            fontSize: metrics.restFont,
+            lineHeight: metrics.restLine,
+          },
+        ]}
+        allowFontScaling={false}
+      >
+        {formatTime(restLeft)}
+      </Text>
+      <AppText variant="footnote" color="tertiary" numberOfLines={1}>
+        {phase === "TRANSITION" ? nextName ?? "" : `next ${lapWord.toLowerCase()} coming up`}
+      </AppText>
     </View>
+  );
+}
+
+/**
+ * The rest screen's one input: the reps that were just banked, pre-filled from
+ * the prescription. Doing nothing accepts it — which is the point.
+ */
+function RepConfirm({
+  reps,
+  lapWord,
+  colors,
+  onAdjust,
+}: {
+  reps: number;
+  lapWord: string;
+  colors: ThemeColors;
+  onAdjust: (delta: number) => void;
+}) {
+  return (
+    <Reanimated.View
+      entering={enterRise()}
+      style={[
+        styles.repConfirm,
+        { backgroundColor: colors.surfaceMuted, borderColor: colors.border },
+      ]}
+    >
+      <View style={styles.flex}>
+        <AppText variant="footnote" weight="600">
+          {lapWord} logged
+        </AppText>
+        <AppText variant="caption" color="tertiary">
+          Adjust it only if that wasn&apos;t right
+        </AppText>
+      </View>
+      <Stepper
+        value={`${reps}`}
+        label="Reps completed"
+        onDecrement={() => onAdjust(-1)}
+        onIncrement={() => onAdjust(1)}
+        canDecrement={reps > 0}
+        valueWidth={34}
+      />
+    </Reanimated.View>
   );
 }
 
 function HintPill({
   phase,
-  setPhase,
+  overtime,
   isTimed,
   cue,
   colors,
 }: {
   phase: string | undefined;
-  setPhase: SetPhase;
+  overtime: boolean;
   isTimed: boolean;
   cue: string;
   colors: ThemeColors;
 }) {
-  if (phase === "ACTIVE_SET") {
-    if (isTimed) {
-      return (
-        <View style={[styles.hintPill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}>
-          <Ionicons name="timer-outline" size={15} color={colors.primary} />
-          <AppText variant="caption" color="brand" uppercase>
-            Hold the position
-          </AppText>
-        </View>
-      );
-    }
-    if (setPhase === "extended") {
-      return (
-        <View style={[styles.hintPill, { backgroundColor: alpha(Palette.warning, 0.12), borderColor: alpha(Palette.warning, 0.4) }]}>
-          <Ionicons name="flame" size={15} color={Palette.warning} />
-          <AppText variant="caption" uppercase style={styles.bonusText}>
-            Bonus reps — nice
-          </AppText>
-        </View>
-      );
-    }
+  if (phase === "ACTIVE_SET" && overtime) {
     return (
-      <View style={[styles.hintPill, { backgroundColor: alpha(colors.primary, 0.12), borderColor: alpha(colors.primary, 0.35) }]}>
-        <Ionicons name="hand-left" size={15} color={colors.primary} />
-        <AppText variant="caption" color="brand" uppercase>
-          Tap the circle to count a rep
+      <View
+        style={[
+          styles.hintPill,
+          { backgroundColor: alpha(Palette.warning, 0.12), borderColor: alpha(Palette.warning, 0.4) },
+        ]}
+      >
+        <Ionicons name="flame" size={15} color={Palette.warning} />
+        <AppText variant="caption" uppercase style={styles.bonusText}>
+          Overtime — finish when you&apos;re ready
         </AppText>
       </View>
     );
@@ -1102,7 +1536,7 @@ function HintPill({
       <View style={[styles.hintPill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}>
         <Ionicons name="leaf-outline" size={15} color={colors.water} />
         <AppText variant="caption" color="secondary" uppercase>
-          Breathe · shake it out
+          {isTimed ? "Hold banked · breathe" : "Breathe · shake it out"}
         </AppText>
       </View>
     );
@@ -1118,51 +1552,64 @@ function HintPill({
   );
 }
 
-/** The set is done unless the athlete says otherwise — shown, not guessed at. */
-function GraceBar({
-  secondsLeft,
-  lapWord,
-  colors,
-  onKeepGoing,
-}: {
-  secondsLeft: number;
-  lapWord: string;
-  colors: ThemeColors;
-  onKeepGoing: () => void;
-}) {
-  return (
-    <View style={[styles.graceBar, { backgroundColor: alpha(Palette.warning, 0.14), borderColor: alpha(Palette.warning, 0.4) }]}>
-      <Ionicons name="checkmark-circle" size={16} color={Palette.warning} />
-      <AppText variant="footnote" style={styles.flex}>
-        {lapWord} target hit · resting in {secondsLeft}s
-      </AppText>
-      <Pressable
-        onPress={onKeepGoing}
-        hitSlop={8}
-        accessibilityRole="button"
-        accessibilityLabel="Keep going — stay in this set"
-      >
-        <AppText variant="caption" color="brand" uppercase>
-          Keep going
-        </AppText>
-      </Pressable>
-    </View>
-  );
-}
-
+/**
+ * A dock slot. With `attention`, its disc glows brand colour for two seconds,
+ * then sits dark for four — the "How to" is the only way to reach the deep
+ * reference mid-set, so it has to say so, and then stop saying it.
+ *
+ * It is a TINT that comes and goes, not a fade toward invisible (which reads as
+ * disabled), not a bloom outside the disc, and not a size change — the dock is
+ * a row of fixed targets and nothing in it may move.
+ */
 function DockButton({
   icon,
   label,
   onPress,
   colors,
   disabled = false,
+  attention = false,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   onPress: () => void;
   colors: ThemeColors;
   disabled?: boolean;
+  attention?: boolean;
 }) {
+  const reduced = useReducedMotion();
+  const beat = useSharedValue(0);
+  const live = attention && !disabled && !reduced;
+
+  useEffect(() => {
+    if (!live) {
+      cancelAnimation(beat);
+      beat.value = withTiming(0, { duration: 240 });
+      return;
+    }
+    beat.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: GLOW_MS, easing: Easing.inOut(Easing.quad) }),
+        withTiming(0, { duration: GLOW_MS, easing: Easing.inOut(Easing.quad) }),
+        // Hold dark. The pause is the point — a light that never rests stops
+        // being a signal and becomes wallpaper.
+        withDelay(GLOW_REST_MS, withTiming(0, { duration: 0 })),
+      ),
+      -1,
+      false,
+    );
+    return () => cancelAnimation(beat);
+  }, [live, beat]);
+
+  // Premixed here, on the JS side: alpha() cannot be called inside a worklet.
+  const idleFill = colors.surfaceMuted;
+  const liveFill = alpha(colors.primary, 0.24);
+  const idleEdge = colors.border;
+  const liveEdge = alpha(colors.primary, 0.9);
+  const discStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(beat.value, [0, 1], [idleFill, liveFill]),
+    borderColor: interpolateColor(beat.value, [0, 1], [idleEdge, liveEdge]),
+  }));
+
   return (
     <Pressable
       onPress={onPress}
@@ -1172,19 +1619,13 @@ function DockButton({
       accessibilityState={{ disabled }}
       style={({ pressed }) => [styles.dockBtn, pressed && styles.pressed]}
     >
-      <View
-        style={[
-          styles.dockIcon,
-          { backgroundColor: colors.surfaceMuted, borderColor: colors.border },
-          disabled && styles.dockDisabled,
-        ]}
-      >
+      <Reanimated.View style={[styles.dockIcon, discStyle, disabled && styles.dockDisabled]}>
         <Ionicons
           name={icon}
           size={19}
           color={disabled ? colors.textTertiary : colors.text}
         />
-      </View>
+      </Reanimated.View>
       <AppText variant="caption" color="tertiary" numberOfLines={1}>
         {label}
       </AppText>
@@ -1192,16 +1633,21 @@ function DockButton({
   );
 }
 
-/* ──────────────────────────────── Intro ────────────────────────────────── */
+/* ───────────────────────────── Prescription ────────────────────────────── */
 
-function IntroView({
+/**
+ * What the session is going to ask of you, already filled in. Nobody is made to
+ * dial in numbers before every workout — the plan brought them — but every row
+ * opens if the day calls for something different.
+ */
+function PrescriptionView({
   label,
   exercises,
   lapWord,
   colors,
   onStart,
   onBack,
-  onShowGuide,
+  onAdjust,
 }: {
   label: string;
   exercises: SessionExerciseInfo[];
@@ -1209,9 +1655,10 @@ function IntroView({
   colors: ThemeColors;
   onStart: () => void;
   onBack: () => void;
-  onShowGuide: (ex: SessionExerciseInfo) => void;
+  onAdjust: (index: number) => void;
 }) {
   const totalSets = exercises.reduce((sum, e) => sum + e.sets, 0);
+  const minutes = Math.max(1, Math.round(estimateSessionSeconds(exercises) / 60));
 
   return (
     <View style={styles.intro}>
@@ -1225,12 +1672,13 @@ function IntroView({
         showsVerticalScrollIndicator={false}
       >
         <AppText variant="caption" color="tertiary" uppercase>
-          About this session
+          Your session
         </AppText>
         <AppText variant="display" style={styles.introTitle}>
           {label}
         </AppText>
         <View style={styles.introMeta}>
+          <IntroChip icon="time-outline" text={`about ${minutes} min`} colors={colors} />
           <IntroChip
             icon="barbell-outline"
             text={`${exercises.length} exercise${exercises.length === 1 ? "" : "s"}`}
@@ -1244,9 +1692,9 @@ function IntroView({
         </View>
 
         <View style={styles.introHint}>
-          <Ionicons name="information-circle-outline" size={14} color={colors.primary} />
+          <Ionicons name="options-outline" size={14} color={colors.primary} />
           <AppText variant="footnote" color="secondary">
-            Tap any exercise to see how it&apos;s done
+            Tap any exercise to adjust it
           </AppText>
         </View>
 
@@ -1254,9 +1702,9 @@ function IntroView({
           {exercises.map((ex, i) => (
             <Pressable
               key={`${ex.exerciseId}-${i}`}
-              onPress={() => onShowGuide(ex)}
+              onPress={() => onAdjust(i)}
               accessibilityRole="button"
-              accessibilityLabel={`How to perform ${ex.name}`}
+              accessibilityLabel={`Adjust ${ex.name}`}
               style={({ pressed }) => [
                 styles.introRow,
                 i < exercises.length - 1 && {
@@ -1275,11 +1723,11 @@ function IntroView({
                 <AppText variant="body" numberOfLines={1}>
                   {ex.name}
                 </AppText>
+                <AppText variant="caption" color="tertiary">
+                  {prescriptionText(ex)} · {resolveWorkSeconds(ex)}s work · {ex.restSeconds}s rest
+                </AppText>
               </View>
-              <AppText variant="footnote" color="tertiary">
-                {ex.sets} × {ex.reps}
-              </AppText>
-              <Ionicons name="information-circle" size={18} color={colors.primary} />
+              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
             </Pressable>
           ))}
         </View>
@@ -1307,6 +1755,143 @@ function IntroChip({
       <AppText variant="footnote" color="secondary">
         {text}
       </AppText>
+    </View>
+  );
+}
+
+/** Sets, how long a set runs, and how long you get back. Nothing else. */
+function PrescribeSheet({
+  index,
+  exercise,
+  lapWord,
+  colors,
+  onClose,
+  onChange,
+  onShowGuide,
+}: {
+  index: number | null;
+  exercise?: SessionExerciseInfo;
+  lapWord: string;
+  colors: ThemeColors;
+  onClose: () => void;
+  onChange: (index: number, patch: Partial<SessionExerciseInfo>) => void;
+  onShowGuide: (ex: SessionExerciseInfo) => void;
+}) {
+  const visible = index !== null && !!exercise;
+  const work = exercise ? resolveWorkSeconds(exercise) : 0;
+
+  const bump = (patch: Partial<SessionExerciseInfo>) => {
+    if (index === null) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    onChange(index, patch);
+  };
+
+  return (
+    <Sheet
+      visible={visible}
+      onClose={onClose}
+      header={
+        <View style={styles.drillHead}>
+          <View style={styles.flex}>
+            <AppText variant="headline" numberOfLines={1}>
+              {exercise?.name ?? ""}
+            </AppText>
+            <AppText variant="caption" color="tertiary">
+              {exercise?.exerciseType === "timed"
+                ? "A hold — the clock is the work"
+                : `Reps are a target, the clock is the work`}
+            </AppText>
+          </View>
+          <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
+            <Ionicons name="close" size={22} color={colors.text} />
+          </Pressable>
+        </View>
+      }
+    >
+      {exercise && (
+        <View style={styles.prescribeBody}>
+          <PrescribeRow
+            label={`${lapWord}s`}
+            hint={exercise.exerciseType === "timed" ? "How many holds" : "How many times through"}
+            value={`${exercise.sets}`}
+            colors={colors}
+            canDecrement={exercise.sets > 1}
+            canIncrement={exercise.sets < 8}
+            onDecrement={() => bump({ sets: exercise.sets - 1 })}
+            onIncrement={() => bump({ sets: exercise.sets + 1 })}
+          />
+          <PrescribeRow
+            label={exercise.exerciseType === "timed" ? "Hold for" : "Work"}
+            hint={
+              exercise.exerciseType === "timed"
+                ? "How long each hold lasts"
+                : `Long enough for ${exercise.reps} reps`
+            }
+            value={`${work}s`}
+            colors={colors}
+            canDecrement={work > 15}
+            canIncrement={work < 180}
+            onDecrement={() => bump({ workSeconds: work - 5 })}
+            onIncrement={() => bump({ workSeconds: work + 5 })}
+          />
+          <PrescribeRow
+            label="Rest"
+            hint={`Between each ${lapWord.toLowerCase()}`}
+            value={`${exercise.restSeconds}s`}
+            colors={colors}
+            canDecrement={exercise.restSeconds > 15}
+            canIncrement={exercise.restSeconds < 180}
+            onDecrement={() => bump({ restSeconds: exercise.restSeconds - 5 })}
+            onIncrement={() => bump({ restSeconds: exercise.restSeconds + 5 })}
+          />
+          <Button
+            label="How it's done"
+            icon="body-outline"
+            variant="ghost"
+            onPress={() => onShowGuide(exercise)}
+          />
+        </View>
+      )}
+    </Sheet>
+  );
+}
+
+function PrescribeRow({
+  label,
+  hint,
+  value,
+  colors,
+  canDecrement,
+  canIncrement,
+  onDecrement,
+  onIncrement,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  colors: ThemeColors;
+  canDecrement: boolean;
+  canIncrement: boolean;
+  onDecrement: () => void;
+  onIncrement: () => void;
+}) {
+  return (
+    <View style={[styles.prescribeRow, { borderBottomColor: colors.divider }]}>
+      <View style={styles.flex}>
+        <AppText variant="body">{label}</AppText>
+        <AppText variant="caption" color="tertiary">
+          {hint}
+        </AppText>
+      </View>
+      <Stepper
+        value={value}
+        label={label}
+        onDecrement={onDecrement}
+        onIncrement={onIncrement}
+        canDecrement={canDecrement}
+        canIncrement={canIncrement}
+        valueWidth={46}
+      />
     </View>
   );
 }
@@ -1344,7 +1929,7 @@ function PauseView({
       </View>
       <View style={styles.pauseControls}>
         <Button label="Resume" icon="play" size="lg" onPress={onResume} />
-        <Button label="End session" variant="ghost" onPress={onEnd} />
+        <Button label="End session" icon="checkmark-done" variant="tonal" onPress={onEnd} />
       </View>
     </View>
   );
@@ -1352,20 +1937,43 @@ function PauseView({
 
 /* ─────────────────────────────── Completion ────────────────────────────── */
 
-/** The core floods gold and locks at full around a checkmark while confetti
- *  flies; one hero moment, then the summary takes over. */
+const EFFORT_OPTIONS: {
+  key: SessionEffort;
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+}[] = [
+  { key: "easy", icon: "leaf-outline", label: "Easy" },
+  { key: "right", icon: "checkmark-circle-outline", label: "Just right" },
+  { key: "hard", icon: "flame-outline", label: "Hard" },
+];
+
+/**
+ * The core floods gold and locks at full around a checkmark while confetti
+ * flies — then ONE question, already answered. Tapping a different card is the
+ * only reason to touch it; Continue takes the pre-filled answer.
+ */
 function CompletionView({
   state,
   colors,
   size,
+  onFinish,
 }: {
   state: SessionState;
   colors: ThemeColors;
   size: number;
+  onFinish: (effort: SessionEffort) => void;
 }) {
   const doneCount = state.results.filter((r) => !r.skipped).length;
   const totalReps = state.results.reduce((sum, r) => sum + r.totalReps, 0);
-  const coreSize = Math.round(size * 0.84);
+  const coreSize = Math.round(size * 0.6);
+  const [effort, setEffort] = useState<SessionEffort>("right");
+  const [asking, setAsking] = useState(false);
+
+  // Let the celebration land before anything asks for an answer.
+  useEffect(() => {
+    const id = setTimeout(() => setAsking(true), 1500);
+    return () => clearTimeout(id);
+  }, []);
 
   return (
     <View style={styles.complete}>
@@ -1381,12 +1989,117 @@ function CompletionView({
           {doneCount} exercise{doneCount === 1 ? "" : "s"}
           {totalReps > 0 ? ` · ${totalReps} reps` : ""} · {formatTime(state.elapsedSeconds)}
         </AppText>
-        <AppText variant="footnote" color="tertiary" style={styles.completeSub}>
-          Tallying your numbers…
-        </AppText>
       </Reanimated.View>
+
+      {asking && (
+        <Reanimated.View entering={enterRise()} style={styles.effortBlock}>
+          <AppText variant="callout" align="center">
+            How did that feel?
+          </AppText>
+          <View style={styles.effortRow}>
+            {EFFORT_OPTIONS.map((opt) => {
+              const active = opt.key === effort;
+              return (
+                <Pressable
+                  key={opt.key}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                    setEffort(opt.key);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={opt.label}
+                  style={({ pressed }) => [
+                    styles.effortTile,
+                    {
+                      borderColor: active ? colors.primary : colors.border,
+                      backgroundColor: active
+                        ? alpha(colors.primary, 0.12)
+                        : alpha(colors.primary, 0),
+                    },
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Ionicons
+                    name={opt.icon}
+                    size={22}
+                    color={active ? colors.primary : colors.textTertiary}
+                  />
+                  <AppText variant="footnote" color={active ? "brand" : "tertiary"}>
+                    {opt.label}
+                  </AppText>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Button label="Continue" icon="arrow-forward" size="lg" onPress={() => onFinish(effort)} />
+        </Reanimated.View>
+      )}
       <Confetti tierColor={colors.gold} intensity={0.9} />
     </View>
+  );
+}
+
+/* ───────────────────────────── Leaving ────────────────────────────────── */
+
+/**
+ * "End session" and "Leave for now" are genuinely different things — one banks
+ * the workout and opens the summary, the other keeps it in progress — and a
+ * two-button alert could never make that clear. Both are spelled out here, with
+ * the consequence written under each, because getting this wrong loses a
+ * workout either way.
+ */
+function ExitSheet({
+  visible,
+  elapsed,
+  exerciseProgress,
+  colors,
+  onClose,
+  onEnd,
+  onLeave,
+}: {
+  visible: boolean;
+  elapsed: string;
+  exerciseProgress: string;
+  colors: ThemeColors;
+  onClose: () => void;
+  onEnd: () => void;
+  onLeave: () => void;
+}) {
+  return (
+    <Sheet
+      visible={visible}
+      onClose={onClose}
+      header={
+        <View style={styles.drillHead}>
+          <View style={styles.flex}>
+            <AppText variant="headline">Finish up?</AppText>
+            <AppText variant="caption" color="tertiary">
+              {elapsed} in · exercise {exerciseProgress}
+            </AppText>
+          </View>
+          <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
+            <Ionicons name="close" size={22} color={colors.text} />
+          </Pressable>
+        </View>
+      }
+    >
+      <View style={styles.exitBody}>
+        <Button label="End session" icon="checkmark-done" size="lg" onPress={onEnd} />
+        <AppText variant="caption" color="tertiary" align="center">
+          Banks everything you&apos;ve done and opens your summary.
+        </AppText>
+
+        <View style={styles.exitGap} />
+
+        <Button label="Leave for now" icon="time-outline" variant="tonal" onPress={onLeave} />
+        <AppText variant="caption" color="tertiary" align="center">
+          Stays in progress — pick it up again from Fitness.
+        </AppText>
+
+        <Button label="Keep training" variant="ghost" onPress={onClose} />
+      </View>
+    </Sheet>
   );
 }
 
@@ -1487,7 +2200,7 @@ function DrillSheet({
                   {ex.name}
                 </AppText>
                 <AppText variant="caption" color="tertiary">
-                  {ex.sets} × {ex.reps}
+                  {prescriptionText(ex)}
                   {skipped ? " · skipped" : isCurrent ? " · now" : ""}
                 </AppText>
               </View>
@@ -1522,6 +2235,18 @@ const styles = StyleSheet.create({
   },
   pressed: { transform: [{ scale: 0.92 }], opacity: 0.85 },
   topCenter: { flex: 1, alignItems: "center" },
+  // The End pill and the drill button are balanced so the title stays centred.
+  endBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    width: 66,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  topRight: { width: 66, alignItems: "flex-end" },
   clockRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 1 },
 
   segments: {
@@ -1534,20 +2259,21 @@ const styles = StyleSheet.create({
 
   main: { flex: 1 },
 
-  // Four fixed zones. Two of them have a hard height and hold their content
-  // absolutely, so a crossfading caption or hint can never nudge the core or
-  // the dock by a single pixel.
+  // Fixed zones. Three of them have a hard height and hold their content
+  // absolutely, so a crossfading caption, clock or hint can never nudge the
+  // figure or the dock by a single pixel.
   stage: {
     flex: 1,
     paddingHorizontal: Spacing.screen,
     paddingBottom: Spacing.lg,
   },
-  captionZone: { height: CAPTION_ZONE },
-  hintZone: { height: HINT_ZONE, justifyContent: "center" },
+  captionZone: {},
+  readoutZone: {},
+  hintZone: { justifyContent: "center" },
   zoneFill: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 3 },
   heroZone: { flex: 1, alignItems: "center", justifyContent: "center" },
-  heroTap: { padding: Spacing.lg, borderRadius: 999 },
-  heroPressed: { transform: [{ scale: 0.975 }] },
+  auxFigure: { position: "absolute", top: 0 },
+  countScrim: { position: "absolute" },
 
   titleRow: {
     flexDirection: "row",
@@ -1566,7 +2292,22 @@ const styles = StyleSheet.create({
   setLabel: { marginLeft: 6, fontWeight: "600" },
 
   bigNumber: { fontWeight: "800", letterSpacing: -2, textAlign: "center" },
-  readoutNumber: { fontWeight: "800", letterSpacing: -1, textAlign: "center" },
+  clockNumber: {
+    fontWeight: "800",
+    letterSpacing: -2,
+    textAlign: "center",
+    fontVariant: ["tabular-nums"],
+  },
+  /** The headline of the rest screen — heavier than the clock beneath it. */
+  restWord: { fontWeight: "800", letterSpacing: 2, textAlign: "center" },
+  restNumber: {
+    // Deliberately lighter than `clockNumber` and than the word above it: on
+    // this screen the seconds are the detail, not the instruction.
+    fontWeight: "500",
+    letterSpacing: -0.5,
+    textAlign: "center",
+    fontVariant: ["tabular-nums"],
+  },
 
   hintPill: {
     flexDirection: "row",
@@ -1587,12 +2328,13 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     alignSelf: "stretch",
   },
-  graceBar: {
+  repConfirm: {
     flexDirection: "row",
     alignItems: "center",
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
+    gap: Spacing.md,
+    paddingLeft: Spacing.lg,
+    paddingRight: Spacing.sm,
+    paddingVertical: Spacing.sm,
     borderRadius: Radius.lg,
     borderWidth: 1,
   },
@@ -1611,12 +2353,12 @@ const styles = StyleSheet.create({
   },
   dockDisabled: { opacity: 0.4 },
 
-  // Intro
+  // Prescription
   intro: { flex: 1 },
   introTopBar: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
   introScroll: { paddingHorizontal: Spacing.screen, paddingBottom: Spacing.xl },
   introTitle: { marginTop: Spacing.xs, marginBottom: Spacing.lg },
-  introMeta: { flexDirection: "row", gap: Spacing.sm, marginBottom: Spacing.xl },
+  introMeta: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm, marginBottom: Spacing.xl },
   introChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -1650,6 +2392,17 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.md,
     paddingBottom: Spacing.md,
   },
+  prescribeBody: { paddingHorizontal: Spacing.sm, gap: Spacing.xs, paddingBottom: Spacing.lg },
+  exitBody: { paddingHorizontal: Spacing.sm, paddingBottom: Spacing.lg, gap: Spacing.sm },
+  exitGap: { height: Spacing.xs },
+  prescribeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
 
   // Pause
   pause: {
@@ -1665,7 +2418,13 @@ const styles = StyleSheet.create({
   pauseControls: { gap: Spacing.sm },
 
   // Complete
-  complete: { flex: 1, justifyContent: "center", alignItems: "center", gap: Spacing.md },
+  complete: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: Spacing.screen,
+    paddingBottom: Spacing.lg,
+    gap: Spacing.lg,
+  },
   completeHero: { alignItems: "center" },
   completeHeadline: {
     fontSize: 30,
@@ -1675,7 +2434,17 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
     textAlign: "center",
   },
-  completeSub: { marginTop: Spacing.lg },
+  effortBlock: { gap: Spacing.md },
+  effortRow: { flexDirection: "row", gap: Spacing.sm },
+  effortTile: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: Spacing.lg,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+  },
 
   // Drill list
   drillHead: {

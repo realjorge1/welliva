@@ -7,7 +7,7 @@
  * the hero. All coaching logic lives in services/gozlin/*; this screen is
  * presentation + input.
  *
- * ── THE FOUR THINGS THIS SCREEN OWNS ────────────────────────────────────────
+ * ── THE FIVE THINGS THIS SCREEN OWNS ────────────────────────────────────────
  *
  * 1. THE KEYBOARD. Not `KeyboardAvoidingView` — it does not work under Android
  *    edge-to-edge, which this app enables. `useKeyboardInset` pads this
@@ -28,6 +28,10 @@
  *
  * 4. THE MENU. Four commands about the conversation, in a popover that grows
  *    out of the ⋯ button (./components/gozlin/GozlinCoachMenu.tsx).
+ *
+ * 5. THE LINE UNDER THE NAME. An opener, then "Thinking", then "Typing", then
+ *    the name of the thread you are in — see the status block further down for
+ *    why it arrives in that order and why the first of those four exists.
  */
 
 import {
@@ -49,12 +53,14 @@ import {
   type CoachMenuStat,
   type DeepDiveState,
 } from "@/components/gozlin";
+import { enterFade, exitFade } from "@/components/motion";
 import { MenuButton } from "@/components/navigation";
 import { AmbientCanvas, AppText, useKeyboardInset } from "@/components/ui";
 import { useColors } from "@/components/ui/useColors";
 import { useBilling } from "@/contexts/BillingContext";
 import { COACH_DISCLAIMER } from "@/constants/legal";
 import { Radius, Spacing } from "@/constants/theme";
+import { deriveConversationTitle, pickCoachSubhead } from "@/services/gozlin";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "@/utils/haptics";
 import { LinearGradient } from "expo-linear-gradient";
@@ -73,6 +79,22 @@ import {
 import { GestureDetector } from "react-native-gesture-handler";
 import Animated from "react-native-reanimated";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+
+/** What the line under the coach's name is currently reporting. */
+type CoachStatus = "idle" | "thinking" | "typing";
+
+/**
+ * Silence before the coach admits to thinking.
+ *
+ * Three seconds is the point at which a wait stops reading as "instant" and
+ * starts reading as "did that send?". Below it, saying anything at all costs
+ * more than it buys: the word would arrive and leave before it could be read,
+ * and a status that strobes is worse than no status.
+ */
+const THINKING_AFTER_MS = 3000;
+
+/** How often the subhead draw lands on the user's own stated "why". */
+const WHY_SUBHEAD_CHANCE = 0.3;
 
 export default function GozlinScreen() {
   const { colors } = useColors();
@@ -95,6 +117,7 @@ export default function GozlinScreen() {
     rateMessage,
     deepDive,
     resetConversation,
+    deleteConversation,
     archive,
     openArchived,
     deleteArchived,
@@ -109,6 +132,7 @@ export default function GozlinScreen() {
   // bubble so a long history does not mount a modal per message.
   const [openReceipt, setOpenReceipt] = useState<Receipt | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [forgetOpen, setForgetOpen] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(64);
   const listRef = useRef<FlatList>(null);
@@ -170,6 +194,18 @@ export default function GozlinScreen() {
     }
     return null;
   }, [messages]);
+
+  /**
+   * The user has actually said something in this thread.
+   *
+   * The day's briefing arrives unasked, so a thread holding only that is not a
+   * conversation anyone had — there is nothing in it to delete and nothing to
+   * name. The coach menu's delete row reads this rather than `messages.length`.
+   */
+  const hasSaidSomething = useMemo(
+    () => messages.some((m) => m.role === "user"),
+    [messages],
+  );
 
   const [editing, setEditing] = useState<{
     id: string;
@@ -291,15 +327,40 @@ export default function GozlinScreen() {
         onPress: () => router.push("/logs" as any),
       },
       {
+        // The one thing "New conversation" deliberately won't do. People say
+        // things to a health coach they don't want kept, and until this row
+        // existed the only way to remove an exchange was "Clear memory" —
+        // which throws out everything Gozlin understands about them along with
+        // it. Nobody should have to choose between a private conversation and
+        // a coach that remembers them.
+        key: "delete",
+        label: "Delete this chat",
+        caption: hasSaidSomething
+          ? "Erase it instead of filing it"
+          : "Nothing said here yet",
+        icon: "trash-outline",
+        destructive: hasSaidSomething,
+        onPress: () => {
+          // A thread holding only today's briefing has nothing to erase —
+          // quietly do the harmless thing rather than raising a confirmation
+          // for a delete that would remove nothing.
+          if (!hasSaidSomething) {
+            toast.show("Nothing to delete yet");
+            return;
+          }
+          setDeleteOpen(true);
+        },
+      },
+      {
         key: "forget",
         label: "Clear memory",
         caption: "Forget everything Gozlin knows",
-        icon: "trash-outline",
+        icon: "trash-bin-outline",
         destructive: true,
         onPress: () => setForgetOpen(true),
       },
     ],
-    [archive.length, resetConversation, router, toast],
+    [archive.length, hasSaidSomething, resetConversation, router, toast],
   );
 
   /** The conversation in three figures, above the menu's verbs. */
@@ -339,6 +400,33 @@ export default function GozlinScreen() {
     [respondToConfirm],
   );
 
+  /**
+   * Deleting the live thread. Confirmed, because it is irreversible and there
+   * is no undo anywhere for it — the app's standing rule for anything
+   * structural and destructive.
+   *
+   * The confirmation says what is NOT being deleted as well as what is. "Delete
+   * this chat" next to a row called "Clear memory" invites exactly one worry —
+   * that this is the small version of that — and a person who suspects a delete
+   * might cost them their coach will simply never press it.
+   */
+  const deleteOptions = useMemo<ActionSheetOption[]>(
+    () => [
+      {
+        key: "confirm-delete-chat",
+        label: "Delete this chat",
+        caption: "This can't be undone",
+        icon: "trash-outline",
+        destructive: true,
+        onPress: () => {
+          void deleteConversation();
+          toast.show("Chat deleted");
+        },
+      },
+    ],
+    [deleteConversation, toast],
+  );
+
   const forgetOptions = useMemo<ActionSheetOption[]>(
     () => [
       {
@@ -361,15 +449,103 @@ export default function GozlinScreen() {
     setMenuOpen(true);
   }, []);
 
-  // Naming the work turns the agent loop's latency into a trust signal — the
-  // user watches the coach dig through their data instead of staring at dots.
-  const statusLine = activity
-    ? activity
-    : isThinking
-      ? "Typing…"
-      : motivation
+  /* ── What the line under "Gozlin" says ─────────────────────────────────
+   *
+   * Four states, and the order they arrive in is the whole design:
+   *
+   *   SUBHEAD → (you send) → [3s of nothing] → THINKING → TYPING → TITLE
+   *
+   * ── THE SUBHEAD ──
+   * What an empty thread says. Drawn once per conversation from a pool of
+   * openers (services/gozlin/conversationTitle) rather than fixed, because a
+   * standing line under a name is a badge — read once on the first day and
+   * never again. When Gozlin has been told the user's own "why", that gets a
+   * turn in the draw: nothing a copywriter can put there beats the sentence
+   * the user wrote themselves.
+   *
+   * ── THINKING, THEN TYPING ──
+   * "Thinking" appears only after three seconds of silence. A status that
+   * flickers on and off for a reply that lands in eight hundred milliseconds is
+   * noise, and worse, it makes a fast coach look hesitant — so a quick answer
+   * goes straight to "Typing" and the user never sees the word at all. The
+   * switch is the FIRST CHARACTER of the reply, not the end of the turn: the
+   * agent loop can spend several seconds in tools, and the moment prose starts
+   * arriving the honest word changes.
+   *
+   * The agent's own narration of its work rides along with "Thinking" rather
+   * than replacing it — "Thinking · checking your recovery…" keeps the state
+   * word people are watching for and still turns the latency into a trust
+   * signal instead of dead air.
+   *
+   * ── THE TITLE ──
+   * Once the coach has stopped talking, the line becomes what the conversation
+   * is ABOUT, the way a chat app names its threads. It is derived from the
+   * user's own first message, deterministically and offline — see
+   * deriveConversationTitle for why it is not a second model call. It is only
+   * ever displaced by thinking and typing, and it comes straight back.
+   */
+  const lastMessage = messages.length ? messages[messages.length - 1] : null;
+  /** The reply has begun arriving — one character is enough, and is the point. */
+  const replyStarted =
+    isThinking &&
+    lastMessage?.role === "coach" &&
+    (lastMessage.content?.trim().length ?? 0) > 0;
+
+  const [slowTurn, setSlowTurn] = useState(false);
+  useEffect(() => {
+    if (!isThinking) {
+      setSlowTurn(false);
+      return;
+    }
+    const t = setTimeout(() => setSlowTurn(true), THINKING_AFTER_MS);
+    return () => clearTimeout(t);
+  }, [isThinking]);
+
+  const conversationTitle = useMemo(
+    () => deriveConversationTitle(messages),
+    [messages],
+  );
+
+
+  /**
+   * A new thread gets a new opener. Keyed on the first message's id — a reset
+   * seeds a fresh briefing and an archived thread reopened brings its own, so
+   * both count as arriving somewhere new. Two seeds because the "why" and the
+   * pool pick are independent draws; one would bias the pool to its top slice.
+   */
+  const threadKey = messages[0]?.id ?? "";
+  const [subheadSeed, setSubheadSeed] = useState(() => ({
+    pick: Math.random(),
+    why: Math.random(),
+  }));
+  useEffect(() => {
+    setSubheadSeed({ pick: Math.random(), why: Math.random() });
+  }, [threadKey]);
+
+  const subhead = useMemo(
+    () =>
+      motivation && subheadSeed.why < WHY_SUBHEAD_CHANCE
         ? `For ${motivation}`
-        : twin.identitySummary || "Your AI coach";
+        : pickCoachSubhead(subheadSeed.pick),
+    [motivation, subheadSeed],
+  );
+
+  const status: CoachStatus = !isThinking
+    ? "idle"
+    : replyStarted
+      ? "typing"
+      : slowTurn
+        ? "thinking"
+        : "idle";
+
+  const statusLine =
+    status === "typing"
+      ? "Typing…"
+      : status === "thinking"
+        ? activity
+          ? `Thinking · ${activity}`
+          : "Thinking…"
+        : (conversationTitle ?? subhead);
 
   const canSend = !!input.trim() && !isThinking;
 
@@ -395,18 +571,37 @@ export default function GozlinScreen() {
               <AppText variant="headline" numberOfLines={1}>
                 Gozlin
               </AppText>
+              {/* The dot is permanent and the line beneath it is not: the dot
+                says Gozlin is here, the line says what it is doing or what the
+                two of you are talking about. Keyed on the text so a change of
+                state crossfades — the coach changing its mind about what it is
+                doing should read as a thought, not as a label being swapped.
+
+                THE SLOT IS A FIXED BOX AND THE LAYERS INSIDE IT ARE ABSOLUTE.
+                An entering and an exiting view overlap for the length of the
+                crossfade; left in the flow they would share the row's width for
+                those two hundred milliseconds and both ellipsise, so the very
+                thing meant to smooth the change would be its most visible
+                moment. Stacked, they simply dissolve through each other. */}
               <View style={styles.statusRow}>
-                {!isThinking ? (
-                  <View style={[styles.liveDot, { backgroundColor: colors.success }]} />
-                ) : null}
-                <AppText
-                  variant="footnote"
-                  color="secondary"
-                  numberOfLines={1}
-                  style={styles.flex}
-                >
-                  {statusLine}
-                </AppText>
+                <StatusDot status={status} colors={colors} />
+                <View style={styles.statusSlot}>
+                  <Animated.View
+                    key={statusLine}
+                    entering={enterFade()}
+                    exiting={exitFade()}
+                    style={styles.statusLayer}
+                  >
+                    <AppText
+                      variant="footnote"
+                      color={status === "idle" ? "secondary" : "brand"}
+                      weight={status === "idle" ? "500" : "600"}
+                      numberOfLines={1}
+                    >
+                      {statusLine}
+                    </AppText>
+                  </Animated.View>
+                </View>
               </View>
             </View>
           </View>
@@ -595,6 +790,14 @@ export default function GozlinScreen() {
         />
 
         <GozlinActionSheet
+          visible={deleteOpen}
+          title="Delete this chat?"
+          subtitle="The messages go. Everything Gozlin has learned about you — your plan, your patterns, your check-ins and your other conversations — stays."
+          options={deleteOptions}
+          onClose={() => setDeleteOpen(false)}
+        />
+
+        <GozlinActionSheet
           visible={forgetOpen}
           title="Clear memory?"
           subtitle="Gozlin will clear your motivation, remembered notes and chat history."
@@ -643,6 +846,69 @@ export default function GozlinScreen() {
 
       <GozlinToast controller={toast} topOffset={insets.top} />
     </View>
+  );
+}
+
+/**
+ * The presence dot beside the status line.
+ *
+ * It used to vanish the moment Gozlin started working, which is exactly
+ * backwards: the one moment you most want proof that something is alive is
+ * while you are waiting for it. It is now always there and says which of three
+ * things is true — green and still means present, and the two working states
+ * breathe, in the brand colour, at their own rates.
+ *
+ * THINKING BREATHES SLOWLY, TYPING QUICKLY. The tempo is the tell. Two states
+ * distinguished only by a word are two states nobody notices changing; a dot
+ * that visibly picks up pace at the instant the first character lands is the
+ * cheapest possible way to say "it has started".
+ */
+function StatusDot({
+  status,
+  colors,
+}: {
+  status: CoachStatus;
+  colors: ReturnType<typeof useColors>["colors"];
+}) {
+  const beat = useRef(new RNAnimated.Value(0)).current;
+
+  useEffect(() => {
+    if (status === "idle") {
+      beat.stopAnimation();
+      beat.setValue(0);
+      return;
+    }
+    const half = status === "typing" ? 380 : 720;
+    const loop = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(beat, { toValue: 1, duration: half, useNativeDriver: true }),
+        RNAnimated.timing(beat, { toValue: 0, duration: half, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [status, beat]);
+
+  const working = status !== "idle";
+  return (
+    <RNAnimated.View
+      style={[
+        styles.liveDot,
+        {
+          backgroundColor: working ? colors.primary : colors.success,
+          opacity: working
+            ? beat.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] })
+            : 1,
+          transform: [
+            {
+              scale: working
+                ? beat.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1.25] })
+                : 1,
+            },
+          ],
+        },
+      ]}
+    />
   );
 }
 
@@ -715,6 +981,13 @@ const styles = StyleSheet.create({
   identity: { flex: 1, flexDirection: "row", alignItems: "center", gap: Spacing.md },
   headerText: { flex: 1 },
   statusRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 1 },
+  /**
+   * The crossfade stage. Its height is the footnote's own line height, so the
+   * header never grows or shrinks as the line changes — and the two layers
+   * inside it are absolute, so they overlap instead of competing for width.
+   */
+  statusSlot: { flex: 1, height: 17, justifyContent: "center" },
+  statusLayer: { position: "absolute", left: 0, right: 0 },
   liveDot: { width: 6, height: 6, borderRadius: 3 },
   /** Matches MenuButton's 36pt target so the header's two ends balance. */
   iconBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },

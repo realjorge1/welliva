@@ -86,7 +86,15 @@ export interface ScheduledDiet {
   date: string; // YYYY-MM-DD
   dietId: string;
   dietName: string;
-  scheduleType: "single_day";
+  /**
+   * How this day got onto the calendar. Both kinds live in the SAME store —
+   * a weekly plan's days are materialised into it on first read (see
+   * ScheduleService.adoptWeeklyDay), because a day that isn't in this store
+   * cannot be ticked, cannot be reconciled against the intake ledger, and so
+   * cannot be counted. The tag survives only so the UI can still say "Weekly
+   * plan"; nothing about how the day is read or written depends on it.
+   */
+  scheduleType: "single_day" | "weekly";
   schedule: DaySchedule;
   createdAt: string;
 }

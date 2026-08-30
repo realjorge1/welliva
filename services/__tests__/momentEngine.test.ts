@@ -276,6 +276,8 @@ describe("one at a time", () => {
 // ── anticipation ────────────────────────────────────────────────────────────
 
 describe("nudges", () => {
+  // The WORDING of every nudge rotates on purpose (services/momentVoice), so
+  // these assert the facts and the grammar rather than one blessed sentence.
   it("counts the days to the record correctly, inclusive of the day that ties", () => {
     const n = detectNudge(
       input({ streak: streak({ currentStreak: 10, longestStreak: 12 }) }),
@@ -284,7 +286,7 @@ describe("nudges", () => {
     expect(n).not.toBeNull();
     expect(n!.kind).toBe("streak_near_record");
     // 10 → needs 11, 12, 13 to beat 12. Three days.
-    expect(n!.headline).toBe("3 days from your record");
+    expect(n!.headline).toContain("3 days");
     expect(n!.detail).toContain("10");
     expect(n!.detail).toContain("12");
   });
@@ -294,7 +296,37 @@ describe("nudges", () => {
       input({ streak: streak({ currentStreak: 12, longestStreak: 12 }) }),
       { ...EMPTY_MOMENT_RECORD, knownLongestStreak: 12 },
     );
-    expect(n!.headline).toBe("One day from your record");
+    expect(n!.headline.toLowerCase()).toContain("one day");
+    expect(n!.headline).not.toContain("1 day");
+    expect(n!.headline).not.toContain("days");
+  });
+
+  it("says the same fact differently as the fact changes", () => {
+    // Same user, one more day on the streak: the numbers move, and the words
+    // must not simply be the old sentence with a digit swapped.
+    const at10 = detectNudge(
+      input({ streak: streak({ currentStreak: 10, longestStreak: 12 }) }),
+      { ...EMPTY_MOMENT_RECORD, knownLongestStreak: 12 },
+    )!;
+    const at11 = detectNudge(
+      input({ streak: streak({ currentStreak: 11, longestStreak: 12 }) }),
+      { ...EMPTY_MOMENT_RECORD, knownLongestStreak: 12 },
+    )!;
+    expect(at10.detail).not.toBe(at11.detail);
+  });
+
+  it("gives the identical fact the identical phrasing every time", () => {
+    // Determinism is what stops the card reshuffling on every re-render.
+    const once = detectNudge(
+      input({ streak: streak({ currentStreak: 10, longestStreak: 12 }) }),
+      { ...EMPTY_MOMENT_RECORD, knownLongestStreak: 12 },
+    )!;
+    const twice = detectNudge(
+      input({ streak: streak({ currentStreak: 10, longestStreak: 12 }) }),
+      { ...EMPTY_MOMENT_RECORD, knownLongestStreak: 12 },
+    )!;
+    expect(twice.headline).toBe(once.headline);
+    expect(twice.detail).toBe(once.detail);
   });
 
   it("stays quiet when the record is far away — no false urgency", () => {
@@ -323,6 +355,69 @@ describe("nudges", () => {
     expect(n).not.toBeNull();
     expect(n!.kind).toBe("week_near_record");
     expect(n!.detail).toContain("3");
+    // The number that BREAKS the record — fixed, and reachable.
+    expect(n!.progress).toEqual({ value: 3, target: 4 });
+  });
+
+  it("fills the bar and states the record once the week is actually the best", () => {
+    // Record of 3 completed weeks; this week already has 4.
+    const n = detectNudge(
+      input({
+        workoutLog: [
+          workout("2026-08-17"),
+          workout("2026-08-18"),
+          workout("2026-08-19"),
+          workout("2026-08-20"),
+        ],
+      }),
+      { ...EMPTY_MOMENT_RECORD, bestWeekSessions: 3 },
+    );
+    expect(n).not.toBeNull();
+    expect(n!.kind).toBe("week_record_held");
+    expect(n!.progress.value).toBeGreaterThanOrEqual(n!.progress.target);
+    expect(n!.badge).toBe("Personal best");
+    expect(n!.detail).toContain("4"); // this week
+    expect(n!.detail).toContain("3"); // the record it beat
+  });
+
+  it("does not put the week record on a treadmill", () => {
+    // THE REGRESSION THIS FILE EXISTS FOR. bestWeekSessions used to absorb the
+    // week in progress, so the target was forever count + 1 and the bar could
+    // never fill: 5 of 6, then 6 of 7, then 7 of 8, the same sentence with a
+    // new digit. The record must come from COMPLETED weeks only.
+    const priorWeeks = [
+      workout("2026-08-10"),
+      workout("2026-08-11"),
+      workout("2026-08-12"),
+    ];
+    const thisWeek = ["2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20"].map((d) =>
+      workout(d),
+    );
+    const { record } = detectMoments(
+      input({ workoutLog: [...priorWeeks, ...thisWeek] }),
+      EMPTY_MOMENT_RECORD,
+    );
+    // The live week (4) must NOT have become the record — the completed week
+    // (3) is what there is to beat.
+    expect(record.bestWeekSessions).toBe(3);
+
+    const n = detectNudge(input({ workoutLog: [...priorWeeks, ...thisWeek] }), record);
+    expect(n!.progress.target).toBe(4);
+    expect(n!.progress.value / n!.progress.target).toBe(1);
+  });
+
+  it("lets the best-week MOMENT fire, which the polluted record blocked", () => {
+    // `detectBestWeek` guards on `count <= rec.bestWeekSessions`. While the
+    // record absorbed the live week that condition was permanently true, so
+    // this celebration could never happen at all.
+    const log = [
+      workout("2026-08-03"), workout("2026-08-05"),
+      workout("2026-08-10"), workout("2026-08-12"),
+      workout("2026-08-17"), workout("2026-08-18"), workout("2026-08-19"),
+    ];
+    const first = detectMoments(input({ workoutLog: log }), EMPTY_MOMENT_RECORD);
+    expect(first.newly.some((m) => m.kind === "best_training_week")).toBe(true);
+    expect(first.record.bestWeekSessions).toBe(2); // completed weeks only
   });
 
   it("flags a round lifetime number only when it is genuinely close", () => {

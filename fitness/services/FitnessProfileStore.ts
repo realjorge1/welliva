@@ -11,6 +11,7 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type {
+  EffortMemory,
   FitnessProfile,
   RecommendationMemory,
   ReminderPrefs,
@@ -25,6 +26,9 @@ export const FITNESS_PROFILE_KEY = "@welliva_fitness_profile";
 
 /** How many recommendation outcomes to remember for adaptation. */
 const REC_MEMORY_LIMIT = 21;
+
+/** How many "how did that feel" answers to keep. */
+const EFFORT_MEMORY_LIMIT = 30;
 
 /* ─────────────── in-process change feed (keeps screens in sync) ───────────────
  * The dashboard, library and settings each hold a copy of the profile; saving
@@ -72,6 +76,7 @@ export function createDefaultProfile(now: Date = new Date()): FitnessProfile {
     },
     favorites: [],
     recommendationHistory: [],
+    effortHistory: [],
   };
 }
 
@@ -148,6 +153,20 @@ export function rememberRecommendation(
     .sort((a, b) => (a.date < b.date ? -1 : 1))
     .slice(-REC_MEMORY_LIMIT);
   return { ...profile, recommendationHistory: history };
+}
+
+/**
+ * Bank how a finished session felt.
+ *
+ * Appended rather than deduped by date: two sessions in one day are two honest
+ * data points, and the engine reads the RUN of recent answers, not one of them.
+ */
+export async function rememberSessionEffort(
+  memory: EffortMemory,
+): Promise<FitnessProfile> {
+  const current = await loadFitnessProfile();
+  const effortHistory = [...current.effortHistory, memory].slice(-EFFORT_MEMORY_LIMIT);
+  return updateFitnessProfile({ effortHistory });
 }
 
 /* ─────────────────────────── data safety ─────────────────────────── */

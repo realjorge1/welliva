@@ -775,6 +775,13 @@ export interface GozlinMoment {
   prompt: string;
   /** Call-to-action label on the card (defaults per kind in the renderer). */
   cta?: string;
+  /**
+   * Where the card goes instead of the chat. Set this whenever `cta` names a
+   * SCREEN — "See my habits" that opened the coach was the card lying about
+   * its own doorway. The prompt stays either way: it's what the card would
+   * have asked, and it's still the fallback for every moment without a route.
+   */
+  route?: string;
 }
 
 // ════════════════════════════════════════════════════════════════

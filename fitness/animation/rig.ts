@@ -235,7 +235,7 @@ const FRONT_SPECS: BoneSpec[] = [
 const ARM_CLEARANCE = 3.6;
 const SIDE_ARM_CLEARANCE = 3.4;
 
-function frontNodes(frame: number[]): Record<string, Pt> {
+function frontNodes(frame: number[], left?: number[]): Record<string, Pt> {
   const head = at(frame, 0);
   const chest = at(frame, 1);
   const pelvis = at(frame, 2);
@@ -249,6 +249,15 @@ function frontNodes(frame: number[]): Record<string, Pt> {
   const armShR = out(shR);
   const armElR = out(elR);
   const armHaR = out(haR);
+
+  // An ALTERNATING movement authors its own left side; everything symmetric
+  // mirrors the right. The arm clearance runs the other way on an authored
+  // left arm, so a hanging hand clears the trunk on both sides.
+  const outL = (p: Pt): Pt => [p[0] - ARM_CLEARANCE, p[1]];
+  const armShL = left ? outL(at(left, 0)) : flip(armShR);
+  const armElL = left ? outL(at(left, 1)) : flip(armElR);
+  const armHaL = left ? outL(at(left, 2)) : flip(armHaR);
+
   return {
     head,
     chest,
@@ -257,15 +266,15 @@ function frontNodes(frame: number[]): Record<string, Pt> {
     hipR,
     knR,
     ftR,
-    hipL: flip(hipR),
-    knL: flip(knR),
-    ftL: flip(ftR),
+    hipL: left ? at(left, 3) : flip(hipR),
+    knL: left ? at(left, 4) : flip(knR),
+    ftL: left ? at(left, 5) : flip(ftR),
     armShR,
     armElR,
     armHaR,
-    armShL: flip(armShR),
-    armElL: flip(armElR),
-    armHaL: flip(armHaR),
+    armShL,
+    armElL,
+    armHaL,
   };
 }
 
@@ -323,8 +332,8 @@ export function buildFrontRig(motion: FigureMotion): Rig {
   const profile = getFrontProfile(motion);
   return assemble(
     FRONT_SPECS,
-    frontNodes(profile.frames[0]),
-    frontNodes(profile.frames[1]),
+    frontNodes(profile.frames[0], profile.framesL?.[0]),
+    frontNodes(profile.frames[1], profile.framesL?.[1]),
     "pelvis",
     2,
     10,

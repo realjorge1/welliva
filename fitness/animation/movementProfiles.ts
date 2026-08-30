@@ -14,6 +14,7 @@
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
 import type { ExerciseCategory } from "@/models/exercise";
 import type { MovementPattern } from "@/models/workout";
+import { EXERCISE_MOTIONS, SPECIFIC_MOTION_FAMILY } from "./exerciseMotions";
 
 /** Point order inside a flat 14-number frame: [x,y] per node. */
 export const FIG_NODES = ["head", "shoulder", "elbow", "hand", "hip", "knee", "foot"] as const;
@@ -30,8 +31,59 @@ export const FIG_INDEX: Record<FigNode, number> = {
 export const FRAME_LEN = FIG_NODES.length * 2; // 14
 export const HEAD_RADIUS = 7;
 
-/** A profile key: the seven real movement patterns + a calm default. */
-export type FigureMotion = MovementPattern | "neutral";
+/**
+ * The FALLBACK rungs: the seven real movement patterns + a calm default.
+ * One shape per family — right for an AI-invented move nobody has authored,
+ * and only ever a stand-in for a move the catalogue actually names.
+ */
+export type BaseMotion = MovementPattern | "neutral";
+
+/**
+ * Exercise-specific movements authored on top of the pattern rungs.
+ *
+ * Drawing butt kicks, high knees and jumping jacks with one shared "cardio"
+ * loop reads as a broken app rather than a stylised one, so the moves people
+ * recognise get their own. `idle` is not an exercise: it is the at-ease pose
+ * the live player switches to between rounds. Front + side keyframes for each
+ * live in front/sideProfiles; the id map is exerciseMotions.ts.
+ */
+export type SpecificMotion =
+  | "idle"
+  // Cardio
+  | "jumpingJack"
+  | "highKnee"
+  | "buttKick"
+  | "burpee"
+  | "jumpRope"
+  | "lateralShuffle"
+  | "skater"
+  | "march"
+  | "boxing"
+  | "bearCrawl"
+  | "inchworm"
+  | "mountainClimber"
+  | "tuckJump"
+  | "broadJump"
+  | "plankJack"
+  // Strength & floor work
+  | "pushup"
+  | "lunge"
+  | "plank"
+  | "gluteBridge"
+  | "legRaise"
+  | "calfRaise"
+  | "row"
+  | "curl"
+  | "superman"
+  | "sidePlank"
+  | "russianTwist"
+  | "wallSit"
+  | "birdDog"
+  | "catCow"
+  | "childsPose";
+
+/** Any profile key the figure can be drawn from. */
+export type FigureMotion = BaseMotion | SpecificMotion;
 
 export interface MovementProfile {
   /** Two keyframes: [top, bottom] of one rep. Each is FRAME_LEN numbers. */
@@ -55,7 +107,7 @@ const P = (
 
 /* ── The pattern library. Poses are hand-tuned side-view silhouettes. ── */
 
-export const MOVEMENT_PROFILES: Record<FigureMotion, MovementProfile> = {
+export const MOVEMENT_PROFILES: Record<BaseMotion, MovementProfile> = {
   // Bodyweight squat — hips sink back, knees track forward, arms counterbalance.
   squat: {
     frames: [
@@ -141,15 +193,24 @@ const CATEGORY_TO_MOTION: Record<ExerciseCategory, FigureMotion> = {
 };
 
 /**
- * Resolve the best demonstration motion for an exercise. Prefers the local
- * DB's precise movementPattern; falls back to the session's category; finally a
- * calm neutral idle. Never throws — AI exercises degrade to a sensible pose.
+ * Resolve the best demonstration motion for an exercise, most precise first:
+ *
+ *   1. the exercise's OWN authored movement (a butt kick kicks; see
+ *      exerciseMotions.ts),
+ *   2. the local DB's movement pattern — the family stand-in,
+ *   3. the session's category,
+ *   4. a calm neutral idle.
+ *
+ * Never throws — AI exercises the catalogue has never seen degrade to a
+ * sensible pose rather than to nothing.
  */
 export function resolveFigureMotion(
   exerciseId?: string,
   category?: ExerciseCategory,
 ): FigureMotion {
   if (exerciseId) {
+    const specific = EXERCISE_MOTIONS[exerciseId];
+    if (specific) return specific;
     const entry = EXERCISE_DATABASE.find((e) => e.id === exerciseId);
     if (entry) return entry.movementPattern;
   }
@@ -157,8 +218,13 @@ export function resolveFigureMotion(
   return "neutral";
 }
 
+/** The pattern-level fallback for a motion — the family it belongs to. */
+export function baseMotionOf(motion: FigureMotion): BaseMotion {
+  return SPECIFIC_MOTION_FAMILY[motion as SpecificMotion] ?? (motion as BaseMotion);
+}
+
 export function getMovementProfile(motion: FigureMotion): MovementProfile {
-  return MOVEMENT_PROFILES[motion] ?? MOVEMENT_PROFILES.neutral;
+  return MOVEMENT_PROFILES[baseMotionOf(motion)] ?? MOVEMENT_PROFILES.neutral;
 }
 
 /** Smoothstep for natural ease at both ends of a rep. */

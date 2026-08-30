@@ -3,9 +3,13 @@
  * catalogued exercise and that no keyframe pose leaves the drawable box.
  */
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
+import { EXERCISE_MOTIONS } from "@/fitness/animation/exerciseMotions";
+import { FRONT_PROFILES } from "@/fitness/animation/frontProfiles";
+import { SIDE_PROFILES } from "@/fitness/animation/sideProfiles";
 import {
   FRAME_LEN,
   MOVEMENT_PROFILES,
+  baseMotionOf,
   getMovementProfile,
   nodeXY,
   resolveFigureMotion,
@@ -29,13 +33,35 @@ describe("movement profiles", () => {
     }
   });
 
-  it("resolves a movement pattern for every exercise in the catalog", () => {
+  it("resolves a drawable movement for every exercise in the catalog", () => {
     for (const ex of EXERCISE_DATABASE) {
       const motion = resolveFigureMotion(ex.id, ex.category);
-      expect(MOVEMENT_PROFILES[motion], `${ex.id} → ${motion}`).toBeDefined();
-      // A DB exercise resolves to its own precise movement pattern.
-      expect(motion).toBe(ex.movementPattern);
+      // Whatever it resolves to, it must be drawable from BOTH cameras.
+      expect(FRONT_PROFILES[motion], `${ex.id} → ${motion}`).toBeDefined();
+      expect(SIDE_PROFILES[motion], `${ex.id} → ${motion}`).toBeDefined();
+      // ...and every authored movement still collapses to one of the seven
+      // patterns, so nothing downstream has to learn a second taxonomy.
+      expect(MOVEMENT_PROFILES[baseMotionOf(motion)], `${ex.id} → ${motion}`).toBeDefined();
     }
+  });
+
+  it("leaves an unmapped exercise on its own movement pattern", () => {
+    // A specialisation is opt-in. Anything without one — including a catalogue
+    // entry added tomorrow — must still land on its pattern, never on neutral.
+    for (const ex of EXERCISE_DATABASE) {
+      if (EXERCISE_MOTIONS[ex.id]) continue;
+      expect(resolveFigureMotion(ex.id, ex.category), ex.id).toBe(ex.movementPattern);
+    }
+  });
+
+  it("prefers an exercise's own authored movement over its pattern", () => {
+    // The complaint that started this: three different cardio moves, one loop.
+    const jack = resolveFigureMotion("cardio_01", "cardio");
+    const knees = resolveFigureMotion("cardio_02", "cardio");
+    const kicks = resolveFigureMotion("cardio_03", "cardio");
+    expect(new Set([jack, knees, kicks]).size).toBe(3);
+    // An exercise with nothing authored still falls back to its pattern.
+    expect(resolveFigureMotion("core_02", "core")).toBe("core");
   });
 
   it("falls back to category, then to neutral", () => {

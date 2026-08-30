@@ -11,10 +11,19 @@
  * is the hollow feeling this whole layer exists to avoid. So it reads as a
  * quiet note with a hairline of progress — a stake, not a trophy.
  *
- * It renders nothing when there is no nudge, which is most days. That is the
+ * IT RENDERS NOTHING when there is no nudge, which is most days. That is the
  * design working: a pull that is always on screen is wallpaper.
+ *
+ * THE RAIL HAS TO BE ABLE TO FILL. Its target is a real number the user can
+ * reach (services/MomentEngine enforces this), so arriving at it looks like
+ * arriving: the hairline goes the whole way across and a small marker names the
+ * standing fact — "Personal best" — beside the headline. That marker is still
+ * not a celebration; it is a label on something already true, and the loud half
+ * of this engine (the Moment, with its confetti) has fired separately. What the
+ * card must never do is show a bar that CANNOT fill, which is what it did while
+ * the week target moved up every time the count did.
  */
-import { AppText, Card, IconBadge, useColors } from "@/components/ui";
+import { AppText, Card, IconBadge, Pill, useColors } from "@/components/ui";
 import { Palette, Radius, Spacing, alpha } from "@/constants/theme";
 import type { Nudge } from "@/services/MomentEngine";
 import React from "react";
@@ -42,9 +51,15 @@ export function NudgeCard({ nudge }: { nudge: Nudge | null }) {
       <View style={styles.row}>
         <IconBadge name={nudge.icon} tone={tone} size={40} />
         <View style={styles.copy}>
-          <AppText variant="headline" weight="700" numberOfLines={2}>
-            {nudge.headline}
-          </AppText>
+          <View style={styles.headlineRow}>
+            <AppText variant="headline" weight="700" numberOfLines={2} style={styles.flex}>
+              {nudge.headline}
+            </AppText>
+            {/* Only present when a record is genuinely held — see the header. */}
+            {nudge.badge ? (
+              <Pill label={nudge.badge} tone={tone} size="sm" icon="trophy" />
+            ) : null}
+          </View>
           <AppText variant="footnote" color="secondary" numberOfLines={2}>
             {nudge.detail}
           </AppText>
@@ -67,8 +82,10 @@ export function NudgeCard({ nudge }: { nudge: Nudge | null }) {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   row: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
   copy: { flex: 1, gap: 2 },
+  headlineRow: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
   rail: {
     height: 3,
     borderRadius: Radius.pill,

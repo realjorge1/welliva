@@ -118,7 +118,7 @@ const FIXTURES: Record<string, [string, string]> = {
       { date: "2026-07-05", weightKg: 79.8 },
     ]),
   ],
-  [KEYS.WORKOUT_LOGS]: [
+  [KEYS.WORKOUT_LOG]: [
     JSON.stringify([{ id: "w1", completedAt: "2026-07-01T10:00:00Z" }]),
     JSON.stringify([{ id: "w2", completedAt: "2026-07-02T10:00:00Z" }]),
   ],
@@ -148,7 +148,98 @@ const FIXTURES: Record<string, [string, string]> = {
     JSON.stringify([{ date: "2026-07-01", minutes: 30 }]),
     JSON.stringify([{ date: "2026-07-02", minutes: 45 }]),
   ],
+  // Record<date, IntakeRecord[]> — breakfast ticked on one device, lunch on
+  // the other. Same shape of loss as the food log, on the document that now
+  // decides what the day's ring reads.
+  [KEYS.INTAKE_LEDGER]: [
+    JSON.stringify({
+      "2026-07-02": [
+        { slot: "breakfast", name: "Oats", calories: 400, at: "2026-07-02T08:00:00Z" },
+      ],
+    }),
+    JSON.stringify({
+      "2026-07-02": [
+        { slot: "lunch", name: "Rice", calories: 600, at: "2026-07-02T13:00:00Z" },
+      ],
+      "2026-07-03": [
+        { slot: "breakfast", name: "Oats", calories: 400, at: "2026-07-03T08:00:00Z" },
+      ],
+    }),
+  ],
+  // ScheduledDiet[] — one row per date. The two sides share 07-02, where the
+  // stale copy was regenerated LATER but records nothing eaten.
+  [KEYS.SCHEDULED_DIETS]: [
+    JSON.stringify([
+      {
+        id: "d1",
+        date: "2026-07-02",
+        createdAt: "2026-07-02T06:00:00Z",
+        schedule: {
+          date: "2026-07-02",
+          breakfast: { name: "Oats", isConsumed: true },
+          lunch: { name: "Rice", isConsumed: true },
+          dinner: null,
+          snacks: [],
+        },
+      },
+    ]),
+    JSON.stringify([
+      {
+        id: "d2",
+        date: "2026-07-02",
+        createdAt: "2026-07-02T23:00:00Z",
+        schedule: {
+          date: "2026-07-02",
+          breakfast: { name: "Oats", isConsumed: false },
+          lunch: { name: "Rice", isConsumed: false },
+          dinner: null,
+          snacks: [],
+        },
+      },
+      {
+        id: "d3",
+        date: "2026-07-03",
+        createdAt: "2026-07-03T06:00:00Z",
+        schedule: { date: "2026-07-03", breakfast: null, lunch: null, dinner: null, snacks: [] },
+      },
+    ]),
+  ],
 };
+
+/* ───────────────── the day a tick must never be rolled back ────────────────*/
+
+describe("a day the user ticked meals on", () => {
+  const [ticked, regenerated] = FIXTURES[KEYS.SCHEDULED_DIETS] as [string, string];
+
+  const dayOf = (json: string | null, date: string) =>
+    JSON.parse(json!).find((d: { date: string }) => d.date === date);
+
+  it("keeps the ticks even though the empty copy was written later", () => {
+    // The exact shape of the report: meals logged during the day, a schedule
+    // regenerated after them, and a total that read zero on the next launch.
+    const merged = merge(KEYS.SCHEDULED_DIETS, ticked, regenerated);
+    const day = dayOf(merged, "2026-07-02");
+    expect(day.schedule.breakfast.isConsumed).toBe(true);
+    expect(day.schedule.lunch.isConsumed).toBe(true);
+  });
+
+  it("keeps it whichever side it arrives from", () => {
+    const day = dayOf(merge(KEYS.SCHEDULED_DIETS, regenerated, ticked), "2026-07-02");
+    expect(day.schedule.breakfast.isConsumed).toBe(true);
+  });
+
+  it("still unions days only one device has", () => {
+    const merged = JSON.parse(merge(KEYS.SCHEDULED_DIETS, ticked, regenerated)!);
+    expect(merged.map((d: { date: string }) => d.date)).toEqual([
+      "2026-07-02",
+      "2026-07-03",
+    ]);
+  });
+
+  it("used to be last-write-wins, which is how the ticks were lost", () => {
+    expect(strategyFor(KEYS.SCHEDULED_DIETS).kind).not.toBe("lww");
+  });
+});
 
 describe("every registered strategy has a fixture", () => {
   it("covers the whole registry", () => {
@@ -170,12 +261,15 @@ describe("properties", () => {
 
     it(`${key} never drops an item present on either side`, () => {
       const merged = merge(key, a, b)!;
+      // Identity comes from the STRATEGY, not from a guess at the field name.
+      // Two rows that share the strategy's id are one item — collapsing them is
+      // the merge working, and a test that assumed "id" would read that as loss.
+      const strategy = strategyFor(key);
+      const idField = strategy.kind === "mergeById" ? strategy.idField : "id";
       for (const side of [a, b]) {
         const parsed = JSON.parse(side);
         const ids = Array.isArray(parsed)
-          ? parsed.map((x: Record<string, unknown>) =>
-              String(x.id ?? x.sessionRunId ?? x.date),
-            )
+          ? parsed.map((x: Record<string, unknown>) => String(x[idField]))
           : Object.keys(parsed);
         for (const id of ids) expect(merged).toContain(id);
       }
@@ -259,9 +353,13 @@ describe("identity", () => {
       idField: "sessionRunId",
       tsField: "completedAt",
     });
-    expect(strategyFor(KEYS.WORKOUT_LOGS)).toMatchObject({
+    expect(strategyFor(KEYS.WORKOUT_LOG)).toMatchObject({
       idField: "id",
       tsField: "completedAt",
     });
+    // Regression: the strategy was registered under a key the app never wrote,
+    // so the real workout log silently took last-write-wins and lost sessions
+    // whenever a second device pushed.
+    expect(isMergeable(KEYS.WORKOUT_LOG)).toBe(true);
   });
 });

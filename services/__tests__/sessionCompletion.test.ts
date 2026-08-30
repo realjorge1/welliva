@@ -81,6 +81,15 @@ function playThrough(
   return s;
 }
 
+/**
+ * The guard app/session-summary.tsx applies before it writes anything. A run
+ * with no completed work is not a workout and must not reach the log — see the
+ * comment at the log site for the list of cards that were over-counting.
+ */
+function isLoggable(summary: ReturnType<typeof service.buildSummary>): boolean {
+  return summary.setsCompleted > 0 || summary.exercisesCompleted > 0;
+}
+
 /** Exactly what app/session-summary.tsx writes into the workout log. */
 function toLogEntry(summary: ReturnType<typeof service.buildSummary>): WorkoutLogEntry {
   return {
@@ -170,6 +179,60 @@ describe("a session with no exercises (the NaN trap)", () => {
     // and every downstream `|| 0` silently reads it as zero.
     expect(revived.completionPercent).not.toBeNull();
     expect(Number.isFinite(revived.completionPercent)).toBe(true);
+  });
+});
+
+describe("a session that was opened and abandoned", () => {
+  const exercises = [repsExercise("e1"), repsExercise("e2")];
+
+  it("is not counted as a workout — no set was ever completed", () => {
+    // Start the player, then end it immediately. This is the "changed my mind"
+    // path, and it used to write a full log entry at 0%.
+    let s = service.createSession("w1", "Abandoned", exercises);
+    s = service.beginFirstSet(service.startSession(s));
+    s = service.stopSession(s);
+
+    const summary = service.buildSummary(s);
+
+    expect(s.phase).toBe("COMPLETE");
+    expect(summary.setsCompleted).toBe(0);
+    expect(summary.exercisesCompleted).toBe(0);
+    expect(summary.completionPercent).toBe(0);
+    expect(isLoggable(summary)).toBe(false);
+  });
+
+  it("keeps the day's other numbers honest when it is the only session", () => {
+    let s = service.createSession("w1", "Abandoned", exercises);
+    s = service.beginFirstSet(service.startSession(s));
+    s = service.stopSession(s);
+    const summary = service.buildSummary(s);
+
+    // What the log actually receives: nothing.
+    const log = isLoggable(summary) ? [toLogEntry(summary)] : [];
+    const snap = buildProgressSnapshot({
+      workoutLog: log,
+      sessionHistory: [summary],
+      today: summary.date,
+      weeklyTargetDays: 3,
+    });
+
+    expect(snap.totalWorkouts).toBe(0);
+    expect(snap.thisWeekWorkouts).toBe(0);
+    expect(snap.currentStreakDays).toBe(0);
+    expect(workoutStreakDays(log, summary.date)).toBe(0);
+  });
+
+  it("still counts the moment ONE set lands", () => {
+    // The bar is one completed set, not one completed exercise.
+    let s = service.createSession("w1", "One set", exercises);
+    s = service.beginFirstSet(service.startSession(s));
+    for (let r = 0; r < 8; r++) s = service.addRep(s);
+    s = service.completeSet(s);
+    s = service.stopSession(s);
+
+    const summary = service.buildSummary(s);
+    expect(summary.setsCompleted).toBeGreaterThan(0);
+    expect(isLoggable(summary)).toBe(true);
   });
 });
 

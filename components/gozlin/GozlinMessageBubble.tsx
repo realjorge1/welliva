@@ -33,7 +33,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { GozlinStructuredRenderer } from "./renderers";
 import { MessageActions, type MessageAction } from "./MessageActions";
-import { ReceiptHint, ReceiptText } from "./ReceiptText";
+import { ReceiptText, ReceiptTrail } from "./ReceiptText";
 import type { Receipt } from "@/services/gozlin/agent";
 
 /** How long the copy tick stays before the icon returns. */
@@ -182,30 +182,53 @@ export function GozlinMessageBubble({
     });
   }
 
+  /**
+   * ── THE CARD COMES FIRST, THEN THE COACH ──────────────────────────────────
+   *
+   * The structured card used to hang BELOW the sentence, which had the turn
+   * backwards. The card is the update — the day counter, the readouts, the
+   * risks, the one move — and the prose is the coach reacting to it. Reading
+   * "Good afternoon. That's three days running." and only then arriving at the
+   * data made the greeting float free of anything, and the card land as an
+   * appendix to a remark that had already been made.
+   *
+   * The other way round, it plays the way a real check-in does: here is where
+   * you are, and here is what I make of it. The reader receives the state
+   * first, and the voice underneath is the coach speaking TO that state — which
+   * is the entire feeling this screen exists to produce, and it cost a reorder.
+   *
+   * The bubble keeps its coach-column alignment and its tail either way, so it
+   * is still unmistakably Gozlin talking rather than a caption on a card.
+   */
   return (
     <View style={styles.coachRow}>
-      <Pressable
-        onPress={toggle}
-        accessibilityRole="button"
-        accessibilityLabel={`Gozlin said: ${message.content}`}
-        accessibilityHint="Shows what you can do with this reply"
-        style={({ pressed }) => [
-          styles.coachBubble,
-          { backgroundColor: colors.surface, borderColor: colors.border },
-          pressed && { opacity: 0.92 },
-        ]}
-      >
-        <ReceiptText
-          content={message.content}
-          receipts={message.receipts}
-          onOpenReceipt={onOpenReceipt ?? (() => {})}
-        />
-        {onOpenReceipt ? <ReceiptHint count={message.receipts?.length ?? 0} /> : null}
-      </Pressable>
       {message.structured ? (
         <View style={styles.structured}>
           <GozlinStructuredRenderer data={message.structured} />
         </View>
+      ) : null}
+      {hasText ? (
+        <Pressable
+          onPress={toggle}
+          accessibilityRole="button"
+          accessibilityLabel={`Gozlin said: ${message.content}`}
+          accessibilityHint="Shows what you can do with this reply"
+          style={({ pressed }) => [
+            styles.coachBubble,
+            message.structured != null && styles.coachBubbleUnderCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            pressed && { opacity: 0.92 },
+          ]}
+        >
+          <ReceiptText content={message.content} />
+          {onOpenReceipt ? (
+            <ReceiptTrail
+              content={message.content}
+              receipts={message.receipts}
+              onOpenReceipt={onOpenReceipt}
+            />
+          ) : null}
+        </Pressable>
       ) : null}
       {showActions ? <MessageActions actions={actions} align="left" /> : null}
     </View>
@@ -241,5 +264,15 @@ const styles = StyleSheet.create({
     borderRadius: Radius.xl,
     borderTopLeftRadius: Radius.xs,
   },
-  structured: { alignSelf: "stretch", marginTop: Spacing.xs },
+  /**
+   * Speaking after a card, not before it. The tail rounds off — a notch
+   * pointing up at the card underneath it would read as the card's caption —
+   * and a small gap keeps the two as two objects rather than one stack.
+   */
+  coachBubbleUnderCard: {
+    marginTop: Spacing.sm,
+    borderTopLeftRadius: Radius.xl,
+    borderBottomLeftRadius: Radius.xs,
+  },
+  structured: { alignSelf: "stretch" },
 });

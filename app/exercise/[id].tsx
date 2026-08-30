@@ -206,9 +206,13 @@ export default function ExerciseDetailScreen() {
               movement on one rep clock. Resolves from the movement pattern;
               the muscles it trains are the MuscleMap section below. */}
           <View style={styles.demo}>
+            {/* The pattern is passed ONLY for AI exercises. It overrides id
+                resolution, and a catalogued move resolves to its own authored
+                movement — forcing the pattern here would put every cardio
+                exercise back on one shared loop. */}
             <ExerciseFigure
               exerciseId={id}
-              motion={view.movementPattern as FigureMotion}
+              motion={view.isAi ? (view.movementPattern as FigureMotion) : undefined}
               size={172}
             />
           </View>

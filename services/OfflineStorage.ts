@@ -29,9 +29,15 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 // sync/React code. Off by default, so tests and the pre-sync app are unaffected.
 //
 // NOTE: this only observes writes that go THROUGH OfflineStorage. Several
-// services write AsyncStorage directly (StreakService, AchievementService, …);
-// the sync engine's periodic full-push sweep is what covers those. Do not rely
-// on this observer alone for completeness.
+// services still write AsyncStorage directly (StreakService, AchievementService,
+// …); the sync engine's periodic full-push sweep is what covers those. Do not
+// rely on this observer alone for completeness.
+//
+// ScheduleService used to be on that list, and it was the expensive one: every
+// meal tick landed without waking the observer, so a day's consumption reached
+// the cloud only if the app happened to be foregrounded again afterwards, and
+// until it did, the sync engine's local-dirty guard did not know to protect it
+// from an older cloud copy. It writes through here now.
 // ============================================================================
 let onWrite: ((key: string) => void) | null = null;
 
@@ -60,7 +66,6 @@ export const KEYS = {
   WEEK_SCHEDULES: "@welliva_week_schedules",
   DIET_HISTORY: "@welliva_diet_history",
   WORKOUT_PLAN: "@welliva_workout_plan",
-  WORKOUT_LOGS: "@welliva_workout_logs",
   BODY_LOGS: "@welliva_body_logs",
   LAST_ACTIVE_DATE: "@welliva_last_active_date",
   LAST_CHECKED_DATE: "@welliva_last_checked_date",
@@ -85,6 +90,13 @@ export const KEYS = {
   SAVED_MEALS: "@welliva_saved_meals",
   /** Cached end-of-period reports, so an archived report never recomputes. */
   PERIOD_REPORTS: "@welliva_period_reports",
+
+  // --- Intake ledger (IntakeLedger) ----------------------------------------
+  /**
+   * Every meal the user has ticked, with the macros AS THEY WERE at the tick.
+   * The plan document is rewritten by half a dozen code paths; this is not.
+   */
+  INTAKE_LEDGER: "@welliva_intake_ledger",
 
   // --- Free-form nutrition logging (FoodLogService) ------------------------
   /** Ad-hoc resolved foods logged per date, outside any planned meal. */

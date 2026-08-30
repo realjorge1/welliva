@@ -213,6 +213,11 @@ export interface UseGozlin {
   ) => Promise<DeepDiveOutcome>;
   /** File the current thread and start an empty one. */
   resetConversation: () => Promise<void>;
+  /**
+   * Discard the current thread WITHOUT filing it. Nothing else Gozlin knows is
+   * touched — see the implementation for why that separation is the point.
+   */
+  deleteConversation: () => Promise<void>;
   /** Past conversations, newest first. Filed by `resetConversation`. */
   archive: ArchivedConversation[];
   /** Reopen an archived thread as the live conversation. */
@@ -239,6 +244,13 @@ export function useGozlin(): UseGozlin {
     updatedAt: 0,
   });
   const [messages, setMessages] = useState<GozlinMessage[]>([]);
+  /**
+   * The stored conversation has been read. Until it has, an empty `messages` is
+   * not evidence of an empty thread — it is the initial state, and treating it
+   * as an answer is what the briefing seeder below used to do. See the note
+   * there; it emptied the screen.
+   */
+  const [hydrated, setHydrated] = useState(false);
   const [archive, setArchive] = useState<ArchivedConversation[]>([]);
   const [checkins, setCheckins] = useState<GozlinCheckin[]>([]);
   const [isThinking, setIsThinking] = useState(false);
@@ -353,20 +365,30 @@ export function useGozlin(): UseGozlin {
   );
 
   // ── Load memory + conversation + check-ins once ──
+  //
+  // `hydrated` is set in a `finally`, and that is deliberate: it is the gate the
+  // briefing seeder waits on, so a storage read that throws must still open it.
+  // Otherwise one failed AsyncStorage call leaves the coach screen permanently
+  // blank — no briefing, no messages, no way back — which is a far worse
+  // outcome than starting the day on a fresh thread.
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [id, convo, chk, past] = await Promise.all([
-        loadIdentity(),
-        loadConversation(),
-        loadCheckins(),
-        loadArchive(),
-      ]);
-      if (!alive) return;
-      setIdentity(id);
-      setMessages(convo);
-      setCheckins(chk);
-      setArchive(past);
+      try {
+        const [id, convo, chk, past] = await Promise.all([
+          loadIdentity(),
+          loadConversation(),
+          loadCheckins(),
+          loadArchive(),
+        ]);
+        if (!alive) return;
+        setIdentity(id);
+        setMessages(convo);
+        setCheckins(chk);
+        setArchive(past);
+      } finally {
+        if (alive) setHydrated(true);
+      }
     })();
     return () => {
       alive = false;
@@ -388,13 +410,28 @@ export function useGozlin(): UseGozlin {
   }, []);
 
   // ── Seed the thread with the day's briefing opener (once, when empty) ──
+  //
+  // IT MUST WAIT FOR THE STORED THREAD, and this was a real screen-emptying bug
+  // rather than a theoretical one.
+  //
+  // `messages` starts as `[]`, so on the very first render this effect used to
+  // see an empty thread, latch `seededRef`, and seed the opener — all while
+  // `loadConversation()` was still in flight. When that promise landed with an
+  // empty array (a fresh install, the morning after "New conversation", or
+  // anything after "Clear memory") it called `setMessages([])` and wiped the
+  // opener it had raced. The latch was already set, so nothing ever re-seeded:
+  // the coach screen sat there with no briefing, no card, and no messages at
+  // all, permanently, until the user typed something.
+  //
+  // `hydrated` is the fix and it is the whole fix: nothing is seeded until the
+  // stored conversation has actually arrived, so "is this thread empty?" is
+  // asked once, of the real answer.
   useEffect(() => {
-    if (seededRef.current) return;
+    if (!hydrated || seededRef.current) return;
     if (messages.length > 0) {
       seededRef.current = true;
       return;
     }
-    // Wait until identity load has had a chance (updatedAt set or messages loaded).
     seededRef.current = true;
     const opener: GozlinMessage = {
       id: `gz_brief_${Date.now()}`,
@@ -405,7 +442,7 @@ export function useGozlin(): UseGozlin {
       createdAt: Date.now(),
     };
     setMessages([opener]);
-  }, [messages.length, briefing]);
+  }, [hydrated, messages.length, briefing]);
 
   // ── One turn ──
   //
@@ -700,6 +737,36 @@ export function useGozlin(): UseGozlin {
   }, []);
 
   /**
+   * Throw the live thread away — the one thing "New conversation" deliberately
+   * will not do.
+   *
+   * ── WHY BOTH EXIST ──────────────────────────────────────────────────────
+   *
+   * Filing and deleting are different intentions and the app was only offering
+   * one of them. "New conversation" archives, because the usual reason to start
+   * fresh is a change of subject and losing the last thread would be a surprise.
+   * But people also say things to a health coach they simply do not want kept —
+   * a weight, a bad week, something about their body — and until now the only
+   * way to remove one exchange was "Clear memory", which throws out the coach's
+   * entire understanding of them along with it. Making someone choose between
+   * keeping a private conversation and keeping their coach is not a choice
+   * anyone should be asked to make.
+   *
+   * SO THIS DELETES EXACTLY ONE THING: the messages on screen. It does not
+   * touch the archive, the identity tier, episodes, behavioural patterns or
+   * check-ins — deleting a conversation is not the same as being forgotten, and
+   * conflating the two is how "delete" becomes a button nobody dares press.
+   *
+   * The seeder puts today's briefing back (`seededRef` is released), so what you
+   * are left with is a clean thread rather than an empty screen.
+   */
+  const deleteConversation = useCallback(async () => {
+    setMessages([]);
+    seededRef.current = false;
+    await saveConversation([]);
+  }, []);
+
+  /**
    * Reopen an archived thread as the live one. The conversation currently on
    * screen is filed first, so switching between threads never costs you the one
    * you were in — and the reopened thread leaves the archive, because two
@@ -782,6 +849,7 @@ export function useGozlin(): UseGozlin {
     rateMessage,
     deepDive,
     resetConversation,
+    deleteConversation,
     archive,
     openArchived,
     deleteArchived,

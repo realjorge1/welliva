@@ -7,15 +7,22 @@
  * - Today's diet schedule + consumed status (persisted immediately)
  * - Workout plan (persisted, deterministic)
  * - Plan state (tracks active plans, regen flags)
- * - Today's consumed nutrition (derived from schedule, not stored separately)
+ * - Today's consumed nutrition (summed from the intake records, never stored)
  * - Goals & water tracking
  *
  * KEY DESIGN DECISIONS:
  * 1. Local-first: AsyncStorage is the working copy. When signed in, the profile
  *    (bio/goals) also syncs to Supabase so it follows the user across devices.
  * 2. All local persistence via AsyncStorage through OfflineStorage service.
- * 3. Nutrition consumed totals are DERIVED from the schedule's isConsumed flags,
- *    never stored separately (single source of truth).
+ * 3. Nutrition consumed totals are summed from the RECORDS OF WHAT WAS EATEN —
+ *    the intake ledger plus the free-form food log — and never from the plan's
+ *    isConsumed flags. This bullet used to say the opposite, and the opposite
+ *    is the bug: the plan document is rewritten by the generator, the midnight
+ *    rollover, the custom-menu projection, a swap and the cloud sync, so a
+ *    total read off it was only ever as durable as the least careful of them.
+ *    The plan still answers "how much of it did you follow?" — adherence is a
+ *    question about the plan. It no longer answers "what did you eat?".
+ *    See services/nutrition/IntakeLedger and services/nutrition/DayTotals.
  * 4. Plan regeneration only on: new day, preference change, or explicit action.
  * 5. Meal consumed state persists across navigation and app restarts.
  */
@@ -62,6 +69,7 @@ import {
 } from "../services/intelligence";
 
 import { calculateNutritionTargets, maintenanceTdee } from "../services/NutritionService";
+import { ZERO_MACROS, type MacroTotals } from "../services/nutrition/DayTotals";
 import { reconcileTargetsVersion } from "../services/nutrition/TargetsVersion";
 import {
   archiveWaterDay,
@@ -361,6 +369,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [nutritionTargets, setNutritionTargets] =
     useState<NutritionTargets | null>(null);
   const [todayDiet, setTodayDiet] = useState<TodayDiet | null>(null);
+  // Today's intake, as its two RECORDS rather than as the plan document: meals
+  // ticked (the intake ledger) and free-form foods logged (the food log). Kept
+  // as totals rather than entries — the entry lists belong to the screens that
+  // render them; this slice only has to add them up. Refreshed by
+  // refreshTodayDiet, which is the single call that reloads all of it.
+  const [intakeMacros, setIntakeMacros] = useState<MacroTotals>(ZERO_MACROS);
+  const [foodLogMacros, setFoodLogMacros] = useState<MacroTotals>(ZERO_MACROS);
   const [dietHistory, setDietHistory] = useState<DietHistoryEntry[]>([]);
   const [workoutPlan, setWorkoutPlan] = useState<GeneratedWorkoutPlan | null>(
     null,
@@ -410,11 +425,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     userBio,
     nutritionTargets,
     planState,
-    currentDate,
+    // No `currentDate`: every diet write resolves the local date at the moment
+    // it writes, so a tick can never land on a day the readers aren't reading.
+    // See useNutritionState.markMealAsConsumed.
     userGoals,
     todayDiet,
+    intakeMacros,
+    foodLogMacros,
     waterMl,
     setTodayDiet,
+    setIntakeMacros,
+    setFoodLogMacros,
     setDietHistory,
     setPlanState,
     setWaterMl,
@@ -594,13 +615,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       setIsLoading(true);
 
-      // Bring on-device storage to the current schema BEFORE any read: idempotent,
-      // version-gated, and additive (backfills the unified Timeline from the existing
-      // silos on first run, originals retained). See docs/architecture/04.
-      await migrate();
-
-      // Auto-expire any life events whose grace day has passed while the app was closed.
-      await lifeContext.expireDue();
+      // Boot housekeeping, guarded ON ITS OWN.
+      //
+      // Everything in loadData used to share one try/catch, so a throw anywhere
+      // above jumped straight past refreshTodayDiet() and left `todayDiet`
+      // null — which the whole app renders as a day on which nothing was eaten.
+      // Nothing had been lost; the read simply never happened. None of the work
+      // below is load-bearing for showing the user their day, so none of it is
+      // allowed to cost them their day.
+      try {
+        // Bring on-device storage to the current schema BEFORE any read:
+        // idempotent, version-gated, and additive (backfills the unified
+        // Timeline from the existing silos on first run, originals retained).
+        // See docs/architecture/04.
+        await migrate();
+        // Auto-expire any life events whose grace day passed while we were shut.
+        await lifeContext.expireDue();
+      } catch (e) {
+        console.error("AppContext: boot housekeeping failed:", e);
+      }
       // Pull from any connected senses on boot (consent + permission gated, never throws).
       void signalsCoordinator.syncDue();
 
@@ -632,68 +665,80 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setBodyLogs(await loadBodyLogs());
       setSessionHistory(await SessionService.getInstance().loadHistory());
 
-      // Handle day change
+      // Handle day change. Also guarded on its own, and for the same reason as
+      // the housekeeping above — more sharply, in fact: this branch reaches the
+      // network (ensureDietForDate), so on a bad connection it is the single
+      // most likely thing in the whole boot path to throw.
       const today = todayDate();
-      if (lastDate && lastDate !== today) {
-        // Sweep rather than close a single day — the app may have been shut for
-        // a week, and every intervening day still needs its history row.
-        await sweepClosedDays(today);
-        // Compact the just-closed day into the L2 summaries (see checkDayChange above).
-        await memory.compactDayIfPresent(lastDate);
-        // Close the learning loop for every day that ended while the app was
-        // shut. This is the path that matters MOST for learning: the in-app
-        // interval sweep (useDayChange) only fires if the app happens to be
-        // running at midnight, and for anyone who closes it overnight — which
-        // is the normal case — THIS is the only place the models ever refit.
-        // Both paths call the same idempotent job, so a user who does leave it
-        // open simply resolves the same day twice to the same numbers.
-        if (bio) {
-          try {
-            await runDailyLearning({
-              mifflinTdee: maintenanceTdee(bio),
-              weightKg: bio.weightKg,
-            });
-          } catch {
-            // Never let learning block boot — the app has to come up regardless.
+      try {
+        if (lastDate && lastDate !== today) {
+          // Sweep rather than close a single day — the app may have been shut for
+          // a week, and every intervening day still needs its history row.
+          await sweepClosedDays(today);
+          // Compact the just-closed day into the L2 summaries (see checkDayChange above).
+          await memory.compactDayIfPresent(lastDate);
+          // Close the learning loop for every day that ended while the app was
+          // shut. This is the path that matters MOST for learning: the in-app
+          // interval sweep (useDayChange) only fires if the app happens to be
+          // running at midnight, and for anyone who closes it overnight — which
+          // is the normal case — THIS is the only place the models ever refit.
+          // Both paths call the same idempotent job, so a user who does leave it
+          // open simply resolves the same day twice to the same numbers.
+          if (bio) {
+            try {
+              await runDailyLearning({
+                mifflinTdee: maintenanceTdee(bio),
+                weightKg: bio.weightKg,
+              });
+            } catch {
+              // Never let learning block boot — the app has to come up regardless.
+            }
           }
-        }
-        // Archive the day that just ended, then reset today's counter — and
-        // PERSIST the reset. Without writing WATER_TODAY=0 here, reopening the
-        // app on a new day (before any water is logged) would reload the stale
-        // total and the log would appear frozen at yesterday's value.
-        const waterGoal =
-          goals?.dailyWaterMl ??
-          (bio ? calculateNutritionTargets(bio).waterMl : undefined) ??
-          2500;
-        await archiveWaterDay(lastDate, water || 0, waterGoal);
-        setWaterMl(0);
-        await writeJSON(KEYS.WATER_TODAY, 0);
-        // Generate diet for the new day, preserving the previously chosen diet.
-        if (bio) {
-          const targets = calculateNutritionTargets(bio);
-          // Prefer a cached day (offline); else generate AI-first with local
-          // fallback. Never clobbers an already-scheduled day.
-          const result = await ensureDietForDate(
-            bio,
-            targets,
-            today,
-            plan?.activeDietId ?? undefined,
-          );
-          if (result && plan) {
-            const updatedPlan: PlanState = {
-              ...plan,
-              activeDietId: result.dietId,
-              dateStamp: today,
-            };
-            setPlanState(updatedPlan);
-            await writeJSON(KEYS.PLAN_STATE, updatedPlan);
+          // Archive the day that just ended, then reset today's counter — and
+          // PERSIST the reset. Without writing WATER_TODAY=0 here, reopening the
+          // app on a new day (before any water is logged) would reload the stale
+          // total and the log would appear frozen at yesterday's value.
+          const waterGoal =
+            goals?.dailyWaterMl ??
+            (bio ? calculateNutritionTargets(bio).waterMl : undefined) ??
+            2500;
+          await archiveWaterDay(lastDate, water || 0, waterGoal);
+          setWaterMl(0);
+          await writeJSON(KEYS.WATER_TODAY, 0);
+          // Generate diet for the new day, preserving the previously chosen diet.
+          if (bio) {
+            const targets = calculateNutritionTargets(bio);
+            // Prefer a cached day (offline); else generate AI-first with local
+            // fallback. Never clobbers an already-scheduled day.
+            const result = await ensureDietForDate(
+              bio,
+              targets,
+              today,
+              plan?.activeDietId ?? undefined,
+            );
+            if (result && plan) {
+              const updatedPlan: PlanState = {
+                ...plan,
+                activeDietId: result.dietId,
+                dateStamp: today,
+              };
+              setPlanState(updatedPlan);
+              await writeJSON(KEYS.PLAN_STATE, updatedPlan);
+            }
           }
+        } else {
+          setWaterMl(water || 0);
         }
-      } else {
-        setWaterMl(water || 0);
+      } catch (e) {
+        console.error("AppContext: day rollover failed:", e);
+        // Fall through: the day still has to load. LAST_ACTIVE_DATE is written
+        // below regardless, which is correct — sweepClosedDays is idempotent
+        // and the next launch re-runs whatever this attempt did not finish.
       }
 
       await writeString(KEYS.LAST_ACTIVE_DATE, today);
+      // Today's numbers. Deliberately the last thing, and now unreachable only
+      // by a failure in itself.
       await refreshTodayDiet();
       await refreshDietHistory();
 
@@ -978,7 +1023,13 @@ export function useApp(): AppContextType {
   const gamification = useGamification();
   const system = useSystem();
   return useMemo(
-    () => ({ ...profile, ...nutrition, ...workout, ...gamification, ...system }),
+    () => ({
+      ...profile,
+      ...nutrition,
+      ...workout,
+      ...gamification,
+      ...system,
+    }),
     [profile, nutrition, workout, gamification, system],
   );
 }

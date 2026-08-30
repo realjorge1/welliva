@@ -12,9 +12,22 @@
  * well pick a thread back up — the live thread is filed on the way past, so
  * switching never costs you the one you were in.
  *
- * Rows are titled with the user's own first words. Any title we generated would
- * be a summary of someone's private conversation written by us, which is both
- * presumptuous and worse at the job.
+ * Rows are titled with the SAME topic title the coach header shows while you
+ * are inside the thread (services/gozlin/conversationTitle) — derived from the
+ * user's own words by rule, on device, never written by a model. The row you
+ * tap and the header you land on therefore always say the same thing, which is
+ * what makes this read as a filing cabinet rather than a log.
+ *
+ * ── DELETING TAKES TWO TAPS, IN PLACE ───────────────────────────────────────
+ *
+ * It used to take one, and that one was final: a mis-aimed thumb permanently
+ * destroyed a conversation with no confirmation and no undo. The fix is not a
+ * dialog — this sheet is a `Modal`, and React Native will not present a second
+ * Modal over a live one, so a confirmation sheet raised from here would simply
+ * never appear. The trash icon becomes a "Delete?" pill for a few seconds
+ * instead, and only the second tap does anything. It expires on its own, and
+ * arming one row disarms any other, so there is never more than one live
+ * trigger on screen.
  */
 
 import { AppText, Sheet } from "@/components/ui";
@@ -23,8 +36,15 @@ import { alpha, Radius, Spacing } from "@/constants/theme";
 import type { ArchivedConversation } from "@/services/gozlin";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "@/utils/haptics";
-import React from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+
+/**
+ * How long a trash button stays armed before it goes back to being a trash
+ * button. Long enough to move a thumb and read the word, short enough that a
+ * live delete trigger is never left sitting on a screen you walked away from.
+ */
+const DISARM_MS = 3500;
 
 interface Props {
   visible: boolean;
@@ -42,6 +62,42 @@ export function GozlinHistorySheet({
   onDelete,
 }: Props) {
   const { colors } = useColors();
+
+  /** The row whose trash button is currently asking "Delete?", if any. */
+  const [armed, setArmed] = useState<string | null>(null);
+  const disarmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearTimer = useCallback(() => {
+    if (disarmTimer.current) clearTimeout(disarmTimer.current);
+    disarmTimer.current = null;
+  }, []);
+
+  // Closing the sheet must not leave a row armed behind it — reopening to find
+  // a delete already half-pressed is exactly the surprise this is preventing.
+  useEffect(() => {
+    if (!visible) {
+      clearTimer();
+      setArmed(null);
+    }
+  }, [visible, clearTimer]);
+
+  useEffect(() => clearTimer, [clearTimer]);
+
+  const armOrDelete = useCallback(
+    (id: string) => {
+      clearTimer();
+      if (armed === id) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        setArmed(null);
+        onDelete(id);
+        return;
+      }
+      Haptics.selectionAsync().catch(() => {});
+      setArmed(id);
+      disarmTimer.current = setTimeout(() => setArmed(null), DISARM_MS);
+    },
+    [armed, onDelete, clearTimer],
+  );
 
   const header = (
     <View style={styles.header}>
@@ -106,16 +162,33 @@ export function GozlinHistorySheet({
               </Pressable>
 
               <Pressable
-                onPress={() => {
-                  Haptics.selectionAsync().catch(() => {});
-                  onDelete(c.id);
-                }}
+                onPress={() => armOrDelete(c.id)}
                 hitSlop={8}
                 accessibilityRole="button"
-                accessibilityLabel={`Delete conversation: ${c.title}`}
-                style={({ pressed }) => [styles.del, pressed && { opacity: 0.5 }]}
+                accessibilityLabel={
+                  armed === c.id
+                    ? `Confirm deleting conversation: ${c.title}`
+                    : `Delete conversation: ${c.title}`
+                }
+                accessibilityHint={
+                  armed === c.id ? "Deletes it permanently" : "Asks you to confirm"
+                }
+                style={({ pressed }) => [
+                  styles.del,
+                  armed === c.id && [
+                    styles.delArmed,
+                    { backgroundColor: alpha(colors.error, 0.14) },
+                  ],
+                  pressed && { opacity: 0.5 },
+                ]}
               >
-                <Ionicons name="trash-outline" size={17} color={colors.textTertiary} />
+                {armed === c.id ? (
+                  <AppText variant="caption" weight="700" style={{ color: colors.error }}>
+                    Delete?
+                  </AppText>
+                ) : (
+                  <Ionicons name="trash-outline" size={17} color={colors.textTertiary} />
+                )}
               </Pressable>
             </View>
           ))}
@@ -178,6 +251,20 @@ const styles = StyleSheet.create({
     height: 44,
     alignItems: "center",
     justifyContent: "center",
+  },
+  /**
+   * Armed. It grows into a labelled pill rather than merely changing colour —
+   * a red icon is a state you have to already know about, and a word is not.
+   * `minWidth` matches the resting target so the row does not reflow when it
+   * arms, which would move the very control the finger is returning to.
+   */
+  delArmed: {
+    width: undefined,
+    minWidth: 44,
+    height: 30,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: Radius.pill,
+    marginRight: 7,
   },
 
   empty: { alignItems: "center", paddingVertical: Spacing.xxl, paddingHorizontal: Spacing.xl },

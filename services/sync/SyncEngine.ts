@@ -10,11 +10,17 @@
  * WHY A CHANGE-DETECTING SWEEP (not just the write observer). OfflineStorage's
  * write observer only sees writes that go THROUGH OfflineStorage. Several
  * services — StreakService, AchievementService, TournamentService,
- * ChallengeService, JourneyService, SessionService, ScheduleService — write
- * AsyncStorage directly, so the observer never fires for streaks or achievements
- * (which is precisely what finding #1 asks us to sync). `fullPushSweep` closes
- * that gap: it scans every synced key, compares a cheap signature against what we
- * last pushed, and queues whatever actually changed — regardless of who wrote it.
+ * ChallengeService, JourneyService, SessionService — write AsyncStorage
+ * directly, so the observer never fires for streaks or achievements (which is
+ * precisely what finding #1 asks us to sync). `fullPushSweep` closes that gap:
+ * it scans every synced key, compares a cheap signature against what we last
+ * pushed, and queues whatever actually changed — regardless of who wrote it.
+ *
+ * ScheduleService was on that list until it started writing through
+ * OfflineStorage. It is worth knowing why it was moved rather than left to the
+ * sweep: the sweep runs on foreground, and a meal tick that is never enqueued is
+ * never DIRTY, so the reconcile below had nothing to stop it adopting an older
+ * cloud copy of the day over the one the user had just ticked.
  *
  * CONFLICT POLICY (v2): TWO policies, chosen per key by services/sync/
  * mergeStrategies.ts.

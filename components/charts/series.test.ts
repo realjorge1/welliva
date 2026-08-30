@@ -6,6 +6,7 @@ import {
   buildWeeklyMinutes,
   buildWeightTrend,
   indexToStart,
+  sharedDomain,
   shortDate,
   weekStartOf,
 } from "./series";
@@ -174,5 +175,70 @@ describe("buildWeightTrend", () => {
     ];
     const points = buildWeightTrend(logs, TODAY, 30);
     expect(points.map((p) => p.value)).toEqual([80, 79.5]);
+  });
+});
+
+describe("sharedDomain — a legend chip is a filter, not a zoom", () => {
+  // Two overlaid macros indexed to their own first day = 100. Calories swing
+  // wide, carbs stay close to flat — the exact pairing that made the bug
+  // visible on the Nutrition trends card.
+  const calories = [100, 140, 90, 120];
+  const carbs = [100, 104, 98, 102];
+
+  /** Where a value lands vertically, 0 = bottom of the plot, 1 = top. */
+  const place = (v: number, [lo, hi]: [number, number]) => (v - lo) / (hi - lo);
+
+  it("moves a line when the domain is narrowed to the visible set — the bug", () => {
+    // This is what the OLD code did: build the domain from visible series only.
+    // Hiding calories left carbs alone in the domain, and carbs stretched to
+    // fill the plot — landing where calories used to be. Asserted so nobody
+    // reintroduces it thinking it looks tidier.
+    const allSeries = sharedDomain([calories, carbs]);
+    const carbsAlone = sharedDomain([carbs]);
+
+    expect(carbsAlone).not.toEqual(allSeries);
+    // Carbs' own peak sits low in the shared domain and at the very top of its
+    // own — a jump of most of the plot's height, from one chip tap.
+    expect(place(104, allSeries)).toBeLessThan(0.5);
+    expect(place(104, carbsAlone)).toBeGreaterThan(0.8);
+  });
+
+  it("holds every line still when the hidden series are still passed in", () => {
+    // The contract the component now honours: hidden series stay in the input,
+    // so the domain — and therefore every line's position — cannot move.
+    const shown = sharedDomain([calories, carbs]);
+    const caloriesHidden = sharedDomain([calories, carbs]);
+
+    expect(caloriesHidden).toEqual(shown);
+    expect(place(104, caloriesHidden)).toBe(place(104, shown));
+  });
+
+  it("spans every series, not just the widest one", () => {
+    const [lo, hi] = sharedDomain([calories, carbs], 0);
+    expect(lo).toBe(90);
+    expect(hi).toBe(140);
+  });
+
+  it("pads the span symmetrically so strokes clear the edges", () => {
+    const [lo, hi] = sharedDomain([[0, 100]], 0.1);
+    expect(lo).toBe(-10);
+    expect(hi).toBe(110);
+  });
+
+  it("ignores nulls rather than treating them as zero", () => {
+    // An untracked day must not drag the floor down to 0 and squash the plot.
+    expect(sharedDomain([[null, 100, null, 120]], 0)).toEqual([100, 120]);
+  });
+
+  it("opens out a flat series instead of dividing by zero", () => {
+    const [lo, hi] = sharedDomain([[100, 100, 100]], 0);
+    expect(hi).toBeGreaterThan(lo);
+  });
+
+  it("survives a series with no finite values at all", () => {
+    const [lo, hi] = sharedDomain([[null, null]], 0);
+    expect(Number.isFinite(lo)).toBe(true);
+    expect(Number.isFinite(hi)).toBe(true);
+    expect(hi).toBeGreaterThan(lo);
   });
 });

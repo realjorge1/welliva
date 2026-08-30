@@ -31,6 +31,7 @@ const ACH_KEY = "@welliva_achievements";
 // ──────────────────────────────────────────────
 
 export type AchievementCategory =
+  | "journey"
   | "streak"
   | "workout"
   | "nutrition"
@@ -68,6 +69,18 @@ export interface AchievementStats {
   waterGoalDays: number;
   // ── Body (← bodyLogs) ──
   weighIns: number;
+  /** Days between the first and the most recent weigh-in. */
+  weighInSpanDays: number;
+  // ── Calendar reach (← every day carrying a workout, weigh-in or diet entry) ──
+  activeMonths: number; // distinct calendar months with any activity
+  activeWeeks: number; // distinct weeks with any activity
+  consistentWeeks: number; // FINISHED weeks holding 4+ active days
+  comebacks: number; // returns after a week or more away
+  // ── Training texture (← workoutLog) ──
+  trainingMinutes: number; // lifetime minutes trained
+  weekendWorkouts: number; // sessions finished on a Saturday or Sunday
+  weekdaysTrained: number; // distinct weekdays trained on, 0–7
+  nightWorkouts: number; // sessions finished at 8pm or later
 }
 
 export const EMPTY_STATS: AchievementStats = {
@@ -83,6 +96,15 @@ export const EMPTY_STATS: AchievementStats = {
   proteinGoalDays: 0,
   waterGoalDays: 0,
   weighIns: 0,
+  weighInSpanDays: 0,
+  activeMonths: 0,
+  activeWeeks: 0,
+  consistentWeeks: 0,
+  comebacks: 0,
+  trainingMinutes: 0,
+  weekendWorkouts: 0,
+  weekdaysTrained: 0,
+  nightWorkouts: 0,
 };
 
 export interface AchievementDef {
@@ -98,6 +120,12 @@ export interface AchievementDef {
   target: number;
   /** How to render a metric value (e.g. add a unit). */
   unit?: string;
+  /**
+   * One line saying why this one is worth having — shown under the description
+   * in the detail sheet. Optional on purpose: "Log 50 meals" speaks for itself,
+   * and a voice on every single badge is a voice you stop hearing.
+   */
+  flavor?: string;
 }
 
 /** Persisted record: which achievements are earned + the water-goal counter. */
@@ -149,6 +177,7 @@ export const CATEGORY_META: Record<
   AchievementCategory,
   { label: string; icon: keyof typeof Ionicons.glyphMap }
 > = {
+  journey: { label: "The Journey", icon: "compass" },
   streak: { label: "Consistency", icon: "flame" },
   workout: { label: "Training", icon: "barbell" },
   nutrition: { label: "Nutrition", icon: "restaurant" },
@@ -692,7 +721,356 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     metric: (s) => s.weighIns,
     target: 200,
   },
+
+  // ════════════════════════════════════════════════════════════════════════
+  // THE SECOND AXIS — TIME, NOT EFFORT.
+  //
+  // Everything above this line is the same shape: do X, N times. N is the only
+  // knob, and the only way to extend the catalogue with it is to turn N up —
+  // which makes the app HARDER, not longer, and eventually impossible. That is
+  // how forty-seven badges got emptied in a season.
+  //
+  // These are gated by the CALENDAR instead. "Active in twelve different
+  // months" cannot be reached before a year has passed and asks for one logged
+  // day a month to qualify — strictly easier than "50 workouts", and twelve
+  // times slower. Nothing here can be rushed, ground out in a heavy week, or
+  // failed by having an ordinary life. The horizon stops at twelve months on
+  // purpose: this is a journey, not a two-year lock.
+  //
+  // RETENTION NOTE. The calendar metrics read the union of days carrying a
+  // workout, a weigh-in or a diet-history row. Workout and body logs are kept
+  // forever; diet history is bounded at 400 days — so for someone who ONLY ever
+  // logs meals, days past that age out of the window. Every target here sits
+  // inside a year for that reason, and anything already earned stays earned in
+  // the record regardless of what later leaves the window.
+  // ════════════════════════════════════════════════════════════════════════
+
+  // ── The journey ── calendar reach + the comeback.
+  {
+    id: "weeks_4",
+    name: "Four Weeks In",
+    description: "Show up in 4 different weeks.",
+    flavor: "Week three is where most people quietly stop. You went past it.",
+    category: "journey",
+    tier: "bronze",
+    icon: "calendar-outline",
+    metric: (s) => s.activeWeeks,
+    target: 4,
+    unit: "weeks",
+  },
+  {
+    id: "consistent_4",
+    name: "Four-Day Habit",
+    description: "Finish 4 weeks with at least 4 active days in them.",
+    flavor: "Four days a week is the number that survives a real life.",
+    category: "journey",
+    tier: "silver",
+    icon: "checkmark-circle",
+    metric: (s) => s.consistentWeeks,
+    target: 4,
+    unit: "weeks",
+  },
+  {
+    id: "months_3",
+    name: "One Season",
+    description: "Be active in 3 different months.",
+    flavor: "A whole season of your life, on the record.",
+    category: "journey",
+    tier: "silver",
+    icon: "partly-sunny",
+    metric: (s) => s.activeMonths,
+    target: 3,
+    unit: "months",
+  },
+  {
+    id: "comeback_1",
+    name: "The Return",
+    description: "Come back after a week or more away.",
+    flavor: "Anyone can start. Coming back is the part that actually decides it.",
+    category: "journey",
+    tier: "silver",
+    icon: "arrow-undo",
+    metric: (s) => s.comebacks,
+    target: 1,
+  },
+  {
+    id: "months_6",
+    name: "Half a Year Here",
+    description: "Be active in 6 different months.",
+    flavor: "Six months. Long past the point where this was a phase.",
+    category: "journey",
+    tier: "gold",
+    icon: "calendar",
+    metric: (s) => s.activeMonths,
+    target: 6,
+    unit: "months",
+  },
+  {
+    id: "consistent_12",
+    name: "A Quarter Held",
+    description: "Finish 12 weeks with at least 4 active days in them.",
+    flavor: "Twelve good weeks. Not perfect ones — good ones.",
+    category: "journey",
+    tier: "gold",
+    icon: "ribbon",
+    metric: (s) => s.consistentWeeks,
+    target: 12,
+    unit: "weeks",
+  },
+  {
+    id: "comeback_3",
+    name: "Unquittable",
+    description: "Come back from a week away three separate times.",
+    flavor: "Three times you had every reason to stop for good. Three times you didn't.",
+    category: "journey",
+    tier: "gold",
+    icon: "shield",
+    metric: (s) => s.comebacks,
+    target: 3,
+  },
+  {
+    id: "months_12",
+    name: "Twelve Months In",
+    description: "Be active in 12 different months.",
+    flavor: "A year of months, each one with your name in it.",
+    category: "journey",
+    tier: "platinum",
+    icon: "earth",
+    metric: (s) => s.activeMonths,
+    target: 12,
+    unit: "months",
+  },
+  {
+    id: "consistent_26",
+    name: "Half-Year Rhythm",
+    description: "Finish 26 weeks with at least 4 active days in them.",
+    flavor: "Half a year of four-day weeks. This is what it looks like when it holds.",
+    category: "journey",
+    tier: "platinum",
+    icon: "pulse",
+    metric: (s) => s.consistentWeeks,
+    target: 26,
+    unit: "weeks",
+  },
+  {
+    id: "weeks_52",
+    name: "Fifty-Two Weeks",
+    description: "Show up in 52 different weeks.",
+    flavor: "A full year of weeks, and not one of them went by without you.",
+    category: "journey",
+    tier: "platinum",
+    icon: "infinite",
+    metric: (s) => s.activeWeeks,
+    target: 52,
+    unit: "weeks",
+  },
+
+  // ── Training texture ── the same hours, counted in ways that say something.
+  {
+    id: "hours_10",
+    name: "Ten Hours In",
+    description: "Spend 10 hours training.",
+    flavor: "Ten hours of your one life, spent on the body you live in.",
+    category: "workout",
+    tier: "silver",
+    icon: "time",
+    metric: (s) => s.trainingMinutes,
+    target: 600,
+    unit: "min",
+  },
+  {
+    id: "weekend_10",
+    name: "Weekend Regular",
+    description: "Finish 10 sessions on a Saturday or Sunday.",
+    flavor: "The days nobody would have blamed you for skipping.",
+    category: "workout",
+    tier: "silver",
+    icon: "walk",
+    metric: (s) => s.weekendWorkouts,
+    target: 10,
+  },
+  {
+    id: "weekdays_7",
+    name: "Every Day of the Week",
+    description: "Train at least once on all seven days of the week.",
+    flavor: "Sunday included. There's no day of the week you haven't trained on.",
+    category: "workout",
+    tier: "silver",
+    icon: "grid",
+    metric: (s) => s.weekdaysTrained,
+    target: 7,
+    unit: "days",
+  },
+  {
+    id: "night_10",
+    name: "Night Shift",
+    description: "Finish 10 sessions at 8pm or later.",
+    flavor: "Trained after the day had already taken everything else.",
+    category: "workout",
+    tier: "silver",
+    icon: "moon",
+    metric: (s) => s.nightWorkouts,
+    target: 10,
+  },
+  {
+    id: "hours_50",
+    name: "Fifty Hours",
+    description: "Spend 50 hours training.",
+    flavor: "Fifty hours. People learn instruments in less.",
+    category: "workout",
+    tier: "gold",
+    icon: "hourglass",
+    metric: (s) => s.trainingMinutes,
+    target: 3000,
+    unit: "min",
+  },
+  {
+    id: "weekend_50",
+    name: "Weekends Are Yours",
+    description: "Finish 50 sessions on a Saturday or Sunday.",
+    category: "workout",
+    tier: "gold",
+    icon: "sunny",
+    metric: (s) => s.weekendWorkouts,
+    target: 50,
+  },
+  {
+    id: "hours_100",
+    name: "One Hundred Hours",
+    description: "Spend 100 hours training.",
+    flavor: "A hundred hours under your own command. That's not a habit any more.",
+    category: "workout",
+    tier: "platinum",
+    icon: "stopwatch",
+    metric: (s) => s.trainingMinutes,
+    target: 6000,
+    unit: "min",
+  },
+
+  // ── Nutrition ──
+  {
+    id: "perfect_100",
+    name: "The Hundred",
+    description: "Reach 100 perfect nutrition days.",
+    flavor: "A hundred days you ate exactly what you set out to.",
+    category: "nutrition",
+    tier: "platinum",
+    icon: "sparkles",
+    metric: (s) => s.perfectDays,
+    target: 100,
+    unit: "days",
+  },
+
+  // ── Body ── the graph is the achievement.
+  {
+    id: "span_180",
+    name: "Six Months of Dots",
+    description: "Have weigh-ins spanning 180 days.",
+    flavor: "Six months of dots. That's a trend line nobody can argue with.",
+    category: "body",
+    tier: "gold",
+    icon: "analytics",
+    metric: (s) => s.weighInSpanDays,
+    target: 180,
+    unit: "days",
+  },
+  {
+    id: "span_365",
+    name: "The Long Graph",
+    description: "Have weigh-ins spanning a full year.",
+    flavor: "A year of the same line. Every wobble in it is a week you kept going.",
+    category: "body",
+    tier: "platinum",
+    icon: "trending-up",
+    metric: (s) => s.weighInSpanDays,
+    target: 365,
+    unit: "days",
+  },
 ];
+
+
+// ──────────────────────────────────────────────
+// CALENDAR DERIVATION
+// ──────────────────────────────────────────────
+
+/** A week counts as consistent at four active days — see the defs above. */
+export const CONSISTENT_WEEK_DAYS = 4;
+/** A gap this long, then a return, is a comeback. */
+export const COMEBACK_GAP_DAYS = 7;
+
+const DAY_MS = 86_400_000;
+
+/** "YYYY-MM-DD" → UTC ms. Parsed as UTC so week maths never crosses a DST seam. */
+function dayMs(date: string): number {
+  const [y, m, d] = date.split("-").map(Number);
+  return Date.UTC(y, (m || 1) - 1, d || 1);
+}
+
+/** The Monday of the week a date falls in, as "YYYY-MM-DD". */
+function weekKey(date: string): string {
+  const t = dayMs(date);
+  const back = (new Date(t).getUTCDay() + 6) % 7; // Monday = 0
+  return new Date(t - back * DAY_MS).toISOString().slice(0, 10);
+}
+
+/** The calendar-shaped read of the days a user actually showed up. */
+export interface ActivityCalendar {
+  activeMonths: number;
+  activeWeeks: number;
+  consistentWeeks: number;
+  comebacks: number;
+}
+
+/**
+ * Turn a bag of active dates into calendar reach.
+ *
+ * Pure and order-independent: duplicates and unsorted input are fine, which
+ * matters because the caller hands it the union of three separate logs.
+ *
+ * `today` is required because the week in progress is EXCLUDED from
+ * `consistentWeeks` — a week that hasn't finished can't be a record yet, and a
+ * count that ticks up mid-week and back down on Monday is the kind of number
+ * this app doesn't ship.
+ */
+export function deriveActivityCalendar(
+  dates: string[],
+  today: string,
+): ActivityCalendar {
+  const days = Array.from(new Set(dates.filter(Boolean))).sort();
+  if (days.length === 0) {
+    return { activeMonths: 0, activeWeeks: 0, consistentWeeks: 0, comebacks: 0 };
+  }
+
+  const months = new Set<string>();
+  const weeks = new Map<string, number>();
+  for (const d of days) {
+    months.add(d.slice(0, 7));
+    const w = weekKey(d);
+    weeks.set(w, (weeks.get(w) ?? 0) + 1);
+  }
+
+  const runningWeek = weekKey(today);
+  let consistentWeeks = 0;
+  for (const [w, count] of weeks) {
+    if (w !== runningWeek && count >= CONSISTENT_WEEK_DAYS) consistentWeeks += 1;
+  }
+
+  // A comeback is the RETURN, not the gap: it's counted on the day activity
+  // resumes, so it can never be earned by simply being away.
+  let comebacks = 0;
+  for (let i = 1; i < days.length; i++) {
+    if (dayMs(days[i]) - dayMs(days[i - 1]) >= COMEBACK_GAP_DAYS * DAY_MS) {
+      comebacks += 1;
+    }
+  }
+
+  return {
+    activeMonths: months.size,
+    activeWeeks: weeks.size,
+    consistentWeeks,
+    comebacks,
+  };
+}
 
 // ──────────────────────────────────────────────
 // PERSISTENCE

@@ -1,7 +1,7 @@
 /**
- * useDayChange — the midnight rollover sweep, extracted verbatim from AppContext
- * (M4). A one-minute interval detects a local date change and closes out every
- * day that ended while the app was open or backgrounded.
+ * useDayChange — the midnight rollover sweep, extracted from AppContext (M4).
+ * A local date change closes out every day that ended while the app was open or
+ * backgrounded.
  *
  * On a rollover it: sweeps + closes every intervening day (idempotent, also
  * purging back-log-expired schedules), compacts the closed day into the L2
@@ -11,11 +11,18 @@
  * tops up the offline meal buffer, refreshes today's diet + history, and
  * regenerates the workout plan when a new week has started.
  *
- * Pure move: identical body, identical dependency array — the effect closes over
- * exactly the same values at exactly the same times as the inlined version.
+ * TWO TRIGGERS, ONE SWEEP. The one-minute interval this started as only runs
+ * while the app is FOREGROUNDED — both platforms suspend JS timers otherwise —
+ * so for the normal user, who closes the app at night and opens it in the
+ * morning, the interval had never once fired at the moment the day actually
+ * turned over. A return to the foreground now runs the same check, and on a
+ * same-day return it still re-reads today's numbers, since storage can have
+ * moved while we were away (a notification action, the sync engine adopting a
+ * remote copy). The two are serialized through one in-flight guard.
  */
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { AppState } from "react-native";
 
 import { lifeContext, memory, runDailyLearning, signalsCoordinator } from "../../health-os";
 import { maintenanceTdee } from "../../services/NutritionService";
@@ -65,7 +72,15 @@ export function useDayChange({
   refreshDietHistory,
   regenerateWorkoutPlan,
 }: Params): void {
-  // Check for day change every minute
+  /**
+   * Guards the sweep against running twice at once — the interval and a
+   * foreground can land together, and the sweep closes days, regenerates a
+   * plan and refits the learning models. Doing that concurrently with itself
+   * is how a day gets closed against half-written state.
+   */
+  const running = useRef(false);
+
+  // Check for day change every minute, and on every return to the foreground.
   useEffect(() => {
     const checkDayChange = async () => {
       const today = todayDate();
@@ -164,8 +179,47 @@ export function useDayChange({
         }
       }
     };
-    const interval = setInterval(checkDayChange, 60_000);
-    return () => clearInterval(interval);
+    /**
+     * One entry point for both triggers, so they can never overlap.
+     *
+     * `refreshOnly` is what a same-day return to the foreground needs: today's
+     * numbers are read from storage, and storage can have moved while we were
+     * backgrounded — the "Mark as done" notification action completes a habit
+     * with the app killed, the sync engine adopts a remote copy on its own
+     * foreground sweep, and a share-sheet log lands from outside the process.
+     * Re-reading three small documents is far cheaper than being wrong about
+     * what someone ate.
+     */
+    const run = async (refreshOnly: boolean) => {
+      if (running.current) return;
+      running.current = true;
+      try {
+        if (todayDate() !== currentDate) await checkDayChange();
+        else if (refreshOnly) await refreshTodayDiet();
+      } catch (e) {
+        console.error("useDayChange: day check failed:", e);
+      } finally {
+        running.current = false;
+      }
+    };
+
+    const interval = setInterval(() => void run(false), 60_000);
+
+    // THE INTERVAL IS NOT ENOUGH. Both platforms suspend JS timers for a
+    // backgrounded app, so the one-minute tick simply does not happen while the
+    // user is away — and "away" is where they are for every hour that isn't
+    // spent in the app. Coming back the next morning, the app would keep
+    // serving YESTERDAY as today until a minute after the resume: the wrong
+    // plan, the wrong totals, and — before the writes were pinned to the real
+    // date — a tick that landed on a day nobody was looking at.
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") void run(true);
+    });
+
+    return () => {
+      clearInterval(interval);
+      sub.remove();
+    };
     // Same dependency array as the inlined effect; refreshers/userGoals are read
     // fresh through props (stable useCallbacks) and intentionally not listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps

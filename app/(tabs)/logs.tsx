@@ -34,19 +34,11 @@
 
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { ProLockCard } from "@/components/billing";
-import {
-  CheckinModal,
-  GozlinActionSheet,
-  WeighInModal,
-  useQuickLog,
-  type ActionSheetOption,
-} from "@/components/gozlin";
-import { ScreenTopBar } from "@/components/navigation";
+import { ActionBar, ScreenTopBar } from "@/components/navigation";
 import {
   AppText,
   Card,
   EmptyState,
-  IconBadge,
   Reveal,
   Screen,
   useColors,
@@ -114,12 +106,7 @@ export default function LogsScreen() {
   const { bodyLogs } = useProfile();
   const { views } = useHabits();
   const { tier } = useBilling();
-  const quickLog = useQuickLog();
-
   const [filter, setFilter] = useState<Kind | "all">("all");
-  const [addOpen, setAddOpen] = useState(false);
-  const [checkinOpen, setCheckinOpen] = useState(false);
-  const [weighInOpen, setWeighInOpen] = useState(false);
 
   // Hydration is archived to storage at day-end rather than held in a context,
   // so it's the one ledger this screen has to go and fetch.
@@ -208,51 +195,24 @@ export default function LogsScreen() {
   const weekDays = week.filter((d) => d.count > 0).length;
   const weekPeak = week.reduce((m, d) => Math.max(m, d.count), 0);
 
-  /**
-   * The two logs nothing else owns.
+  /*
+   * WHERE THE "ADD" BUTTON WENT.
    *
-   * Meals, workouts, water and habits are all recorded by the feature they
-   * belong to, so this screen reports them. A check-in and a weigh-in belong to
-   * no feature — they were stranded in the coach's overflow menu — so this is
-   * where they're entered.
+   * This screen used to carry its own `+` in the top bar, opening a two-row
+   * sheet for the two logs nothing else owns (check-in and weigh-in). The
+   * Action Bar's quick-log half now offers both, plus meals, water and
+   * training — a superset — from the bottom of this very screen.
+   *
+   * Two `+` buttons on one page, opening overlapping sheets, is precisely the
+   * clutter the bar was added to remove. The entry points are unchanged in
+   * kind, only in place: check-in and weigh-in are still entered from Logs.
    */
-  const addOptions = useMemo<ActionSheetOption[]>(
-    () => [
-      {
-        key: "checkin",
-        label: quickLog.todayCheckin ? "Update today's check-in" : "Check in",
-        caption: "Mood, energy, stress & sleep",
-        icon: "sunny-outline",
-        onPress: () => setCheckinOpen(true),
-      },
-      {
-        key: "weighin",
-        label: "Log a weigh-in",
-        caption: "Weight, waist & goal",
-        icon: "scale-outline",
-        tone: colors.fat,
-        onPress: () => setWeighInOpen(true),
-      },
-    ],
-    [quickLog.todayCheckin, colors.fat],
-  );
 
   const header = (
     <>
       <ScreenTopBar
         title="Logs"
         style={styles.topBar}
-        right={
-          <Pressable
-            hitSlop={12}
-            onPress={() => setAddOpen(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Add a log"
-            style={[styles.addBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
-          >
-            <Ionicons name="add" size={22} color={colors.text} />
-          </Pressable>
-        }
         titleRight={
           <AppText variant="footnote" color="tertiary">
             {counts.all} {counts.all === 1 ? "entry" : "entries"}
@@ -312,7 +272,7 @@ export default function LogsScreen() {
   );
 
   return (
-    <Screen header={header}>
+    <Screen header={header} footer={<ActionBar />}>
       {/* Last seven days, at a glance. It sits above the ledger because the
           question people bring to a log screen is "how has my week gone", and
           a list of rows makes you do that arithmetic yourself. */}
@@ -439,28 +399,6 @@ export default function LogsScreen() {
         </Reveal>
       )}
 
-      <GozlinActionSheet
-        visible={addOpen}
-        title="Add a log"
-        subtitle="Meals, workouts and water are recorded where you do them."
-        options={addOptions}
-        onClose={() => setAddOpen(false)}
-      />
-
-      <CheckinModal
-        visible={checkinOpen}
-        existing={quickLog.todayCheckin}
-        onClose={() => setCheckinOpen(false)}
-        onSave={quickLog.saveCheckin}
-      />
-
-      <WeighInModal
-        visible={weighInOpen}
-        currentWeightKg={quickLog.currentWeightKg}
-        goalWeightKg={quickLog.goalWeightKg}
-        onClose={() => setWeighInOpen(false)}
-        onSave={quickLog.saveWeighIn}
-      />
     </Screen>
   );
 }
@@ -728,13 +666,6 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
 
   topBar: { paddingTop: Spacing.sm },
-  addBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: Radius.pill,
-    alignItems: "center",
-    justifyContent: "center",
-  },
 
   filters: {
     flexDirection: "row",

@@ -9,11 +9,14 @@
  * panel, so this is asserted across the whole sweep, not just at the ends.
  */
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
-import { MOVEMENT_PROFILES, resolveFigureMotion, type FigureMotion } from "@/fitness/animation/movementProfiles";
+import { FRONT_PROFILES } from "@/fitness/animation/frontProfiles";
+import { resolveFigureMotion, type FigureMotion } from "@/fitness/animation/movementProfiles";
 import { buildFrontRig, buildSideRig, poseRig, repEase } from "@/fitness/animation/rig";
 import { describe, expect, it } from "vitest";
 
-const MOTIONS = Object.keys(MOVEMENT_PROFILES) as FigureMotion[];
+// Every drawable movement, pattern fallbacks AND the exercise-specific ones —
+// a pose that escapes the box is just as broken either way.
+const MOTIONS = Object.keys(FRONT_PROFILES) as FigureMotion[];
 const BUILDERS = { front: buildFrontRig, side: buildSideRig } as const;
 
 /** Every joint the chain produces at rep progress `p`, as [x, y] pairs. */

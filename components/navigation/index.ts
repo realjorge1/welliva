@@ -7,6 +7,8 @@
  * hamburger each root screen puts at the top-left of its header. Everything
  * else here is the model those two share.
  */
+export { ActionBar } from "./ActionBar";
+export type { ActionBarProps } from "./ActionBar";
 export { AppDrawer } from "./AppDrawer";
 export { MenuButton } from "./MenuButton";
 export type { MenuButtonProps } from "./MenuButton";
@@ -23,5 +25,17 @@ export {
   SWIPEABLE_PATHS,
 } from "./menu";
 export type { MenuItem } from "./menu";
+export {
+  MEAL_WINDOWS,
+  mealDueAt,
+  mealMissedBy,
+  resolveNextMove,
+} from "./nextMove";
+export type {
+  MealSlot,
+  NextMove,
+  NextMoveAction,
+  NextMoveInput,
+} from "./nextMove";
 export { useAccountIdentity } from "./useAccountIdentity";
 export type { AccountIdentity } from "./useAccountIdentity";

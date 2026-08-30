@@ -42,6 +42,21 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import {
+  DAYS_DETAILS,
+  DAYS_HEADLINES,
+  STREAK_DETAILS,
+  STREAK_HEADLINES,
+  WEEK_CHASE_DETAILS,
+  WEEK_CHASE_HEADLINES,
+  WEEK_RECORD_DETAILS,
+  WEEK_RECORD_HEADLINES,
+  pickPhrase,
+  type DaysFacts,
+  type StreakFacts,
+  type WeekFacts,
+} from "./momentVoice";
+
 import type { DietHistoryEntry } from "../models/diet";
 import type { SessionSummaryData } from "../models/session";
 import type { WorkoutLogEntry } from "../models/workout";
@@ -79,7 +94,10 @@ export interface Moment {
 
 export type NudgeKind =
   | "streak_near_record"
+  /** Chasing the biggest training week you've had. */
   | "week_near_record"
+  /** You have already passed it. The bar is full and the record is yours. */
+  | "week_record_held"
   | "active_days_near";
 
 /** Something not yet true but within reach. Shown quietly. NEVER celebrated. */
@@ -92,8 +110,19 @@ export interface Nudge {
   detail: string;
   icon: keyof typeof Ionicons.glyphMap;
   tone: "gold" | "flame" | "water" | "success";
-  /** For the progress hairline. `value` and `target` are both real counts. */
+  /**
+   * For the progress hairline. `value` and `target` are both real counts, and
+   * `target` is a number the user can actually REACH — see detectNudge. A
+   * target that recedes as you approach it is a treadmill, and a bar that can
+   * never fill is a bar that means nothing.
+   */
   progress: { value: number; target: number };
+  /**
+   * A two-word standing fact, shown as a small marker on the card. Set only
+   * when a record is genuinely HELD, never as encouragement. Still not a
+   * celebration — that is the Moment half of this engine, and it is loud.
+   */
+  badge?: string;
 }
 
 /**
@@ -115,7 +144,21 @@ export interface MomentRecord {
    * then you hold it until it breaks.
    */
   streakRecordHeld: boolean;
-  /** Most sessions in any single completed week so far. */
+  /**
+   * Most sessions in any single COMPLETED week so far — never the week in
+   * progress.
+   *
+   * The distinction is the whole ballgame, and getting it wrong is what made
+   * the week nudge an infinite treadmill: folding the live week into this on
+   * every check meant the record was always exactly equal to the current count,
+   * so "one from your biggest week" was true at 5, and again at 6, and again at
+   * 7, with the bar stuck at value/(value+1) forever. It also silently killed
+   * the `best_training_week` MOMENT, whose guard is `count <= bestWeekSessions`
+   * — a condition the polluted record made permanently true.
+   *
+   * Same reasoning as `knownLongestStreak` directly above: a record you are
+   * currently setting is not a record you can beat.
+   */
   bestWeekSessions: number;
   /** Highest total reps in any single session so far. */
   bestSessionReps: number;
@@ -387,7 +430,9 @@ export function detectMoments(
       input.streak.currentStreak <= 1
         ? false
         : record.streakRecordHeld || chosen.some((m) => m.kind === "streak_record"),
-    bestWeekSessions: Math.max(record.bestWeekSessions, currentWeekSessions(input)),
+    // COMPLETED weeks only — the live week joins the record when it ends, not
+    // while it is being set.
+    bestWeekSessions: Math.max(record.bestWeekSessions, bestCompletedWeekSessions(input)),
     bestSessionReps: Math.max(
       record.bestSessionReps,
       input.sessionHistory.reduce((m, s) => Math.max(m, s.totalReps ?? 0), 0),
@@ -405,6 +450,26 @@ function currentWeekSessions(input: MomentInput): number {
   return input.workoutLog.filter((w) => w.date && weekStartOf(w.date) === thisWeek).length;
 }
 
+/**
+ * The most sessions in any week that is OVER — the record there is to beat.
+ *
+ * Deliberately excludes the week in progress. See MomentRecord.bestWeekSessions
+ * for what happens when it doesn't.
+ */
+function bestCompletedWeekSessions(input: MomentInput): number {
+  const thisWeek = weekStartOf(input.today);
+  const byWeek = new Map<string, number>();
+  for (const w of input.workoutLog) {
+    if (!w.date) continue;
+    const k = weekStartOf(w.date);
+    if (k === thisWeek) continue;
+    byWeek.set(k, (byWeek.get(k) ?? 0) + 1);
+  }
+  let best = 0;
+  for (const v of byWeek.values()) if (v > best) best = v;
+  return best;
+}
+
 // ──────────────────────────────────────────────
 // PUBLIC — nudges (the anticipation half)
 // ──────────────────────────────────────────────
@@ -416,6 +481,21 @@ function currentWeekSessions(input: MomentInput): number {
  *
  * Returns at most one. The whole point is a single clear thing to reach for;
  * three competing nudges is a dashboard, which is what we're moving away from.
+ *
+ * TWO RULES THIS FILE LEARNED THE HARD WAY.
+ *
+ * 1. THE TARGET MUST BE REACHABLE. Every `progress.target` below is a fixed
+ *    number the user can actually arrive at, so the bar fills when they get
+ *    there. The week nudge used to compute its target from a record that
+ *    included the week in progress, which meant the target moved up in lockstep
+ *    with the count: 5 of 6, then 6 of 7, then 7 of 8, the same sentence with a
+ *    different number, and a bar frozen a hair short of full forever. A goal
+ *    that retreats as you approach it teaches people the number is decorative.
+ *
+ * 2. THE SAME FACT DOES NOT GET THE SAME SENTENCE TWICE. Numbers are counted;
+ *    the words around them are drawn from a large pool keyed to those numbers
+ *    (see services/momentVoice). Stable while the fact is, new the moment the
+ *    fact changes.
  */
 export function detectNudge(input: MomentInput, record: MomentRecord): Nudge | null {
   const best = Math.max(record.knownLongestStreak, input.streak.longestStreak);
@@ -425,11 +505,13 @@ export function detectNudge(input: MomentInput, record: MomentRecord): Nudge | n
   if (best >= 5 && current > 0 && current <= best) {
     const away = best - current + 1;
     if (away <= 3) {
+      const facts: StreakFacts = { current, best, away };
+      const seed = `streak:${best}:${current}`;
       return {
         id: `nudge:streak:${best}`,
         kind: "streak_near_record",
-        headline: away === 1 ? "One day from your record" : `${away} days from your record`,
-        detail: `You're on ${current}. Your longest ever is ${best}.`,
+        headline: pickPhrase(STREAK_HEADLINES, `${seed}#h`)(facts),
+        detail: pickPhrase(STREAK_DETAILS, `${seed}#d`)(facts),
         icon: "flame",
         tone: "flame",
         progress: { value: current, target: best + 1 },
@@ -437,18 +519,51 @@ export function detectNudge(input: MomentInput, record: MomentRecord): Nudge | n
     }
   }
 
-  // 2. One session from the biggest week you've had.
+  // 2. The biggest training week you've ever had — chased, then held.
+  //
+  //    `record.bestWeekSessions` is the best COMPLETED week, so the target is
+  //    a real, fixed number: one more than the record. Below it the card is a
+  //    stake; at or above it the card states the record and the bar is full,
+  //    which is the payoff the chase was always promising.
   const week = currentWeekSessions(input);
-  if (record.bestWeekSessions >= 3 && week > 0 && week === record.bestWeekSessions) {
-    return {
-      id: `nudge:week:${weekStartOf(input.today)}`,
-      kind: "week_near_record",
-      headline: "One session from your biggest week",
-      detail: `${week} done. Your best week ever is ${record.bestWeekSessions}.`,
-      icon: "barbell",
-      tone: "gold",
-      progress: { value: week, target: record.bestWeekSessions + 1 },
-    };
+  const weekBest = record.bestWeekSessions;
+  if (weekBest >= 3 && week > 0) {
+    const target = weekBest + 1;
+    const remaining = target - week;
+    const facts: WeekFacts = { week, best: weekBest, target, remaining };
+    const weekStart = weekStartOf(input.today);
+
+    if (remaining <= 0) {
+      // Record broken and still standing. Not a celebration — the celebration
+      // is the `best_training_week` Moment, which fires once and is loud. This
+      // is the quiet card afterwards, saying where you now stand.
+      const seed = `week-held:${weekStart}:${week}:${weekBest}`;
+      return {
+        id: `nudge:week-record:${weekStart}:${week}`,
+        kind: "week_record_held",
+        headline: pickPhrase(WEEK_RECORD_HEADLINES, `${seed}#h`)(facts),
+        detail: pickPhrase(WEEK_RECORD_DETAILS, `${seed}#d`)(facts),
+        icon: "trophy",
+        tone: "gold",
+        progress: { value: week, target },
+        badge: "Personal best",
+      };
+    }
+
+    // Within two sessions of the record — close enough to be a pull, far
+    // enough that the bar has somewhere to travel.
+    if (remaining <= 2) {
+      const seed = `week-chase:${weekStart}:${week}:${weekBest}`;
+      return {
+        id: `nudge:week:${weekStart}`,
+        kind: "week_near_record",
+        headline: pickPhrase(WEEK_CHASE_HEADLINES, `${seed}#h`)(facts),
+        detail: pickPhrase(WEEK_CHASE_DETAILS, `${seed}#d`)(facts),
+        icon: "barbell",
+        tone: "gold",
+        progress: { value: week, target },
+      };
+    }
   }
 
   // 3. A round lifetime number about to land. Quietest of the three, and only
@@ -457,11 +572,13 @@ export function detectNudge(input: MomentInput, record: MomentRecord): Nudge | n
   for (const milestone of [50, 100, 200, 365, 500]) {
     const away = milestone - totalDays;
     if (away > 0 && away <= 3) {
+      const facts: DaysFacts = { total: totalDays, milestone, away };
+      const seed = `days:${milestone}:${totalDays}`;
       return {
         id: `nudge:active-days:${milestone}`,
         kind: "active_days_near",
-        headline: away === 1 ? `One day from ${milestone}` : `${away} days from ${milestone}`,
-        detail: `${totalDays} active days logged so far.`,
+        headline: pickPhrase(DAYS_HEADLINES, `${seed}#h`)(facts),
+        detail: pickPhrase(DAYS_DETAILS, `${seed}#d`)(facts),
         icon: "calendar",
         tone: "water",
         progress: { value: totalDays, target: milestone },

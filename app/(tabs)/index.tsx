@@ -20,7 +20,7 @@ import {
   useColors,
 } from "@/components/ui";
 import { GozlinButton, useGozlinMoments, useHabitReport } from "@/components/gozlin";
-import { ScreenTopBar } from "@/components/navigation";
+import { ActionBar, ScreenTopBar } from "@/components/navigation";
 import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
 import { CrashTrigger, ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { CoachDeepDive } from "@/components/home/CoachDeepDive";
@@ -121,10 +121,39 @@ export default function HomeScreen() {
     return workoutPlan.sessions.find((s) => s.dayOfWeek === dayIndex) || null;
   }, [workoutPlan]);
 
-  const todayWorkoutDone = useMemo(() => {
+  /**
+   * Everything logged TODAY, aggregated.
+   *
+   * Aggregated rather than `find`-ed because a second session in a day is a
+   * real thing people do, and the tile used to read the first entry only — so a
+   * 40% morning session followed by a full evening one still showed 40%. The
+   * card says "Workout"; it has to mean every workout.
+   */
+  const todayWorkouts = useMemo(() => {
     const todayStr = todayDate();
-    return workoutLog.some((l) => l.date === todayStr);
+    const logs = workoutLog.filter((l) => l.date === todayStr);
+    return {
+      count: logs.length,
+      minutes: logs.reduce((sum, l) => sum + (l.durationMinutes || 0), 0),
+      // Best completion of the day: two sessions can't make each other worse,
+      // and averaging would punish a deliberate short second session.
+      percent: logs.reduce((max, l) => Math.max(max, l.completionPercent ?? 0), 0),
+    };
   }, [workoutLog]);
+  const todayWorkoutDone = todayWorkouts.count > 0;
+
+  /**
+   * IS TODAY A REST DAY? Only answerable when a plan exists.
+   *
+   * The local generator emits TRAINING DAYS ONLY — it hard-codes
+   * `isRestDay: false` and simply omits the other days — so `todayWorkout`
+   * being null on a planned week means "nothing scheduled", i.e. rest. The tile
+   * used to read that as "No plan / Set a plan", which told four users in seven
+   * every week that they had no plan when they were looking at one. The
+   * `isRestDay` half is kept for AI-generated plans, which may state rest days
+   * explicitly rather than by omission.
+   */
+  const isRestToday = !!workoutPlan && (!todayWorkout || todayWorkout.isRestDay);
 
   // Rotating time-of-day greeting, picked fresh on each app open. A greeting
   // never repeats until the other 29 in its day-part bucket have been shown.
@@ -204,6 +233,17 @@ export default function HomeScreen() {
     [],
   );
 
+  // "Friday, 29 Aug" — the plan card's scope, spelled out rather than implied.
+  const todayLabel = useMemo(
+    () =>
+      new Date().toLocaleDateString(undefined, {
+        weekday: "long",
+        day: "numeric",
+        month: "short",
+      }),
+    [],
+  );
+
   const calorieTarget = nutritionTargets?.calories || 2000;
   const caloriePct = nutritionTargets
     ? calculateProgress(consumedNutrition.calories, nutritionTargets.calories)
@@ -249,11 +289,12 @@ export default function HomeScreen() {
   const dietProgress = dietMeals.total > 0 ? dietMeals.consumed / dietMeals.total : 0;
 
   const workoutProgress = useMemo(() => {
-    if (todayWorkout?.isRestDay) return 1; // recovery counts as a full day
-    if (!todayWorkoutDone) return 0;
-    const log = workoutLog.find((l) => l.date === todayDate());
-    return Math.min(1, (log?.completionPercent ?? 100) / 100);
-  }, [todayWorkout, todayWorkoutDone, workoutLog]);
+    // A completed session always wins, including one done on a rest day —
+    // training when the plan didn't ask you to is not zero progress.
+    if (todayWorkoutDone) return Math.min(1, todayWorkouts.percent / 100);
+    if (isRestToday) return 1; // recovery counts as a full day
+    return 0;
+  }, [todayWorkoutDone, todayWorkouts.percent, isRestToday]);
 
   // Coach carousel: each card ~82% of the viewport so the next one peeks.
   const coachW = Math.round(width * 0.82);
@@ -286,19 +327,26 @@ export default function HomeScreen() {
       {/* Dev-only: open with ?crash=1 or ?crash=tab:home to verify this
           screen's ErrorBoundary catches without taking the app down. */}
       {__DEV__ && <CrashTrigger surface="tab:home" />}
-      {/* `bottomInset`: Home floats nothing over its footer any more — the coach
-          button moved into the top bar — so the default nav clearance was just a
-          screen-height of dead space under the last card. This is the end of the
-          content plus the device's own bottom inset, nothing more. */}
-      <Screen gutter={false} header={header} onScroll={onScroll} bottomInset={Spacing.xxl}>
+      {/* `bottomInset` is the no-footer figure: the end of the content plus the
+          device's own inset, kept from when nothing floated here. The Action Bar
+          does float here now, and `Screen` raises the inset to NAV_CLEARANCE for
+          exactly as long as a footer is mounted — so this number stays honest
+          rather than being hand-tuned to whatever is currently docked. */}
+      <Screen
+        gutter={false}
+        header={header}
+        onScroll={onScroll}
+        bottomInset={Spacing.xxl}
+        footer={<ActionBar />}
+      >
       {/* ── Hero: calories + macros ── */}
       <Reveal index={1}>
         <Card style={styles.gutter} padding="xxl">
           <View style={styles.heroRow}>
             <Ring
               progress={caloriePct / 100}
-              size={140}
-              strokeWidth={13}
+              size={132}
+              strokeWidth={12}
               gradient={Gradients.calories}
             >
               <AnimatedNumber
@@ -310,34 +358,62 @@ export default function HomeScreen() {
               </AppText>
             </Ring>
 
+            {/* The ring and this block are ONE centred group, not two things
+                pinned to opposite edges of the card. Stretching them apart put
+                the dial against the left rule and the figures against the
+                right, which reads as two separate cards sharing a box.
+
+                Centred text rather than a label-left/figure-right table: this
+                column is ~140pt on a 390pt screen and under 90pt on a small
+                one, and a two-column row at that width either overflows or
+                truncates its label. Stacked and centred, every width fits. */}
             <View style={styles.heroInfo}>
-              <AppText variant="caption" color="tertiary" uppercase>
-                Daily target
-              </AppText>
-              <AppText
-                variant="title"
-                style={styles.heroTarget}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-              >
-                {calorieTarget.toLocaleString()}
-                <AppText variant="headline" color="tertiary">
-                  {" "}
-                  kcal
+              <View style={styles.stat}>
+                <AppText variant="caption" color="tertiary" uppercase align="center">
+                  Target
                 </AppText>
-              </AppText>
-              <View style={styles.remainingRow}>
-                <IconBadge name="flame-outline" tone={colors.calories} size={30} />
-                <View style={styles.flex}>
-                  <AppText variant="headline" color="calories">
-                    {remaining.toLocaleString()}
-                  </AppText>
+                <AppText
+                  variant="headline"
+                  align="center"
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                >
+                  {calorieTarget.toLocaleString()}
                   <AppText variant="footnote" color="tertiary">
-                    remaining
+                    {" "}
+                    kcal
                   </AppText>
-                </View>
+                </AppText>
               </View>
-              <Pill label={`${caloriePct}% of goal`} tone={colors.calories} size="sm" />
+
+              <View style={[styles.statRule, { backgroundColor: colors.divider }]} />
+
+              <View style={styles.stat}>
+                <AppText variant="caption" color="tertiary" uppercase align="center">
+                  Remaining
+                </AppText>
+                <AppText
+                  variant="headline"
+                  color="calories"
+                  align="center"
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                >
+                  {remaining.toLocaleString()}
+                  <AppText variant="footnote" color="tertiary">
+                    {" "}
+                    kcal
+                  </AppText>
+                </AppText>
+              </View>
+
+              <Pill
+                label={`${caloriePct}% of goal`}
+                tone={colors.calories}
+                size="sm"
+                icon="flame-outline"
+                style={styles.heroPill}
+              />
             </View>
           </View>
 
@@ -355,7 +431,7 @@ export default function HomeScreen() {
                       {m.label}
                     </AppText>
                   </View>
-                  <AppText variant="headline">
+                  <AppText variant="headline" align="center" numberOfLines={1}>
                     {Math.round(m.current)}
                     <AppText variant="footnote" color="tertiary">
                       {" "}
@@ -379,67 +455,85 @@ export default function HomeScreen() {
              Renders nothing on most days — see components/home/NudgeCard. ── */}
       {nudge && (
         <Reveal index={2}>
-          <View style={styles.gutter}>
+          {/* `nudgeBlock`, not `gutter`: the shared gutter style carries no
+              vertical margin, so this card used to sit flush against the hero
+              above it and the two read as one shape with a seam through it.
+              Everything else on this screen states its own top margin; this was
+              the one block that didn't. */}
+          <View style={styles.nudgeBlock}>
             <NudgeCard nudge={nudge} />
           </View>
         </Reveal>
       )}
 
-      {/* ── Today's plan (progress meters, real data) ── */}
+      {/* ── Today's plan ──────────────────────────────────────────────────
+             Both meters are counted from logs written today, and the header
+             says so. The card carried no title at all before, which left two
+             progress meters floating with no stated scope — read as lifetime
+             totals by anyone who hadn't trained today, and reported as broken
+             for exactly that reason. A meter with no subject is a decoration. */}
       <Reveal index={3}>
-        <Card style={styles.planCard} padding="lg">
-          <View style={styles.planRow}>
-            <PlanTile
-              label="Workout"
-              value={
-                todayWorkoutDone
-                  ? "Completed"
-                  : todayWorkout?.isRestDay
-                    ? "Rest day"
-                    : todayWorkout
-                      ? todayWorkout.focus
-                      : "No plan"
-              }
-              caption={
-                todayWorkoutDone
-                  ? `${Math.round(workoutProgress * 100)}% complete`
-                  : todayWorkout?.isRestDay
-                    ? "Recovery counts"
-                    : todayWorkout
-                      ? `~${todayWorkout.totalDurationMinutes} min`
-                      : "Set a plan"
-              }
-              icon={todayWorkout?.isRestDay ? "bed-outline" : "fitness"}
-              tone={
-                todayWorkoutDone || todayWorkout?.isRestDay
-                  ? colors.success
-                  : todayWorkout
-                    ? colors.fat
-                    : colors.warning
-              }
-              progress={workoutProgress}
-            />
-            <View style={[styles.planSep, { backgroundColor: colors.divider }]} />
-            <PlanTile
-              label="Diet"
-              value={
-                todayDiet?.hasScheduledDiet && todayDiet.schedule
-                  ? todayDiet.schedule.dietName
-                  : "Not set"
-              }
-              caption={
-                todayDiet?.hasScheduledDiet
-                  ? dietMeals.total > 0
-                    ? `${dietMeals.consumed} of ${dietMeals.total} meals`
-                    : "Meals ready"
-                  : "Add today's meals"
-              }
-              icon={todayDiet?.hasScheduledDiet ? "restaurant" : "add-circle-outline"}
-              tone={todayDiet?.hasScheduledDiet ? colors.protein : colors.warning}
-              progress={dietProgress}
-            />
+        <View style={styles.section}>
+          <View style={styles.gutter}>
+            <SectionHeader title="Today" subtitle={todayLabel} weight="700" />
           </View>
-        </Card>
+          <Card style={styles.planCard} padding="lg">
+            <View style={styles.planRow}>
+              <PlanTile
+                label="Workout"
+                value={
+                  todayWorkoutDone
+                    ? todayWorkouts.count > 1
+                      ? `${todayWorkouts.count} sessions`
+                      : "Completed"
+                    : isRestToday
+                      ? "Rest day"
+                      : todayWorkout
+                        ? todayWorkout.focus
+                        : "No plan"
+                }
+                caption={
+                  todayWorkoutDone
+                    ? `${todayWorkouts.percent}% done · ${todayWorkouts.minutes} min`
+                    : isRestToday
+                      ? "Recovery counts"
+                      : todayWorkout
+                        ? `~${todayWorkout.totalDurationMinutes} min`
+                        : "Set a plan"
+                }
+                icon={isRestToday && !todayWorkoutDone ? "bed-outline" : "fitness"}
+                tone={
+                  todayWorkoutDone || isRestToday
+                    ? colors.success
+                    : todayWorkout
+                      ? colors.fat
+                      : colors.warning
+                }
+                progress={workoutProgress}
+              />
+              <View style={[styles.planSep, { backgroundColor: colors.divider }]} />
+              <PlanTile
+                label="Diet"
+                value={
+                  todayDiet?.hasScheduledDiet && todayDiet.schedule
+                    ? todayDiet.schedule.dietName
+                    : "Not set"
+                }
+                caption={
+                  todayDiet?.hasScheduledDiet
+                    ? dietMeals.total > 0
+                      ? `${dietMeals.consumed} of ${dietMeals.total} meals`
+                      : // A scheduled day with no meals in it has nothing ready.
+                        "Nothing scheduled"
+                    : "Add today's meals"
+                }
+                icon={todayDiet?.hasScheduledDiet ? "restaurant" : "add-circle-outline"}
+                tone={todayDiet?.hasScheduledDiet ? colors.protein : colors.warning}
+                progress={dietProgress}
+              />
+            </View>
+          </Card>
+        </View>
       </Reveal>
 
       {/* ── Streak (card-less strip) ── */}
@@ -708,6 +802,7 @@ const styles = StyleSheet.create({
   weeklyMessage: { marginTop: 2 },
   flex: { flex: 1 },
   gutter: { marginHorizontal: Spacing.screen },
+  nudgeBlock: { marginHorizontal: Spacing.screen, marginTop: Spacing.xl },
 
   // Header
   topBar: {
@@ -719,19 +814,34 @@ const styles = StyleSheet.create({
   syncPill: { marginTop: Spacing.sm },
 
   // Hero
-  heroRow: { flexDirection: "row", alignItems: "center", gap: Spacing.xl },
-  heroInfo: { flex: 1, gap: Spacing.sm },
-  heroTarget: { marginTop: -2 },
-  remainingRow: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
+  // One centred group. `justifyContent: center` + a shrinkable (not flexed)
+  // info column is what keeps the two pieces together in the middle of the
+  // card instead of stretched to its two rules — with the gap, not the card
+  // width, deciding how far apart they sit.
+  heroRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.xxl,
+  },
+  heroInfo: { flexShrink: 1, gap: Spacing.md, alignItems: "center" },
+  stat: { alignSelf: "stretch", gap: 1 },
+  statRule: { height: 1, alignSelf: "stretch" },
+  heroPill: { marginTop: Spacing.xs },
   divider: { height: 1, marginVertical: Spacing.xl },
   macroRow: { flexDirection: "row", gap: Spacing.lg },
-  macroCol: { flex: 1, gap: 6 },
+  // Centred, not left-aligned: a label and a figure that describe a bar belong
+  // over the middle of it. Left-aligned they read as three ragged columns
+  // pulling the whole card toward its left edge.
+  macroCol: { flex: 1, gap: 6, alignItems: "center" },
   macroHead: { flexDirection: "row", alignItems: "center", gap: 6 },
   macroDot: { width: 8, height: 8, borderRadius: 4 },
-  macroBar: { marginTop: 2 },
+  // alignSelf is load-bearing: the column centres its children, which would
+  // otherwise shrink the bar to nothing.
+  macroBar: { marginTop: 2, alignSelf: "stretch" },
 
   // Plan
-  planCard: { marginHorizontal: Spacing.screen, marginTop: Spacing.xl },
+  planCard: { marginHorizontal: Spacing.screen },
   planRow: { flexDirection: "row", alignItems: "stretch", gap: Spacing.lg },
   planTile: { flex: 1 },
   planSep: { width: 1 },

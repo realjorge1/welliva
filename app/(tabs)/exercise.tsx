@@ -31,7 +31,7 @@ import {
 } from "@/components/ui";
 import { ActivityRings, type ActivityRingMetric } from "@/components/charts";
 import { GozlinButton } from "@/components/gozlin";
-import { ScreenTopBar } from "@/components/navigation";
+import { ActionBar, ScreenTopBar } from "@/components/navigation";
 import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
 import { CrashTrigger, ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { Radius, Spacing, alpha } from "@/constants/theme";
@@ -754,6 +754,12 @@ export default function ExerciseScreen() {
         </ScrollView>,
         )}
       </SafeAreaView>
+
+      {/* This screen paints its own canvas rather than using `Screen`, so the
+          bar is docked by hand — a sibling of the SafeAreaView, inside the same
+          root, which is what keeps it riding the drawer's transform. `content`
+          already reserves NAV_CLEARANCE, so nothing scrolls underneath it. */}
+      <ActionBar />
     </View>
   );
 }

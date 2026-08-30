@@ -17,6 +17,7 @@ export default defineConfig({
       "fitness/**/*.test.ts",
       "components/charts/**/*.test.ts",
       "components/home/**/*.test.ts",
+      "components/navigation/**/*.test.ts",
       "components/__tests__/**/*.test.ts",
       "constants/**/*.test.ts",
       "lib/**/*.test.ts",

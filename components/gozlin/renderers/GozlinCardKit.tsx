@@ -6,7 +6,7 @@
  * pattern from features/, rebuilt on Welliva's design tokens).
  */
 
-import { AppText, useColors } from "@/components/ui";
+import { AppText, Mono, useColors } from "@/components/ui";
 import { alpha, Radius, Spacing, type ThemeColors } from "@/constants/theme";
 import type { GozlinTone } from "@/services/gozlin";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,6 +14,63 @@ import React from "react";
 import { StyleSheet, View } from "react-native";
 
 type IconName = keyof typeof Ionicons.glyphMap;
+
+/**
+ * A technical eyebrow — the small tracked label that sits above a value.
+ *
+ * Set in the instrument face on purpose (see components/ui/Mono). A coach card
+ * is two different kinds of statement stacked on top of each other: readings,
+ * and what the coach makes of them. Giving the readings' labels their own face
+ * separates the two before a single word has been read, and it is what makes
+ * these cards look like an instrument panel rather than a styled paragraph.
+ */
+export function MonoLabel({
+  text,
+  color,
+  size = 10,
+}: {
+  text: string;
+  color: string;
+  size?: number;
+}) {
+  return (
+    <Mono size={size} weight="700" color={color} tracking={1.1}>
+      {text.toUpperCase()}
+    </Mono>
+  );
+}
+
+/**
+ * A value read off something, with an optional unit set smaller beside it.
+ *
+ * Fixed-width by construction, so a figure that changes cannot shove whatever
+ * sits next to it — which is the practical reason readouts get their own face
+ * and not merely an aesthetic one.
+ */
+export function Readout({
+  value,
+  unit,
+  color,
+  size = 20,
+}: {
+  value: string;
+  unit?: string;
+  color: string;
+  size?: number;
+}) {
+  return (
+    <View style={styles.readout}>
+      <Mono size={size} weight="700" color={color} tracking={-0.2}>
+        {value}
+      </Mono>
+      {unit ? (
+        <Mono size={Math.max(9, Math.round(size * 0.5))} weight="700" color={alpha(color, 0.75)} tracking={0.8}>
+          {unit.toUpperCase()}
+        </Mono>
+      ) : null}
+    </View>
+  );
+}
 
 /** Map a Gozlin tone to a design-system color. */
 export function toneColor(colors: ThemeColors, tone?: GozlinTone): string {
@@ -118,9 +175,7 @@ export function LeverBox({
     <View style={[styles.lever, { backgroundColor: alpha(color, 0.1), borderColor: alpha(color, 0.25) }]}>
       <View style={styles.leverHead}>
         <Ionicons name="arrow-forward-circle" size={15} color={color} />
-        <AppText variant="caption" uppercase style={{ color, letterSpacing: 0.6 }}>
-          {label}
-        </AppText>
+        <MonoLabel text={label} color={color} />
       </View>
       <AppText variant="callout" style={styles.leverText}>
         {text}
@@ -135,6 +190,7 @@ export const kitStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
+  readout: { flexDirection: "row", alignItems: "baseline", gap: 3 },
   headerRow: { flexDirection: "row", alignItems: "center", gap: Spacing.sm, marginBottom: Spacing.xs },
   headerIcon: {
     width: 22,

@@ -10,26 +10,32 @@
  *
  * Because planning a month by hand is otherwise unbearable, "copy this day" and
  * "repeat this week" are first-class buttons rather than a power-user feature.
+ *
+ * ── THE WHOLE SLOT IS THE BUTTON ────────────────────────────────────────────
+ * A "+" used to be the only way into the picker, which put the entire feature
+ * behind a 24pt target in the corner of a card whose other 300pt did nothing.
+ * The card opens the picker now and the "+" is a plain glyph: it says a meal can
+ * go here, it isn't the only place you may say so. A filled slot opens the
+ * picker too — changing your mind is the same gesture as making up your mind.
+ *
+ * ── WHERE A PICK GOES ───────────────────────────────────────────────────────
+ * Straight onto the calendar. contexts/MealPlanContext projects each write into
+ * the schedule store, so a meal planned here is the meal the Diet screen serves
+ * on the day, tickable and counted. See services/CustomMenuSchedule for why that
+ * projection exists rather than a second reader.
  */
 
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Alert,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  View,
-} from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { AppText, Button, Card, Screen, useColors } from "@/components/ui";
+import { MealPickerSheet, type MealPickResult } from "@/components/diet/MealPickerSheet";
 import { PlanDurationPicker } from "@/components/diet/PlanDurationPicker";
-import { Radius, Spacing } from "@/constants/theme";
+import { alpha, Radius, Spacing } from "@/constants/theme";
 import { useMealPlan } from "@/contexts/MealPlanContext";
-import { useSystem } from "@/contexts/AppContext";
-import type { MealType, ScheduledMeal } from "@/models/diet";
+import { useProfile, useSystem } from "@/contexts/AppContext";
+import type { MealType } from "@/models/diet";
 import {
   addDays,
   dateRange,
@@ -39,20 +45,19 @@ import {
   type CustomMenuEntry,
   type PlanDuration,
 } from "@/models/mealPlan";
-import type { NutrientPanel } from "@/models/nutrients";
-import { resolveKnownFood, searchCanonical } from "@/services/nutrition/NutrientResolver";
 import * as Haptics from "@/utils/haptics";
 
-const SLOTS: { key: MealType; label: string; icon: string }[] = [
-  { key: "breakfast", label: "Breakfast", icon: "sunny-outline" },
-  { key: "lunch", label: "Lunch", icon: "partly-sunny-outline" },
-  { key: "dinner", label: "Dinner", icon: "moon-outline" },
-  { key: "snack", label: "Snacks", icon: "cafe-outline" },
+const SLOTS: { key: MealType; label: string; icon: string; when: string }[] = [
+  { key: "breakfast", label: "Breakfast", icon: "sunny-outline", when: "Morning" },
+  { key: "lunch", label: "Lunch", icon: "partly-sunny-outline", when: "Midday" },
+  { key: "dinner", label: "Dinner", icon: "moon-outline", when: "Evening" },
+  { key: "snack", label: "Snacks", icon: "cafe-outline", when: "Any time" },
 ];
 
 export default function PlanMenuScreen() {
   const { colors } = useColors();
   const { currentDate } = useSystem();
+  const { userBio } = useProfile();
   const {
     activePeriod,
     startPeriod,
@@ -63,6 +68,7 @@ export default function PlanMenuScreen() {
     repeatWeekPattern,
     plannedDates,
     savedMeals,
+    saveMealForReuse,
   } = useMealPlan();
 
   const isCustom = activePeriod?.mode === "custom";
@@ -163,14 +169,32 @@ export default function PlanMenuScreen() {
   const plannedSet = new Set(plannedDates);
   const bySlot = (slot: MealType) => entries.filter((e) => e.slot === slot);
 
-  const handlePick = async (meal: ScheduledMeal, nutrients?: NutrientPanel) => {
+  /** Midpoint calories across everything planned for the selected day. */
+  const dayCalories = entries.reduce(
+    (sum, e) => sum + Math.round((e.meal.calories.min + e.meal.calories.max) / 2),
+    0,
+  );
+
+  const handlePick = async (result: MealPickResult) => {
     if (!picking) return;
     await setCustomMeal({
       date: selectedDate,
       slot: picking,
-      meal,
-      ...(nutrients ? { nutrients } : {}),
+      meal: {
+        ...result.meal,
+        id: `cm_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        isConsumed: false,
+      },
+      ...(result.nutrients ? { nutrients: result.nutrients } : {}),
     });
+    if (result.saveForReuse) {
+      await saveMealForReuse({
+        name: result.meal.name,
+        defaultSlot: picking,
+        meal: result.meal,
+        ...(result.nutrients ? { nutrients: result.nutrients } : {}),
+      });
+    }
     setPicking(null);
     await loadDay(selectedDate);
   };
@@ -198,6 +222,9 @@ export default function PlanMenuScreen() {
                   Haptics.selectionAsync().catch(() => {});
                   setSelectedDate(date);
                 }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${longDay(date)}${hasPlan ? ", planned" : ", nothing planned"}`}
                 style={[
                   styles.dayChip,
                   {
@@ -242,24 +269,89 @@ export default function PlanMenuScreen() {
         </View>
       </ScrollView>
 
-      {/* --- Slots for the selected day ------------------------------------ */}
+      {/* --- The selected day ---------------------------------------------- */}
+      <View style={styles.dayHeader}>
+        <View style={styles.flex}>
+          <AppText variant="headline" weight="700">
+            {longDay(selectedDate)}
+          </AppText>
+          <AppText variant="footnote" color="tertiary">
+            {entries.length === 0
+              ? "Nothing planned yet"
+              : `${entries.length} meal${entries.length === 1 ? "" : "s"} · about ${dayCalories} kcal`}
+          </AppText>
+        </View>
+        {selectedDate === currentDate ? (
+          <View style={[styles.todayPill, { backgroundColor: alpha(colors.primary, 0.14) }]}>
+            <AppText variant="caption" weight="700" style={{ color: colors.primary }}>
+              TODAY
+            </AppText>
+          </View>
+        ) : null}
+      </View>
+
+      {/* --- Slots --------------------------------------------------------- */}
       {SLOTS.map((slot) => {
         const picked = bySlot(slot.key);
+        const filled = picked.length > 0;
         return (
-          <Card key={slot.key} padding="lg">
+          <Card
+            key={slot.key}
+            padding="lg"
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              setPicking(slot.key);
+            }}
+            accessibilityLabel={
+              filled
+                ? `${slot.label}: ${picked.map((e) => e.meal.name).join(", ")}. Change it.`
+                : `${slot.label}, nothing planned. Choose a meal.`
+            }
+            accessibilityHint="Opens the meal picker"
+          >
             <View style={styles.slotHeader}>
-              <Ionicons name={slot.icon as never} size={17} color={colors.textSecondary} />
-              <AppText variant="body" weight="700" style={styles.flex}>
-                {slot.label}
-              </AppText>
-              <Pressable onPress={() => setPicking(slot.key)} hitSlop={10}>
-                <Ionicons name="add-circle" size={24} color={colors.primary} />
-              </Pressable>
+              <View
+                style={[
+                  styles.slotIcon,
+                  {
+                    backgroundColor: filled
+                      ? alpha(colors.primary, 0.14)
+                      : colors.surfaceMuted,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={slot.icon as never}
+                  size={16}
+                  color={filled ? colors.primary : colors.textTertiary}
+                />
+              </View>
+              <View style={styles.flex}>
+                <AppText variant="body" weight="700">
+                  {slot.label}
+                </AppText>
+                <AppText variant="caption" color="tertiary">
+                  {slot.when}
+                </AppText>
+              </View>
+              {/*
+                A GLYPH, NOT A BUTTON. It marks the slot as fillable; the card is
+                what opens the picker. Kept out of the accessibility tree so a
+                screen reader announces one action for one card rather than two
+                controls that do the same thing.
+              */}
+              <Ionicons
+                name={filled ? "swap-horizontal" : "add-circle-outline"}
+                size={22}
+                color={filled ? colors.textTertiary : colors.primary}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              />
             </View>
 
-            {picked.length === 0 ? (
-              <AppText variant="caption" color="secondary" style={{ marginTop: 6 }}>
-                Nothing planned — tap + to choose, or leave it empty.
+            {!filled ? (
+              <AppText variant="footnote" color="tertiary" style={styles.slotEmpty}>
+                Tap to choose — or leave it empty, and it won&apos;t count against you.
               </AppText>
             ) : (
               picked.map((entry) => (
@@ -269,17 +361,22 @@ export default function PlanMenuScreen() {
                       {entry.meal.name}
                     </AppText>
                     <AppText variant="caption" color="secondary">
-                      {entry.meal.calories.min === entry.meal.calories.max
-                        ? `${entry.meal.calories.min} kcal`
-                        : `${entry.meal.calories.min}–${entry.meal.calories.max} kcal`}
+                      {entry.meal.calories.max === 0
+                        ? "No nutrition data"
+                        : entry.meal.calories.min === entry.meal.calories.max
+                          ? `${entry.meal.calories.min} kcal · ${entry.meal.proteinG.max}g protein`
+                          : `${entry.meal.calories.min}–${entry.meal.calories.max} kcal · ${entry.meal.proteinG.max}g protein`}
                     </AppText>
                   </View>
                   <Pressable
                     onPress={async () => {
+                      Haptics.selectionAsync().catch(() => {});
                       await removeCustomMeal(entry.id);
                       await loadDay(selectedDate);
                     }}
-                    hitSlop={10}
+                    hitSlop={12}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${entry.meal.name} from ${slot.label}`}
                   >
                     <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
                   </Pressable>
@@ -332,180 +429,26 @@ export default function PlanMenuScreen() {
         </Card>
       ) : null}
 
-      <MealPickerModal
+      {/* The promise, stated once. A planner that doesn't say where the plan
+          goes is asking for trust it hasn't earned. */}
+      <View style={styles.footnote}>
+        <Ionicons name="calendar-outline" size={15} color={colors.textTertiary} />
+        <AppText variant="footnote" color="tertiary" style={styles.flex}>
+          Each day you plan shows up on your Diet screen that morning, ready to tick
+          off as you eat it.
+        </AppText>
+      </View>
+
+      <MealPickerSheet
         visible={picking !== null}
         slot={picking}
+        date={selectedDate}
         savedMeals={savedMeals}
+        {...(userBio?.region ? { region: userBio.region } : {})}
         onClose={() => setPicking(null)}
         onPick={handlePick}
       />
     </Screen>
-  );
-}
-
-// ============================================================================
-// MEAL PICKER
-// ============================================================================
-
-function MealPickerModal({
-  visible,
-  slot,
-  savedMeals,
-  onClose,
-  onPick,
-}: {
-  visible: boolean;
-  slot: MealType | null;
-  savedMeals: { id: string; name: string; meal: Omit<ScheduledMeal, "id" | "isConsumed" | "consumedAt">; nutrients?: NutrientPanel }[];
-  onClose: () => void;
-  onPick: (meal: ScheduledMeal, nutrients?: NutrientPanel) => void;
-}) {
-  const { colors } = useColors();
-  const [query, setQuery] = useState("");
-
-  /*
-   * `searchCanonical` scans the whole food reference, so running it per
-   * keystroke was the actual cost on this screen — the RESULT list is capped at
-   * 12, so there was never anything here worth virtualizing. Debounce the term
-   * that drives the scan and leave the input itself instant.
-   */
-  const [search, setSearch] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setSearch(query), 150);
-    return () => clearTimeout(t);
-  }, [query]);
-
-  const results = useMemo(
-    () => (search.trim() ? searchCanonical(search, 12) : []),
-    [search],
-  );
-
-  const make = (name: string, kcal: number, p = 0, c = 0, f = 0): ScheduledMeal => ({
-    id: `cm_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    mealType: slot ?? "snack",
-    name,
-    calories: { min: kcal, max: kcal },
-    proteinG: { min: p, max: p },
-    carbsG: { min: c, max: c },
-    fatG: { min: f, max: f },
-    isConsumed: false,
-  });
-
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <Screen scroll contentStyle={styles.body} edges={["top"]}>
-        <View style={styles.modalHeader}>
-          <AppText variant="headline" weight="700">
-            Choose a meal
-          </AppText>
-          <Pressable
-            onPress={onClose}
-            hitSlop={12}
-            accessibilityRole="button"
-            accessibilityLabel="Close"
-          >
-            <Ionicons name="close" size={26} color={colors.text} />
-          </Pressable>
-        </View>
-
-        <Card padding="lg">
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search foods, or type any meal name"
-            placeholderTextColor={colors.textSecondary}
-            style={[styles.search, { color: colors.text }]}
-            autoCorrect={false}
-          />
-        </Card>
-
-        {/* Anything the user types is allowed — a hand-planned menu shouldn't be
-            limited to what's in our database. Unmatched names simply carry no
-            nutrition, which the report handles honestly. */}
-        {query.trim().length > 1 ? (
-          <Pressable
-            onPress={() => onPick(make(query.trim(), 0))}
-            style={[styles.freeRow, { borderColor: colors.border }]}
-          >
-            <Ionicons name="add" size={18} color={colors.primary} />
-            <AppText variant="body" weight="600">
-              {`Use "${query.trim()}"`}
-            </AppText>
-          </Pressable>
-        ) : null}
-
-        {results.length > 0 ? (
-          <>
-            <AppText variant="caption" color="secondary" weight="700" uppercase>
-              From the food reference
-            </AppText>
-            {results.map((food) => {
-              const resolved = resolveKnownFood(
-                food.id,
-                1,
-                food.portions.find((p) => p.isDefault)?.unit ?? food.portions[0]?.unit ?? "serving",
-              );
-              const kcal = Math.round(resolved?.nutrients.calories ?? 0);
-              return (
-                <Pressable
-                  key={food.id}
-                  onPress={() =>
-                    onPick(
-                      make(
-                        food.name,
-                        kcal,
-                        Math.round(resolved?.nutrients.protein ?? 0),
-                        Math.round(resolved?.nutrients.carbs ?? 0),
-                        Math.round(resolved?.nutrients.fat ?? 0),
-                      ),
-                      resolved?.nutrients,
-                    )
-                  }
-                  style={[styles.resultRow, { borderColor: colors.border }]}
-                >
-                  <View style={styles.flex}>
-                    <AppText variant="body" weight="600">
-                      {food.name}
-                    </AppText>
-                    <AppText variant="caption" color="secondary">
-                      {food.group}
-                    </AppText>
-                  </View>
-                  <AppText variant="body" weight="700">
-                    {kcal}
-                  </AppText>
-                </Pressable>
-              );
-            })}
-          </>
-        ) : null}
-
-        {savedMeals.length > 0 && !query.trim() ? (
-          <>
-            <AppText variant="caption" color="secondary" weight="700" uppercase>
-              Your saved meals
-            </AppText>
-            {savedMeals.map((sm) => (
-              <Pressable
-                key={sm.id}
-                onPress={() =>
-                  onPick(
-                    { ...sm.meal, id: `cm_${Date.now()}`, isConsumed: false },
-                    sm.nutrients,
-                  )
-                }
-                style={[styles.resultRow, { borderColor: colors.border }]}
-              >
-                <AppText variant="body" weight="600" style={styles.flex}>
-                  {sm.name}
-                </AppText>
-                <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-              </Pressable>
-            ))}
-          </>
-        ) : null}
-      </Screen>
-    </Modal>
   );
 }
 
@@ -515,7 +458,12 @@ function ScreenHeader({ title }: { title: string }) {
   const { colors } = useColors();
   return (
     <View style={styles.modalHeader}>
-      <Pressable onPress={() => router.back()} hitSlop={12}>
+      <Pressable
+        onPress={() => router.back()}
+        hitSlop={12}
+        accessibilityRole="button"
+        accessibilityLabel="Back"
+      >
         <Ionicons name="chevron-back" size={26} color={colors.text} />
       </Pressable>
       <AppText variant="headline" weight="700" style={styles.flex}>
@@ -527,6 +475,13 @@ function ScreenHeader({ title }: { title: string }) {
 
 const fmt = (d: string) =>
   parseLocalDate(d).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+
+const longDay = (d: string) =>
+  parseLocalDate(d).toLocaleDateString(undefined, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
 
 const minDate = (a: string, b: string) => (a < b ? a : b);
 
@@ -554,7 +509,26 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
   },
   dot: { width: 5, height: 5, borderRadius: 3, marginTop: 2 },
-  slotHeader: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
+  dayHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    marginBottom: -Spacing.sm,
+  },
+  todayPill: {
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.pill,
+  },
+  slotHeader: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
+  slotIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  slotEmpty: { marginTop: Spacing.sm, lineHeight: 17 },
   pickedRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -564,20 +538,10 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   bulkRow: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm, marginTop: Spacing.md },
-  search: { fontSize: 16, minHeight: 24 },
-  freeRow: {
+  footnote: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: Spacing.sm,
-    padding: Spacing.lg,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-  },
-  resultRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.xs,
   },
 });

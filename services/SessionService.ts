@@ -19,9 +19,11 @@ import {
     SessionExerciseInfo,
     SessionState,
     SessionSummaryData,
+    SessionEffort,
     SetResult,
     createInitialSessionState,
-    parseTargetReps
+    parseTargetReps,
+    resolveWorkSeconds
 } from "../models/session";
 
 // ──────────────────────────────────────────────
@@ -130,9 +132,12 @@ export class SessionService {
     const ex = s.exercises[s.currentExerciseIndex];
     if (!ex) return { ...s, phase: "COMPLETE" };
 
-    // For timed exercises, auto-complete the set when time elapses
+    // A HOLD ends on the clock — that is the whole point of a hold, and it's
+    // what keeps a plank hands-free. A REP set never auto-completes: its clock
+    // runs on past the box into overtime, because only the athlete knows when
+    // the reps are actually finished.
     if (ex.exerciseType === "timed") {
-      const targetSec = parseTargetReps(ex.reps);
+      const targetSec = resolveWorkSeconds(ex);
       if (newTimer >= targetSec) {
         return this.completeCurrentSet(s, targetSec, targetSec);
       }
@@ -203,10 +208,20 @@ export class SessionService {
   /** User tapped "Done" (complete current set manually) */
   completeSet(state: SessionState): SessionState {
     if (state.phase !== "ACTIVE_SET") return state;
+    const ex = state.exercises[state.currentExerciseIndex];
+    // Reps are a prescription, not something tapped out live — so a finished
+    // rep set banks its TARGET, and the rest screen hands that number back as a
+    // pre-filled stepper the athlete only touches if it was wrong. A counted
+    // `currentReps` still wins where something did count (legacy resumed
+    // sessions, and the engine tests that drive the machine directly).
     const reps =
-      state.exercises[state.currentExerciseIndex]?.exerciseType === "timed"
+      ex?.exerciseType === "timed"
         ? state.timerValue
-        : state.currentReps;
+        : state.currentReps > 0
+          ? state.currentReps
+          : ex
+            ? parseTargetReps(ex.reps)
+            : 0;
     return this.completeCurrentSet(state, reps, state.timerValue);
   }
 
@@ -233,6 +248,71 @@ export class SessionService {
   addRestTime(state: SessionState, seconds: number = 20): SessionState {
     if (state.phase !== "REST" && state.phase !== "TRANSITION") return state;
     return { ...state, timerValue: state.timerValue + seconds };
+  }
+
+  /**
+   * Re-prescribe an exercise before the session starts — the "tap to adjust"
+   * path off the prescription screen. Deliberately INTRO-only: once the clock
+   * is running the shape of the session is settled, and the only time controls
+   * left are the rest screen's.
+   */
+  updateExercise(
+    state: SessionState,
+    index: number,
+    patch: Partial<SessionExerciseInfo>,
+  ): SessionState {
+    if (state.phase !== "INTRO") return state;
+    const ex = state.exercises[index];
+    if (!ex) return state;
+    const exercises = [...state.exercises];
+    exercises[index] = { ...ex, ...patch };
+    return { ...state, exercises };
+  }
+
+  /** Reps banked for the set that just finished, or null when there isn't one. */
+  lastSetReps(state: SessionState): number | null {
+    const found = this.lastResultEntry(state);
+    if (!found) return null;
+    const sets = found.result.setsCompleted;
+    return sets.length ? sets[sets.length - 1].repsCompleted : null;
+  }
+
+  /**
+   * Correct the reps banked for the set that just finished — the rest screen's
+   * stepper. This is the only place a number is edited by hand, because rest is
+   * the only moment in a session the phone should be in a hand at all.
+   */
+  adjustLastSetReps(state: SessionState, reps: number): SessionState {
+    if (state.phase !== "REST" && state.phase !== "TRANSITION") return state;
+    const found = this.lastResultEntry(state);
+    if (!found) return state;
+    const { index, result } = found;
+    const sets = result.setsCompleted;
+    if (sets.length === 0) return state;
+    const clamped = Math.max(0, Math.min(999, Math.round(reps)));
+    const last = sets[sets.length - 1];
+    if (last.repsCompleted === clamped) return state;
+    const nextSets = [...sets];
+    nextSets[nextSets.length - 1] = { ...last, repsCompleted: clamped };
+    const results = [...state.results];
+    results[index] = {
+      ...result,
+      setsCompleted: nextSets,
+      totalReps: result.totalReps - last.repsCompleted + clamped,
+    };
+    return { ...state, results };
+  }
+
+  /** The live (non-skipped, rep-based) result entry for the exercise on stage. */
+  private lastResultEntry(
+    state: SessionState,
+  ): { index: number; result: ExerciseSessionResult } | null {
+    const ex = state.exercises[state.currentExerciseIndex];
+    if (!ex || ex.exerciseType === "timed") return null;
+    const index = state.results.findIndex(
+      (r) => r.exerciseId === ex.exerciseId && !r.skipped,
+    );
+    return index === -1 ? null : { index, result: state.results[index] };
   }
 
   /** Skip the current exercise entirely */
@@ -442,7 +522,11 @@ export class SessionService {
   // ────────────── Summary ──────────────
 
   /** Produce SessionSummaryData from a COMPLETE session state */
-  buildSummary(state: SessionState, weightKg: number = 70): SessionSummaryData {
+  buildSummary(
+    state: SessionState,
+    weightKg: number = 70,
+    effort?: SessionEffort,
+  ): SessionSummaryData {
     const completed = state.results.filter((r) => !r.skipped);
     const totalSetsTarget = state.exercises.reduce((sum, e) => sum + e.sets, 0);
     const setsCompleted = state.results.reduce(
@@ -474,6 +558,7 @@ export class SessionService {
       totalReps,
       durationSeconds: state.elapsedSeconds,
       caloriesBurned: calories,
+      effort,
       completionPercent:
         state.exercises.length > 0
           ? Math.round((completed.length / state.exercises.length) * 100)

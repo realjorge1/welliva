@@ -35,6 +35,22 @@ const KIND_META: Record<GozlinMomentKind, { eyebrow: string; cta: string }> = {
   coach: { eyebrow: "Gozlin", cta: "Ask Gozlin" },
 };
 
+/**
+ * Where each surface lives, so a moment never routes to the screen it's already
+ * sitting on. A card on Progress whose CTA says "See my progress" would be a
+ * tap that does nothing — worse than one that opens the chat. When the route
+ * IS the host, the card falls back to the conversation.
+ */
+const SURFACE_ROUTE: Record<GozlinSurface, string | null> = {
+  home: "/",
+  workout: "/exercise",
+  diet: "/diet",
+  progress: "/profile",
+  habits: "/habits",
+  reviews: null,
+  goals: null,
+};
+
 export function GozlinMoment({
   surface,
   style,
@@ -45,15 +61,18 @@ export function GozlinMoment({
 }) {
   const { top } = useGozlinMoments(surface);
   if (!top) return null;
-  return <GozlinMomentCard moment={top} style={style} />;
+  return <GozlinMomentCard moment={top} surface={surface} style={style} />;
 }
 
 /** The card itself — also usable directly with a pre-built moment. */
 export function GozlinMomentCard({
   moment,
+  surface,
   style,
 }: {
   moment: Moment;
+  /** The screen this card is on — suppresses a route back to that same screen. */
+  surface?: GozlinSurface;
   style?: object;
 }) {
   const { colors } = useColors();
@@ -63,8 +82,19 @@ export function GozlinMomentCard({
   const cta = moment.cta ?? meta.cta;
   const celebratory = moment.kind === "celebration";
 
+  // A moment with a route is a signpost, not a conversation opener: the CTA
+  // named a screen, so the tap has to land there. Everything else — and any
+  // route that would just reload the host screen — is still a doorway into the
+  // chat with the question already asked.
+  const route =
+    moment.route && (!surface || moment.route !== SURFACE_ROUTE[surface])
+      ? moment.route
+      : null;
+
   const open = () =>
-    router.push({ pathname: "/gozlin", params: { prompt: moment.prompt } } as any);
+    route
+      ? router.push(route as any)
+      : router.push({ pathname: "/gozlin", params: { prompt: moment.prompt } } as any);
 
   return (
     <Pressable

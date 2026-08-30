@@ -29,6 +29,14 @@
  * gold Ring (it's a level, and a ring is how this app draws progress
  * everywhere else), and the seven history rows became one grouped card with a
  * way through to the full calendar.
+ *
+ * ── AND WHAT THE 2026-08-29 PASS CHANGED ────────────────────────────────────
+ *
+ * Achievements shows the ones you've EARNED. All forty-odd tiles used to render
+ * at once, so the section — already the longest on the screen — was mostly
+ * empty outlines of things you hadn't done. The locked ones are all still here,
+ * grouped and progress-ringed exactly as before, behind the "Still to earn"
+ * disclosure at the bottom.
  */
 
 import {
@@ -72,6 +80,11 @@ import {
   getLatestUnlocked,
   TIER_META,
 } from "@/services/AchievementService";
+import {
+  badgeFinish,
+  lockedFinish,
+  type BadgeFinish,
+} from "@/services/achievementBadges";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
@@ -104,6 +117,7 @@ import Animated, {
 
 /** Order categories appear in the achievements list. */
 const CATEGORY_ORDER: AchievementCategory[] = [
+  "journey",
   "streak",
   "workout",
   "nutrition",
@@ -179,6 +193,20 @@ const GOLD_DEEP = "#B8862F";
 const GOLD_DIM = "#8A7440";
 const GOLD_GRADIENT = [GOLD_LIGHT, GOLD, GOLD_DEEP] as const;
 
+/**
+ * An UNEARNED trophy, on the detail screen's black card.
+ *
+ * A neutral pewter rather than a dimmed copy of the badge's real finish: a
+ * greyed-out amethyst still tells you it's amethyst, and the material is the
+ * reward. These are literals for the same reason the golds above are — the
+ * card is black in both themes, so a theme-aware grey would be answering a
+ * question nobody asked.
+ */
+const LOCKED_TONE = "#7C838F";
+const LOCKED_PLATE = "#2A2E36";
+/** The unearned trophy's progress arc — pewter, still legible on black. */
+const LOCKED_RING = ["#9AA2AE", LOCKED_TONE, "#5A616B"] as const;
+
 /** Sparks around the detail medallion. Offsets are from its centre. */
 const MEDAL_SPARKLES = [
   { x: -84, y: -50, size: 12, delay: 0 },
@@ -246,25 +274,37 @@ export default function ProfileScreen() {
     () => getLatestUnlocked(achievements),
     [achievements],
   );
-  // Group achievements by category, earned-first within each group.
+  /**
+   * Achievements by category, EARNED SPLIT FROM LOCKED.
+   *
+   * The grid used to draw every tile at once and most of them were empty
+   * outlines — the longest thing on Profile, and the least of it yours. The
+   * earned ones stand alone now; everything still counting folds behind one
+   * disclosure, in the same groups, drawn the same way when opened.
+   */
   const grouped = useMemo(() => {
-    const map = new Map<AchievementCategory, EvaluatedAchievement[]>();
+    const map = new Map<
+      AchievementCategory,
+      { earned: EvaluatedAchievement[]; locked: EvaluatedAchievement[] }
+    >();
     for (const a of achievements) {
-      const list = map.get(a.def.category) ?? [];
-      list.push(a);
-      map.set(a.def.category, list);
+      const g = map.get(a.def.category) ?? { earned: [], locked: [] };
+      (a.unlocked ? g.earned : g.locked).push(a);
+      map.set(a.def.category, g);
     }
-    for (const list of map.values()) {
-      list.sort((x, y) => {
-        if (x.unlocked !== y.unlocked) return x.unlocked ? -1 : 1;
-        return y.progress - x.progress;
-      });
-    }
+    // Earned keeps definition order — that's the bronze→silver→gold ladder, and
+    // a shelf that reshuffles on every unlock is a shelf you have to re-read.
+    // Locked leads with whatever is closest to done.
+    for (const g of map.values()) g.locked.sort((x, y) => y.progress - x.progress);
     return map;
   }, [achievements]);
+  /** How many are still out there — the number on the disclosure. */
+  const lockedCount = summary.total - summary.earnedCount;
 
   const [history, setHistory] = useState<DietHistoryEntry[]>([]);
   const [detail, setDetail] = useState<EvaluatedAchievement | null>(null);
+  /** Collapsed by default: the shelf is the point, the ladder is the detail. */
+  const [showLocked, setShowLocked] = useState(false);
   /** A photo just uploaded from this screen — wins over the resolved identity. */
   const [freshAvatar, setFreshAvatar] = useState<string | null>(null);
   /**
@@ -656,87 +696,12 @@ export default function ProfileScreen() {
           </Reveal>
         )}
 
-        {/* Achievements */}
+        {/* History.
+            ABOVE ACHIEVEMENTS ON PURPOSE. This is a progress screen, and what
+            you actually did is the progress; the trophy case is the reward for
+            it. Burying the chart and the last seven days under the whole
+            trophy case meant scrolling past what you came to read. */}
         <Reveal index={5}>
-          <View style={styles.section}>
-            <SectionHeader
-              title="Achievements"
-              subtitle={`${summary.earnedCount} of ${summary.total} unlocked`}
-            />
-
-            {/* LEVEL. A ring, not a bar: this app draws every other kind of
-                progress as one, and the level number belongs inside the thing
-                that's filling toward the next one rather than in a plate beside
-                it. Gold because it's the trophy shelf's own metal — the same
-                fixed hexes the medallions use, for the same reason. */}
-            <Card style={styles.block} padding="lg">
-              <View style={styles.levelTop}>
-                <Ring
-                  progress={summary.pointsIntoLevel / summary.pointsForLevel}
-                  size={76}
-                  strokeWidth={6}
-                  gradient={GOLD_GRADIENT}
-                  track={alpha(GOLD, 0.16)}
-                >
-                  <AppText variant="caption" style={[styles.levelKicker, { color: GOLD_DIM }]}>
-                    LVL
-                  </AppText>
-                  <AppText variant="title" style={{ color: GOLD }}>
-                    {summary.level}
-                  </AppText>
-                </Ring>
-                <View style={styles.flex}>
-                  <AppText variant="headline">{summary.levelTitle}</AppText>
-                  <AppText variant="footnote" color="tertiary" style={styles.levelPoints}>
-                    {summary.points} of {summary.maxPoints} points earned
-                  </AppText>
-                  {/* Once everything is earned there are no more points to go
-                      and get, so "N pts to Level 6" would be pointing at a door
-                      that isn't there. */}
-                  <AppText variant="caption" color="tertiary" style={styles.levelHint}>
-                    {summary.points >= summary.maxPoints
-                      ? "Every achievement earned"
-                      : `${summary.pointsForLevel - summary.pointsIntoLevel} pts to Level ${summary.level + 1}`}
-                  </AppText>
-                </View>
-              </View>
-            </Card>
-
-            {/* Achievements by category */}
-            {CATEGORY_ORDER.map((cat) => {
-              const list = grouped.get(cat);
-              if (!list || list.length === 0) return null;
-              const meta = CATEGORY_META[cat];
-              const earnedInCat = list.filter((a) => a.unlocked).length;
-              return (
-                <View key={cat} style={styles.catBlock}>
-                  <View style={styles.catHeader}>
-                    <Ionicons name={meta.icon} size={16} color={colors.textSecondary} />
-                    <AppText variant="callout" style={styles.flex}>
-                      {meta.label}
-                    </AppText>
-                    <AppText variant="caption" color="tertiary">
-                      {earnedInCat}/{list.length}
-                    </AppText>
-                  </View>
-                  <View style={styles.achGrid}>
-                    {list.map((a) => (
-                      <AchievementCard
-                        key={a.def.id}
-                        item={a}
-                        colors={colors}
-                        onPress={() => setDetail(a)}
-                      />
-                    ))}
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        </Reveal>
-
-        {/* History */}
-        <Reveal index={6}>
           <View style={styles.section}>
             {/* The seven most recent days are a preview; the calendar behind
                 "See all" is where a day can actually be inspected and (for
@@ -790,6 +755,135 @@ export default function ProfileScreen() {
                   </AppText>
                 </View>
               </Card>
+            )}
+          </View>
+        </Reveal>
+
+        {/* Achievements — the last section, and the longest. */}
+        <Reveal index={6}>
+          <View style={styles.section}>
+            <SectionHeader
+              title="Achievements"
+              subtitle={`${summary.earnedCount} of ${summary.total} unlocked`}
+            />
+
+            {/* LEVEL. A ring, not a bar: this app draws every other kind of
+                progress as one, and the level number belongs inside the thing
+                that's filling toward the next one rather than in a plate beside
+                it. Gold because it's the trophy shelf's own metal — the same
+                fixed hexes the medallions use, for the same reason. */}
+            <Card style={styles.block} padding="lg">
+              <View style={styles.levelTop}>
+                <Ring
+                  progress={summary.pointsIntoLevel / summary.pointsForLevel}
+                  size={76}
+                  strokeWidth={6}
+                  gradient={GOLD_GRADIENT}
+                  track={alpha(GOLD, 0.16)}
+                >
+                  <AppText variant="caption" style={[styles.levelKicker, { color: GOLD_DIM }]}>
+                    LVL
+                  </AppText>
+                  <AppText variant="title" style={{ color: GOLD }}>
+                    {summary.level}
+                  </AppText>
+                </Ring>
+                <View style={styles.flex}>
+                  <AppText variant="headline">{summary.levelTitle}</AppText>
+                  <AppText variant="footnote" color="tertiary" style={styles.levelPoints}>
+                    {summary.points} of {summary.maxPoints} points earned
+                  </AppText>
+                  {/* Once everything is earned there are no more points to go
+                      and get, so "N pts to Level 6" would be pointing at a door
+                      that isn't there. */}
+                  <AppText variant="caption" color="tertiary" style={styles.levelHint}>
+                    {summary.points >= summary.maxPoints
+                      ? "Every achievement earned"
+                      : `${summary.pointsForLevel - summary.pointsIntoLevel} pts to Level ${summary.level + 1}`}
+                  </AppText>
+                </View>
+              </View>
+            </Card>
+
+            {/* EARNED, by category. A category with nothing won in it doesn't
+                appear at all — a heading over an empty row is the crowding this
+                section was built to lose. The count still says how many of that
+                category exist, so the shelf never implies it's all there is. */}
+            {CATEGORY_ORDER.map((cat) => {
+              const g = grouped.get(cat);
+              if (!g || g.earned.length === 0) return null;
+              return (
+                <CategoryBlock
+                  key={cat}
+                  category={cat}
+                  items={g.earned}
+                  count={`${g.earned.length}/${g.earned.length + g.locked.length}`}
+                  colors={colors}
+                  onPick={setDetail}
+                />
+              );
+            })}
+
+            {/* Day one: one line, so the level card isn't sitting straight on
+                top of a disclosure row with nothing between them. */}
+            {summary.earnedCount === 0 && (
+              <Card style={styles.block} padding="lg">
+                <AppText variant="footnote" color="secondary">
+                  No badges yet — the first ones are closer than they look. Open
+                  the list below to see what&apos;s already counting.
+                </AppText>
+              </Card>
+            )}
+
+            {/* THE REST, FOLDED. Same groups, same tiles, same progress rings —
+                just not the default view. */}
+            {lockedCount > 0 && (
+              <>
+                <Pressable
+                  onPress={() => setShowLocked((v) => !v)}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: showLocked }}
+                  accessibilityLabel={`Still to earn, ${lockedCount} achievements`}
+                  style={({ pressed }) => [
+                    styles.lockedToggle,
+                    { backgroundColor: colors.surface, borderColor: colors.border },
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <Ionicons
+                    name="ellipsis-horizontal-circle-outline"
+                    size={17}
+                    color={colors.textTertiary}
+                  />
+                  <AppText variant="callout" style={styles.flex}>
+                    Still to earn
+                  </AppText>
+                  <AppText variant="footnote" color="tertiary">
+                    {lockedCount}
+                  </AppText>
+                  <Ionicons
+                    name={showLocked ? "chevron-up" : "chevron-down"}
+                    size={16}
+                    color={colors.textTertiary}
+                  />
+                </Pressable>
+
+                {showLocked &&
+                  CATEGORY_ORDER.map((cat) => {
+                    const g = grouped.get(cat);
+                    if (!g || g.locked.length === 0) return null;
+                    return (
+                      <CategoryBlock
+                        key={cat}
+                        category={cat}
+                        items={g.locked}
+                        count={`${g.locked.length} left`}
+                        colors={colors}
+                        onPick={setDetail}
+                      />
+                    );
+                  })}
+              </>
             )}
           </View>
         </Reveal>
@@ -1034,6 +1128,9 @@ function LatestAchievementRow({
   const { colors } = useColors();
   const reduceMotion = useReducedMotion();
   const cheer = cheerFor(item);
+  // The row wears what was actually won. It is only ever shown for an UNLOCKED
+  // achievement (see getLatestUnlocked), so there is no bare state here.
+  const finish = badgeFinish(item.def);
   // The cheer waits out the name rather than racing it — a beat of applause
   // after the reveal, not underneath it.
   const cheerDelay = Array.from(item.def.name).length * GLITTER_STAGGER_MS + 260;
@@ -1062,14 +1159,14 @@ function LatestAchievementRow({
       accessibilityHint="See the details"
       style={({ pressed }) => [
         styles.latestRow,
-        { borderColor: alpha(colors.gold, 0.38) },
+        { borderColor: alpha(finish.accent, 0.38) },
         pressed && { opacity: 0.7 },
       ]}
     >
-      {/* A wash rather than a flat tint: the gold pools behind the medal and
-          fades out across the name, so the row has a light source. */}
+      {/* A wash rather than a flat tint: the badge's metal pools behind the
+          medal and fades out across the name, so the row has a light source. */}
       <LinearGradient
-        colors={[alpha(colors.gold, 0.22), alpha(colors.gold, 0.04)]}
+        colors={[alpha(finish.ramp[1], 0.24), alpha(finish.ramp[1], 0.04)]}
         start={{ x: 0, y: 0.5 }}
         end={{ x: 1, y: 0.5 }}
         style={StyleSheet.absoluteFill}
@@ -1081,9 +1178,9 @@ function LatestAchievementRow({
           somewhere to go. */}
       <View style={styles.latestMedalWrap}>
         {ROW_SPARKLES.map((s, i) => (
-          <Sparkle key={i} {...s} color={colors.gold} />
+          <Sparkle key={i} {...s} color={finish.ramp[0]} />
         ))}
-        <Ionicons name={item.def.icon} size={26} color={colors.gold} />
+        <Ionicons name={item.def.icon} size={26} color={finish.accent} />
       </View>
 
       <View style={styles.flex}>
@@ -1101,7 +1198,7 @@ function LatestAchievementRow({
             variant="footnote"
             weight="600"
             numberOfLines={1}
-            style={[styles.latestCheer, { color: colors.gold }]}
+            style={[styles.latestCheer, { color: finish.accent }]}
           >
             {cheer}
           </AppText>
@@ -1459,6 +1556,54 @@ function BodyEditSheet({
   );
 }
 
+/**
+ * One category: its header, and a grid of whatever tiles it was handed.
+ *
+ * Shared by the earned shelf and the folded list so the two read identically —
+ * the only difference is which tiles go in, and what the number on the right is
+ * measuring. That number is why `count` is a string: "3/8" on the shelf means
+ * three of eight earned, "5 left" below means five still counting, and neither
+ * may be read as the other.
+ */
+function CategoryBlock({
+  category,
+  items,
+  count,
+  colors,
+  onPick,
+}: {
+  category: AchievementCategory;
+  items: EvaluatedAchievement[];
+  count: string;
+  colors: ReturnType<typeof useColors>["colors"];
+  onPick: (a: EvaluatedAchievement) => void;
+}) {
+  const meta = CATEGORY_META[category];
+  return (
+    <View style={styles.catBlock}>
+      <View style={styles.catHeader}>
+        <Ionicons name={meta.icon} size={16} color={colors.textSecondary} />
+        <AppText variant="callout" style={styles.flex}>
+          {meta.label}
+        </AppText>
+        <AppText variant="caption" color="tertiary">
+          {count}
+        </AppText>
+      </View>
+      <View style={styles.achGrid}>
+        {items.map((a) => (
+          <AchievementCard
+            key={a.def.id}
+            item={a}
+            colors={colors}
+            onPress={() => onPick(a)}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function AchievementCard({
   item,
   colors,
@@ -1470,25 +1615,43 @@ function AchievementCard({
 }) {
   const { def, unlocked, value, target, progress } = item;
   const tier = TIER_META[def.tier];
-  const tone = unlocked ? tier.color : colors.textTertiary;
+  // THE BADGE'S OWN METAL, NOT ITS TIER'S. Tinting by tier made the whole
+  // trophy case one shade of orange — bronze and gold are two thirds of the
+  // ladder. A finish is per-achievement, so no two neighbours match.
+  const finish = badgeFinish(def);
+  const tone = unlocked ? finish.accent : colors.textTertiary;
 
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${def.name}. ${unlocked ? "Unlocked" : `${value} of ${target}${def.unit ? ` ${def.unit}` : ""}`}.`}
+      accessibilityLabel={`${def.name}. ${unlocked ? `Unlocked. ${finish.material}.` : `${value} of ${target}${def.unit ? ` ${def.unit}` : ""}`}.`}
       style={[
         styles.achCard,
         {
           backgroundColor: colors.surface,
-          borderColor: unlocked ? alpha(tier.color, 0.45) : colors.border,
+          borderColor: unlocked ? alpha(finish.accent, 0.45) : colors.border,
         },
       ]}
     >
+      {/* A pool of the badge's own light, only once it's been won. */}
+      {unlocked ? (
+        <LinearGradient
+          colors={[alpha(finish.ramp[1], 0.16), "#00000000"]}
+          start={{ x: 0.1, y: 0 }}
+          end={{ x: 0.9, y: 1 }}
+          style={styles.achWash}
+        />
+      ) : null}
+
       <View style={styles.achTop}>
-        <IconBadge name={def.icon} tone={tone} size={40} solid={unlocked} />
         {unlocked ? (
-          <Ionicons name="checkmark-circle" size={18} color={tier.color} />
+          <StruckBadge finish={finish} icon={def.icon} size={42} />
+        ) : (
+          <IconBadge name={def.icon} tone={tone} size={40} />
+        )}
+        {unlocked ? (
+          <Ionicons name="checkmark-circle" size={18} color={finish.accent} />
         ) : (
           <Ionicons name="lock-closed" size={13} color={colors.textTertiary} />
         )}
@@ -1508,14 +1671,18 @@ function AchievementCard({
 
       <View style={styles.achFooter}>
         {unlocked ? (
-          <View style={[styles.achTierPill, { backgroundColor: alpha(tier.color, 0.16) }]}>
-            <AppText variant="caption" style={[styles.achTierText, { color: tier.color }]}>
+          // The pill names the TIER (what it's worth) in the badge's own metal
+          // (what it is) — two facts, one chip, neither fighting the other.
+          <View style={[styles.achTierPill, { backgroundColor: alpha(finish.accent, 0.18) }]}>
+            <AppText variant="caption" style={[styles.achTierText, { color: finish.accent }]}>
               {tier.label}
             </AppText>
           </View>
         ) : (
           <>
-            <ProgressBar progress={progress} tone={tier.color} height={6} />
+            {/* A locked badge is bare, so its bar is too — the material is the
+                prize, and spending it before the unlock gives it away. */}
+            <ProgressBar progress={progress} tone={colors.textTertiary} height={6} />
             <AppText variant="caption" color="tertiary" style={styles.achProgress}>
               {value}/{target}
               {def.unit ? ` ${def.unit}` : ""}
@@ -1524,6 +1691,53 @@ function AchievementCard({
         )}
       </View>
     </Pressable>
+  );
+}
+
+/**
+ * A struck disc: rim, three-stop metal, a lit corner, and the glyph cut into
+ * it. The grid's medal at 42pt and the detail screen's at 96 are the same
+ * object at two sizes — which is what makes the trophy you tap and the trophy
+ * that fills the screen read as one thing.
+ */
+function StruckBadge({
+  finish,
+  icon,
+  size,
+}: {
+  finish: BadgeFinish;
+  icon: keyof typeof Ionicons.glyphMap;
+  size: number;
+}) {
+  return (
+    <View
+      style={[
+        styles.struckRim,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: finish.ramp[2],
+        },
+      ]}
+    >
+      <LinearGradient
+        colors={finish.ramp}
+        locations={[0, 0.52, 1]}
+        start={{ x: 0.12, y: 0 }}
+        end={{ x: 0.88, y: 1 }}
+        style={[
+          styles.struckFace,
+          {
+            width: size - 3,
+            height: size - 3,
+            borderRadius: (size - 3) / 2,
+          },
+        ]}
+      >
+        <Ionicons name={icon} size={Math.round(size * 0.5)} color={finish.ink} />
+      </LinearGradient>
+    </View>
   );
 }
 
@@ -1571,13 +1785,26 @@ function AchievementDetail({
   const reduceMotion = useReducedMotion();
   const { def, unlocked, rawValue, target, progress, earnedAt } = item;
   const tier = TIER_META[def.tier];
-  // ONE ACCENT, AND IT IS GOLD. The tier colours (a coppery bronze, a blue
-  // platinum) each dragged their own hue onto this screen, and against black
-  // the bronze in particular read as a dull orange rather than as a prize. The
-  // tier is still named in the pill and still colours the grid card; here the
-  // metal is always gold. Locked achievements get the same gold, dimmed —
-  // it's the same trophy, not yet lit.
-  const accent = unlocked ? GOLD : GOLD_DIM;
+  /**
+   * THE BADGE'S OWN METAL.
+   *
+   * This screen used to force GOLD onto all forty-seven achievements, because
+   * the alternative on offer was the TIER colour and the tiers are
+   * bronze/silver/gold/platinum — three of which are variations on the same
+   * warm metal. One gold was at least consistent; it also meant the trophy case
+   * had exactly one trophy in it, drawn forty-seven times.
+   *
+   * A finish is per-achievement instead (see services/achievementBadges), so
+   * hydration is water, a dawn badge is lit like sunrise, and the mythic summit
+   * is obsidian or amethyst. Black is still the ground — it is the only surface
+   * every one of these metals reads as metal on.
+   *
+   * LOCKED STAYS BARE. Not a dimmed version of the real finish: a greyed-out
+   * copper still tells you it's copper, and the reveal is the reward.
+   */
+  const finish = unlocked ? badgeFinish(def) : lockedFinish(LOCKED_TONE, LOCKED_PLATE);
+  const accent = unlocked ? finish.accent : LOCKED_TONE;
+  const ramp = finish.ramp;
   const earnedDate = earnedAt
     ? new Date(earnedAt).toLocaleDateString("en-US", {
         month: "long",
@@ -1636,43 +1863,46 @@ function AchievementDetail({
       <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.scrim }]} />
 
       {/* A CARD, AND IT IS PITCH BLACK. Not the theme's surface — black in both
-          modes, because black is the only ground gold reads as metal on, and a
-          light-grey panel turned the trophy into a dialog about a trophy. The
-          card shape stays: this is one achievement, held, not a takeover of
+          modes, because black is the only ground these metals read as metal on,
+          and a light-grey panel turned the trophy into a dialog about a trophy.
+          The card shape stays: this is one achievement, held, not a takeover of
           the screen. */}
       <Animated.View
-        style={[styles.detailCard, { borderColor: alpha(GOLD, 0.35) }, cardStyle]}
+        style={[styles.detailCard, { borderColor: alpha(accent, 0.35) }, cardStyle]}
       >
-        {/* A warm pool behind the medallion so the black has a centre and the
-            gold looks lit rather than painted on. Clipped by the card's own
-            `overflow: hidden`, which is what keeps it a glow and not a halo
-            leaking over the corners. */}
+        {/* A pool of the badge's own light behind the medallion, so the black
+            has a centre and the metal looks lit rather than painted on. Clipped
+            by the card's own `overflow: hidden`, which is what keeps it a glow
+            and not a halo leaking over the corners. */}
         <LinearGradient
-          colors={[alpha(GOLD, unlocked ? 0.15 : 0.06), "#00000000"]}
+          colors={[alpha(finish.glow, unlocked ? 0.17 : 0.05), "#00000000"]}
           style={styles.detailVignette}
         />
 
         {/* Medallion — halo, sparks, ring, disc, glyph. */}
         <View style={styles.medallionWrap}>
           <Animated.View
-            style={[styles.medallionHalo, { backgroundColor: alpha(GOLD, 0.18) }, haloStyle]}
+            style={[
+              styles.medallionHalo,
+              { backgroundColor: alpha(finish.glow, 0.2) },
+              haloStyle,
+            ]}
           />
           {unlocked
-            ? MEDAL_SPARKLES.map((s, i) => <Sparkle key={i} {...s} color={GOLD} />)
+            ? MEDAL_SPARKLES.map((s, i) => <Sparkle key={i} {...s} color={ramp[0]} />)
             : null}
           <Ring
             progress={unlocked ? 1 : progress}
             size={140}
             strokeWidth={7}
-            gradient={GOLD_GRADIENT}
-            track={alpha(GOLD, 0.16)}
+            // The bare badge's disc is a dark plate, but its RING still has to
+            // be read — it is the only place "62 of 100" becomes a shape.
+            gradient={unlocked ? ramp : LOCKED_RING}
+            track={alpha(unlocked ? finish.accent : LOCKED_TONE, 0.16)}
           >
             <LinearGradient
-              colors={
-                unlocked
-                  ? [GOLD_LIGHT, GOLD, GOLD_DEEP]
-                  : [alpha(GOLD, 0.16), alpha(GOLD, 0.06)]
-              }
+              colors={ramp}
+              locations={[0, 0.52, 1]}
               start={{ x: 0.1, y: 0 }}
               end={{ x: 0.9, y: 1 }}
               style={styles.medallion}
@@ -1680,14 +1910,15 @@ function AchievementDetail({
               <Ionicons
                 name={def.icon}
                 size={44}
-                // Dark ink on bright metal — white on gold is mush.
-                color={unlocked ? "#1A1206" : alpha(GOLD, 0.55)}
+                // Ink chosen against the LIT face — white on bright gold is
+                // mush, dark on obsidian is a hole. See achievementBadges.
+                color={unlocked ? finish.ink : alpha(LOCKED_TONE, 0.75)}
               />
             </LinearGradient>
           </Ring>
         </View>
 
-        <View style={[styles.detailTier, { backgroundColor: alpha(GOLD, 0.14) }]}>
+        <View style={[styles.detailTier, { backgroundColor: alpha(accent, 0.16) }]}>
           <Ionicons name={unlocked ? "medal" : "lock-closed"} size={13} color={accent} />
           <AppText variant="caption" style={[styles.achTierText, { color: accent }]}>
             {tier.label} · {unlocked ? "+" : ""}
@@ -1695,12 +1926,12 @@ function AchievementDetail({
           </AppText>
         </View>
 
-        {/* Struck letter by letter, cooling from white to gold. */}
+        {/* Struck letter by letter, cooling from white into the badge's metal. */}
         <View style={styles.detailNameWrap}>
           <GlitterText
             key={def.id}
             text={def.name}
-            color={GOLD}
+            color={unlocked ? ramp[0] : LOCKED_TONE}
             variant="title"
             delay={160}
             spread={3}
@@ -1711,11 +1942,24 @@ function AchievementDetail({
           {def.description}
         </AppText>
 
+        {/* Why this one is worth having. Not every badge carries a line — a
+            counter that speaks for itself doesn't need a voice, and a voice on
+            all sixty-seven is a voice nobody hears. */}
+        {def.flavor ? (
+          <AppText
+            variant="footnote"
+            align="center"
+            style={[styles.detailFlavor, { color: alpha(accent, 0.82) }]}
+          >
+            {def.flavor}
+          </AppText>
+        ) : null}
+
         {unlocked ? (
-          <View style={[styles.detailStatus, { borderColor: alpha(GOLD, 0.3) }]}>
-            <Ionicons name="checkmark-circle" size={17} color={GOLD} />
+          <View style={[styles.detailStatus, { borderColor: alpha(accent, 0.32) }]}>
+            <Ionicons name="checkmark-circle" size={17} color={accent} />
             <View>
-              <AppText variant="footnote" weight="700" style={{ color: GOLD }}>
+              <AppText variant="footnote" weight="700" style={{ color: accent }}>
                 Unlocked
               </AppText>
               {earnedDate ? (
@@ -1728,7 +1972,7 @@ function AchievementDetail({
         ) : (
           <View style={styles.detailStatusCol}>
             <View style={styles.detailProgressRow}>
-              <AppText variant="title" style={[styles.detailProgressValue, { color: GOLD }]}>
+              <AppText variant="title" style={[styles.detailProgressValue, { color: accent }]}>
                 {rawValue}
               </AppText>
               <AppText variant="subhead" style={styles.detailMuted}>
@@ -1931,6 +2175,17 @@ const styles = StyleSheet.create({
 
   // Achievements
   catBlock: { marginTop: Spacing.lg },
+  /** The one row that holds everything still counting. */
+  lockedToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    marginTop: Spacing.lg,
+    borderWidth: 1,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+  },
   catHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1945,7 +2200,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: Radius.lg,
     padding: Spacing.md,
+    // Clips the unlocked card's light pool to its corners.
+    overflow: "hidden",
   },
+  /** The badge's own light, pooled in the top-left of an unlocked tile. */
+  achWash: { position: "absolute", top: 0, left: 0, right: 0, height: 96 },
+  /** A struck disc: the ramp's shadow stop showing as a rim under the face. */
+  struckRim: { alignItems: "center", justifyContent: "center" },
+  struckFace: { alignItems: "center", justifyContent: "center" },
   achTop: {
     flexDirection: "row",
     alignItems: "center",
@@ -1965,6 +2227,14 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill,
   },
   achTierText: { fontWeight: "700" },
+
+  /** The badge's own line, under its description. */
+  detailFlavor: {
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
+    fontStyle: "italic",
+    lineHeight: 18,
+  },
 
   // Achievement detail modal
   detailScrim: {

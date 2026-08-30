@@ -7,6 +7,9 @@
 
 import { Difficulty, ExerciseCategory } from "./exercise";
 
+/** The one question the completion screen asks, so the plan can adapt. */
+export type SessionEffort = "easy" | "right" | "hard";
+
 // ──────────────────────────────────────────────
 // Session Phases
 // ──────────────────────────────────────────────
@@ -94,6 +97,15 @@ export interface SessionExerciseInfo {
   exerciseType: "reps" | "timed";
   sets: number;
   reps: string; // "10-15" or "30 sec"
+  /**
+   * How long ONE set of this movement is boxed to, in seconds.
+   *
+   * Every set is time-driven — reps are a PRESCRIPTION the athlete reads, never
+   * a live counter they tap — so a rep exercise carries a work duration too.
+   * Absent means "use the estimate" (`estimateWorkSeconds`); present means the
+   * athlete set it themselves on the prescription screen.
+   */
+  workSeconds?: number;
   restSeconds: number;
   transitionSeconds: number; // rest between exercises (default 60)
   setupPosition: string;
@@ -120,6 +132,8 @@ export interface SessionSummaryData {
   durationSeconds: number;
   caloriesBurned: number;
   completionPercent: number;
+  /** How the session felt — the single post-workout question. */
+  effort?: SessionEffort;
   completedAt: string; // ISO timestamp
 }
 
@@ -132,6 +146,42 @@ export function parseTargetReps(reps: string): number {
   // "10-15" → 10, "30 sec" → 30, "12" → 12
   const match = reps.match(/(\d+)/);
   return match ? parseInt(match[1], 10) : 10;
+}
+
+/**
+ * Seconds one controlled rep takes, by category. A push-up and a squat run at
+ * roughly a three-second tempo; a burpee or mountain climber is far quicker;
+ * a mobility rep is slower because the hold is the point.
+ */
+const SECONDS_PER_REP: Record<ExerciseCategory, number> = {
+  push: 3,
+  pull: 3,
+  legs: 3,
+  core: 2.8,
+  cardio: 1.6,
+  flexibility: 4,
+};
+
+/**
+ * How long to box a set of this exercise, when nobody has said otherwise.
+ *
+ * A timed movement already carries its answer in `reps` ("30 sec"). A rep
+ * movement gets tempo × prescribed reps plus a few seconds to settle into
+ * position, clamped to a sane band and rounded to five so the prescription
+ * reads like something a coach wrote rather than something a spreadsheet did.
+ */
+export function estimateWorkSeconds(ex: SessionExerciseInfo): number {
+  if (ex.exerciseType === "timed") return parseTargetReps(ex.reps);
+  const perRep = SECONDS_PER_REP[ex.category] ?? 3;
+  const raw = parseTargetReps(ex.reps) * perRep + 4;
+  return Math.max(20, Math.min(120, Math.round(raw / 5) * 5));
+}
+
+/** The set's work duration: what the athlete chose, else the estimate. */
+export function resolveWorkSeconds(ex: SessionExerciseInfo): number {
+  return typeof ex.workSeconds === "number" && ex.workSeconds > 0
+    ? ex.workSeconds
+    : estimateWorkSeconds(ex);
 }
 
 /** Parse reps string to check if it's time-based */

@@ -27,6 +27,7 @@ export { Sheet } from "./Sheet";
 export { SegmentedControl } from "./SegmentedControl";
 export { Stat } from "./Stat";
 export { Stepper } from "./Stepper";
+export { Mono, MONO_FAMILY } from "./Mono";
 export { AppText } from "./Text";
 export { ThemedIcon } from "./ThemedIcon";
 export { useColors } from "./useColors";
@@ -34,6 +35,7 @@ export { useElasticScroll } from "./useElasticScroll";
 export { useKeyboardInset } from "./useKeyboardInset";
 
 export type { AppTextProps } from "./Text";
+export type { MonoProps } from "./Mono";
 export type { ElasticScrollOptions } from "./useElasticScroll";
 export type { KeyboardInset, KeyboardInsetOptions } from "./useKeyboardInset";
 export type { AscendingMeterProps } from "./AscendingMeter";

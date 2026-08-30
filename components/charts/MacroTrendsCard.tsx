@@ -247,6 +247,17 @@ export function MacroTrendsCard({
                 key={m.key}
                 onPress={() => toggle(m.key)}
                 hitSlop={4}
+                accessibilityRole="switch"
+                // The chip is a readout AND a toggle, so the name has to carry
+                // the value — sighted users read it off the chip, and without
+                // it a screen reader announces four identical "on" switches.
+                accessibilityLabel={
+                  shown != null
+                    ? `${m.label}, ${fmt(shown)} ${m.unit}`
+                    : `${m.label}, no data`
+                }
+                accessibilityState={{ checked: !off }}
+                accessibilityHint="Toggles this macro on the chart"
                 style={[
                   styles.chip,
                   { backgroundColor: colors.surfaceMuted, opacity: off ? 0.45 : 1 },

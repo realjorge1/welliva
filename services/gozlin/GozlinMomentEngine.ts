@@ -58,7 +58,8 @@ function candidates(twin: GozlinTwin): Candidate[] {
     priority: number,
     prompt: string,
     cta?: string,
-  ) => out.push({ id, kind, surfaces, icon, title, message, tone, priority, prompt, cta });
+    route?: string,
+  ) => out.push({ id, kind, surfaces, icon, title, message, tone, priority, prompt, cta, route });
 
   // ── Risk alerts / interventions (highest leverage) ──
   if (f.has("SETBACK")) {
@@ -72,7 +73,7 @@ function candidates(twin: GozlinTwin): Candidate[] {
       "gentle",
       92,
       "Help me figure out why I fell off, and how to restart.",
-      "Get back on track",
+      "Let's talk it through",
     );
   }
 
@@ -116,7 +117,7 @@ function candidates(twin: GozlinTwin): Candidate[] {
       "gentle",
       78,
       "Why did I lose my streak, and what's the easiest way back?",
-      "Restart today",
+      "Show me the way back",
     );
   }
 
@@ -132,6 +133,7 @@ function candidates(twin: GozlinTwin): Candidate[] {
       75,
       "What should I eat today? Help me set a plan.",
       "Set today's plan",
+      "/diet",
     );
   }
 
@@ -165,6 +167,7 @@ function candidates(twin: GozlinTwin): Candidate[] {
         74,
         "Can we still fit today's workout in? Give me a short version.",
         "Start now",
+        "/exercise",
       );
     } else {
       add(
@@ -180,6 +183,7 @@ function candidates(twin: GozlinTwin): Candidate[] {
         60,
         "Walk me through today's workout.",
         "See workout",
+        "/exercise",
       );
     }
   }
@@ -196,6 +200,7 @@ function candidates(twin: GozlinTwin): Candidate[] {
       66,
       "I finished today's workout — how's my training trending?",
       "See my progress",
+      "/fitness/progress",
     );
   }
 
@@ -226,6 +231,9 @@ function candidates(twin: GozlinTwin): Candidate[] {
       64,
       "What habits have you noticed are working for me?",
       "See my habits",
+      // The CTA names a screen, so it opens that screen. This card used to send
+      // "See my habits" into the chat.
+      "/habits",
     );
   }
 

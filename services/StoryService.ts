@@ -18,6 +18,7 @@
  */
 import { store, K, type LifeContextRepository } from "@/health-os";
 import { ACHIEVEMENTS, AchievementTier, TIER_META } from "./AchievementService";
+import { badgeFinish } from "./achievementBadges";
 import { celebrate, closer } from "./gozlin/GozlinPersona";
 import { toLocalDateString } from "./OfflineStorage";
 import type { DietHistoryEntry } from "../models/diet";
@@ -225,7 +226,14 @@ export function aggregate(input: StoryInput, start: string, end: string): StoryS
     if (!def) continue;
     if (!topAchievement || tierRank[def.tier] > tierRank[topAchievement.tier]) {
       const meta = TIER_META[def.tier];
-      topAchievement = { name: def.name, tier: def.tier, tierLabel: meta.label, color: meta.color };
+      topAchievement = {
+        name: def.name,
+        tier: def.tier,
+        tierLabel: meta.label,
+        // The badge's own metal, so a trophy looks the same wherever it is
+        // shown — the story, the grid, the unlock. See achievementBadges.
+        color: badgeFinish(def).accent,
+      };
     }
   }
 

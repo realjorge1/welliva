@@ -37,6 +37,7 @@ import {
   useSharedValue,
   withRepeat,
   withTiming,
+  type SharedValue,
 } from "react-native-reanimated";
 import Svg, { Circle, Path as SvgPath } from "react-native-svg";
 import type { FigureView, SkiaFigurePanelProps } from "./ExerciseFigure.skia";
@@ -62,33 +63,98 @@ export interface ExerciseFigureProps {
   color?: string;
   /** Set false to freeze the rep clock while the host is hidden. */
   playing?: boolean;
+  /**
+   * An externally-owned rep clock (see `useFigureClock`). Pass the SAME one to
+   * two panels living in different parts of a screen and they move as one body
+   * — which is the only way a corner panel can stay in rhythm with a hero
+   * panel, since two instances each running their own loop drift apart the
+   * moment either remounts.
+   */
+  clock?: SharedValue<number>;
+  /**
+   * Drop the panel's card chrome (fill, border, radius) so the figure floats on
+   * whatever it is standing in. The live player stage uses this: the figure is
+   * inside the instrument ring there, and a card edge cutting through the ring
+   * would read as two competing frames.
+   */
+  bare?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
 const DEFAULT_VIEWS: readonly FigureView[] = ["front", "side"];
 
-export function ExerciseFigure({
-  exerciseId,
-  category,
-  motion: motionOverride,
-  size = 150,
-  views = DEFAULT_VIEWS,
-  color,
-  playing = true,
-  style,
-}: ExerciseFigureProps) {
-  const { colors } = useColors();
-  const reduced = useReducedMotion();
-  const tint = color ?? colors.primary;
-  const motion = useMemo(
-    () => motionOverride ?? resolveFigureMotion(exerciseId, category),
-    [motionOverride, exerciseId, category],
-  );
-  const loopMs = useMemo(() => buildFrontRig(motion).loopMs, [motion]);
+/** Movements a side-on camera reads best; everything else faces the viewer. */
+const SIDE_READS_BEST = new Set<FigureMotion>([
+  "squat",
+  "hinge",
+  "push",
+  "core",
+  "flexibility",
+  // Anything that happens along the body's own front-back axis: a camera
+  // square-on to a push-up or a hip hinge sees a foreshortened blob.
+  "pushup",
+  "plank",
+  "sidePlank",
+  "gluteBridge",
+  "legRaise",
+  "row",
+  "superman",
+  "birdDog",
+  "catCow",
+  "childsPose",
+  "russianTwist",
+  "wallSit",
+  "lunge",
+  "burpee",
+  "inchworm",
+  "bearCrawl",
+  "mountainClimber",
+  "broadJump",
+  "tuckJump",
+  "curl",
+]);
 
-  // One clock shared across both panels → identical rhythm, no drift.
+/*
+ * ALTERNATING MOVEMENTS FACE THE VIEWER — high knees, butt kicks, marching.
+ *
+ * They look like side-view movements and they are not, because of how the two
+ * rigs differ: the front rig can author a left side (so one knee is up while
+ * the other is planted), while the side rig draws ONE leg and echoes it dimmed
+ * behind for depth. Side-on, "drive the near knee up" therefore lifts both legs
+ * at once and the athlete appears to levitate. Front-on it reads as a cadence,
+ * which is what it is. Their absence from the set above is deliberate — the
+ * side view is still shown, as the small second angle, where it costs nothing.
+ */
+
+/**
+ * The single best camera angle for a movement — for the places only one panel
+ * fits, like the live player stage where the figure IS the screen.
+ */
+export function primaryView(motion: FigureMotion): FigureView {
+  return SIDE_READS_BEST.has(motion) ? "side" : "front";
+}
+
+/** The camera angle the primary one doesn't cover. */
+export function secondaryView(motion: FigureMotion): FigureView {
+  return primaryView(motion) === "side" ? "front" : "side";
+}
+
+/**
+ * A rep clock a caller owns, to drive several `ExerciseFigure`s in unison.
+ *
+ * Mirrors the loop the component runs internally — one linear 0→1 pass per rep,
+ * frozen at 0 when it isn't playing — so a panel handed this clock behaves
+ * exactly as it would on its own, only in step with its siblings.
+ */
+export function useFigureClock(
+  motion: FigureMotion,
+  playing: boolean = true,
+): SharedValue<number> {
+  const reduced = useReducedMotion();
+  const loopMs = useMemo(() => buildFrontRig(motion).loopMs, [motion]);
   const progress = useSharedValue(0);
   const animate = !!SkiaPanel && !reduced && playing;
+
   useEffect(() => {
     if (!animate) {
       cancelAnimation(progress);
@@ -104,6 +170,53 @@ export function ExerciseFigure({
     return () => cancelAnimation(progress);
   }, [animate, loopMs, progress]);
 
+  return progress;
+}
+
+export type { FigureView };
+
+export function ExerciseFigure({
+  exerciseId,
+  category,
+  motion: motionOverride,
+  size = 150,
+  views = DEFAULT_VIEWS,
+  color,
+  playing = true,
+  bare = false,
+  clock,
+  style,
+}: ExerciseFigureProps) {
+  const { colors } = useColors();
+  const reduced = useReducedMotion();
+  const tint = color ?? colors.primary;
+  const motion = useMemo(
+    () => motionOverride ?? resolveFigureMotion(exerciseId, category),
+    [motionOverride, exerciseId, category],
+  );
+  const loopMs = useMemo(() => buildFrontRig(motion).loopMs, [motion]);
+
+  // One clock shared across this instance's panels → identical rhythm, no
+  // drift. A caller can supply its own instead, to keep panels on OPPOSITE
+  // sides of a screen beating together.
+  const own = useSharedValue(0);
+  const progress = clock ?? own;
+  const animate = !!SkiaPanel && !reduced && playing && !clock;
+  useEffect(() => {
+    if (!animate) {
+      cancelAnimation(own);
+      own.value = 0;
+      return;
+    }
+    own.value = 0;
+    own.value = withRepeat(
+      withTiming(1, { duration: loopMs, easing: Easing.linear }),
+      -1,
+      false,
+    );
+    return () => cancelAnimation(own);
+  }, [animate, loopMs, own]);
+
   const showLabels = views.length > 1;
 
   return (
@@ -113,8 +226,10 @@ export function ExerciseFigure({
           key={view}
           style={[
             styles.panel,
-            {
-              height: size,
+            { height: size },
+            !bare && {
+              borderRadius: Radius.xl,
+              borderWidth: StyleSheet.hairlineWidth,
               backgroundColor: alpha(colors.text, 0.035),
               borderColor: alpha(colors.borderStrong, 0.5),
             },
@@ -215,8 +330,6 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   panel: {
-    borderRadius: Radius.xl,
-    borderWidth: StyleSheet.hairlineWidth,
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "flex-end",

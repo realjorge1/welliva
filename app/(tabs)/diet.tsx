@@ -48,7 +48,7 @@ import {
   isConditionDiet,
 } from "@/constants/DietDatabase";
 import { GozlinButton, GozlinToast, useToast } from "@/components/gozlin";
-import { ScreenTopBar } from "@/components/navigation";
+import { ActionBar, ScreenTopBar } from "@/components/navigation";
 import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
 import { CrashTrigger, ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { DisclaimerNote } from "@/components/legal";
@@ -59,6 +59,7 @@ import {
   dayProvenance,
   provenanceLine,
 } from "@/services/nutrition/dayProvenance";
+import { mealsForSlot } from "@/services/nutrition/MealCatalog";
 import { TargetsRecalcCard } from "@/components/nutrition/TargetsRecalcCard";
 import { Gradients, Radius, Spacing, alpha } from "@/constants/theme";
 import { useNutrition, useProfile, useSystem } from "@/contexts/AppContext";
@@ -497,8 +498,18 @@ export default function DietScreen() {
     return DIET_DATABASE.find((d) => d.id === todayDiet.schedule!.dietId) || null;
   }, [todayDiet]);
 
+  /**
+   * What "swap this meal" offers.
+   *
+   * A day the user hand-planned follows NO diet, so there is no diet to draw
+   * alternatives from — `currentDietData` is null by design (see
+   * services/CustomMenuSchedule). Falling through to `[]` there would leave the
+   * sheet saying "0 options · tap to swap", which is a dead end on exactly the
+   * days the user is most engaged. The whole meal library is the honest answer:
+   * they chose this meal by hand, so they get the same shelf back to change it.
+   */
   const swapOptions = useMemo<(DietMealOption | DietSnackOption)[]>(() => {
-    if (!currentDietData) return [];
+    if (!currentDietData) return mealsForSlot(swapMealType);
     switch (swapMealType) {
       case "breakfast":
         return currentDietData.breakfastOptions;
@@ -1020,7 +1031,7 @@ export default function DietScreen() {
     <>
       {/* Dev-only: open with ?crash=1 or ?crash=tab:diet — see AppErrorBoundary. */}
       {__DEV__ && <CrashTrigger surface="tab:diet" />}
-      <Screen header={header}>
+      <Screen header={header} footer={<ActionBar />}>
         {/* Active plan period — what you committed to and how far through it
             you are. Without this the app can show today's meals but never says
             what they're part of. */}
@@ -1955,7 +1966,9 @@ export default function DietScreen() {
                 )}
 
                 <AppText variant="headline" style={styles.modalSection}>
-                  All {currentDietData?.name || "diet"} options
+                  {currentDietData
+                    ? `All ${currentDietData.name} options`
+                    : "The whole meal library"}
                 </AppText>
                 <AppText variant="subhead" color="tertiary" style={styles.modalSectionSub}>
                   {swapOptions.length} options · tap to swap

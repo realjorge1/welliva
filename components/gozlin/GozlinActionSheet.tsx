@@ -58,6 +58,12 @@ interface Props {
    * dismissal carries a meaning must say what a PICK means separately.
    */
   onAfterPick?: () => void;
+  /**
+   * Fired once the sheet has fully closed and unmounted. Pass work that opens
+   * ANOTHER modal here — React Native will not present a second Modal while
+   * this one is still mounted, so it must wait rather than race a delay.
+   */
+  onClosed?: () => void;
 }
 
 export function GozlinActionSheet({
@@ -67,6 +73,7 @@ export function GozlinActionSheet({
   options,
   onClose,
   onAfterPick,
+  onClosed,
 }: Props) {
   const { colors } = useColors();
 
@@ -91,7 +98,7 @@ export function GozlinActionSheet({
     ) : null;
 
   return (
-    <Sheet visible={visible} onClose={onClose} header={header}>
+    <Sheet visible={visible} onClose={onClose} onClosed={onClosed} header={header}>
       <View style={styles.options}>
         {options.map((opt, i) => {
           const tint = opt.tone ?? (opt.destructive ? colors.error : colors.primary);

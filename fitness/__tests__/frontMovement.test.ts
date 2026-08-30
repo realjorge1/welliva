@@ -5,6 +5,7 @@
  */
 import {
   FRONT_FRAME_LEN,
+  FRONT_LEFT_LEN,
   FRONT_PROFILES,
   getFrontProfile,
 } from "@/fitness/animation/frontProfiles";
@@ -23,6 +24,24 @@ describe("front movement profiles", () => {
         }
       }
       expect(profile.loopMs).toBeGreaterThan(0);
+    }
+  });
+
+  it("keeps authored left limbs well-formed and on the left", () => {
+    for (const [key, profile] of Object.entries(FRONT_PROFILES)) {
+      if (!profile.framesL) continue;
+      expect(profile.framesL, key).toHaveLength(2);
+      for (const frame of profile.framesL) {
+        expect(frame, key).toHaveLength(FRONT_LEFT_LEN);
+        for (const n of frame) {
+          expect(n, key).toBeGreaterThanOrEqual(0);
+          expect(n, key).toBeLessThanOrEqual(100);
+        }
+        // Hands and even a crossing step legitimately reach past the
+        // centreline (a russian twist, a curtsy lunge). The left HIP does not:
+        // if that flips sides the pelvis is inside out.
+        expect(frame[6], `${key} hipL.x`).toBeLessThanOrEqual(50);
+      }
     }
   });
 

@@ -22,6 +22,7 @@ import type { ConsumedNutrition } from "../AppContext";
 import {
   AchievementRecord,
   AchievementStats,
+  deriveActivityCalendar,
   EvaluatedAchievement,
   evaluateAchievements,
   getAchievementSummary,
@@ -153,6 +154,25 @@ export function useGamificationState({
     [setCelebrations],
   );
 
+  /**
+   * Every day that carries a real record — a finished workout, a weigh-in, or a
+   * day of eating that wasn't skipped. This is what the calendar achievements
+   * (months, weeks, comebacks) are measured against.
+   *
+   * The three logs are unioned rather than read off streakData because a streak
+   * is a COUNT: it can tell you 40 days happened, never WHICH days, and every
+   * calendar metric here is a question about which.
+   */
+  const activityCalendar = useMemo(() => {
+    const days: string[] = [];
+    for (const w of workoutLog) if (w.date) days.push(w.date);
+    for (const b of bodyLogs) if (b.date) days.push(b.date);
+    for (const d of dietHistory) {
+      if (d.date && d.status !== "skipped") days.push(d.date);
+    }
+    return deriveActivityCalendar(days, currentDate);
+  }, [workoutLog, bodyLogs, dietHistory, currentDate]);
+
   const achievementStats = useMemo<AchievementStats>(() => {
     // Today's nutrition signals (live, before day-end writes them to history).
     const sched = todayDiet?.schedule;
@@ -204,8 +224,45 @@ export function useGamificationState({
       proteinGoalDays: historyProtein + (todayProteinHit ? 1 : 0),
       waterGoalDays: achievementRecord.waterGoalDays,
       weighIns: bodyLogs.length,
+      // First dot to last, not "days since you started": the span IS the graph,
+      // and a graph with one point on it spans nothing.
+      weighInSpanDays: (() => {
+        if (bodyLogs.length < 2) return 0;
+        let first = bodyLogs[0].date;
+        let last = bodyLogs[0].date;
+        for (const b of bodyLogs) {
+          if (b.date < first) first = b.date;
+          if (b.date > last) last = b.date;
+        }
+        return Math.max(
+          0,
+          Math.round(
+            (Date.parse(last + "T00:00:00Z") - Date.parse(first + "T00:00:00Z")) /
+              86400000,
+          ),
+        );
+      })(),
+      ...activityCalendar,
+      trainingMinutes: workoutLog.reduce(
+        (sum, l) => sum + (l.durationMinutes || 0),
+        0,
+      ),
+      // Weekend/weekday come off the session's DATE (a Saturday session is a
+      // Saturday session wherever it was logged from); early/night come off the
+      // clock time it finished at, which is the thing those two are about.
+      weekendWorkouts: workoutLog.filter((l) => {
+        const d = new Date(l.date + "T00:00:00Z").getUTCDay();
+        return d === 0 || d === 6;
+      }).length,
+      weekdaysTrained: new Set(
+        workoutLog.map((l) => new Date(l.date + "T00:00:00Z").getUTCDay()),
+      ).size,
+      nightWorkouts: workoutLog.filter(
+        (l) => new Date(l.completedAt).getHours() >= 20,
+      ).length,
     };
   }, [
+    activityCalendar,
     todayDiet?.schedule,
     nutritionTargets,
     consumedNutrition.proteinG,

@@ -2,12 +2,25 @@
  * CONFETTI — the achievement-unlock burst.
  *
  * A physics-driven, GPU-rendered confetti cannon built on Reanimated. Every
- * piece is a flat paper ribbon (or foil dot) that is fired outward from the
- * medallion, pulled down by gravity, drifts with air-drag, flutters side to
- * side, and tumbles on all three axes. The tumble foreshortens each ribbon and
- * flips between its lit front face and a darker back face — that two-sided,
+ * piece is a flat paper ribbon (or a foil dot, or a long streamer) fired
+ * outward from the medallion, slowed by air-drag, fluttering side to side, and
+ * tumbling on all three axes. The tumble foreshortens each ribbon and flips
+ * between its lit front face and a darker back face — that two-sided,
  * catches-the-light flip is what makes it read as real 3D paper instead of flat
  * 2D sprites.
+ *
+ * ── WHY THE MOTION CHANGED ─────────────────────────────────────────────────
+ *
+ * The fall used to be `y = v·t + ½g·t²` with gravity around 1700 — pure
+ * free-fall, no terminal velocity. Paper does not do that. Everything launched,
+ * stalled, and then RAINED, accelerating off the bottom of the screen in about
+ * half a second; the burst read as fast and cheap rather than as a celebration.
+ *
+ * Both axes now run the same linear-drag solution, so a piece leaves fast,
+ * bleeds off its launch speed, and settles into a steady flutter-fall at its
+ * own terminal velocity — the drift a real scrap of foil has. Pieces also enter
+ * in two waves and fade on their own schedule, so the field thins out instead
+ * of switching off together.
  *
  * One linear `clock` (0→1 over the burst lifetime) drives the whole field, so
  * each particle is a pure function of elapsed time — cheap, deterministic, and
@@ -34,9 +47,10 @@ import Animated, {
 
 const { width: W, height: H } = Dimensions.get("window");
 
-const LIFE_MS = 2600;
+/** Long enough for the last pieces to drift, not so long they loiter. */
+const LIFE_MS = 3400;
 const LIFE_S = LIFE_MS / 1000;
-const BASE_COUNT = 42;
+const BASE_COUNT = 56;
 const TWO_PI = Math.PI * 2;
 
 /** Darken a hex toward black by factor f (0..1) — the ribbon's shaded back face. */
@@ -63,7 +77,9 @@ interface Piece {
   back: string;
   vx: number;
   vy: number;
-  g: number;
+  /** Terminal fall speed, px/s — what drag settles this piece down to. */
+  vTerm: number;
+  /** Drag time-constant, s. Bigger = floatier. */
   tau: number;
   sway: number;
   swayFreq: number;
@@ -75,17 +91,17 @@ interface Piece {
   phaseY: number;
   phaseZ: number;
   delay: number;
+  /** Fraction of the burst this piece stays lit before it starts to fade. */
+  fadeAt: number;
 }
 
-function makePieces(
-  originX: number,
-  originY: number,
-  tierColor: string,
-  count: number,
-): Piece[] {
-  // A cohesive, brand-aligned palette — tier color weighted twice, gold + aqua
-  // accents, a little white foil for sparkle. Deliberately NOT a rainbow.
-  const palette = [
+/**
+ * The default palette. Deliberately NOT a rainbow: the burst is the badge
+ * catching the light, so it is built from the badge's own metal (passed in as
+ * `palette`) and only falls back to this brand mix when there isn't one.
+ */
+function defaultPalette(tierColor: string): string[] {
+  return [
     tierColor,
     tierColor,
     Palette.gold,
@@ -95,16 +111,29 @@ function makePieces(
     Palette.caloriesSoft,
     "#FFFFFF",
   ];
+}
 
-  return Array.from({ length: count }, () => {
-    const isDot = Math.random() < 0.3;
-    const d = rand(7, 13);
-    const w = isDot ? d : rand(6, 12);
-    const h = isDot ? d : rand(12, 22);
+function makePieces(
+  originX: number,
+  originY: number,
+  palette: readonly string[],
+  count: number,
+): Piece[] {
+  return Array.from({ length: count }, (_, i) => {
+    const roll = Math.random();
+    // Three shapes rather than two: round foil dots, paper rectangles, and a
+    // few long streamers that hang in the air and read as ribbon.
+    const kind = roll < 0.24 ? "dot" : roll < 0.86 ? "chip" : "streamer";
+    const d = rand(6, 11);
+    const w = kind === "dot" ? d : kind === "streamer" ? rand(4, 6) : rand(7, 13);
+    const h =
+      kind === "dot" ? d : kind === "streamer" ? rand(26, 42) : rand(11, 20);
 
-    // Cannon: fired up-and-out from the medallion in a ±70° fan.
-    const ang = rand(-1, 1) * (70 * (Math.PI / 180));
-    const speed = rand(520, 1080);
+    // Cannon: fired up-and-out from the medallion in a ±72° fan. A second
+    // wave leaves a beat later, so the field arrives in two breaths.
+    const wave = i % 3 === 2 ? rand(0.18, 0.34) : rand(0, 0.1);
+    const ang = rand(-1, 1) * (72 * (Math.PI / 180));
+    const speed = rand(420, 900);
     const color = pick(palette);
 
     return {
@@ -112,23 +141,25 @@ function makePieces(
       y0: originY,
       w,
       h,
-      radius: isDot ? d / 2 : 2,
+      radius: kind === "dot" ? d / 2 : 1.5,
       color,
-      back: shade(color, 0.6),
+      back: shade(color, 0.58),
       vx: Math.sin(ang) * speed,
-      vy: -Math.cos(ang) * speed * rand(0.8, 1.3),
-      g: rand(1500, 1900),
-      tau: rand(0.55, 1.05),
-      sway: rand(8, 30),
-      swayFreq: rand(1.5, 4),
+      vy: -Math.cos(ang) * speed * rand(0.85, 1.25),
+      // Streamers are light and hang; dots are dense and drop.
+      vTerm: kind === "streamer" ? rand(150, 260) : kind === "dot" ? rand(320, 470) : rand(230, 380),
+      tau: kind === "streamer" ? rand(1.1, 1.6) : rand(0.7, 1.15),
+      sway: rand(10, 34),
+      swayFreq: rand(1.1, 2.8),
       swayPhase: rand(0, TWO_PI),
-      spinZ: rand(-1, 1) * rand(4, 10),
-      spinX: rand(-1, 1) * rand(5, 12),
-      spinY: rand(-1, 1) * rand(5, 12),
+      spinZ: rand(-1, 1) * rand(2, 6),
+      spinX: rand(-1, 1) * rand(3, 8),
+      spinY: rand(-1, 1) * rand(3, 8),
       phaseX: rand(0, TWO_PI),
       phaseY: rand(0, TWO_PI),
       phaseZ: rand(0, TWO_PI),
-      delay: rand(0, 0.12),
+      delay: wave,
+      fadeAt: rand(0.6, 0.86),
     };
   });
 }
@@ -137,8 +168,14 @@ interface ConfettiProps {
   /** Burst origin (defaults to the medallion's approximate screen position). */
   originX?: number;
   originY?: number;
-  /** Drives the palette so the burst matches the achievement's tier. */
+  /** Drives the shockwave and the fallback palette. */
   tierColor?: string;
+  /**
+   * The badge's own colours (see services/achievementBadges → badgePalette).
+   * When present the burst is that material catching the light rather than a
+   * generic brand mix.
+   */
+  palette?: readonly string[];
   /**
    * 0–1 fanfare. The maturity dial: scales the particle count and the shockwave
    * so a seasoned user's everyday unlock stays tasteful while big moments roar.
@@ -150,6 +187,7 @@ export function Confetti({
   originX = W / 2,
   originY = H * 0.34,
   tierColor = Palette.brand,
+  palette,
   intensity = 1,
 }: ConfettiProps) {
   const reduced = useReducedMotion();
@@ -159,9 +197,14 @@ export function Confetti({
   // Always keep a real burst (never a sad handful), but let intensity scale it.
   const count = Math.round(BASE_COUNT * (0.4 + 0.6 * i));
 
+  const colors = useMemo(
+    () => (palette && palette.length > 0 ? palette : defaultPalette(tierColor)),
+    [palette, tierColor],
+  );
+
   const pieces = useMemo(
-    () => makePieces(originX, originY, tierColor, count),
-    [originX, originY, tierColor, count],
+    () => makePieces(originX, originY, colors, count),
+    [originX, originY, colors, count],
   );
 
   useEffect(() => {
@@ -190,21 +233,24 @@ function Confetto({ piece: p, clock }: { piece: Piece; clock: SharedValue<number
     const t = clock.value * LIFE_S;
     const td = Math.max(0, t - p.delay);
 
-    // Horizontal: initial burst velocity bled off by air-drag, plus a fluttering
-    // sway — the gentle side-to-side of falling paper.
+    // BOTH axes run linear drag: v' = -(v - v∞)/τ. A piece leaves fast, bleeds
+    // off its launch speed, and settles into a steady flutter-fall instead of
+    // accelerating forever. Integrating that gives the closed forms below —
+    // no per-frame state, so the whole field stays a pure function of time.
     const ex = 1 - Math.exp(-td / p.tau);
     const x = p.vx * p.tau * ex + p.sway * Math.sin(p.swayFreq * td + p.swayPhase);
-    // Vertical: launch velocity + gravity → a natural arc.
-    const y = p.vy * td + 0.5 * p.g * td * td;
+    const y = (p.vy - p.vTerm) * p.tau * ex + p.vTerm * td;
 
     const rx = p.spinX * td + p.phaseX;
     const ry = p.spinY * td + p.phaseY;
     const rz = p.spinZ * td + p.phaseZ;
 
-    const appear = interpolate(td, [0, 0.1], [0.3, 1], Extrapolation.CLAMP);
+    const appear = interpolate(td, [0, 0.12], [0.4, 1], Extrapolation.CLAMP);
+    // Each piece fades on its own schedule, so the field thins out rather than
+    // switching off in one frame.
     const fade = interpolate(
-      t,
-      [0, LIFE_S * 0.72, LIFE_S],
+      clock.value,
+      [0, p.fadeAt, 1],
       [1, 1, 0],
       Extrapolation.CLAMP,
     );

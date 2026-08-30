@@ -54,21 +54,30 @@ import {
   SCRIM_OPACITY,
   menuWidthFor,
   type DrawerApi,
+  type DrawerOpenIntent,
+  type DrawerOpenSource,
 } from "./DrawerContext";
 import { SideMenu } from "./SideMenu";
 import { SWIPEABLE_PATHS, type MenuItem } from "./menu";
 
 /**
- * THE COLD-START LATCH for the menu's entrance bounce.
+ * TWO WAYS IN, TWO ENTRANCES.
  *
- * Module scope, deliberately: this lives as long as the JS runtime does, which
- * is exactly the lifetime we were asked for. Kill the app and relaunch it and
- * the runtime is new, so the bounce plays once more; background it and come
- * back and the runtime survived, so the menu just opens. A ref or state would
- * be per-mount (wrong on a remount), and storage would persist across launches
- * (wrong the other way) — the JS session IS the unit here.
+ * The panel used to play its cascade once per JS runtime and never again — a
+ * cold-start flourish. It is stamped per OPEN and per SOURCE instead:
+ *
+ *   · TAP the hamburger → the full cascade, every single time. A tap is a
+ *     discrete request that carries no motion of its own, so the panel supplies
+ *     all of it: rows arrive from the left with a soft overshoot, staggered
+ *     down.
+ *   · SWIPE → something else entirely, because the drag ALREADY animated the
+ *     reveal under the finger. Replaying an entrance on top of that would fight
+ *     the gesture, so the rows settle with a quiet vertical ripple as the panel
+ *     lands instead. Both live in SideMenu.
+ *
+ * The nonce is what makes "every time" work: same source, new number, so the
+ * effect downstream re-runs on each open rather than deduping itself away.
  */
-let introPending = true;
 
 export function AppDrawer({ children }: { children: React.ReactNode }) {
   const { colors } = useColors();
@@ -87,6 +96,22 @@ export function AppDrawer({ children }: { children: React.ReactNode }) {
 
   const swipeEnabled = SWIPEABLE_PATHS.has(pathname);
 
+  /* ── Which entrance the panel plays, restamped on every open ────────── */
+
+  const [openIntent, setOpenIntent] = useState<DrawerOpenIntent | null>(null);
+  const openNonce = useRef(0);
+  const markOpened = useCallback((source: DrawerOpenSource) => {
+    openNonce.current += 1;
+    setOpenIntent({ source, nonce: openNonce.current });
+  }, []);
+
+  // The last COMMITTED open state, assigned during render. Read by the
+  // gesture's end handler (to tell a real closed → open transition from a drag
+  // that merely nudged an already-open drawer) and by the navigation effect
+  // below, which must not take `isOpen` as a dependency.
+  const openRef = useRef(false);
+  openRef.current = isOpen;
+
   /* ── Imperative API ─────────────────────────────────────────────────── */
 
   // Flip React state at the START of the animation, not the end: the drawer
@@ -94,10 +119,14 @@ export function AppDrawer({ children }: { children: React.ReactNode }) {
   const settle = useCallback(
     (to: 0 | 1) => {
       setIsOpen(to === 1);
+      // Armed BEFORE the spring, while the rows are still at zero opacity — so
+      // the cascade's reset to its off-screen start is never seen, only its
+      // travel back in.
+      if (to === 1) markOpened("button");
       Haptics.selectionAsync().catch(() => {});
       progress.value = withSpring(to, DRAWER_SPRING);
     },
-    [progress],
+    [progress, markOpened],
   );
 
   const open = useCallback(() => settle(1), [settle]);
@@ -106,25 +135,17 @@ export function AppDrawer({ children }: { children: React.ReactNode }) {
 
   /** Called from the gesture's UI-thread end handler — the spring is already
    *  running by then, so this only syncs React and fires the haptic. */
-  const syncOpen = useCallback((next: boolean) => {
-    setIsOpen((prev) => {
-      if (prev !== next) Haptics.selectionAsync().catch(() => {});
-      return next;
-    });
-  }, []);
-
-  /* ── First open of the session gets the entrance bounce ─────────────── */
-
-  // Flips exactly once per launch, at the START of the first open (`isOpen` is
-  // set before the spring runs), so the rows are still invisible when the
-  // cascade is armed. It never flips back: SideMenu keys the animation on the
-  // 0 → 1 edge, so every later open is a plain reveal.
-  const [playIntro, setPlayIntro] = useState(false);
-  useEffect(() => {
-    if (!isOpen || !introPending) return;
-    introPending = false;
-    setPlayIntro(true);
-  }, [isOpen]);
+  const syncOpen = useCallback(
+    (next: boolean) => {
+      const wasOpen = openRef.current;
+      setIsOpen((prev) => {
+        if (prev !== next) Haptics.selectionAsync().catch(() => {});
+        return next;
+      });
+      if (next && !wasOpen) markOpened("swipe");
+    },
+    [markOpened],
+  );
 
   /* ── Android back closes the drawer before it leaves the screen ─────── */
 
@@ -142,8 +163,6 @@ export function AppDrawer({ children }: { children: React.ReactNode }) {
   // Covers the routes we don't drive ourselves: a notification deep link, a
   // paywall redirect, the auth gate. `close()` is idempotent, so the menu's own
   // navigation calling it twice costs nothing.
-  const openRef = useRef(isOpen);
-  openRef.current = isOpen;
   useEffect(() => {
     if (openRef.current) close();
     // Deliberately keyed on the path alone — adding `isOpen` here would fire the
@@ -271,7 +290,7 @@ export function AppDrawer({ children }: { children: React.ReactNode }) {
             width={menuWidth}
             activePath={pathname}
             onNavigate={onNavigate}
-            playIntro={playIntro}
+            openIntent={openIntent}
           />
 
           <Animated.View

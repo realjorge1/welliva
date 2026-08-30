@@ -17,6 +17,23 @@
 import React, { createContext, useContext } from "react";
 import type { SharedValue } from "react-native-reanimated";
 
+/**
+ * HOW THIS OPEN WAS ASKED FOR. The menu answers a tap and a swipe with two
+ * different entrances (see SideMenu), so the shell has to say which one
+ * happened rather than leaving the panel to guess.
+ */
+export type DrawerOpenSource = "button" | "swipe";
+
+/**
+ * One open, stamped. `nonce` increments on every closed → open transition,
+ * which is what lets the panel replay its entrance EVERY time instead of once
+ * per launch: the value changes, so the effect that drives it runs again.
+ */
+export interface DrawerOpenIntent {
+  source: DrawerOpenSource;
+  nonce: number;
+}
+
 export interface DrawerApi {
   /** 0 = closed, 1 = open. Continuous during a drag. */
   progress: SharedValue<number>;

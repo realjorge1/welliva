@@ -59,6 +59,17 @@ export interface ScreenProps {
    * the page reads as one continuous surface.
    */
   header?: React.ReactNode;
+  /**
+   * Pinned over the bottom edge, outside the scroll region — the Action Bar's
+   * home. Passing one also raises the default `bottomInset` to `NAV_CLEARANCE`,
+   * so a screen can never float a control over its own last card: the clearance
+   * and the thing needing clearance are declared in the same place.
+   *
+   * It's laid out `pointerEvents="box-none"`, so the strip either side of a
+   * floating control stays transparent to touches and the content beneath it
+   * remains scrollable.
+   */
+  footer?: React.ReactNode;
   edges?: Edge[];
   contentStyle?: StyleProp<ViewStyle>;
   refreshing?: boolean;
@@ -80,18 +91,29 @@ export function Screen({
   gutter = true,
   gradient = true,
   header,
+  footer,
   edges = ["top"],
   contentStyle,
   refreshing,
   onRefresh,
   onScroll,
-  bottomInset = NAV_CLEARANCE,
+  bottomInset,
 }: ScreenProps) {
   const { colors } = useColors();
   const insets = useSafeAreaInsets();
   const padding: StyleProp<ViewStyle> = gutter
     ? { paddingHorizontal: Spacing.screen }
     : undefined;
+
+  /**
+   * A footer FORCES at least the nav clearance, whatever the screen asked for.
+   * Screens that trimmed their inset when nothing floated over them (Home) then
+   * get the room back automatically the moment one does, instead of the last
+   * card quietly sliding under a control someone added months later.
+   */
+  const inset = footer
+    ? Math.max(bottomInset ?? 0, NAV_CLEARANCE)
+    : (bottomInset ?? NAV_CLEARANCE);
 
   // Pull-to-refresh already owns the drag-down-from-the-top gesture, so a
   // screen that has one can't also have the elastic pull.
@@ -112,7 +134,7 @@ export function Screen({
           showsVerticalScrollIndicator={false}
           {...elastic.scrollProps}
           contentContainerStyle={[
-            { paddingBottom: Math.max(bottomInset, insets.bottom + MIN_BOTTOM_GAP) },
+            { paddingBottom: Math.max(inset, insets.bottom + MIN_BOTTOM_GAP) },
             padding,
             contentStyle,
           ]}
@@ -133,10 +155,19 @@ export function Screen({
     </SafeAreaView>
   );
 
+  // Outside `body`, so it is a sibling of the scroll region rather than a child
+  // of it — a footer inside the ScrollView would scroll away with the content.
+  const pinnedFooter = footer ? (
+    <View style={styles.footer} pointerEvents="box-none">
+      {footer}
+    </View>
+  ) : null;
+
   if (!gradient) {
     return (
       <View style={[styles.flex, { backgroundColor: colors.background }]}>
         {body}
+        {pinnedFooter}
       </View>
     );
   }
@@ -145,10 +176,17 @@ export function Screen({
     <View style={[styles.flex, { backgroundColor: colors.background }]}>
       <AmbientCanvas />
       {body}
+      {pinnedFooter}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  footer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
 });

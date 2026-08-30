@@ -18,6 +18,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Palette } from "../constants/theme";
 import type { Moment } from "./MomentEngine";
+import { badgeFinish, finishFromAccent, type BadgeFinish } from "./achievementBadges";
 import {
   TIER_META,
   type AchievementDef,
@@ -43,6 +44,12 @@ export interface Celebration {
   icon: keyof typeof Ionicons.glyphMap;
   /** Drives the medallion gradient, glow, confetti palette, and border. */
   accent: string;
+  /**
+   * The material the medallion is struck in — a three-stop ramp plus the ink
+   * its glyph is cut in. An achievement brings its own (see achievementBadges);
+   * a chapter or a moment has one derived from its tone.
+   */
+  finish: BadgeFinish;
   badgeIcon: keyof typeof Ionicons.glyphMap;
   badgeLabel: string;
   /** 0–1 fanfare — the maturity dial. Scales confetti volume + the shockwave. */
@@ -84,6 +91,9 @@ export function celebrationFromAchievement(
   summary: AchievementSummary,
 ): Celebration {
   const tier = TIER_META[def.tier];
+  // The BADGE's own metal, not the tier's. Every bronze used to arrive as the
+  // same orange disc; each one is now the thing it commemorates.
+  const finish = badgeFinish(def);
   const maturity = userMaturity(summary);
   return {
     id: `ach:${def.id}`,
@@ -92,7 +102,8 @@ export function celebrationFromAchievement(
     title: def.name,
     description: def.description,
     icon: def.icon,
-    accent: tier.color,
+    accent: finish.accent,
+    finish,
     badgeIcon: "medal",
     badgeLabel: `${tier.label} · +${tier.points} pts`,
     intensity: achievementIntensity(def.tier, maturity),
@@ -116,6 +127,7 @@ export function celebrationForChapter(opts: {
     description: `You reached your ${opts.goalLabel.toLowerCase()} goal. The journey doesn't end here — let's choose what's next.`,
     icon: "trophy",
     accent: opts.accent,
+    finish: finishFromAccent(opts.accent),
     badgeIcon: "sparkles",
     badgeLabel: "A new chapter awaits",
     intensity: 1,
@@ -152,6 +164,7 @@ export function celebrationFromMoment(moment: Moment): Celebration {
     description: moment.line,
     icon: moment.icon,
     accent: TONE[moment.tone],
+    finish: finishFromAccent(TONE[moment.tone]),
     badgeIcon: "eye",
     badgeLabel: "From your own history",
     intensity: 0.72,

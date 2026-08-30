@@ -42,6 +42,10 @@ import {
   type TrackingMode,
 } from "../models/trackingMode";
 import { analyzeFoodText } from "../services/gozlin/GozlinFoodAnalyst";
+import {
+  syncCustomDay,
+  syncWholeCustomPeriod,
+} from "../services/CustomMenuSchedule";
 import * as MealPlan from "../services/MealPlanService";
 import type { FoodItem } from "../constants/FoodDictionary";
 import {
@@ -54,7 +58,7 @@ import {
   replaceLoggedItem,
   type FoodLogEntry,
 } from "../services/nutrition/FoodLogService";
-import { KEYS, readJSON, writeJSON } from "../services/OfflineStorage";
+import { KEYS, readJSON, todayDate, writeJSON } from "../services/OfflineStorage";
 import { getOrBuildReport } from "../services/PeriodReportService";
 import {
   getBacklogPrompt,
@@ -257,6 +261,32 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
     })();
   }, [isLoading, refresh]);
 
+  /*
+   * REPAIR PASS — project the whole active custom menu onto the calendar once
+   * per period, per day.
+   *
+   * Two things need healing that no single edit can reach. Menus planned before
+   * this bridge existed were never projected at all; and the rollover generator
+   * fills any unscheduled day, so it can have written a diet over a day the user
+   * had hand-picked. Both are fixed by re-projecting, which is idempotent — it
+   * carries consumption across and clears days the user has emptied.
+   */
+  const repaired = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activePeriod || activePeriod.mode !== "custom") return;
+    const stamp = `${activePeriod.id}:${currentDate}`;
+    if (repaired.current === stamp) return;
+    repaired.current = stamp;
+    void (async () => {
+      try {
+        await syncWholeCustomPeriod(activePeriod, currentDate);
+        await refreshTodayDiet();
+      } catch (e) {
+        console.warn("MealPlanContext: custom menu projection failed:", e);
+      }
+    })();
+  }, [activePeriod, currentDate, refreshTodayDiet]);
+
   // A dismissal only applies to the day it was made on.
   useEffect(() => {
     setBacklogDismissed(null);
@@ -384,10 +414,23 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
     [activePeriod],
   );
 
+  /*
+   * Every custom write goes through one of these, and every one of them
+   * PROJECTS the result into the schedule store (services/CustomMenuSchedule).
+   * That projection is what makes a planned day actually arrive: today's plan,
+   * ticking a meal off, the backlog prompt, day-end history and the closing
+   * report all read schedules, and none of them has ever read a custom menu.
+   *
+   * Bulk edits re-project the whole period rather than the dates they touched.
+   * "Repeat this week onward" can rewrite thirty days, and a projection that
+   * tracks which ones is a second copy of the same logic waiting to disagree
+   * with the first.
+   */
   const setCustomMeal = useCallback(
     async (input: Omit<MealPlan.SetCustomMealInput, "periodId">) => {
       if (!activePeriod) return;
       await MealPlan.setCustomMeal({ ...input, periodId: activePeriod.id });
+      await syncCustomDay(activePeriod, input.date, currentDate);
       await refresh();
       if (input.date === currentDate) await refreshTodayDiet();
     },
@@ -398,29 +441,37 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
     async (entryId: string) => {
       if (!activePeriod) return;
       await MealPlan.removeCustomMeal(activePeriod.id, entryId);
+      // The service doesn't report which date held the entry, and a removal can
+      // empty a day (which must un-schedule it), so re-project the period.
+      await syncWholeCustomPeriod(activePeriod, currentDate);
       await refresh();
+      await refreshTodayDiet();
     },
-    [activePeriod, refresh],
+    [activePeriod, refresh, refreshTodayDiet, currentDate],
   );
 
   const copyDayTo = useCallback(
     async (sourceDate: string, targetDates: string[]) => {
       if (!activePeriod) return 0;
       const n = await MealPlan.copyDayTo(activePeriod.id, sourceDate, targetDates);
+      await syncWholeCustomPeriod(activePeriod, currentDate);
       await refresh();
+      if (targetDates.includes(currentDate)) await refreshTodayDiet();
       return n;
     },
-    [activePeriod, refresh],
+    [activePeriod, refresh, refreshTodayDiet, currentDate],
   );
 
   const repeatWeekPattern = useCallback(
     async (weekStart: string, through: string) => {
       if (!activePeriod) return 0;
       const n = await MealPlan.repeatWeekPattern(activePeriod.id, weekStart, through);
+      await syncWholeCustomPeriod(activePeriod, currentDate);
       await refresh();
+      await refreshTodayDiet();
       return n;
     },
-    [activePeriod, refresh],
+    [activePeriod, refresh, refreshTodayDiet, currentDate],
   );
 
   const saveMealForReuse = useCallback(
@@ -442,27 +493,42 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  /**
+   * Re-read a day's free-form log, and the totals that include it.
+   *
+   * ONE CLOCK, resolved here rather than taken from `currentDate`. That
+   * value is refreshed by a day-change check, and a check cannot run while
+   * the app is backgrounded — so on the first moments after a resume it can
+   * still name yesterday. Every write below resolves the real local date for
+   * the same reason, and a guard comparing the two against different clocks
+   * is a guard that silently drops the refresh for food just logged.
+   */
   const refreshLog = useCallback(
     async (date: string) => {
-      if (date !== currentDate) return;
+      if (date !== todayDate()) return;
       const [log, nutrients] = await Promise.all([
         getFoodLogForDate(date),
         dayNutrients(date),
       ]);
       setTodayFoodLog(log);
       setTodayNutrients({ totals: nutrients.totals, partialKeys: nutrients.partialKeys });
+      // The day's calorie/macro totals live one layer up, where AppContext adds
+      // this log to the intake ledger, and Home reads them from there. Without
+      // this call, logging a food updated the Foods screen and left the ring on
+      // the home screen reading as though the user had eaten nothing.
+      await refreshTodayDiet();
     },
-    [currentDate],
+    [refreshTodayDiet],
   );
 
   const logFoodAnalysis = useCallback(
     async (analysis: FoodAnalysis, slot: MealType | null, date?: string) => {
-      const target = date ?? currentDate;
+      const target = date ?? todayDate();
       const entry = await logAnalysis({ date: target, slot, analysis });
       if (entry) await refreshLog(target);
       return entry !== null;
     },
-    [currentDate, refreshLog],
+    [refreshLog],
   );
 
   const logFood = useCallback(
@@ -473,12 +539,12 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
       slot: MealType | null;
       date?: string;
     }) => {
-      const target = args.date ?? currentDate;
+      const target = args.date ?? todayDate();
       const entry = await logKnownFood({ ...args, date: target });
       if (entry) await refreshLog(target);
       return entry !== null;
     },
-    [currentDate, refreshLog],
+    [refreshLog],
   );
 
   const logCatalogFood = useCallback(
@@ -489,7 +555,7 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
       slot: MealType | null;
       date?: string;
     }) => {
-      const target = args.date ?? currentDate;
+      const target = args.date ?? todayDate();
       const entry = await logCatalogFoodEntry({
         date: target,
         slot: args.slot,
@@ -500,25 +566,25 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
       if (entry) await refreshLog(target);
       return entry;
     },
-    [currentDate, refreshLog],
+    [refreshLog],
   );
 
   const removeLoggedFood = useCallback(
     async (entryId: string, date?: string) => {
-      const target = date ?? currentDate;
+      const target = date ?? todayDate();
       await removeFoodLog(target, entryId);
       await refreshLog(target);
     },
-    [currentDate, refreshLog],
+    [refreshLog],
   );
 
   const correctLoggedItem = useCallback(
     async (args: { entryId: string; itemId: string; foodId: string; date?: string }) => {
-      const target = args.date ?? currentDate;
+      const target = args.date ?? todayDate();
       await replaceLoggedItem({ ...args, date: target });
       await refreshLog(target);
     },
-    [currentDate, refreshLog],
+    [refreshLog],
   );
 
   // --------------------------------------------------------- back-logging ---

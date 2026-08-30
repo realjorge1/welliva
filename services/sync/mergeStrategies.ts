@@ -55,7 +55,47 @@ export type MergeStrategy =
       order?: "asc" | "desc";
       /** Keep at most this many items after merging. */
       cap?: number;
+      /**
+       * Named scorer (see SCORERS) consulted BEFORE the timestamp when two
+       * sides hold the same item. For records where "newer" is the wrong
+       * question — a day's schedule that was regenerated later is not a better
+       * account of what was eaten than the copy someone actually ticked.
+       */
+      prefer?: keyof typeof SCORERS;
     };
+
+/**
+ * COLLISION SCORERS — "which of these two is the fuller record?", by name.
+ *
+ * A tiny registry rather than inline functions per key, so a strategy stays
+ * declarative data and the merge stays value-based (never "prefer local"),
+ * which is what keeps it commutative and idempotent.
+ */
+const SCORERS = {
+  /**
+   * How many meals a day's schedule records as eaten.
+   *
+   * SCHEDULED_DIETS is where every meal tick lives, and it is not append-only,
+   * so it fell through to last-write-wins: a cloud copy written before the
+   * user ticked anything could be adopted wholesale and take the whole day's
+   * consumption with it. Ticking is what a user does to this document all day;
+   * regenerating it is what the app does once. So the side with more meals
+   * eaten wins, and a stale copy can never un-eat a meal.
+   */
+  consumedMeals(item: unknown): number {
+    if (!isPlainObject(item)) return 0;
+    const schedule = item.schedule;
+    if (!isPlainObject(schedule)) return 0;
+    let n = 0;
+    const eaten = (meal: unknown) =>
+      isPlainObject(meal) && meal.isConsumed === true ? 1 : 0;
+    n += eaten(schedule.breakfast) + eaten(schedule.lunch) + eaten(schedule.dinner);
+    if (Array.isArray(schedule.snacks)) {
+      for (const snack of schedule.snacks) n += eaten(snack);
+    }
+    return n;
+  },
+} as const;
 
 /**
  * Per-key strategies. Every field name here was read off the model — see
@@ -66,6 +106,12 @@ export type MergeStrategy =
 export const MERGE_STRATEGIES: Record<string, MergeStrategy> = {
   // Record<date, FoodLogEntry[]> — the headline case from the audit.
   [KEYS.FOOD_LOG]: { kind: "mergeByDate", capDays: 180 },
+
+  // Record<date, IntakeRecord[]> — every meal ticked, with the macros it had at
+  // the tick. Append-only and the authority for the day's calories, so it gets
+  // the same union the food log does: two devices each ticking a different meal
+  // must end up with both, and a stale copy must not be able to remove either.
+  [KEYS.INTAKE_LEDGER]: { kind: "mergeByDate", capDays: 180 },
 
   // NutritionHistoryEntry[] / legacy day rows, keyed by date. `mealsLogged`
   // breaks a same-day tie: the device that logged more saw more of that day.
@@ -108,7 +154,16 @@ export const MERGE_STRATEGIES: Record<string, MergeStrategy> = {
     order: "asc",
   },
   // WorkoutLogEntry[] — has a real `id` and `completedAt`.
-  [KEYS.WORKOUT_LOGS]: {
+  //
+  // THE KEY IS SINGULAR. This strategy used to be registered under a
+  // `WORKOUT_LOGS` constant ("@welliva_workout_logs") that NOTHING in the app
+  // ever read or wrote — the log lives at `WORKOUT_LOG`
+  // ("@welliva_workout_log"), which therefore fell through to `lww` and had one
+  // device's entire training history overwritten wholesale by another's on
+  // every sync. Diet history, keyed correctly, merged throughout, which is
+  // exactly why the loss read as "workouts don't count and food does". The dead
+  // constant is deleted so autocomplete cannot make the mistake again.
+  [KEYS.WORKOUT_LOG]: {
     kind: "mergeById",
     idField: "id",
     tsField: "completedAt",
@@ -129,6 +184,20 @@ export const MERGE_STRATEGIES: Record<string, MergeStrategy> = {
     idField: "id",
     tsField: "createdAt",
     order: "desc",
+  },
+  // ScheduledDiet[] — one row per DATE, each holding that day's meals and the
+  // isConsumed flags the whole app derives intake and adherence from. Days
+  // union (two devices can each hold days the other never saw), and a day both
+  // sides have resolves to whichever copy records more meals eaten. Ordered
+  // ascending by date, matching how the store reads back; capped well past the
+  // back-log window, since purgeExpiredSchedules is what actually retires days.
+  [KEYS.SCHEDULED_DIETS]: {
+    kind: "mergeById",
+    idField: "date",
+    tsField: "createdAt",
+    order: "asc",
+    cap: 400,
+    prefer: "consumedMeals",
   },
   // CustomFood[] — foods the user added that our catalogs never had. Merging
   // matters more here than for most lists: these are hand-curated additions, so
@@ -205,8 +274,10 @@ export function unionById(
   tsField?: string,
   order: "asc" | "desc" = "desc",
   cap?: number,
+  prefer?: keyof typeof SCORERS,
 ): unknown[] {
   const byId = new Map<string, unknown>();
+  const score = prefer ? SCORERS[prefer] : null;
 
   for (const item of [...a, ...b]) {
     const id = identityOf(item, idField);
@@ -214,6 +285,16 @@ export function unionById(
     if (existing === undefined) {
       byId.set(id, item);
       continue;
+    }
+    // A named scorer outranks the timestamp: see SCORERS for why "newer" is
+    // the wrong question for some records.
+    if (score) {
+      const sa = score(existing);
+      const sb = score(item);
+      if (sa !== sb) {
+        byId.set(id, sb > sa ? item : existing);
+        continue;
+      }
     }
     const ta = timestampOf(existing, tsField);
     const tb = timestampOf(item, tsField);
@@ -296,7 +377,15 @@ export function merge(
 
     if (!Array.isArray(l) || !Array.isArray(r)) return remote; // shape drift
     return JSON.stringify(
-      unionById(l, r, strategy.idField, strategy.tsField, strategy.order, strategy.cap),
+      unionById(
+        l,
+        r,
+        strategy.idField,
+        strategy.tsField,
+        strategy.order,
+        strategy.cap,
+        strategy.prefer,
+      ),
     );
   } catch {
     // Unparseable on either side → fall back to today's behavior.
