@@ -6,11 +6,14 @@
  * consent-gated on the "wearable" category. Reads are LOCAL-ONLY — wearable metrics never
  * leave the device; only the derived recovery score is ever surfaced.
  *
- * The concrete provider (Apple HealthKit via `react-native-health`, Android Health
- * Connect) is the EAS-build cutover — the biggest native lift in the roadmap. Until it's
- * registered the source reports `unavailable` and degrades to a safe no-op, while a
- * `manual` path (logging last night's sleep) still feeds the recovery fold so P4 delivers
- * value before the native work lands.
+ * The concrete providers now EXIST (./providers: Apple HealthKit via
+ * `react-native-health`, Android Health Connect via `react-native-health-connect`) and are
+ * registered below, so this source is no longer wired to a permanent `unavailable`. What
+ * remains of the cutover is installing those two packages and taking an EAS build:
+ * neither is a dependency yet, so both providers currently fail their own guarded require
+ * and degrade to the same safe no-op as before. Nothing is enabled by default, and the
+ * `manual` path (logging last night's sleep) still feeds the recovery fold either way.
+ * See docs/companion/health-native-cutover.md.
  *
  * See docs/companion/00-proactive-companion-blueprint.md §3.2 + §7 (P4).
  */
@@ -30,19 +33,60 @@ export interface WearableProvider {
   readToday(now: Date): Promise<WearableSnapshot | null>;
 }
 
-/** Default provider until the native one is registered: always unavailable. */
+/** The floor every provider degrades to: no module, no permission, no data. */
 export const nullWearableProvider: WearableProvider = {
   getStatus: async () => ({ permission: "unavailable" as SignalPermission, ready: false }),
   requestAccess: async () => ({ permission: "unavailable" as SignalPermission, ready: false }),
   readToday: async () => null,
 };
 
+/**
+ * The platform provider, resolved on FIRST USE rather than at import.
+ *
+ * Two reasons, both structural rather than stylistic:
+ *
+ *  1. IT BREAKS A CYCLE. `./providers` imports `nullWearableProvider` from this
+ *     module as a value, so importing it here at module scope would close a
+ *     require loop and one of the two would see a half-initialised module.
+ *     Deferring the require to the first call means this file is fully
+ *     evaluated before `./providers` ever loads.
+ *
+ *  2. IT KEEPS COLD START CLEAN. Nothing about HealthKit or Health Connect
+ *     should run because a module graph happened to include this file. The
+ *     first actual status check is early enough.
+ */
+let resolvedProvider: WearableProvider | null = null;
+
+function platformProvider(): WearableProvider {
+  if (resolvedProvider) return resolvedProvider;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { resolveWearableProvider } = require("./providers") as {
+      resolveWearableProvider: () => WearableProvider;
+    };
+    resolvedProvider = resolveWearableProvider();
+  } catch {
+    resolvedProvider = nullWearableProvider;
+  }
+  return resolvedProvider;
+}
+
+/** Delegates every call to whichever provider this platform resolved to. */
+export const lazyPlatformProvider: WearableProvider = {
+  getStatus: () => platformProvider().getStatus(),
+  requestAccess: () => platformProvider().requestAccess(),
+  readToday: (now) => platformProvider().readToday(now),
+};
+
 export class WearableSource {
   constructor(
     private readonly store: KeyValueStore = defaultStore,
     private readonly consent: ConsentRepository = defaultConsent,
-    /** Swap in a HealthKit/Health Connect provider in the dev build; null = unavailable. */
-    private readonly provider: WearableProvider = nullWearableProvider,
+    /**
+     * Defaults to the platform's own health store. Tests and the manual path
+     * inject their own; `nullWearableProvider` is still the explicit no-op.
+     */
+    private readonly provider: WearableProvider = lazyPlatformProvider,
   ) {}
 
   getStatus(): Promise<SignalStatus> {
@@ -109,5 +153,5 @@ export class WearableSource {
   }
 }
 
-/** The default, app-wide wearable source (provider registered in the dev build). */
+/** The default, app-wide wearable source, on this platform's health store. */
 export const wearableSource = new WearableSource();

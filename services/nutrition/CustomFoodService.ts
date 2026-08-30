@@ -52,6 +52,15 @@ export interface CustomFood extends FoodItem {
   addedAt: string;
   /** The words the user searched, kept so the food is findable by them again. */
   query?: string;
+  /**
+   * The EAN/UPC this food was scanned from, when it arrived by barcode.
+   *
+   * Load-bearing for the local-first rule: scanning the same tin next week must
+   * resolve out of this store instead of hitting Open Food Facts again. Without
+   * it every scan is a network call, and any correction the user made to the
+   * entry would be silently replaced by the community's version each time.
+   */
+  barcode?: string;
 }
 
 /**
@@ -103,6 +112,8 @@ export interface AddCustomFoodInput {
   confidence: NutrientConfidence;
   isNigerian?: boolean;
   query?: string;
+  /** Set by the barcode path; see CustomFood.barcode. */
+  barcode?: string;
 }
 
 /**
@@ -118,9 +129,15 @@ export async function addCustomFood(input: AddCustomFoodInput): Promise<CustomFo
   return withLock(async () => {
     const all = await readStore();
     const key = input.name.trim().toLowerCase();
-    const existing = all.find(
-      (f) => f.name.trim().toLowerCase() === key && f.group === input.group,
-    );
+    /*
+     * A barcode is a stronger identity than a name, so it wins the dedupe when
+     * present: two products can share a name ("Greek Yogurt") and the user can
+     * rename either, but a GTIN identifies exactly one package. Matching on it
+     * first is what stops a re-scan from stacking duplicates.
+     */
+    const existing =
+      (input.barcode ? all.find((f) => f.barcode === input.barcode) : undefined) ??
+      all.find((f) => f.name.trim().toLowerCase() === key && f.group === input.group);
 
     const food: CustomFood = {
       id: existing?.id ?? `${CUSTOM_ID_PREFIX}${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
@@ -142,6 +159,7 @@ export async function addCustomFood(input: AddCustomFoodInput): Promise<CustomFo
       addedAt: new Date().toISOString(),
       ...(input.isNigerian ? { isNigerian: true } : {}),
       ...(input.query ? { query: input.query } : {}),
+      ...(input.barcode ? { barcode: input.barcode } : {}),
     };
 
     const rest = all.filter((f) => f.id !== food.id);
@@ -153,6 +171,24 @@ export async function addCustomFood(input: AddCustomFoodInput): Promise<CustomFo
     await writeJSON(KEYS.CUSTOM_FOODS, next);
     return food;
   });
+}
+
+/**
+ * Find a previously scanned food by its barcode.
+ *
+ * This IS the local-first rule for the barcode ladder — see
+ * services/nutrition/OpenFoodFacts.ts. A hit here stops the network lookup dead,
+ * for the same reason a catalog hit stops the USDA one: the answer we already
+ * hold is better than the one we would fetch, because the user may have
+ * corrected it.
+ */
+export async function findCustomFoodByBarcode(
+  barcode: string,
+): Promise<CustomFood | null> {
+  const code = barcode.replace(/D+/g, "");
+  if (!code) return null;
+  const all = await readStore();
+  return all.find((f) => f.barcode === code) ?? null;
 }
 
 export async function removeCustomFood(id: string): Promise<boolean> {

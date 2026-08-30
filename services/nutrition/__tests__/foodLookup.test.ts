@@ -28,7 +28,8 @@ import {
   weakestConfidence,
   type NutrientConfidence,
 } from "../../../models/nutrients";
-import { shouldOfferLookup } from "../FoodLookupService";
+import { lookupBarcode, shouldOfferLookup } from "../FoodLookupService";
+import { addCustomFood } from "../CustomFoodService";
 
 // ============================================================================
 // THE LOCAL-FIRST RULE
@@ -122,5 +123,50 @@ describe("ai-estimated confidence rung", () => {
     // The product decision: estimates DO count. They just carry their label.
     const { totals } = sumPanels([{ calories: 300 }, { calories: 240 }]);
     expect(totals.calories).toBe(540);
+  });
+});
+
+// ============================================================================
+// THE BARCODE LADDER
+// ============================================================================
+
+/**
+ * The same local-first rule, on the shorter ladder.
+ *
+ * It matters MORE here than on the text ladder, for a reason the text one
+ * doesn't have: a scanned food the user has corrected must not be silently
+ * replaced by the community's version on the next weekly shop. A network call
+ * that never happens cannot overwrite anything.
+ */
+describe("lookupBarcode — local first", () => {
+  it("answers from the user's own foods without touching the network", async () => {
+    await addCustomFood({
+      name: "Corrected Oat Clusters",
+      serving: "45 g",
+      servingGrams: 45,
+      group: "Your foods",
+      nutrients: { calories: 171, protein: 3.6 },
+      source: { kind: "branded", brand: "Northgate", description: "Declared label" },
+      confidence: "measured",
+      barcode: "5000112552126",
+    });
+
+    // No fetch is injected and none is reachable under Node here: if this
+    // reached rung 2 the test would fail rather than quietly pass.
+    const res = await lookupBarcode({ barcode: "5000112552126" });
+    expect(res.status).toBe("local");
+    if (res.status === "local") {
+      expect(res.food.name).toBe("Corrected Oat Clusters");
+    }
+  });
+
+  it("rejects an invalid code before any rung runs", async () => {
+    expect((await lookupBarcode({ barcode: "1234567890" })).status).toBe("invalid");
+  });
+
+  it("accepts separators the way a printed package writes them", async () => {
+    // Same stored food, typed by hand out of the aisle.
+    const res = await lookupBarcode({ barcode: "5 000112 552126" });
+    expect(res.status).toBe("local");
   });
 });

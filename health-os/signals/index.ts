@@ -47,8 +47,24 @@ export {
   WearableSource,
   wearableSource,
   nullWearableProvider,
+  lazyPlatformProvider,
   type WearableProvider,
 } from "./wearable/WearableSource";
+export {
+  AppleHealthProvider,
+  HealthConnectProvider,
+  resolveWearableProvider,
+  resetWearableProvider,
+} from "./wearable/providers";
+export {
+  lastNightWindow,
+  mergeIntervals,
+  rollingBaseline,
+  sleepHoursFromSamples,
+  totalHours,
+  type DatedValue,
+  type Interval,
+} from "./wearable/normalize";
 
 // coordinator (consent + permission gated boot/rollover sync + "what's watching")
 export {

@@ -18,6 +18,18 @@ import type { NutritionTargets } from "@/models/nutrition";
 import type { UserBio } from "@/models/user";
 import type { GeneratedWorkoutPlan } from "@/models/workout";
 import { API_BASE_URL, isApiConfigured } from "./config";
+import {
+  isApiErrorBody,
+  isCoachChatResponse,
+  isCoachTurnFrame,
+  isDietGenerateResponse,
+  isFoodLookupResponse,
+  isInsightTrialClaim,
+  isMealPhotoResponse,
+  isParseFoodResponse,
+  isWorkoutGenerateResponse,
+  type InsightTrialClaim,
+} from "./contracts";
 import { warmBackend } from "./warmup";
 
 export interface DietGenerateResponse {
@@ -137,6 +149,35 @@ async function accessToken(): Promise<string> {
   return token;
 }
 
+/**
+ * The server answered, but not with the shape this client was written against.
+ *
+ * A distinct type on purpose. Every caller already degrades to an on-device
+ * engine on failure, so without this a contract break would be indistinguishable
+ * from "the user is on a train" — the app would quietly serve deterministic
+ * plans forever and nobody would learn the backend had drifted. Callers that
+ * want to tell the two apart can; callers that don't still get their fallback.
+ */
+export class ContractViolationError extends Error {
+  readonly endpoint: string;
+  /** Top-level keys that DID arrive. Never the values — those carry user data. */
+  readonly receivedKeys: string[];
+
+  constructor(endpoint: string, received: unknown) {
+    const keys =
+      received && typeof received === "object" && !Array.isArray(received)
+        ? Object.keys(received as Record<string, unknown>)
+        : [];
+    super(
+      `${endpoint} returned a payload this build does not recognise` +
+        (keys.length ? ` (keys: ${keys.join(", ")})` : ""),
+    );
+    this.name = "ContractViolationError";
+    this.endpoint = endpoint;
+    this.receivedKeys = keys;
+  }
+}
+
 async function send(
   path: string,
   body: unknown,
@@ -171,10 +212,26 @@ async function send(
  */
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+/**
+ * POST, then CHECK.
+ *
+ * `validate` is the runtime half of services/api/contracts.ts, and it is not
+ * optional in practice — every method below passes one. It runs on the parsed
+ * body before the value is handed back, so a server that renamed a field fails
+ * HERE, once, with the endpoint named, instead of surfacing as an `undefined`
+ * three layers away in front of a user.
+ *
+ * Rejecting rather than repairing is the deliberate choice (see contracts.ts):
+ * a payload we don't recognise is a change of behaviour somebody needs to know
+ * about, and every caller of this function already falls back to an on-device
+ * engine, so the cost of being strict is a degraded feature rather than a
+ * broken screen.
+ */
 async function post<T>(
   path: string,
   body: unknown,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  validate?: (v: unknown) => v is T,
 ): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -197,14 +254,20 @@ async function post<T>(
     if (!res.ok) {
       let message = `API error ${res.status}`;
       try {
-        const j = (await res.json()) as { error?: { message?: string } };
-        if (j?.error?.message) message = j.error.message;
+        // The envelope is pinned too: a server that flattened `{error:{message}}`
+        // to `{message}` would silently replace every actionable error with a
+        // bare status code, and nothing would notice. isApiErrorBody notices.
+        const j: unknown = await res.json();
+        if (isApiErrorBody(j)) message = j.error.message;
       } catch {
         // non-JSON error body — keep the status message
       }
       throw new Error(message);
     }
-    return (await res.json()) as T;
+
+    const parsed: unknown = await res.json();
+    if (validate && !validate(parsed)) throw new ContractViolationError(path, parsed);
+    return parsed as T;
   } finally {
     clearTimeout(timer);
   }
@@ -260,12 +323,24 @@ async function postStream(
   const handleLine = (line: string) => {
     const trimmed = line.trim();
     if (!trimmed) return;
-    let frame: CoachTurnFrame;
+    let parsed: unknown;
     try {
-      frame = JSON.parse(trimmed) as CoachTurnFrame;
+      parsed = JSON.parse(trimmed);
     } catch {
       return; // a partial or malformed line is not worth failing the turn over
     }
+    /*
+     * A frame that fails the contract is DROPPED, not thrown on — the opposite
+     * of post()'s rule, and deliberately so. This is a stream: a single bad line
+     * mid-turn is the same class of event as the truncated JSON above, and
+     * killing a reply the user is already reading would be worse than ignoring
+     * one frame. The failure still surfaces, because a dropped `done` leaves
+     * `done` null and the turn ends with "stream ended without a result".
+     */
+    if (!isCoachTurnFrame(parsed)) return;
+    // Widened back to the local type: contracts' frame omits the optional
+    // `model`/`usage` the agent loop reads off `done`.
+    const frame = parsed as CoachTurnFrame;
     if (frame.type === "delta") opts.onDelta?.(frame.text);
     else if (frame.type === "done") done = frame;
     else if (frame.type === "error") failure = frame.message;
@@ -352,7 +427,7 @@ export const WellivaApi = {
     date: string;
     dietId?: string;
   }): Promise<DietGenerateResponse> {
-    return post<DietGenerateResponse>("/v1/diet/generate", args, 30000);
+    return post("/v1/diet/generate", args, 30000, isDietGenerateResponse);
   },
 
   /** Generate a weekly AI workout plan tailored to the user. */
@@ -360,12 +435,12 @@ export const WellivaApi = {
     bio: UserBio;
     weekStart: string;
   }): Promise<WorkoutGenerateResponse> {
-    return post<WorkoutGenerateResponse>("/v1/workout/generate", args, 30000);
+    return post("/v1/workout/generate", args, 30000, isWorkoutGenerateResponse);
   },
 
   /** Open-ended Gozlin coach reply (grounded by the app's system prompt). */
   coachChat(args: { system?: string; user: string }): Promise<CoachChatResponse> {
-    return post<CoachChatResponse>("/v1/coach/chat", args, 20000);
+    return post("/v1/coach/chat", args, 20000, isCoachChatResponse);
   },
 
   /**
@@ -375,7 +450,9 @@ export const WellivaApi = {
    * fallback, so waiting is worse than degrading.
    */
   parseFood(args: { system: string; user: string }): Promise<ParseFoodResponse> {
-    return post<ParseFoodResponse>("/v1/nutrition/parse", args, 12000);
+    // isParseFoodResponse enforces the parse-only rule: a payload carrying
+    // calories is REJECTED, not stripped. See contracts.ts.
+    return post("/v1/nutrition/parse", args, 12000, isParseFoodResponse);
   },
 
   /**
@@ -392,12 +469,8 @@ export const WellivaApi = {
    * reading, and services/billing/trial.ts degrades to a local grant on any
    * failure — including the 404 it will get until the endpoint is deployed.
    */
-  claimInsightTrial(): Promise<{
-    expiresAt: string;
-    claimedAt: string;
-    alreadyClaimed: boolean;
-  }> {
-    return post("/v1/billing/trial/claim", {}, 8000);
+  claimInsightTrial(): Promise<InsightTrialClaim> {
+    return post("/v1/billing/trial/claim", {}, 8000, isInsightTrialClaim);
   },
 
   /**
@@ -422,7 +495,9 @@ export const WellivaApi = {
     /** The user's region, so a local dish resolves the way they mean it. */
     region?: string;
   }): Promise<MealPhotoResponse> {
-    return post<MealPhotoResponse>("/v1/log/photo", args, 25000);
+    // Same parse-only rule as /v1/nutrition/parse — a vision model returning
+    // calories is the exact regression this guard exists to make loud.
+    return post("/v1/log/photo", args, 25000, isMealPhotoResponse);
   },
 
   /**
@@ -446,6 +521,6 @@ export const WellivaApi = {
     /** The user's region, so "swallow" or "pap" resolves the way they mean. */
     region?: string;
   }): Promise<FoodLookupResponse> {
-    return post<FoodLookupResponse>("/v1/nutrition/lookup", args, 20000);
+    return post("/v1/nutrition/lookup", args, 20000, isFoodLookupResponse);
   },
 };

@@ -21,10 +21,10 @@
  * Pure TS (no React / Skia / Reanimated) so the fitness suite can prove every
  * catalogued movement resolves to a well-formed, drawable skeleton.
  */
-import { getFrontProfile } from "./frontProfiles";
+import { getFrontProfile, type FrontProfile } from "./frontProfiles";
 import type { FigureMotion } from "./movementProfiles";
 import type { FigureZone } from "./muscleEmphasis";
-import { getSideProfile } from "./sideProfiles";
+import { getSideProfile, type SideProfile } from "./sideProfiles";
 
 /**
  * One bone: a rounded capsule of fixed length hanging off its parent's tip.
@@ -328,8 +328,20 @@ function sideNodes(frame: number[]): Record<string, Pt> {
 /** Side-view limb bones, echoed dimmed behind the body to read as depth. */
 export const SIDE_FAR_BONES = [4, 5, 6, 7, 8] as const;
 
-export function buildFrontRig(motion: FigureMotion): Rig {
-  const profile = getFrontProfile(motion);
+/**
+ * Rig a front profile that is NOT in the exercise registry.
+ *
+ * `buildFrontRig` takes a `FigureMotion`, which is the EXERCISE vocabulary —
+ * a closed union every catalogued lift resolves into. Modalities that are not
+ * exercises (a tai chi form, a breathwork posture) have their own vocabulary
+ * and must not widen that union just to be drawn; a `SpecificMotion` key for
+ * "cloudHands" would force every exhaustive `Record<FigureMotion, …>` in the
+ * fitness layer to grow a tai chi column it has no business having.
+ *
+ * So the skeleton is separated from the registry: both callers assemble the
+ * same bones from the same specs, and only the lookup differs.
+ */
+export function buildFrontRigFrom(profile: FrontProfile): Rig {
   return assemble(
     FRONT_SPECS,
     frontNodes(profile.frames[0], profile.framesL?.[0]),
@@ -342,8 +354,8 @@ export function buildFrontRig(motion: FigureMotion): Rig {
   );
 }
 
-export function buildSideRig(motion: FigureMotion): Rig {
-  const profile = getSideProfile(motion);
+/** The side-view counterpart of `buildFrontRigFrom`. */
+export function buildSideRigFrom(profile: SideProfile): Rig {
   return assemble(
     SIDE_SPECS,
     sideNodes(profile.frames[0]),
@@ -354,6 +366,14 @@ export function buildSideRig(motion: FigureMotion): Rig {
     profile.loopMs,
     ["foot"],
   );
+}
+
+export function buildFrontRig(motion: FigureMotion): Rig {
+  return buildFrontRigFrom(getFrontProfile(motion));
+}
+
+export function buildSideRig(motion: FigureMotion): Rig {
+  return buildSideRigFrom(getSideProfile(motion));
 }
 
 /**

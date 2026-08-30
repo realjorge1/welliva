@@ -35,6 +35,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -235,10 +236,10 @@ export function UpcomingCard({
   );
 }
 
-/* ── signals: weather + calendar ── */
+/* ── signals: weather + calendar + wearable ── */
 
 /**
- * The two outside senses, as list rows rather than a bespoke card: they're
+ * The outside senses, as list rows rather than bespoke cards: they're
  * connect-once switches, which is exactly what a settings-style row is for.
  */
 export function SignalsPanel({ onSynced }: { onSynced: () => Promise<void> | void }) {
@@ -263,8 +264,35 @@ export function SignalsPanel({ onSynced }: { onSynced: () => Promise<void> | voi
     );
   };
 
+  /**
+   * Connect Apple Health / Health Connect.
+   *
+   * The "nothing came back" case gets its own sentence because it is genuinely
+   * common and not a failure: HealthKit cannot report a declined READ permission
+   * (see health-os/signals/wearable/providers/appleHealth.ts), so a refusal and
+   * an empty store both arrive here as null. One sentence covers both truthfully,
+   * where "connected!" would be a lie in one of them.
+   */
+  const onConnectWearable = async () => {
+    const snap = await s.connectWearable();
+    if (!snap) {
+      Alert.alert(
+        "No health data yet",
+        "Nothing came back from your health store — either access wasn't granted, or there's no sleep or heart data on this device yet. You can still log last night's sleep by hand, and recovery will use it.",
+      );
+      return;
+    }
+    Alert.alert(
+      "Health connected",
+      snap.sleepHours !== undefined
+        ? `Read ${snap.sleepHours.toFixed(1)}h of sleep from last night. Recovery will use it from now on.`
+        : "Recovery will use your sleep and heart data from now on.",
+    );
+  };
+
   const calUnavailable = s.calendar.permission === "unavailable";
   const wxUnavailable = s.weatherStatus.permission === "unavailable";
+  const wearUnavailable = s.wearable.permission === "unavailable";
 
   const action = (label: string) => (
     <AppText variant="footnote" color="brand" style={styles.actionLabel}>
@@ -307,6 +335,39 @@ export function SignalsPanel({ onSynced }: { onSynced: () => Promise<void> | voi
           calUnavailable
             ? undefined
             : action(s.connectingCalendar ? "…" : s.calendar.ready ? "Sync" : "Connect")
+        }
+      />
+      <ListRow
+        icon="heart-outline"
+        tone={s.wearable.ready ? colors.success : colors.primary}
+        title={
+          wearUnavailable
+            ? Platform.OS === "android"
+              ? "Health Connect — coming soon"
+              : "Apple Health — coming soon"
+            : s.wearable.ready
+              ? "Health app connected"
+              : Platform.OS === "android"
+                ? "Connect Health Connect"
+                : "Connect Apple Health"
+        }
+        subtitle={
+          wearUnavailable
+            ? // Named plainly rather than dressed up: it is off, and the manual
+              // path is the working alternative today.
+              "Not in this build yet. Log last night's sleep by hand and recovery still uses it."
+            : s.wearable.ready
+              ? s.wearableSnapshot?.sleepHours !== undefined
+                ? `Last night: ${s.wearableSnapshot.sleepHours.toFixed(1)}h. Read on device, never uploaded.`
+                : "Sleep and heart data stay on your device — only the recovery score is used."
+              : "Sleep, HRV and resting heart rate make recovery real instead of a training-load guess."
+        }
+        onPress={wearUnavailable ? undefined : () => void onConnectWearable()}
+        disabled={wearUnavailable || s.connectingWearable}
+        right={
+          wearUnavailable
+            ? undefined
+            : action(s.connectingWearable ? "…" : s.wearable.ready ? "Refresh" : "Connect")
         }
       />
     </ListGroup>

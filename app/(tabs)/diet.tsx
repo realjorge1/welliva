@@ -1349,13 +1349,25 @@ export default function DietScreen() {
                       {/* How much of the number above was READ from a food
                           composition table rather than estimated. Silent on a
                           fully-measured day, so the label stays worth reading
-                          on the days it appears. See dayProvenance.ts. */}
+                          on the days it appears. See dayProvenance.ts.
+
+                          Tappable now: the chip states the caveat, /diet/receipts
+                          shows the evidence behind it. A chip that raises a doubt
+                          and offers no way to check it is the worse half of an
+                          honest design. */}
                       {measuredLabel && (
-                        <Pill
-                          label={measuredLabel}
-                          tone={colors.textSecondary}
-                          size="sm"
-                        />
+                        <Pressable
+                          onPress={() => router.push("/diet/receipts")}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${measuredLabel}. See where today's numbers came from`}
+                        >
+                          <Pill
+                            label={measuredLabel}
+                            tone={colors.textSecondary}
+                            size="sm"
+                          />
+                        </Pressable>
                       )}
                     </View>
                   </View>
@@ -1386,6 +1398,38 @@ export default function DietScreen() {
                 {/* These targets are estimates from population formulas — the
                     disclaimer sits with the numbers, not three screens away. */}
                 <DisclaimerNote compact style={styles.disclaimer} />
+
+                {/*
+                  THE RECEIPT DOOR.
+
+                  Present on every day with something logged, including a
+                  perfectly measured one — unlike the caveat chip above, which
+                  hides itself at 100% so that it stays worth reading when it
+                  does appear. Both rules are right: the chip is a warning and
+                  earns attention by being rare; this is an invitation to check
+                  our work, and an invitation that only appears on our bad days
+                  would be a strange thing to offer.
+
+                  It is the most defensible thing this app does and it was
+                  invisible. See app/diet/receipts.tsx. */}
+                {todayFoodLog.length > 0 && (
+                  <Pressable
+                    onPress={() => router.push("/diet/receipts")}
+                    style={({ pressed }) => [
+                      styles.receiptRow,
+                      { borderTopColor: colors.divider, opacity: pressed ? 0.6 : 1 },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="See where today's numbers came from"
+                    accessibilityHint="Opens a per-item list of the reference table behind every figure"
+                  >
+                    <Ionicons name="receipt-outline" size={16} color={colors.textSecondary} />
+                    <AppText variant="footnote" color="secondary" style={styles.receiptRowText}>
+                      Where these numbers came from
+                    </AppText>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                  </Pressable>
+                )}
               </>
             )}
 
@@ -2779,6 +2823,15 @@ const styles = StyleSheet.create({
   ringPct: { fontWeight: "800" },
   divider: { height: 1, marginVertical: Spacing.xl },
   macroRingGrid: { flexDirection: "row", justifyContent: "space-around", marginBottom: Spacing.lg },
+  receiptRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: Spacing.lg,
+    paddingTop: Spacing.lg,
+  },
+  receiptRowText: { flex: 1 },
   disclaimer: { marginBottom: Spacing.xxl },
   macroRingItem: { alignItems: "center", gap: Spacing.sm },
   macroRingLabel: { marginTop: 2 },

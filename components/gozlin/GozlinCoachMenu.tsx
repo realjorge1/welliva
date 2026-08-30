@@ -42,7 +42,7 @@ import { alpha, Radius, Spacing } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "@/utils/haptics";
 import { BlurView } from "expo-blur";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Modal, Pressable, StyleSheet, View } from "react-native";
 import Animated, {
   Easing,
@@ -84,7 +84,35 @@ export function GozlinCoachMenu({ visible, onClose, options, top, stats }: Props
   const progress = useSharedValue(0);
   const [mounted, setMounted] = useState(visible);
 
-  const finishClose = useCallback(() => setMounted(false), []);
+  /**
+   * The row that was picked, held until this panel is actually gone.
+   *
+   * ── WHY THE ACTION CANNOT RUN ON THE TAP ────────────────────────────────
+   *
+   * This menu is a `Modal`, and React Native will not present a second Modal
+   * while a first one is still mounted — it simply never appears, with no
+   * error and no warning. Three of these rows (Chat history, Delete this chat,
+   * Clear memory) do nothing except raise a sheet, which is another Modal.
+   *
+   * It used to fire them on a guessed `setTimeout(…, CLOSE_MS - 40)` — 100ms,
+   * against a close animation that runs for CLOSE_MS and only unmounts on its
+   * completion callback. The guess was always short, so the sheet was always
+   * requested over a live modal: tapping "Delete this chat" or "Chat history"
+   * did nothing whatsoever, because the confirmation and the history list were
+   * being asked to open behind a panel that had not finished leaving.
+   *
+   * So the pick is PARKED here and run from `finishClose`, once the panel has
+   * genuinely unmounted — the same contract `ui/Sheet` exposes as `onClosed`,
+   * for the same reason. No delay is guessed; the animation says when.
+   */
+  const pickedRef = useRef<ActionSheetOption | null>(null);
+
+  const finishClose = useCallback(() => {
+    setMounted(false);
+    const picked = pickedRef.current;
+    pickedRef.current = null;
+    picked?.onPress();
+  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -115,10 +143,9 @@ export function GozlinCoachMenu({ visible, onClose, options, top, stats }: Props
   const handlePick = useCallback(
     (opt: ActionSheetOption) => {
       Haptics.selectionAsync().catch(() => {});
+      // Parked, not run — see `pickedRef`. It fires when the panel is gone.
+      pickedRef.current = opt;
       onClose();
-      // Let the close animation start before the action runs, so a sheet or a
-      // toast raised by the action doesn't race this panel out.
-      setTimeout(opt.onPress, CLOSE_MS - 40);
     },
     [onClose],
   );

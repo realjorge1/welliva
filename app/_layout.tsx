@@ -231,6 +231,7 @@ function RootLayoutContent() {
             {/* Flexible meal planning */}
             <Stack.Screen name="diet/plan-menu" />
             <Stack.Screen name="diet/history" />
+            <Stack.Screen name="diet/receipts" />
             <Stack.Screen name="diet/log-food" options={{ presentation: "modal" }} />
             <Stack.Screen name="diet/report/[periodId]" options={{ presentation: "modal" }} />
             <Stack.Screen name="+not-found" />

@@ -22,17 +22,65 @@ placeholder strings.
 The gate is version-pinned: bump `LEGAL_VERSION` in `constants/legal.ts` on any
 material wording change and every user re-accepts on next launch.
 
-## 2. Before submitting — four placeholders
+## 2. Before submitting — the two that are still blocking
 
-In `constants/legal.ts`:
+`constants/legal.ts` holds four identity constants. **Two of them are real; two
+are still bracketed placeholder text, and CI is red because of it.**
 
-- `LEGAL_ENTITY` — the registered name of the operating entity
-- `LEGAL_POSTAL_ADDRESS` — required by GDPR-style transparency rules
-- `LEGAL_JURISDICTION` — governing law for the Terms
-- `LEGAL_CONTACT_EMAIL` — must be a monitored mailbox (rights requests carry a
-  30-day deadline in the policy)
+| Constant | State | Notes |
+|---|---|---|
+| `LEGAL_ENTITY` | `"Welliva"` | Passes the gate. Replace if the registered name differs from the trading name. |
+| `LEGAL_CONTACT_EMAIL` | `"privacy@welliva.app"` | Passes the gate. Must be a **monitored** mailbox — the policy commits to a 30-day response on rights requests. |
+| `LEGAL_POSTAL_ADDRESS` | **placeholder** | Blocking. Required by GDPR-style transparency rules. |
+| `LEGAL_JURISDICTION` | **placeholder** | Blocking. Governing law for the Terms. |
 
-Then bump `LEGAL_LAST_UPDATED`.
+### What the failure looks like
+
+`npm test` fails three assertions until these are filled:
+
+```
+FAIL  constants/__tests__/legal.test.ts
+  › LEGAL_POSTAL_ADDRESS is filled in, not a placeholder
+  › LEGAL_JURISDICTION is filled in, not a placeholder
+  › renders no placeholder text in any document body
+```
+
+**This gate is correct. Do not relax it, skip it, or loosen the `PLACEHOLDER`
+regex.** These strings are interpolated verbatim into the privacy policy and the
+terms — the two documents a user must accept before the app asks them about
+pregnancy, medication or kidney disease. A fabricated address in a live privacy
+policy is materially worse than a red test, which is precisely why the test was
+written to fail loudly rather than to warn.
+
+### The edit
+
+```diff
+-export const LEGAL_POSTAL_ADDRESS = "[registered business address — to be completed]";
+-export const LEGAL_JURISDICTION = "[governing jurisdiction — to be completed]";
++export const LEGAL_POSTAL_ADDRESS = "<street, city, postcode, country>";
++export const LEGAL_JURISDICTION = "<e.g. England and Wales / the Federal Republic of Nigeria>";
+```
+
+Requirements the test enforces, so get them right first time:
+
+- **No square brackets anywhere in the value.** The guard treats bracketed text
+  as an unfilled field, so a value like `"12 High St [Suite 4]"` still fails.
+- No `TODO`, `TBD`, `FIXME`, `XXX`, or the phrase "to be completed".
+- The address must be the **registered** one for the operating entity, not a
+  mailbox or a co-working desk — a regulator writing to it has to reach you.
+- The jurisdiction is a place, phrased to sit inside the sentence
+  *"These Terms are governed by the laws of ___"*. "Nigeria" reads correctly;
+  "Nigerian law" does not.
+
+Then bump `LEGAL_LAST_UPDATED` to the date you made the change.
+
+### Do you also need to bump `LEGAL_VERSION`?
+
+**No — not for this.** `LEGAL_VERSION` gates re-consent: bumping it asks every
+existing user to accept the documents again on next launch. Filling a placeholder
+before the first release changes no substance for anyone, because nobody has
+accepted the placeholder version. Bump it only when the *meaning* of a document
+changes after release.
 
 ## 3. Host the same text publicly
 

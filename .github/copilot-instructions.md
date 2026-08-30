@@ -1,173 +1,111 @@
-# Welliva AI Coding Instructions
+# Welliva — AI coding instructions
 
-## Project Overview
+> **Source of truth is [`README.md`](../README.md).** This file exists to stop an
+> assistant making the specific mistakes this codebase punishes. If the two ever
+> disagree, the README wins.
 
-Welliva is a React Native (Expo) fitness & nutrition app with **Supabase** backend (PostgreSQL + Auth), and **Google Gemini AI** for meal plan generation. Target users include African/Nigerian audiences with culturally-adapted diet options.
+## What this app is
 
-## Architecture
+A nutrition, training and habit app for React Native (Expo SDK 54, expo-router,
+TypeScript strict). Supabase for accounts and sync. **The AI runs on Claude Haiku
+in a separate backend repository** (`/backend-welliva`) — this app only knows its
+URL. Culturally-adapted diet options for African/Nigerian users are a first-class
+concern, not an afterthought.
 
-### Provider Hierarchy (Critical Order)
+## The rule that overrides every other consideration
 
-The app uses nested React Context providers in `app/_layout.tsx`. Order matters:
+**A model may parse, but never number.**
+
+Every nutrition figure comes from a food composition table — USDA, the FAO's West
+African tables, or a manufacturer's printed label — and carries its source and a
+`NutrientConfidence` rung for the rest of its life. `NutrientResolver` is the only
+thing allowed to say what a food contains.
+
+Concretely, do not write code that:
+
+- reads a calorie/macro value out of a model response and stores or displays it;
+- adds nutrition fields to `/v1/nutrition/parse` or `/v1/log/photo` handling;
+- promotes a value to a stronger `NutrientConfidence` than its source justifies;
+- shows a figure without the provenance the surrounding UI shows for its peers.
+
+Failing toward *less* confident is always the safe direction. Tests enforce this:
+`services/api/__tests__/contracts.test.ts`,
+`services/nutrition/__tests__/foodLookup.test.ts`,
+`services/nutrition/__tests__/openFoodFacts.test.ts`.
+
+## Things that were true once and are not now
+
+Assistants routinely suggest these from stale context. All are wrong:
+
+| Stale belief | Reality |
+|---|---|
+| `constants/GeminiService.ts` generates plans | **Deleted.** AI is Claude Haiku, server-side, via `services/api/WellivaApi.ts` |
+| Google Gemini is the AI provider | Claude Haiku, in a separate repo |
+| Contexts live in `components/*Context.tsx` | `contexts/`, split by domain into `contexts/domain/*` |
+| All user data MUST be in Supabase | **Offline-first.** The app is fully functional with no backend, no key and no signal. Supabase is sync, not the source of truth |
+| The app uses a tab bar | A ChatGPT-style swipe drawer; every destination is still a `(tabs)` child so URLs held |
+| `schema.sql` is the schema | `supabase/migrations/` — idempotent, 8 of them |
+
+## Layout
 
 ```
-SupabaseAuthProvider → CustomThemeProvider → AuthWrapper → ProfileInfoProvider → DietProvider → NutritionProvider → ...
+app/            Expo Router screens (40 routes)
+components/     components/ui is the design system; use it, don't re-roll primitives
+contexts/       App state, split by domain (contexts/domain/*)
+models/         Pure domain types. models/nutrients.ts is load-bearing
+services/       nutrition/ · gozlin/ (the coach) · api/ · billing/ · sync/
+health-os/      Event-sourced health OS. Imports NO React Native — keep it that way
+fitness/        Workout library, rec engine, session beats
 ```
 
-### Data Flow Pattern
+`health-os/` and `fitness/` are pure and unit-tested under plain Node. A
+`react-native` import anywhere in them breaks the whole suite. Native modules go
+behind a lazy, guarded `require` — see `health-os/signals/calendar/CalendarSource.ts`
+or `services/nutrition/MealPhotoCapture.ts` for the pattern.
 
-- **Primary storage**: Supabase PostgreSQL (all user data MUST be stored in Supabase)
-- **Authentication**: Supabase Auth with Google and Apple OAuth
-- **Frontend state**: React Context providers in `components/*Context.tsx`
-- **AI generation**: `constants/GeminiService.ts` for meal/workout generation
-- **Legacy**: `constants/StorageService.ts` uses SecureStore
+## House style
 
-### Key Integration Points
+- **Comments explain *why*, not *what*.** Match the density around you. A comment
+  restating the code is worse than none; a comment recording a constraint or a
+  rejected alternative is why this codebase is maintainable.
+- Every user-facing number must be real. If a card says it counts something, it
+  counts exactly that — no rounded-up streaks, no placeholder totals.
+- Every failure gets its own sentence and its own next move. "Nothing happened"
+  is never an acceptable response to a user action.
+- Use `components/ui` primitives (`Screen`, `Card`, `Button`, `AppText`,
+  `ListRow`, `Sheet`, `Pill`) and `constants/theme` tokens. No raw hex, no
+  bespoke buttons.
+- `accessibilityRole` + `accessibilityLabel` on anything interactive. Gestures are
+  the fast path, never the only path.
 
-| Component         | Purpose                     | Key Files                                                           |
-| ----------------- | --------------------------- | ------------------------------------------------------------------- |
-| Supabase Backend  | PostgreSQL DB, Auth         | `lib/supabase.ts`, `lib/database.types.ts`, `supabase/migrations/` |
-| Cloud sync        | Profile + file sync layer   | `services/sync/` (`ProfileSync`, `StorageSync`, `SyncTelemetry`)    |
-| Supabase Auth     | User authentication (OAuth) | `components/SupabaseAuthProvider.tsx`, `components/AuthWrapper.tsx` |
-| Gemini AI         | Meal plan generation        | `constants/GeminiService.ts`                                        |
-| Context Providers | Client state management     | `components/*Context.tsx`                                           |
-
-## Development Workflow
-
-### Starting Development
+## Workflow
 
 ```bash
-npx expo start  # Runs Expo dev server
+npx expo start          # dev server
+npm run typecheck       # tsc --noEmit — must be clean
+npm run lint            # eslint . — must have 0 errors
+npm test                # vitest run
 ```
 
-### Database Setup
+`npm test` fails **exactly three** assertions by design:
+`constants/__tests__/legal.test.ts` refuses to pass while
+`LEGAL_POSTAL_ADDRESS` and `LEGAL_JURISDICTION` hold placeholder text. **Never
+"fix" this by relaxing the gate** — those strings go verbatim into a privacy
+policy users must accept. See `docs/legal/store-submission.md`.
 
-The schema is owned by **versioned migrations**, not a pasted file. Never edit
-tables by clicking in the dashboard. Full runbook: `supabase/README.md`.
+Anything else red is a real regression.
 
-```powershell
-supabase link --project-ref aisapqelfijpmqbpibqo
-supabase db push
-supabase gen types typescript --linked > lib/database.types.ts
-```
+## Environment
 
-> `supabase/schema.sql` no longer exists — it was superseded by
-> `supabase/migrations/` and archived to `supabase/_archive/`. Do not run it.
+Only `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` are required;
+the anon key is safe to expose because RLS is what protects the data. Everything
+else in `.env.example` is optional and degrades cleanly. **No secret key ever
+belongs in this repo** — the Anthropic key and the RevenueCat `sk_` key live only
+on the backend.
 
-### Environment Variables
+## Further reading
 
-Required in `.env`:
-
-- `EXPO_PUBLIC_SUPABASE_URL` - Supabase project URL
-- `EXPO_PUBLIC_SUPABASE_ANON_KEY` - Supabase anonymous key
-
-## Code Patterns
-
-### Supabase Queries
-
-Use the hooks from `hooks/useSupabase.ts`:
-
-```typescript
-// hooks/useSupabase.ts pattern
-const { user } = useSupabaseAuth();
-const { nutritionLogs, logMeal } = useNutritionLogs(user?.id || null);
-```
-
-### Context Hook Pattern
-
-Each context exports a custom hook. Always check for undefined:
-
-```typescript
-const context = useContext(NutritionContext);
-if (!context) throw new Error("Must be used within Provider");
-```
-
-### Database Schema
-
-All tables use `user_id: uuid` with RLS policies for security:
-
-```sql
--- Row Level Security pattern
-CREATE POLICY "Users can only access own data" ON table_name
-  FOR ALL USING (auth.uid() = user_id);
-```
-
-### Date Handling
-
-Dates stored as `YYYY-MM-DD` strings for nutrition/water logs, timestamps as ISO strings for everything else.
-
-### Error Handling Pattern
-
-- Use `try/catch` with `console.error()` for all async operations
-- Return sensible defaults on failure (empty arrays, null, fallback data)
-- For user-facing errors, throw with descriptive messages
-
-```typescript
-// Example from GeminiService.ts
-} catch (error) {
-  console.error("Error generating meal recommendations:", error);
-  return this.getFallbackRecommendations(mealType); // Graceful fallback
-}
-```
-
-### Logging Conventions
-
-- Use `console.log()` for debug info (migration status, etc.)
-- Use `console.error()` for caught exceptions with context
-- Avoid logging sensitive data (API keys, user credentials)
-
-## Security Notes
-
-### API Key Management
-
-- **Gemini API keys**: Currently stored client-side via AsyncStorage/localStorage in `GeminiService.ts`
-- **Recommended**: Move API key storage to `expo-secure-store` (see `StorageService.ts` pattern)
-- **Never** commit API keys to version control - use environment variables
-- User-provided API keys should use SecureStore, not AsyncStorage
-
-### Authentication Flow
-
-- Supabase handles auth tokens via `expo-secure-store` in `lib/supabase.ts`
-- User ID from Supabase Auth (`user.id`) is used as `user_id` in all tables
-- Row Level Security (RLS) enforces data isolation
-
-## File Conventions
-
-### Screen Files (`app/`)
-
-- Use Expo Router file-based routing
-- Tab screens in `app/(tabs)/` are rendered via `CustomBottomNav`, NOT native tabs
-- Dynamic routes: `app/exercise/[id].tsx`
-
-### Adding New Features
-
-1. **Schema**: `supabase migration new <name>`, write idempotent SQL, `supabase db push`
-2. **Types**: regenerate — `supabase gen types typescript --linked > lib/database.types.ts`
-3. **Sync**: add a slice under `services/sync/` (fail-soft, wrapped in
-   `withSyncTelemetry`) — do NOT call `supabase.from()` from screens or services
-4. **Context** (if needed): Create `components/NewFeatureContext.tsx`
-5. **UI**: Create components in `components/`, screens in `app/`
-
-> There is no `hooks/useSupabase.ts` — the only cloud access path is
-> `services/sync/`.
-
-### Storage Rules
-
-- **All persistent data** → Supabase PostgreSQL
-- **Sensitive credentials** → `expo-secure-store` only
-- **Avoid** AsyncStorage for new features (legacy only)
-
-### Diet Database
-
-`constants/DietDatabase.ts` contains clinically-adapted diet data with Nigerian cuisine options. Each diet has:
-
-- Meal options with calorie/macro ranges
-- Clinical safety info (`safeFor`, `cautionFor`)
-- Cultural adaptations (`isNigerian`, `cuisine` fields)
-
-## Singleton Services
-
-Services using singleton pattern - access via `getInstance()`:
-
-- `GeminiService.getInstance()` - AI meal generation
-- `StorageService.getInstance()` - Secure local storage (legacy)
+- `docs/architecture/00–12` — the health OS
+- `docs/gozlin/` — agent loop, tools, grounding, the two clinical safety gates
+- `docs/AUDIT_2026-08-30.md` — audit and competitive analysis
+- `docs/companion/health-native-cutover.md` — the pending HealthKit/Health Connect step

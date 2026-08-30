@@ -67,7 +67,15 @@
         "expo-image-picker",
         {
           "photosPermission": "Welliva accesses your photos so you can log a meal from a picture, set a profile picture and add progress photos. A meal photo is read once to identify the foods and is never stored; the rest upload only to your private account storage.",
-          "cameraPermission": "Welliva uses your camera so you can log a meal by photographing it. The picture is read once to identify the foods and is never stored or uploaded."
+          "cameraPermission": "Welliva uses your camera so you can log a meal by photographing it, and to scan a packaged food's barcode. The picture is read once and is never stored or uploaded."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Welliva uses your camera to scan a packaged food's barcode and to log a meal by photographing it. Nothing is recorded or uploaded — the frame is read on your device and discarded.",
+          "microphonePermission": false,
+          "recordAudioAndroidPermission": false
         }
       ]
     ],

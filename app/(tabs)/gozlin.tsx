@@ -207,6 +207,9 @@ export default function GozlinScreen() {
     [messages],
   );
 
+  /** Filed threads, plus the one on screen if it is a conversation yet. */
+  const threadCount = archive.length + (hasSaidSomething ? 1 : 0);
+
   const [editing, setEditing] = useState<{
     id: string;
     text: string;
@@ -307,10 +310,12 @@ export default function GozlinScreen() {
         label: "Chat history",
         caption:
           archive.length > 0
-            ? "Reopen an earlier conversation"
-            : "Past conversations appear here",
+            ? "This chat and every earlier one"
+            : "Every chat you have with Gozlin",
         icon: "time-outline",
-        badge: archive.length > 0 ? String(archive.length) : undefined,
+        // Counts the live thread too — the sheet lists it, so a badge that
+        // omitted it would disagree with the screen it opens.
+        badge: threadCount > 0 ? String(threadCount) : undefined,
         navigates: true,
         onPress: () => setHistoryOpen(true),
       },
@@ -360,7 +365,7 @@ export default function GozlinScreen() {
         onPress: () => setForgetOpen(true),
       },
     ],
-    [archive.length, hasSaidSomething, resetConversation, router, toast],
+    [archive.length, threadCount, hasSaidSomething, resetConversation, router, toast],
   );
 
   /** The conversation in three figures, above the menu's verbs. */
@@ -504,6 +509,25 @@ export default function GozlinScreen() {
   const conversationTitle = useMemo(
     () => deriveConversationTitle(messages),
     [messages],
+  );
+
+  /**
+   * The live thread as a history row.
+   *
+   * Null until the user has actually said something: a thread holding only the
+   * day's briefing is not a conversation they had, and listing it would put an
+   * entry in their history that they did not write — exactly what the archive
+   * declines to file, for the same reason.
+   */
+  const currentThread = useMemo(
+    () =>
+      hasSaidSomething
+        ? {
+            title: conversationTitle ?? "This conversation",
+            count: messages.length,
+          }
+        : null,
+    [hasSaidSomething, conversationTitle, messages.length],
   );
 
 
@@ -808,6 +832,7 @@ export default function GozlinScreen() {
         <GozlinHistorySheet
           visible={historyOpen}
           conversations={archive}
+          current={currentThread}
           onClose={() => setHistoryOpen(false)}
           onOpen={openArchived}
           onDelete={deleteArchived}

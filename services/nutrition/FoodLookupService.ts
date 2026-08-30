@@ -25,6 +25,28 @@
  * whether to ask at all, and to make sure whatever comes back is labelled
  * honestly on the way in.
  *
+ * ── THE BARCODE LADDER IS A SEPARATE, SHORTER ONE ───────────────────────────
+ * A scanned EAN/UPC does not enter the ladder above, because none of its rungs
+ * can answer the question. USDA's Branded set is US-only and stale; a model
+ * asked "what is in barcode 5000112552126" can only invent. The right source is
+ * Open Food Facts, keyed on exactly that identifier:
+ *
+ *   1. the user's own scanned foods, by barcode  → their corrections win
+ *   2. Open Food Facts (keyless, direct)         → branded, "declared label"
+ *   3. nothing                                   → offer manual entry
+ *
+ * The same two rules hold. LOCAL FIRST: rung 1 shutting off rung 2 is what stops
+ * a weekly shop from re-fetching (and silently overwriting) foods the user has
+ * already fixed. NOTHING IS PROMOTED: a declared label is `branded`, never
+ * `usda` — see services/nutrition/OpenFoodFacts.ts for why that middle rung
+ * exists at all.
+ *
+ * Rung 2 is called DIRECTLY rather than through the backend. Open Food Facts
+ * needs no key, so proxying it would add a hop, a cold start and an auth
+ * requirement to the one lookup that must work in a supermarket aisle on one
+ * bar of signal — and would make barcode scanning stop working entirely for a
+ * user with no account, which it has no reason to.
+ *
  * ── WHY THE SANITIZER IS HERE ───────────────────────────────────────────────
  * The server is trusted, but this is the last gate before a number reaches a
  * user's daily total. GozlinFoodAnalyst makes the same argument for its own
@@ -53,6 +75,9 @@ import {
 import { isApiConfigured } from "../api/config";
 import type { FoodLookupResult } from "../api/WellivaApi";
 import type { AddCustomFoodInput } from "./CustomFoodService";
+// Pure — no storage, no native modules, no key. Safe at module scope, unlike
+// WellivaApi above.
+import { fetchBarcode, isValidBarcode, normalizeBarcode } from "./OpenFoodFacts";
 
 /** Shortest query worth spending a network call on. */
 const MIN_QUERY_LENGTH = 2;
@@ -120,6 +145,74 @@ export async function lookupFood(args: {
           ? res.resolvedBy
           : "ai-estimate",
   };
+}
+
+// ── The barcode rung ────────────────────────────────────────────────────────
+
+/** A scanned candidate always knows the code it came from. */
+export type BarcodeCandidate = LookupCandidate & { barcode: string };
+
+/**
+ * What a scan resolved to. Distinct outcomes rather than null, because the
+ * sentence shown to someone holding a tin differs completely between them:
+ * "already in your foods" (log it), "not in the database" (add it by hand),
+ * "couldn't reach the database" (retry).
+ */
+export type BarcodeLookupOutcome =
+  /** Rung 1 — we already have this exact package. No network call was made. */
+  | { status: "local"; food: SearchableFood }
+  /** Rung 2 — Open Food Facts had it, mapped and sanitized. */
+  | { status: "found"; candidate: BarcodeCandidate }
+  /** Not a valid EAN/UPC: a misread, or a barcode that isn't a food. */
+  | { status: "invalid" }
+  | { status: "not-found"; barcode: string }
+  /** The product exists but carries no usable panel. Nothing to wait for. */
+  | { status: "no-nutrition"; barcode: string; name?: string }
+  | { status: "failed"; message: string };
+
+/**
+ * Resolve a scanned barcode.
+ *
+ * Never throws — every failure is a status. Unlike {@link lookupFood} there is
+ * no `shouldOffer…` gate to call first: the local check IS the gate, and it
+ * lives inside this function because a scan carries no query the caller could
+ * have searched with. Pointing a camera at a package is an unambiguous request
+ * for that package, so the only question is where the answer comes from.
+ */
+export async function lookupBarcode(args: {
+  barcode: string;
+  signal?: AbortSignal;
+}): Promise<BarcodeLookupOutcome> {
+  const code = normalizeBarcode(args.barcode);
+  if (!isValidBarcode(code)) return { status: "invalid" };
+
+  // Rung 1. Lazily imported for the same reason WellivaApi is — it reaches
+  // AsyncStorage, and this module must stay importable outside a native runtime.
+  try {
+    const { findCustomFoodByBarcode } = await import("./CustomFoodService");
+    const existing = await findCustomFoodByBarcode(code);
+    if (existing) return { status: "local", food: existing };
+  } catch {
+    // A storage read failing is not a reason to refuse the scan; fall through
+    // to the network rung, which can still answer.
+  }
+
+  // Rung 2.
+  const outcome = await fetchBarcode(code, args.signal ? { signal: args.signal } : {});
+  switch (outcome.status) {
+    case "ok":
+      return { status: "found", candidate: outcome.candidate };
+    case "not-found":
+      return { status: "not-found", barcode: code };
+    case "no-nutrition":
+      return outcome.name
+        ? { status: "no-nutrition", barcode: code, name: outcome.name }
+        : { status: "no-nutrition", barcode: code };
+    case "invalid":
+      return { status: "invalid" };
+    case "failed":
+      return { status: "failed", message: outcome.message };
+  }
 }
 
 /**

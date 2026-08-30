@@ -42,6 +42,7 @@
  *   • Search is debounced, so a keystroke doesn't re-filter the whole catalog.
  */
 import {
+  BarcodeScannerSheet,
   FilterButton,
   FoodDetailSheet,
   FoodFilterSheet,
@@ -86,7 +87,9 @@ import {
   CUSTOM_FOOD_GROUP,
   lookupFood,
   shouldOfferLookup,
+  type BarcodeCandidate,
   type LookupCandidate,
+  type SearchableFood,
 } from "@/services/nutrition/FoodLookupService";
 import {
   loadShortlist,
@@ -209,6 +212,18 @@ export default function FoodsScreen() {
   const [lookupState, setLookupState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [lookupResults, setLookupResults] = useState<LookupCandidate[]>([]);
   const [lookupError, setLookupError] = useState<string | undefined>();
+
+  /*
+   * The barcode scanner.
+   *
+   * Deliberately NOT gated on `shouldOfferLookup`: that rule rations the USDA/AI
+   * rung because it costs money and can return an unmeasured figure. Open Food
+   * Facts is keyless, free, and answers a question the catalog structurally
+   * cannot — a specific package — so scanning is always available rather than a
+   * consolation for a failed search. Its own local-first check lives inside
+   * lookupBarcode().
+   */
+  const [scannerOpen, setScannerOpen] = useState(false);
 
   /*
    * `query` drives the TextInput (must stay instant); `search` drives the
@@ -475,6 +490,34 @@ export default function FoodsScreen() {
     [showToast],
   );
 
+  /**
+   * A scanned product the user accepted.
+   *
+   * Same landing as onPickCandidate — saved to their foods, then straight into
+   * the detail sheet — because a scan and a search are the same intent arriving
+   * by different doors, and there is no reason for them to end anywhere
+   * different. The barcode rides along on the saved food so the next scan of the
+   * same package resolves locally.
+   */
+  const onPickScanned = useCallback(
+    async (candidate: BarcodeCandidate) => {
+      const saved = await addCustomFood(candidate);
+      setCustomFoods(await listCustomFoods());
+      setScannerOpen(false);
+      setSelected(saved);
+      setSheetOpen(true);
+      showToast({ message: `${saved.name} added to your foods` });
+    },
+    [showToast],
+  );
+
+  /** A scan that matched a food already saved. Open it, log nothing yet. */
+  const onScanExisting = useCallback((food: SearchableFood) => {
+    setScannerOpen(false);
+    setSelected(food);
+    setSheetOpen(true);
+  }, []);
+
   const onUndo = useCallback(async () => {
     if (!toast?.entryId) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -616,6 +659,42 @@ export default function FoodsScreen() {
               Search anything you eat · tap for the full label
             </AppText>
           </>
+        }
+        /*
+         * The scanner is PINNED, opposite the screen name.
+         *
+         * It used to live as a bare glyph inside the search field, which was
+         * wrong twice over: the search row rides the list and parallaxes away
+         * (see PARALLAX), so the fastest way to log a packaged food vanished on
+         * the first flick — and an unlabelled icon among three other glyphs read
+         * as decoration. Here it is on the only line that never moves, it is
+         * captioned, and it mirrors the title/subtitle pair on the left so the
+         * header reads as one row rather than a title with a button stuck on it.
+         */
+        titleRight={
+          <Pressable
+            onPress={() => setScannerOpen(true)}
+            hitSlop={10}
+            style={styles.scanAction}
+            accessibilityRole="button"
+            accessibilityLabel="Scan a barcode"
+            accessibilityHint="Opens the camera to read a packaged food's barcode"
+          >
+            <View
+              style={[
+                styles.scanBadge,
+                {
+                  backgroundColor: alpha(colors.primary, 0.12),
+                  borderColor: alpha(colors.primary, 0.3),
+                },
+              ]}
+            >
+              <Ionicons name="barcode-outline" size={20} color={colors.primary} />
+            </View>
+            <AppText variant="caption" color="tertiary">
+              Scan barcode
+            </AppText>
+          </Pressable>
         }
       />
 
@@ -775,6 +854,22 @@ export default function FoodsScreen() {
               accessibilityHint="Searches USDA's food database, then Gozlin, and adds what it finds to your foods"
             />
           ) : null}
+
+          {/* A missed search on a packaged food is the single most common way
+              to arrive here, and the barcode answers it in two seconds where
+              the text lookup cannot answer it at all. */}
+          {query.trim() ? (
+            <Button
+              label="Scan the barcode"
+              icon="barcode-outline"
+              variant="tonal"
+              size="md"
+              fullWidth
+              style={{ marginTop: Spacing.sm }}
+              onPress={() => setScannerOpen(true)}
+              accessibilityHint="Opens the camera to read a packaged food's barcode"
+            />
+          ) : null}
         </>
       )}
     </Card>
@@ -839,6 +934,13 @@ export default function FoodsScreen() {
         onClose={() => setLookupOpen(false)}
         onRetry={runLookup}
         onPick={onPickCandidate}
+      />
+
+      <BarcodeScannerSheet
+        visible={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onPick={onPickScanned}
+        onUseExisting={onScanExisting}
       />
 
       {toast && (
@@ -961,6 +1063,16 @@ const FoodRow = React.memo(function FoodRow({
 const styles = StyleSheet.create({
   headerRow: { paddingTop: Spacing.xs, paddingBottom: Spacing.md },
   headerRule: { height: StyleSheet.hairlineWidth },
+  // Caption under the glyph, so it lands level with the title's own subtitle.
+  scanAction: { alignItems: "center", gap: 3 },
+  scanBadge: {
+    width: 40,
+    height: 32,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   listHeader: { paddingTop: Spacing.md },
   search: {
     flexDirection: "row",

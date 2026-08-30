@@ -15,6 +15,7 @@ export default defineConfig({
     include: [
       "health-os/**/*.test.ts",
       "fitness/**/*.test.ts",
+      "practices/**/*.test.ts",
       "components/charts/**/*.test.ts",
       "components/home/**/*.test.ts",
       "components/navigation/**/*.test.ts",

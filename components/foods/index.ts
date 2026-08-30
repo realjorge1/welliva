@@ -9,3 +9,5 @@ export { FoodFilterSheet, FilterButton } from "./FoodFilterSheet";
 export type { FoodFilterSheetProps } from "./FoodFilterSheet";
 export { FoodLookupSheet } from "./FoodLookupSheet";
 export type { FoodLookupSheetProps } from "./FoodLookupSheet";
+export { BarcodeScannerSheet, isBarcodeScannerAvailable } from "./BarcodeScannerSheet";
+export type { BarcodeScannerSheetProps } from "./BarcodeScannerSheet";
