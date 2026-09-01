@@ -42,4 +42,5 @@ export type { WeighInPayload } from "./WeighInModal";
 export { useGozlin } from "./useGozlin";
 export type { DeepDiveOutcome, UseGozlin } from "./useGozlin";
 export { useHabitReport } from "./useHabitReport";
+export { useHabitTrackerBrief, useRetiredBeat } from "./useHabitTracker";
 export * from "./renderers";

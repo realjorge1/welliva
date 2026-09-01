@@ -18,8 +18,14 @@ import {
   Screen,
   SectionHeader,
   useColors,
+  type MeterGlyphName,
 } from "@/components/ui";
-import { GozlinButton, useGozlinMoments, useHabitReport } from "@/components/gozlin";
+import {
+  GozlinButton,
+  useGozlinMoments,
+  useHabitReport,
+  useRetiredBeat,
+} from "@/components/gozlin";
 import { ActionBar, ScreenTopBar } from "@/components/navigation";
 import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
 import { CrashTrigger, ScreenErrorFallback } from "@/components/AppErrorBoundary";
@@ -29,6 +35,7 @@ import {
   buildCoachDeck,
   buildHabitCard,
   cardFromPattern,
+  retiredHabitCard,
   type CoachCard,
 } from "@/components/home/coachDeck";
 import { pickWeeklyInsight, WEEKLY_INSIGHT_EYEBROW } from "@/components/home/weeklyInsight";
@@ -37,6 +44,7 @@ import { Gradients, Radius, Spacing, alpha } from "@/constants/theme";
 import { useGamification, useNutrition, useProfile, useWorkout } from "@/contexts/AppContext";
 import { calculateProgress } from "@/services/NutritionService";
 import { todayDate } from "@/services/OfflineStorage";
+import { router } from "expo-router";
 import { getMotivationalMessage } from "@/services/StreakService";
 import { nextHomeGreeting } from "@/constants/HomeGreetings";
 import { Ionicons } from "@expo/vector-icons";
@@ -99,11 +107,19 @@ export default function HomeScreen() {
     if (weekly) void startInsightTrial();
   }, [weekly, startInsightTrial]);
 
+  // A habit the user stopped tracking, on one of the handful of days it is
+  // allowed to come up. Null nearly always — see GozlinTrackerHabits.
+  const retiredBeat = useRetiredBeat();
+  const retiredCard = useMemo(
+    () => (retiredBeat ? retiredHabitCard(retiredBeat) : null),
+    [retiredBeat],
+  );
+
   // The full coach deck — distinct cards (adaptive insights + Gozlin's habit
   // card), capped at 4; more appear as the user logs more.
   const coachDeck = useMemo<CoachCard[]>(
-    () => buildCoachDeck(coachInsights, habitCard),
-    [coachInsights, habitCard],
+    () => buildCoachDeck(coachInsights, habitCard, retiredCard),
+    [coachInsights, habitCard, retiredCard],
   );
 
   // The tapped card that opens the coach deep-dive.
@@ -295,6 +311,21 @@ export default function HomeScreen() {
     if (isRestToday) return 1; // recovery counts as a full day
     return 0;
   }, [todayWorkoutDone, todayWorkouts.percent, isRestToday]);
+
+  /**
+   * A rest day has no progress to draw, so it draws a resting face instead.
+   *
+   * The meter used to score an untrained rest day 1.0 and light every bar. It
+   * was defensible arithmetic — recovery IS the plan for today — and it was a
+   * bad reading: five full bars is the app's own symbol for "you did the work",
+   * and putting it on the day you did none of it undercuts the days you did.
+   * The glyph says the true thing in the same space: nothing was asked for.
+   *
+   * A session logged on a rest day takes the meter back — that IS progress, and
+   * showing someone a snoozing face after they went and trained anyway would be
+   * the same mistake pointing the other way.
+   */
+  const workoutGlyph = !todayWorkoutDone && isRestToday ? "rest" : null;
 
   // Coach carousel: each card ~82% of the viewport so the next one peeks.
   const coachW = Math.round(width * 0.82);
@@ -510,6 +541,8 @@ export default function HomeScreen() {
                       : colors.warning
                 }
                 progress={workoutProgress}
+                glyph={workoutGlyph}
+                glyphLabel="Rest day — nothing scheduled"
               />
               <View style={[styles.planSep, { backgroundColor: colors.divider }]} />
               <PlanTile
@@ -661,7 +694,17 @@ export default function HomeScreen() {
                       insight={insight}
                       tone={tone}
                       width={coachW}
-                      onPress={() => setSelectedCard(insight)}
+                      // The retired-habit card is a question, so it opens the
+                      // conversation rather than a read-only deep dive. Every
+                      // other card is a finding, and findings open the dive.
+                      onPress={() =>
+                        retiredBeat && insight.id === retiredCard?.id
+                          ? router.navigate({
+                              pathname: "/gozlin",
+                              params: { prompt: retiredBeat.prompt },
+                            } as never)
+                          : setSelectedCard(insight)
+                      }
                     />
                   );
                 })}
@@ -690,6 +733,8 @@ function PlanTile({
   icon,
   tone,
   progress,
+  glyph,
+  glyphLabel,
 }: {
   label: string;
   value: string;
@@ -697,12 +742,21 @@ function PlanTile({
   icon: keyof typeof Ionicons.glyphMap;
   tone: string;
   progress: number;
+  /** Drawn instead of the meter when a filled meter would mean nothing. */
+  glyph?: MeterGlyphName | null;
+  glyphLabel?: string;
 }) {
   return (
     <View style={styles.planTile}>
       <View style={styles.planTileHead}>
         <IconBadge name={icon} tone={tone} size={38} />
-        <AscendingMeter progress={progress} tone={tone} height={26} />
+        <AscendingMeter
+          progress={progress}
+          tone={tone}
+          height={26}
+          glyph={glyph}
+          glyphLabel={glyphLabel}
+        />
       </View>
       <AppText variant="caption" color="tertiary" uppercase style={styles.planLabel}>
         {label}

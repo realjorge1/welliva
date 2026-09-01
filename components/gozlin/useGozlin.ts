@@ -35,9 +35,12 @@ import {
   type GozlinSuggestion,
   type GozlinTwin,
 } from "@/services/gozlin";
+import { buildHabitTrackerBrief } from "@/services/gozlin";
+import { saveRetiredHabits } from "@/services/HabitService";
 import { makeWeighIn } from "@/services/BodyLogService";
 import { coachTransport } from "@/services/api";
 import { useBilling } from "@/contexts/BillingContext";
+import { useHabits } from "@/contexts/HabitsContext";
 import {
   checkCoachQuota,
   checkDeepDive,
@@ -236,6 +239,11 @@ export interface UseGozlin {
 
 export function useGozlin(): UseGozlin {
   const app = useApp();
+  const {
+    views: habitViews,
+    retired: retiredHabits,
+    refreshRetired,
+  } = useHabits();
   const { openUpgrade } = useBilling();
   const [quota, setQuota] = useState<MeteredState | null>(null);
   const [identity, setIdentity] = useState<GozlinIdentityMemory>({
@@ -292,6 +300,20 @@ export function useGozlin(): UseGozlin {
     ],
   );
 
+  // The habit tracker, as facts Gozlin can cite. This is the half of the user's
+  // routine that they DECLARED rather than the half we inferred, and it was the
+  // one thing the coach could not see: it knew their adherence to a meal plan
+  // and nothing about the vitamins they told the app they wanted to take.
+  const habitBrief = useMemo(
+    () =>
+      buildHabitTrackerBrief({
+        views: habitViews,
+        retired: retiredHabits,
+        today: app.currentDate,
+      }),
+    [habitViews, retiredHabits, app.currentDate],
+  );
+
   const chatContext = useMemo<GozlinChatContext>(
     () => ({
       twin,
@@ -299,11 +321,12 @@ export function useGozlin(): UseGozlin {
       insights: app.coachInsights,
       identity,
       checkins,
+      habits: habitBrief,
       conversation: messages,
       weekStart: currentWeekStart(),
       weeklyWorkoutTarget: app.userGoals?.weeklyWorkoutsTarget ?? 3,
     }),
-    [twin, snapshot, app.coachInsights, identity, checkins, messages, app.userGoals],
+    [twin, snapshot, app.coachInsights, identity, checkins, habitBrief, messages, app.userGoals],
   );
 
   // ── Confirmation gate for write tools ──
@@ -789,13 +812,26 @@ export function useGozlin(): UseGozlin {
     setArchive(await deleteArchivedConversation(id));
   }, []);
 
+  /**
+   * "Clear memory" — and it has to mean ALL of it.
+   *
+   * Retired habits live outside the Gozlin key space (they belong to the habit
+   * tracker), but they are memory in every sense the user cares about: the
+   * delete-habit sheet promises "Gozlin still remembers it", and the habits
+   * screen tells them that record is kept for exactly as long as Gozlin's
+   * memory is. Leaving them behind here would make Gozlin able to bring up a
+   * habit from a past the user had just asked it to forget — which is the
+   * single worst way to discover that a privacy control is partial.
+   */
   const forgetMe = useCallback(async () => {
     await clearGozlinMemory();
+    await saveRetiredHabits([]);
+    await refreshRetired();
     setIdentity({ preferences: [], constraints: [], updatedAt: 0 });
     setMessages([]);
     setArchive([]);
     seededRef.current = false;
-  }, []);
+  }, [refreshRetired]);
 
   const logWeighIn = useCallback(
     async (weightKg: number, waistCm?: number) => {

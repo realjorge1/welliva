@@ -628,7 +628,19 @@ export default function ExerciseScreen() {
                     </AppText>
                   </View>
                 </View>
-                <AscendingMeter progress={recovery.score / 100} tone={recoveryTone} height={30} />
+                {/* At a perfect score the bar is five full segments that mean
+                    "nothing to recover from" — the same shape the app uses for
+                    "you finished everything", on a day the body is asking to be
+                    used. A flexed arm says the true thing in the same box; the
+                    moment recovery is anything short of full, the meter comes
+                    back and fills as the body does. */}
+                <AscendingMeter
+                  progress={recovery.score / 100}
+                  tone={recoveryTone}
+                  height={30}
+                  glyph={recovery.score >= 100 ? "flex" : null}
+                  glyphLabel="Fully recovered — ready to train"
+                />
               </View>
             </Card>
           </Reveal>

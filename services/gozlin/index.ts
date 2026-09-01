@@ -48,6 +48,27 @@ export type {
   WeeklyReviewInput,
 } from "./GozlinProgressEngine";
 
+// The habit TRACKER as coach-readable facts — live habits and retired ones,
+// plus the restraint that decides when either is worth raising.
+export {
+  buildHabitTrackerBrief,
+  crossReference,
+  pickRetiredBeat,
+  sayAgo,
+  sayDate,
+  QUIET_DAYS,
+  RETIRED_WINDOW_DAYS,
+} from "./GozlinTrackerHabits";
+export type {
+  CrossReference,
+  HabitTrackerBrief,
+  HabitViewLike,
+  RetiredBeat,
+  RetiredHabitFact,
+  TrackedHabitFact,
+  TrackerBriefInput,
+} from "./GozlinTrackerHabits";
+
 // Progress Detective (Phase 8)
 export { buildDetectiveReport } from "./GozlinDetectiveEngine";
 export type { DetectiveInput } from "./GozlinDetectiveEngine";

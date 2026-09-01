@@ -32,6 +32,7 @@ import {
   Button,
   Card,
   Chip,
+  ChipGrid,
   Divider,
   IconBadge,
   ListGroup,
@@ -1237,6 +1238,17 @@ export default function SettingsScreen() {
                   ) : undefined
                 }
               />
+              {/* The one row that actually SCHEDULES something, so it says
+                  what it does rather than what it is. Meal reminders arrive at
+                  times the user sets and carry an "Ate it" button that records
+                  the meal without the app ever opening. */}
+              <ListRow
+                icon="restaurant"
+                tone={colors.success}
+                title="Tap to log meals"
+                subtitle="Set your meal times and finish them from the lock screen"
+                onPress={() => router.push("/reminders" as never)}
+              />
               {/* The times themselves live on each habit (create/edit), which is
                   where a per-habit schedule belongs — so this points at the list
                   and says so, rather than promising a picker that isn't here. */}
@@ -2260,18 +2272,36 @@ function FormCard({
 }
 
 /** A labeled row of selectable chips — works for single- or multi-select. */
+/**
+ * One labelled block of the profile editor.
+ *
+ * The options are laid out by {@link ChipGrid}, not wrapped. Every group in
+ * this form holds a different KIND of word — "3" and "4" in one, "Moderate —
+ * active job or 3–4 sessions" in the next — and `flexWrap` gave each of them a
+ * different ragged right edge, so the whole editor read as a stack of blocks
+ * shoved to the left. The grid lets the words choose the column count (four
+ * short ones, three medium, one long on its own line) and then justifies each
+ * row to the card's full width, so the groups line up with each other and with
+ * everything else on the sheet.
+ *
+ * `maxPerRow` is the one thing a caller still decides, because a chip's size is
+ * also a hit target: a seven-option weekday row genuinely wants four across,
+ * while a two-option row of long medical labels does not want to be squeezed.
+ */
 function ChipGroup<T extends string>({
   label,
   hint,
   options,
   selected,
   onToggle,
+  maxPerRow,
 }: {
   label: string;
   hint?: string;
   options: Opt<T>[];
   selected: (value: T) => boolean;
   onToggle: (value: T) => void;
+  maxPerRow?: number;
 }) {
   return (
     <View style={styles.group}>
@@ -2283,16 +2313,13 @@ function ChipGroup<T extends string>({
           {hint}
         </AppText>
       )}
-      <View style={styles.options}>
-        {options.map((o) => (
-          <Chip
-            key={o.value}
-            label={o.label}
-            active={selected(o.value)}
-            onPress={() => onToggle(o.value)}
-          />
-        ))}
-      </View>
+      <ChipGrid
+        options={options}
+        selected={selected}
+        onToggle={onToggle}
+        maxPerRow={maxPerRow}
+        style={styles.optionGrid}
+      />
     </View>
   );
 }
@@ -2438,6 +2465,7 @@ const styles = StyleSheet.create({
   cuisineGrid: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm },
   cuisineChip: { flexGrow: 1, flexBasis: "45%", justifyContent: "center" },
   options: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm },
+  optionGrid: { marginTop: 2 },
 
   // Danger zone
   danger: { borderWidth: 1 },

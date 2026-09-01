@@ -3,11 +3,17 @@
  *
  * Headless; mounted once in the root layout. It closes the loop that scheduling
  * opens: a reminder is delivered, the user acts on it, and something has to
- * happen. Three responses are handled:
+ * happen. Four responses are handled:
  *
  *   • "Mark as Done"  → completes the habit straight in storage (no app UI
  *     needed), dismisses the banner, and lets the live UI reload.
- *   • "Later"         → re-posts the same nudge an hour out, dismisses the banner.
+ *   • "Ate it"        → ticks the scheduled meal the reminder was for, writing
+ *     straight through to the schedule and the intake ledger. Same contract as
+ *     the habit write and one extra rule: the meal is checked for being ticked
+ *     ALREADY before anything is written, because the ledger is append-only and
+ *     a replayed response would otherwise add a second dinner (see
+ *     services/notifications/mealActions).
+ *   • "Later"         → re-posts the same nudge, on its own category, dismisses.
  *   • the tap itself  → follows the notification's `data.route`, which is what
  *     the proactive/health-os notifications have always carried.
  *
@@ -22,10 +28,12 @@
  */
 import { useAuth } from "@/components/SupabaseAuthProvider";
 import {
+  ACTION_LOG_MEAL,
   ACTION_MARK_DONE,
   ACTION_SNOOZE,
 } from "@/services/notifications/categories";
 import { markHabitDoneFromNotification } from "@/services/notifications/habitActions";
+import { logMealFromNotification } from "@/services/notifications/mealActions";
 import { snoozeReminder } from "@/services/notifications/send";
 import { setWidgetHost } from "@/services/notifications/widgets";
 import * as Haptics from "@/utils/haptics";
@@ -104,11 +112,42 @@ async function handleResponse(
       return;
     }
 
+    case ACTION_LOG_MEAL: {
+      // Same demo escape hatch as the habit action: the Settings test
+      // notification looks real and owns no meal.
+      if (data.test === true) {
+        await dismiss(identifier);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+          () => {},
+        );
+        return;
+      }
+      const slot = typeof data.slot === "string" ? data.slot : null;
+      if (!slot) return;
+
+      const result = await logMealFromNotification(
+        slot as "breakfast" | "lunch" | "dinner" | "snack",
+        notification.date,
+      );
+      await dismiss(identifier);
+      if (result.ok) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+          () => {},
+        );
+      }
+      return;
+    }
+
     case ACTION_SNOOZE: {
+      const isMeal = data.type === "meal-reminder";
       await snoozeReminder(
         content.title ?? "Reminder",
-        content.body ?? "Still time to keep the ember burning.",
+        content.body ??
+          (isMeal
+            ? "Still here when you've eaten."
+            : "Still time to keep the ember burning."),
         data,
+        isMeal ? "meal" : "habit",
       );
       await dismiss(identifier);
       return;

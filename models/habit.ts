@@ -150,3 +150,61 @@ export function suggestWeeklyGoal(name: string): number | null {
 
   return null;
 }
+
+// ════════════════════════════════════════════════════════════════════
+// RETIREMENT — a deleted habit, kept
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * A habit the user stopped tracking.
+ *
+ * Deleting a habit removes it from the tracker; it does NOT remove the fact
+ * that it happened. The dates stay, the record stays, and Gozlin can still say
+ * "you were coding four times a week for two months" long after the row is gone
+ * — because that IS the user's history, and the only thing that should be able
+ * to erase it is the user erasing Gozlin's memory.
+ *
+ * The completion dates are MOVED here rather than left behind in the live log
+ * blob: the record then travels as one self-contained object, and the active
+ * log holds only habits that still exist.
+ */
+export interface RetiredHabit {
+  /** The habit exactly as it was on its last day. */
+  habit: Habit;
+  /** Every date it was completed, sorted. */
+  done: string[];
+  /** YYYY-MM-DD it was removed from the tracker. */
+  retiredAt: string;
+  /** The record at the moment it was retired — computed once, never re-derived. */
+  record: RetiredRecord;
+}
+
+/**
+ * What a retired habit AMOUNTED to. Frozen at retirement so the story never
+ * shifts under a later engine change, and so nothing has to walk a stranger's
+ * date list to say one sentence about them.
+ */
+export interface RetiredRecord {
+  /** Days it was actually done. */
+  totalDone: number;
+  /** Calendar days from first tracked day to the last completion. */
+  spanDays: number;
+  /** Completions per week over the tracked span, one decimal. */
+  perWeek: number;
+  bestStreak: number;
+  streakUnit: "day" | "week";
+  /** First and last completion, or null if it was never once done. */
+  firstDone: string | null;
+  lastDone: string | null;
+}
+
+/** "4× a week for 9 weeks" — the one-line shape of a finished habit. */
+export function retiredSummaryLine(r: RetiredRecord): string {
+  if (r.totalDone === 0) return "never got going";
+  const weeks = Math.max(1, Math.round(r.spanDays / 7));
+  const rate =
+    r.perWeek >= 6.5
+      ? "almost every day"
+      : `${r.perWeek % 1 === 0 ? r.perWeek : r.perWeek.toFixed(1)}× a week`;
+  return `${rate} for ${weeks} week${weeks === 1 ? "" : "s"}`;
+}

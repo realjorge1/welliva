@@ -19,7 +19,7 @@
 import type { GozlinChatContext, GozlinChatResult } from "../GozlinChatEngine";
 import { respondDeterministic } from "../GozlinChatEngine";
 import type { GozlinMessage, GozlinTone } from "../gozlin.types";
-import { buildTurnMessages, type WireMessage } from "./context";
+import { buildTurnMessages, habitEvidence, type WireMessage } from "./context";
 import { screenForClinicalRisk } from "./clinical";
 import {
   addDerivedGaps,
@@ -189,16 +189,25 @@ export async function runAgentTurn(
   const messages = buildTurnMessages(text, ctx);
 
   // Everything the model is allowed to quote: the state block plus every tool
-  // result it sees this turn.
+  // result it sees this turn. The habit tracker is part of that block, so its
+  // streaks and percentages are citable — omit them here and grounding would
+  // reject the model for repeating a number we handed it ourselves.
+  const habitFacts = habitEvidence(text, ctx);
   const allowed = collectAllowedNumbers({
     twin: ctx.twin,
     identity: ctx.identity,
+    habits: habitFacts.habits,
+    habitLink: habitFacts.link,
   });
   // The same evidence, indexed by WHERE each figure came from. Built in
   // lockstep with the allowed-set above so that anything grounding lets
   // through has a receipt to show — the two must never disagree.
   const ledger = createLedger();
   collectWithProvenance(ctx.twin, "current-state", ledger);
+  if (habitFacts.habits) {
+    collectWithProvenance(habitFacts.habits, "habit-tracker", ledger);
+    collectWithProvenance(habitFacts.link, "habit-tracker", ledger);
+  }
   addDerivedGaps(allowed, [
     ctx.twin.today.calories,
     ctx.twin.today.protein,

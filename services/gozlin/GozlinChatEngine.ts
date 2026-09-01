@@ -18,6 +18,7 @@ import { buildBriefing, type BriefingInput } from "./GozlinBriefingEngine";
 import { buildDetectiveReport } from "./GozlinDetectiveEngine";
 import { buildForecast } from "./GozlinForecastEngine";
 import { buildHabitReport } from "./GozlinHabitEngine";
+import type { HabitTrackerBrief } from "./GozlinTrackerHabits";
 import { closer } from "./GozlinPersona";
 import {
   buildWeeklyReview,
@@ -50,6 +51,13 @@ export interface GozlinChatContext {
   identity: GozlinIdentityMemory;
   /** Self-reported daily check-ins (sleep / mood / stress) — powers Habit reads. */
   checkins: GozlinCheckin[];
+  /**
+   * The habit TRACKER, as facts: the habits this person declared out loud, and
+   * the ones they stopped. Optional because the deterministic path predates it
+   * and every surface that builds a context does not have the tracker to hand —
+   * a missing brief means "don't mention habits", never a fabricated one.
+   */
+  habits?: HabitTrackerBrief;
   weekStart: string;
   weeklyWorkoutTarget: number;
   /**

@@ -13,13 +13,12 @@
  *   • denied       → the prompt is gone for good; the only route is OS settings
  */
 import { AppText, Button, useColors } from "@/components/ui";
-import { Radius, Spacing, alpha } from "@/constants/theme";
+import { Spacing, alpha } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useRef } from "react";
-import { Animated, Easing, Image, StyleSheet, View } from "react-native";
+import { Animated, Easing, StyleSheet, View } from "react-native";
+import { NotificationBannerPreview } from "./NotificationBannerPreview";
 import { useReminderPermission } from "./useReminderPermission";
-
-const APP_ICON = require("@/assets/images/welliva48.png");
 
 export interface NotificationPrimerProps {
   /** Called once the user has resolved the ask (granted, skipped, or blocked). */
@@ -70,7 +69,14 @@ export function NotificationPrimer({
           straight from the lock screen, without opening the app.
         </AppText>
 
-        <BannerPreview />
+        {/* The shared mock, so the promise here and the promise on the
+            Tap-to-log screen are literally the same component. */}
+        <NotificationBannerPreview
+          title="Evening wind-down"
+          body="A small step keeps the ember burning."
+          actionLabel="Mark as Done"
+          style={styles.banner}
+        />
       </View>
 
       <View style={styles.actions}>
@@ -152,67 +158,6 @@ function BellMark({ granted }: { granted: boolean }) {
   );
 }
 
-/**
- * A faithful mock of the delivered notification — same icon, title, nudge line
- * and action button the real reminder carries (see services/notifications/copy).
- * Non-interactive by design: it is a promise about what will arrive.
- */
-function BannerPreview() {
-  const { colors, isDark } = useColors();
-  const enter = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.timing(enter, {
-      toValue: 1,
-      duration: 520,
-      delay: 220,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [enter]);
-
-  return (
-    <Animated.View
-      style={[
-        styles.banner,
-        {
-          backgroundColor: isDark ? alpha("#FFFFFF", 0.09) : alpha("#0B0D10", 0.05),
-          borderColor: colors.cardBorder,
-          opacity: enter,
-          transform: [
-            { translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) },
-          ],
-        },
-      ]}
-    >
-      <View style={styles.bannerHead}>
-        <Image source={APP_ICON} style={styles.bannerIcon} />
-        <AppText variant="caption" color="tertiary" uppercase style={styles.bannerApp}>
-          Welliva
-        </AppText>
-        <AppText variant="caption" color="tertiary">
-          now
-        </AppText>
-      </View>
-
-      <AppText variant="callout" style={styles.bannerTitle}>
-        Evening wind-down
-      </AppText>
-      <AppText variant="footnote" color="secondary">
-        A small step keeps the ember burning.
-      </AppText>
-
-      <View style={[styles.bannerDivider, { backgroundColor: colors.divider }]} />
-      <View style={styles.bannerAction}>
-        <Ionicons name="checkmark-circle-outline" size={16} color={colors.primary} />
-        <AppText variant="footnote" color="brand" style={styles.bannerActionLabel}>
-          Mark as Done
-        </AppText>
-      </View>
-    </Animated.View>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1, justifyContent: "space-between", paddingVertical: Spacing.xl },
   top: { alignItems: "center", paddingTop: Spacing.xxl },
@@ -235,25 +180,7 @@ const styles = StyleSheet.create({
   title: { marginTop: Spacing.xxl },
   blurb: { marginTop: Spacing.md, paddingHorizontal: Spacing.md, lineHeight: 22 },
 
-  banner: {
-    width: "100%",
-    marginTop: Spacing.xxl,
-    padding: Spacing.lg,
-    borderRadius: Radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  bannerHead: { flexDirection: "row", alignItems: "center", marginBottom: Spacing.sm },
-  bannerIcon: { width: 18, height: 18, borderRadius: 4, marginRight: Spacing.sm },
-  bannerApp: { flex: 1, letterSpacing: 0.6 },
-  bannerTitle: { fontWeight: "700", marginBottom: 2 },
-  bannerDivider: { height: StyleSheet.hairlineWidth, marginTop: Spacing.lg },
-  bannerAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: Spacing.md,
-  },
-  bannerActionLabel: { fontWeight: "700", marginLeft: Spacing.xs },
+  banner: { marginTop: Spacing.xxl },
 
   actions: { paddingTop: Spacing.xl },
   allowedRow: {

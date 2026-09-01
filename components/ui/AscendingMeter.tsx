@@ -5,6 +5,15 @@
  * Each bar fills from the bottom; a single Reanimated value drives the whole row
  * so the bars light up one after another in sequence, on the UI thread. Used on
  * Home's today card (diet + workout progress) and inside the coach deep-dive.
+ *
+ * `glyph` is the escape hatch, and it exists because a meter is only honest
+ * while it is measuring something. On a rest day the workout tile has no
+ * progress to show — nothing was asked for, so nothing was missed — and the old
+ * behaviour of scoring the day 1.0 lit all five bars, which reads as "you
+ * trained" on the one day you deliberately did not. Passing a glyph swaps the
+ * bars for a picture in the same box and the same tone (see ./MeterGlyph); the
+ * meter stops pretending to a number it does not have, and the layout does not
+ * shift when the state flips back.
  */
 import { Motion, Radius, alpha } from "@/constants/theme";
 import React, { useEffect } from "react";
@@ -18,6 +27,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Ease } from "@/components/motion/motion";
 import { useIntroReveal } from "@/components/motion/IntroReveal";
+import { MeterGlyph, type MeterGlyphName } from "./MeterGlyph";
 import { useColors } from "./useColors";
 
 export interface AscendingMeterProps {
@@ -34,6 +44,13 @@ export interface AscendingMeterProps {
   gap?: number;
   /** Track fill for the empty portion of each bar. */
   track?: string;
+  /**
+   * Draw this instead of the bars. For states where a filled meter would be
+   * meaningless rather than impressive — a rest day, a fully-recovered body.
+   */
+  glyph?: MeterGlyphName | null;
+  /** What the glyph means, for screen readers. */
+  glyphLabel?: string;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -45,6 +62,8 @@ export function AscendingMeter({
   barWidth = 5,
   gap = 5,
   track,
+  glyph,
+  glyphLabel,
   style,
 }: AscendingMeterProps) {
   const { colors, isDark } = useColors();
@@ -61,6 +80,21 @@ export function AscendingMeter({
   }, [clamped, reduced, p]);
 
   const trackColor = track ?? (isDark ? alpha(colors.text, 0.1) : alpha(tone, 0.14));
+
+  // The exact footprint the bars would have taken, so the glyph lands in the
+  // same place on the card and nothing around it moves.
+  if (glyph) {
+    return (
+      <MeterGlyph
+        name={glyph}
+        width={bars * barWidth + gap * (bars - 1)}
+        height={height}
+        tone={tone}
+        label={glyphLabel}
+        style={style}
+      />
+    );
+  }
 
   return (
     <View style={[styles.row, { height, gap }, style]}>

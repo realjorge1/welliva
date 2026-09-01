@@ -824,7 +824,7 @@ export default function GozlinScreen() {
         <GozlinActionSheet
           visible={forgetOpen}
           title="Clear memory?"
-          subtitle="Gozlin will clear your motivation, remembered notes and chat history."
+          subtitle="Gozlin will clear your motivation, remembered notes, chat history and the record of habits you've stopped tracking. Your habits, logs and plans stay."
           options={forgetOptions}
           onClose={() => setForgetOpen(false)}
         />

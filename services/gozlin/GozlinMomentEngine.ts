@@ -22,10 +22,18 @@ import type {
   GozlinTone,
   GozlinTwin,
 } from "./gozlin.types";
+import type { RetiredBeat } from "./GozlinTrackerHabits";
 
 export interface MomentInput {
   twin: GozlinTwin;
   surface: GozlinSurface;
+  /**
+   * A habit the user stopped tracking that today is worth mentioning. Almost
+   * always null — GozlinTrackerHabits.pickRetiredBeat is the thing that decides
+   * that, and it is deliberately reluctant. Passed in rather than derived here
+   * because the tracker lives in a React context and this engine is pure.
+   */
+  retired?: RetiredBeat | null;
   /** Injectable for tests/determinism; defaults to now. */
   now?: Date;
 }
@@ -38,6 +46,32 @@ interface Candidate extends Omit<GozlinMoment, "id"> {
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
+}
+
+/**
+ * The retired-habit beat, as a moment.
+ *
+ * Priority 45 is a considered number, not a spare one: below every risk,
+ * intervention and streak alert (78–92), above the calm steady-state beats. A
+ * habit someone quit last month must never displace "your recovery is red
+ * today" — but it should absolutely beat "nice work, keep going".
+ */
+function retiredCandidates(beat: RetiredBeat | null | undefined): Candidate[] {
+  if (!beat) return [];
+  return [
+    {
+      id: `retired_${beat.fact.id}`,
+      kind: "coach",
+      surfaces: ["home", "habits", "progress", "goals"],
+      icon: "time-outline",
+      title: beat.title,
+      message: beat.message,
+      tone: "curious",
+      priority: 45,
+      prompt: beat.prompt,
+      cta: "Talk it through",
+    },
+  ];
 }
 
 /** Build every coach beat the current Twin warrants, unranked. */
@@ -422,7 +456,7 @@ const FALLBACK: Record<GozlinSurface, { title: string; message: string; prompt: 
  * returns at least one (the surface's warm fallback), so Gozlin is omnipresent.
  */
 export function buildMoments(input: MomentInput): GozlinMoment[] {
-  const { twin, surface } = input;
+  const { twin, surface, retired } = input;
 
   // No profile yet → a single gentle onboarding nudge, nothing alarming.
   if (!twin.hasProfile) {
@@ -441,7 +475,7 @@ export function buildMoments(input: MomentInput): GozlinMoment[] {
     ];
   }
 
-  const pool = candidates(twin)
+  const pool = [...candidates(twin), ...retiredCandidates(retired)]
     .filter((c) => c.surfaces.includes(surface))
     .sort((a, b) => b.priority - a.priority)
     .map(({ surfaces: _surfaces, ...m }) => m);

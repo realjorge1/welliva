@@ -14,6 +14,12 @@
  * while this context was alive) and an AppState → active re-read (it happened
  * while the app was suspended). Both just reload the blob, so every derived
  * value — streaks, progress, heatmaps — recomputes the normal way.
+ *
+ * DELETING A HABIT DOES NOT DELETE ITS PAST. `deleteHabit` retires the habit:
+ * it leaves the tracker, and its completion dates move into the retired store
+ * with a frozen record of what it amounted to. That record is what lets Gozlin
+ * still say "you were coding four times a week for two months" — the tracker
+ * stopped, the history did not, and only erasing Gozlin's memory erases it.
  */
 import * as Haptics from "@/utils/haptics";
 import React, {
@@ -25,12 +31,14 @@ import React, {
   useState,
 } from "react";
 import { AppState } from "react-native";
-import type { Habit, HabitLogs, HabitStats } from "../models/habit";
+import type { Habit, HabitLogs, HabitStats, RetiredHabit } from "../models/habit";
 import {
   computeStats,
   isDueToday,
   loadHabits,
   loadLogs,
+  loadRetiredHabits,
+  retireHabit,
   saveHabits,
   saveLogs,
   seedDefaultHabits,
@@ -54,6 +62,12 @@ export interface HabitView {
 interface HabitsContextType {
   loading: boolean;
   views: HabitView[];
+  /**
+   * Habits the user stopped tracking, newest first — history, not a bin.
+   * Nothing restores from here; it is read by Gozlin and by the past-habits
+   * shelf, and it is the only place a finished habit still exists.
+   */
+  retired: RetiredHabit[];
   getView: (id: string) => HabitView | undefined;
   /** Manual habits only — linked ones complete from app data. */
   toggleToday: (id: string) => Promise<void>;
@@ -61,8 +75,22 @@ interface HabitsContextType {
     input: Omit<Habit, "id" | "order" | "createdAt" | "reminderIds">,
   ) => Promise<Habit>;
   updateHabit: (habit: Habit) => Promise<void>;
+  /**
+   * Stop tracking a habit. Removable ones only (see {@link canRetire}) — the
+   * three auto-tracked habits are the app's own wiring, not the user's list.
+   * The habit's history is archived, never erased.
+   */
   deleteHabit: (id: string) => Promise<void>;
   reorderHabits: (orderedIds: string[]) => Promise<void>;
+  /**
+   * Re-read the retired store.
+   *
+   * The one path that changes it from outside this provider is "Clear memory"
+   * in the coach, which erases retired habits along with everything else Gozlin
+   * remembers. Without this, the habits screen would keep listing a past the
+   * user had just asked the app to forget — until the next day rollover.
+   */
+  refreshRetired: () => Promise<void>;
 }
 
 const HabitsContext = createContext<HabitsContextType | undefined>(undefined);
@@ -76,6 +104,7 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
   const [habits, setHabits] = useState<Habit[]>([]);
   const [logs, setLogs] = useState<HabitLogs>({});
   const [waterHistory, setWaterHistory] = useState<WaterHistoryEntry[]>([]);
+  const [retired, setRetired] = useState<RetiredHabit[]>([]);
   const [loading, setLoading] = useState(true);
 
   const waterGoalMl =
@@ -86,10 +115,11 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [stored, storedLogs, water] = await Promise.all([
+      const [stored, storedLogs, water, archived] = await Promise.all([
         loadHabits(),
         loadLogs(),
         getWaterHistory(),
+        loadRetiredHabits(),
       ]);
       if (!alive) return;
       let all = stored;
@@ -104,6 +134,7 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
       setHabits(all);
       setLogs(storedLogs);
       setWaterHistory(water);
+      setRetired(archived);
       setLoading(false);
     })();
     return () => {
@@ -271,10 +302,27 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
     [habits],
   );
 
+  /**
+   * Retire a habit.
+   *
+   * Order matters and is the whole safety of this function: the history is
+   * ARCHIVED FIRST, and only then is the live row (and its log) dropped. A
+   * crash between the two loses nothing that mattered — the record is already
+   * written, and the worst case is a habit that survives one more launch. Doing
+   * it the other way round would make the same crash erase the past.
+   */
   const deleteHabit = useCallback(
     async (id: string) => {
       const habit = habits.find((h) => h.id === id);
-      if (habit) await syncReminders({ ...habit, reminder: null });
+      if (!habit) return;
+      // Auto-tracked habits are not the user's to delete: they are how water,
+      // meals and workouts show up here at all, and they hold no manual log.
+      if (!canRetire(habit)) return;
+
+      const entry = await retireHabit(habit, new Set(logs[id] ?? []), currentDate);
+      setRetired((prev) => [entry, ...prev.filter((r) => r.habit.id !== id)]);
+
+      await syncReminders({ ...habit, reminder: null });
       const next = habits.filter((h) => h.id !== id);
       setHabits(next);
       await saveHabits(next);
@@ -284,9 +332,16 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
         setLogs(nextLogs);
         await saveLogs(nextLogs);
       }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(
+        () => {},
+      );
     },
-    [habits, logs],
+    [habits, logs, currentDate],
   );
+
+  const refreshRetired = useCallback(async () => {
+    setRetired(await loadRetiredHabits());
+  }, []);
 
   const reorderHabits = useCallback(
     async (orderedIds: string[]) => {
@@ -307,17 +362,32 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
     () => ({
       loading,
       views,
+      retired,
       getView,
       toggleToday,
       createHabit,
       updateHabit,
       deleteHabit,
       reorderHabits,
+      refreshRetired,
     }),
-    [loading, views, getView, toggleToday, createHabit, updateHabit, deleteHabit, reorderHabits],
+    [loading, views, retired, getView, toggleToday, createHabit, updateHabit, deleteHabit, reorderHabits, refreshRetired],
   );
 
   return <HabitsContext.Provider value={value}>{children}</HabitsContext.Provider>;
+}
+
+/**
+ * Can this habit be removed from the tracker?
+ *
+ * Only habits the user added themselves — everything created from the "New
+ * habit" form or the "Suggested for you" shelf. The three auto-tracked habits
+ * (water, meals, workout) are the app's own wiring: they hold no manual log,
+ * they cost nothing to keep, and deleting one would leave the tracker quietly
+ * disagreeing with what the rest of the app already records.
+ */
+export function canRetire(habit: Habit): boolean {
+  return habit.source === "manual";
 }
 
 export function useHabits(): HabitsContextType {

@@ -30,6 +30,7 @@
 
 import type { GozlinMessage, GozlinTwin } from "../gozlin.types";
 import type { GozlinChatContext } from "../GozlinChatEngine";
+import { crossReference, type HabitTrackerBrief } from "../GozlinTrackerHabits";
 import { conditionRules } from "./clinical";
 
 // ════════════════════════════════════════════════════════════════
@@ -56,6 +57,18 @@ Use ONLY numbers that appear in a tool result or in the current-state block. Nev
 If you don't have a number, say what you do know and offer to look — do not produce a plausible one. A wrong number here is worse than no number: this person makes real decisions about their body from what you say.
 
 Percentages, dates, weights, calories, streak counts — all of it. If it isn't in front of you, it doesn't go in the reply.
+
+# Their habits
+This person keeps a habit tracker. What is in it is what they told you they want to be doing, in their own words — it is worth more than anything you could infer, and it is the only part of their routine they chose out loud.
+
+The current-state block lists what they track and how it is going, and sometimes flags one thing from it that connects to what they just said. When it does:
+
+- Weave it into your answer where it belongs. It is a reason your advice is what it is, not a postscript. Never open with it, never make it the whole reply.
+- Always attach something they can do. An observation with no next step is just being watched.
+- Say it once. If it is already in this conversation, it is said.
+- Never scold, never tally, never imply they owe you an explanation.
+
+When a habit they used to keep is flagged, do not ask why they stopped — that asks them to defend themselves. Say what the record shows, when it ended, and offer a reason they can accept or correct: "you were reading almost every day for two months and it stopped in August — was it the evenings getting busy?" Then let them answer. Do not chase it, do not raise it twice, and drop it entirely if they change the subject.
 
 # Safety
 You are not a doctor, a dietitian of record, or a therapist. You do not diagnose, do not interpret symptoms, and do not advise on medication, supplements as treatment, or anything clinical.
@@ -135,7 +148,9 @@ export function toWireMessages(conversation: GozlinMessage[]): WireMessage[] {
  */
 export function twinStateMessage(
   twin: GozlinTwin,
-  ctx?: Pick<GozlinChatContext, "snapshot" | "identity">,
+  ctx?: Pick<GozlinChatContext, "snapshot" | "identity" | "habits">,
+  /** The message being answered — enables the habit cross-reference. */
+  userText?: string,
 ): WireMessage {
   const t = twin.today;
   const lines = [
@@ -153,6 +168,11 @@ export function twinStateMessage(
   const motivation = ctx?.identity.motivation;
   if (motivation) lines.push(`their stated why: ${motivation}`);
 
+  if (ctx?.habits) {
+    lines.push(...habitLines(ctx.habits));
+    if (userText) lines.push(...crossReferenceLines(userText, ctx.habits, twin.asOf));
+  }
+
   const rules = conditionRules(ctx?.snapshot.bio ?? null);
   if (rules.length > 0) {
     lines.push(
@@ -163,6 +183,106 @@ export function twinStateMessage(
   }
 
   return { role: "system", content: lines.join("\n") };
+}
+
+/**
+ * The tracker's own habits, compressed to a few lines.
+ *
+ * Only what a coach would actually cite: the name, the target, how the week is
+ * going, and whether anything was recently missed. Capped at six habits and one
+ * line each — this block is UNCACHED and paid for on every single turn, so it
+ * earns its tokens or it does not go in.
+ *
+ * Retired habits are listed too, and separately, because they are a different
+ * kind of fact: not something to nudge about, something to remember.
+ */
+function habitLines(brief: HabitTrackerBrief): string[] {
+  const lines: string[] = [];
+
+  const tracked = brief.tracked.slice(0, 6);
+  if (tracked.length > 0) {
+    lines.push("", "HABITS THEY TRACK (their own words, their own targets):");
+    for (const t of tracked) {
+      const bits = [`${t.frequency}`, `${t.weekDone}/${t.weekTarget} this week`];
+      if (t.streak > 0) bits.push(`${t.streak}-${t.streakUnit} streak`);
+      bits.push(`${t.last30Pct}% over 30d`);
+      if (t.recentMisses.length > 0) bits.push(`missed ${t.recentMisses.length} recently`);
+      lines.push(`- ${t.name}: ${bits.join(" · ")}`);
+    }
+  }
+
+  // Only habits that were REAL and are recent enough to still be live history.
+  // A two-day experiment abandoned in March is not something to bring up.
+  const retired = brief.retired.filter((r) => r.wasConsistent && r.daysSince <= 180).slice(0, 4);
+  if (retired.length > 0) {
+    lines.push(
+      "",
+      "HABITS THEY USED TO KEEP (they stopped tracking these; the record stands):",
+    );
+    for (const r of retired) {
+      lines.push(
+        `- ${r.name}: ${r.summary}, ${r.totalDone} days total, best run ${r.bestStreak} ${r.streakUnit}s — stopped ${r.retiredOn} (${r.daysSince} days ago)`,
+      );
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * The cross-reference: one fact from their own history that connects to the
+ * message they just sent.
+ *
+ * It arrives as an INSTRUCTION, not as data, because the failure mode is not
+ * the model missing it — it is the model reciting it. Left as a bare fact in a
+ * state block, a note like "missed vitamins Thursday" gets read as something to
+ * report; framed as a condition ("only if it fits, and always with a fix"), it
+ * gets used the way a coach would use it. The engine chose it, the engine's
+ * numbers are the only ones in it, and the model decides whether it belongs in
+ * the sentence at all.
+ */
+function crossReferenceLines(
+  text: string,
+  brief: HabitTrackerBrief,
+  today: string,
+): string[] {
+  const ref = crossReference(text, brief, today);
+  if (!ref) return [];
+
+  const howToUse =
+    ref.kind === "streak"
+      ? "Acknowledge it in passing and build the advice on top of it — they are already doing this, so do not tell them to start."
+      : "Connect it to what they asked, and offer one concrete way to make it easier. Not a reprimand.";
+
+  return [
+    "",
+    "CONNECTED TO WHAT THEY JUST SAID — you may raise this once, if it genuinely fits:",
+    ref.evidence,
+    howToUse,
+    "If it does not fit the reply naturally, leave it out entirely. Never list it as an aside.",
+  ];
+}
+
+/**
+ * Exactly what the habit half of the state block put in front of the model.
+ *
+ * The grounding gate only lets the model quote numbers it was actually given,
+ * and it builds that set from the same objects this file renders. So the two
+ * have to be read from ONE place: if the block says "12-day streak" and the
+ * allowed-set was built without it, the reply gets rejected as invented and the
+ * user watches a correct sentence get thrown away. Calling this from both sides
+ * is what keeps them from drifting — it is pure and deterministic, so the
+ * second call is free and cannot disagree with the first.
+ */
+export function habitEvidence(
+  text: string,
+  ctx: Pick<GozlinChatContext, "habits" | "twin">,
+): { habits: HabitTrackerBrief | null; link: unknown } {
+  if (!ctx.habits) return { habits: null, link: null };
+  return {
+    habits: ctx.habits,
+    link: crossReference(text, ctx.habits, ctx.twin.asOf),
+  };
 }
 
 /**
@@ -178,6 +298,9 @@ export function buildTurnMessages(
   return [
     ...toWireMessages(ctx.conversation ?? []),
     { role: "user", content: text.trim() },
-    twinStateMessage(ctx.twin, ctx),
+    // The user's text is handed to the state block as well as sent as the turn:
+    // the cross-reference is chosen FROM what they said, and it has to travel
+    // on the system channel, where nothing typed into the chat can forge it.
+    twinStateMessage(ctx.twin, ctx, text),
   ];
 }

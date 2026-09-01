@@ -23,6 +23,7 @@ import { AuthWrapper } from "@/components/AuthWrapper";
 import { LegalGateProvider } from "@/components/legal";
 import { IntroRevealProvider } from "@/components/motion/IntroReveal";
 import { AppDrawer } from "@/components/navigation";
+import { MealReminderRunner } from "@/components/notifications/MealReminderRunner";
 import { NotificationActionRunner } from "@/components/notifications/NotificationActionRunner";
 import { ProactiveDeliveryRunner } from "@/components/notifications/ProactiveDeliveryRunner";
 import { SupabaseAuthProvider, useAuth } from "@/components/SupabaseAuthProvider";
@@ -209,6 +210,7 @@ function RootLayoutContent() {
             <Stack.Screen name="legal/consent" options={{ gestureEnabled: false }} />
             <Stack.Screen name="legal/[doc]" />
             <Stack.Screen name="notifications-setup" />
+            <Stack.Screen name="reminders" />
             <Stack.Screen name="exercise/[id]" />
             <Stack.Screen name="fitness/library" />
             <Stack.Screen name="fitness/workout/[id]" />
@@ -241,8 +243,11 @@ function RootLayoutContent() {
           <AchievementCelebration />
           <ProactiveDeliveryRunner />
           {/* Closes the loop on delivered notifications: "Mark as Done",
-              "Later", and tap-to-route. Headless. */}
+              "Ate it", "Later", and tap-to-route. Headless. */}
           <NotificationActionRunner />
+          {/* Keeps the rolling week of tap-to-log meal reminders topped up, and
+              folds a lock-screen meal tick back into a live screen. Headless. */}
+          <MealReminderRunner />
           <StatusBar style={currentTheme === "dark" ? "light" : "dark"} />
           </IntroRevealProvider>
         </AuthWrapper>

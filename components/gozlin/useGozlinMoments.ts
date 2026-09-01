@@ -5,6 +5,11 @@
  * on the shared Twin (useGozlinSnapshot) so it stays consistent with the full
  * coach, and the pure GozlinMomentEngine so the selection logic is testable and
  * lives outside the UI. Cheap to call from every tab.
+ *
+ * The retired-habit beat is folded in here rather than at each call site, so a
+ * habit someone quit six weeks ago can resurface on ANY surface that shows a
+ * moment — which is the whole point of it. It ranks below every live risk: a
+ * memory should never push aside something happening today.
  */
 
 import {
@@ -14,6 +19,7 @@ import {
 } from "@/services/gozlin";
 import { useMemo } from "react";
 import { useGozlinSnapshot } from "./useGozlinSnapshot";
+import { useRetiredBeat } from "./useHabitTracker";
 
 export interface UseGozlinMoments {
   /** All beats relevant to the surface, highest leverage first. */
@@ -24,10 +30,11 @@ export interface UseGozlinMoments {
 
 export function useGozlinMoments(surface: GozlinSurface): UseGozlinMoments {
   const { twin } = useGozlinSnapshot();
+  const retired = useRetiredBeat();
 
   const moments = useMemo(
-    () => buildMoments({ twin, surface }),
-    [twin, surface],
+    () => buildMoments({ twin, surface, retired }),
+    [twin, surface, retired],
   );
 
   return { moments, top: moments[0] ?? null };

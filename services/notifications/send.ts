@@ -12,6 +12,8 @@
 import * as Notifications from "expo-notifications";
 import {
   HABIT_REMINDER_CATEGORY,
+  MEAL_REMINDER_CATEGORY,
+  MEAL_SNOOZE_MINUTES,
   SNOOZE_MINUTES,
   ensureNotificationCategories,
 } from "./categories";
@@ -61,28 +63,37 @@ export async function sendTestNotification(): Promise<SendResult> {
 }
 
 /**
- * Re-post a reminder {@link SNOOZE_MINUTES} from now. Used by the "Later" action;
- * the original repeating trigger is untouched, so tomorrow's reminder is unaffected.
+ * Re-post a reminder a while from now. Used by the "Later" action; the original
+ * trigger is untouched, so tomorrow's reminder is unaffected.
+ *
+ * The snoozed copy KEEPS ITS CATEGORY, and that is the whole reason this takes
+ * a type. A meal reminder that came back wearing the habit category would
+ * arrive with a "Mark as Done" button wired to a habit id it does not have —
+ * the button would be inert, on a notification that looked identical to the one
+ * that worked half an hour earlier. Meals also come back sooner: an hour is a
+ * sensible delay for "read ten pages" and far too long for "have you eaten".
  */
 export async function snoozeReminder(
   title: string,
   body: string,
   data: Record<string, unknown>,
+  kind: "habit" | "meal" = "habit",
 ): Promise<void> {
   try {
     await ensureRemindersChannel();
     await ensureNotificationCategories();
+    const meal = kind === "meal";
     await Notifications.scheduleNotificationAsync({
       content: {
         title,
         body,
-        categoryIdentifier: HABIT_REMINDER_CATEGORY,
+        categoryIdentifier: meal ? MEAL_REMINDER_CATEGORY : HABIT_REMINDER_CATEGORY,
         data: { ...data, snoozed: true },
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
         channelId: REMINDERS_CHANNEL_ID,
-        seconds: SNOOZE_MINUTES * 60,
+        seconds: (meal ? MEAL_SNOOZE_MINUTES : SNOOZE_MINUTES) * 60,
         repeats: false,
       },
     });

@@ -10,20 +10,29 @@
  * that must span the full content width inside a card that takes 40pt of
  * padding was the whole problem, so the card is gone: the grid measures the
  * page and sizes its own cells to land flush with everything else on it.
+ *
+ * THE HEADER CARRIES BOTH OF THE HABIT'S OWN VERBS — edit, then delete, in that
+ * order, and only for habits the user added. Edit comes first because it is the
+ * one people reach for; delete sits outboard of it, behind a confirmation that
+ * says in as many words that the history survives. That last part is the whole
+ * design: people do not stop tracking a thing because they want the past
+ * deleted, they stop because the present changed, and a tracker that treats
+ * those as the same event punishes them for being honest about it.
  */
 import { HabitHeatmap } from "@/components/habits/HabitHeatmap";
 import { HabitWeekStrip } from "@/components/habits/HabitWeekStrip";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { ConfirmSheet } from "@/components/ui/ConfirmSheet";
 import { IconBadge } from "@/components/ui/IconBadge";
 import { Screen } from "@/components/ui/Screen";
 import { AppText } from "@/components/ui/Text";
 import { useColors } from "@/components/ui/useColors";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useSystem } from "@/contexts/AppContext";
-import { useHabits } from "@/contexts/HabitsContext";
-import { frequencyLabel } from "@/models/habit";
-import { buildHeatWeeks, monthLabels } from "@/services/HabitService";
+import { canRetire, useHabits } from "@/contexts/HabitsContext";
+import { frequencyLabel, retiredSummaryLine } from "@/models/habit";
+import { buildHeatWeeks, monthLabels, retiredRecordFor } from "@/services/HabitService";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useState } from "react";
@@ -41,7 +50,7 @@ export default function HabitDetailScreen() {
   const router = useRouter();
   const { colors } = useColors();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { getView, toggleToday } = useHabits();
+  const { getView, toggleToday, deleteHabit } = useHabits();
   const { currentDate } = useSystem();
 
   // The width the page actually gives its content, measured once on layout.
@@ -50,6 +59,8 @@ export default function HabitDetailScreen() {
   const [contentWidth, setContentWidth] = useState(0);
   const onMeasure = (e: LayoutChangeEvent) =>
     setContentWidth(e.nativeEvent.layout.width);
+
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const view = getView(String(id));
   if (!view) {
@@ -68,6 +79,12 @@ export default function HabitDetailScreen() {
   const months = monthLabels(weeks);
   const isManual = habit.source === "manual";
   const quota = habit.weeklyGoal != null;
+  const removable = canRetire(habit);
+
+  // What the confirmation promises stays. Built from the SAME frozen record the
+  // retirement itself will store, so the sheet cannot describe a past that the
+  // archive then remembers differently.
+  const kept = removable ? retiredRecordFor(habit, done) : null;
 
   const header = (
     <View style={styles.headerRow}>
@@ -81,6 +98,9 @@ export default function HabitDetailScreen() {
         <Ionicons name="chevron-back" size={20} color={colors.text} />
       </Pressable>
       <View style={{ flex: 1 }} />
+      {/* Edit, then delete. The auto-tracked habits get neither: there is
+          nothing to edit about "completes when you log a meal", and removing
+          one would only make the tracker disagree with the app. */}
       {isManual && (
         <Pressable
           hitSlop={12}
@@ -90,6 +110,22 @@ export default function HabitDetailScreen() {
           style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
         >
           <Ionicons name="pencil" size={17} color={colors.text} />
+        </Pressable>
+      )}
+      {removable && (
+        <Pressable
+          hitSlop={12}
+          onPress={() => setConfirmDelete(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`Delete ${habit.name}`}
+          accessibilityHint="Stops tracking this habit. Its history is kept."
+          style={[
+            styles.iconBtn,
+            styles.headerGap,
+            { backgroundColor: alpha(colors.error, 0.12) },
+          ]}
+        >
+          <Ionicons name="trash-outline" size={17} color={colors.error} />
         </Pressable>
       )}
     </View>
@@ -166,6 +202,34 @@ export default function HabitDetailScreen() {
           </View>
         </Card>
       )}
+
+      {/* Deleting is a decision about the FUTURE, and the sheet says so. The
+          reassurance line is not boilerplate: it quotes this habit's own record
+          back, because "your history is kept" is an abstraction and "43 days,
+          almost every day for 9 weeks" is the thing the user is actually afraid
+          of losing. */}
+      <ConfirmSheet
+        visible={confirmDelete}
+        title={`Stop tracking ${habit.name}?`}
+        body="It comes off your habits list and its reminders stop. You can always add it back later."
+        reassurance={
+          kept && kept.totalDone > 0
+            ? `Your record stays: ${kept.totalDone} day${
+                kept.totalDone === 1 ? "" : "s"
+              } done, ${retiredSummaryLine(kept)}. Gozlin still remembers it.`
+            : "Nothing is erased from Gozlin's memory — only the tracker stops."
+        }
+        confirmLabel="Delete habit"
+        cancelLabel="Keep tracking it"
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => {
+          // Leave BEFORE the delete lands. This screen is addressed by the
+          // habit's id; the moment it retires, `getView` returns undefined and
+          // the page would flash its "Habit not found" state on the way out.
+          router.back();
+          void deleteHabit(habit.id);
+        }}
+      />
     </Screen>
   );
 }
@@ -208,6 +272,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  headerGap: { marginLeft: Spacing.sm },
   hero: {
     alignItems: "center",
     marginTop: Spacing.md,

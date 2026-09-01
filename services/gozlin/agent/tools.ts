@@ -391,6 +391,58 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
   },
 
   {
+    name: "review_tracked_habits",
+    description:
+      "Read the user's own HABIT TRACKER: the habits they created themselves, how each " +
+      "is going this week, and the habits they used to keep but have since stopped " +
+      "tracking. Different from get_habit_report, which infers behaviour from meals and " +
+      "workouts — this is what the user explicitly told the app they want to do. Call it " +
+      "when they mention a specific routine or ritual of theirs, ask what they should add " +
+      "or drop, ask about a streak, wonder whether they used to do something, or when a " +
+      "recommendation you are about to make is already one of their habits.",
+    input_schema: obj(
+      {
+        include_stopped: {
+          type: "boolean",
+          description:
+            "Include habits they no longer track. Use when the question is about the " +
+            "past, about restarting something, or about why a routine faded.",
+        },
+      },
+      ["include_stopped"],
+    ),
+    readOnly: true,
+    run: (input: { include_stopped: boolean }, ctx) => {
+      const brief = ctx.habits;
+      // No tracker in this context is "nothing to say", never an invented list.
+      if (!brief) return { tracked: [], stopped: [], available: false };
+      return {
+        available: true,
+        tracked: brief.tracked.map((t) => ({
+          name: t.name,
+          target: t.frequency,
+          thisWeek: `${t.weekDone}/${t.weekTarget}`,
+          streak: t.streak > 0 ? `${t.streak} ${t.streakUnit}s` : "none",
+          last30Pct: t.last30Pct,
+          doneToday: t.doneToday,
+          recentlyMissed: t.recentMisses,
+        })),
+        stopped: input.include_stopped
+          ? brief.retired.map((r) => ({
+              name: r.name,
+              record: r.summary,
+              daysDone: r.totalDone,
+              bestStreak: `${r.bestStreak} ${r.streakUnit}s`,
+              stoppedOn: r.retiredOn,
+              daysSinceStopped: r.daysSince,
+              wasConsistent: r.wasConsistent,
+            }))
+          : [],
+      };
+    },
+  },
+
+  {
     name: "get_recovery_status",
     description:
       "Current recovery/readiness: a 0–100 score, its level, what drove it, and a " +

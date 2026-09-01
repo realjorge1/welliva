@@ -4,9 +4,16 @@
  * The habit card is derived straight from the deterministic Habit Awareness
  * report (a learned pattern, else the behavior headline). It only appears when
  * there's a real, evidence-backed thing to say — never a fabricated one.
+ *
+ * There is one more card that is not about today: the RETIRED-habit beat, for a
+ * habit the user stopped tracking weeks ago. It leads the deck when it appears,
+ * because it appears roughly never — the engine holds it back for at least a
+ * fortnight and then only surfaces it on a sampled day (see
+ * GozlinTrackerHabits.pickRetiredBeat). A rare card that gets buried at
+ * position four is a rare card nobody ever sees.
  */
 import type { CoachInsight } from "@/services/intelligence";
-import type { GozlinHabitReport, HabitPattern } from "@/services/gozlin";
+import type { GozlinHabitReport, HabitPattern, RetiredBeat } from "@/services/gozlin";
 
 export interface CoachCard extends CoachInsight {
   /** The Gozlin habit-awareness card — opens the deep-dive framed on habits. */
@@ -64,6 +71,26 @@ export function cardFromPattern(p: HabitPattern, id = "gozlin-habit"): CoachCard
   };
 }
 
+/**
+ * A habit the user used to keep, as a coach card.
+ *
+ * Deliberately NOT a "warning" tone. Stopping something is not a failure state
+ * and the card must not look like one; this is the coach remembering, and the
+ * colour should say so.
+ */
+export function retiredHabitCard(beat: RetiredBeat): CoachCard {
+  return {
+    id: `gozlin-retired-${beat.fact.id}`,
+    type: "motivation",
+    tone: "nudge",
+    icon: "time-outline",
+    title: beat.title,
+    message: beat.message,
+    priority: 9,
+    isHabit: true,
+  };
+}
+
 export function buildHabitCard(report: GozlinHabitReport): CoachCard | null {
   if (report.patterns.length > 0) {
     return cardFromPattern(report.patterns[0]);
@@ -97,6 +124,7 @@ export function buildHabitCard(report: GozlinHabitReport): CoachCard | null {
 export function buildCoachDeck(
   insights: CoachInsight[],
   habitCard: CoachCard | null,
+  retiredCard: CoachCard | null = null,
 ): CoachCard[] {
   const byType = new Map<string, CoachInsight>();
   for (const i of insights) {
@@ -108,7 +136,11 @@ export function buildCoachDeck(
   // A real habit card replaces the generic "you're doing great" filler.
   if (habitCard) distinct = distinct.filter((c) => c.type !== "motivation");
 
-  return habitCard ? [...distinct.slice(0, 3), habitCard] : distinct.slice(0, 4);
+  const tail = habitCard ? [...distinct.slice(0, 3), habitCard] : distinct.slice(0, 4);
+  // The retired beat goes FIRST and costs the deck its last card. It is the one
+  // card in here the user cannot get to any other way, and it is shown a
+  // handful of times in a habit's whole life.
+  return retiredCard ? [retiredCard, ...tail.slice(0, 3)] : tail;
 }
 
 /** Map an insight tone to a role name the deep-dive + card resolve to a color. */

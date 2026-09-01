@@ -13,6 +13,18 @@
  * the app. The write itself goes straight to storage (see habitActions.ts), so it
  * survives the app not being running.
  *
+ * There are TWO categories, not one, and the split is deliberate. A habit
+ * reminder's button says "Mark as Done"; a meal reminder's says "Ate it". Same
+ * mechanism, different sentence — and the sentence matters, because it is the
+ * only text on the button and the user is deciding whether to press it from a
+ * locked screen. One shared category would have forced one shared verb.
+ *
+ * WORKOUTS DELIBERATELY HAVE NO CATEGORY HERE. A meal or a habit is a yes/no
+ * fact the user can answer from a lock screen; a session is a thing with sets,
+ * weights, a duration and a completion percentage, and a button that claimed to
+ * record one would be recording a fiction. The app will ask you to open it for
+ * that, and it should.
+ *
  * Only `expo-notifications` is imported (no `react-native`), keeping this module
  * loadable under the Node test runner.
  */
@@ -21,14 +33,21 @@ import * as Notifications from "expo-notifications";
 /** Category carried by every habit reminder. */
 export const HABIT_REMINDER_CATEGORY = "welliva.habit-reminder";
 
+/** Category carried by every meal reminder. */
+export const MEAL_REMINDER_CATEGORY = "welliva.meal-reminder";
+
 /** Action ids — matched against `response.actionIdentifier`. */
 export const ACTION_MARK_DONE = "MARK_DONE";
 export const ACTION_SNOOZE = "SNOOZE";
+export const ACTION_LOG_MEAL = "LOG_MEAL";
 
 /** How long "Later" pushes a reminder out. */
 export const SNOOZE_MINUTES = 60;
 
 let registration: Promise<void> | null = null;
+
+/** How long "Later" pushes a MEAL reminder out. Shorter — a meal is imminent. */
+export const MEAL_SNOOZE_MINUTES = 30;
 
 async function register(): Promise<void> {
   await Notifications.setNotificationCategoryAsync(HABIT_REMINDER_CATEGORY, [
@@ -40,6 +59,22 @@ async function register(): Promise<void> {
     {
       identifier: ACTION_SNOOZE,
       buttonTitle: `Later (${SNOOZE_MINUTES}m)`,
+      options: { opensAppToForeground: false },
+    },
+  ]);
+
+  await Notifications.setNotificationCategoryAsync(MEAL_REMINDER_CATEGORY, [
+    {
+      // Past tense, on purpose. "Log meal" sounds like it opens a form; "Ate
+      // it" is a statement of fact the user can make from a locked screen, and
+      // it is the honest description of what the button records.
+      identifier: ACTION_LOG_MEAL,
+      buttonTitle: "Ate it",
+      options: { opensAppToForeground: false },
+    },
+    {
+      identifier: ACTION_SNOOZE,
+      buttonTitle: `Not yet (${MEAL_SNOOZE_MINUTES}m)`,
       options: { opensAppToForeground: false },
     },
   ]);

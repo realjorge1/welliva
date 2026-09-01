@@ -3,6 +3,11 @@
  * row (identity icon, streak, frequency, mini heatmap, one-tap check), and a
  * goal-aware "Suggested for you" shelf that adds a real habit in a single tap.
  * Auto-tracked habits (water / meals / workout) light up from app data.
+ *
+ * The last shelf is "No longer tracking" — the habits the user has deleted,
+ * with what each of them amounted to. It is there because deleting a habit here
+ * removes it from the LIST, not from the record, and a promise that abstract is
+ * worth nothing unless you can see it being kept.
  */
 import { HabitRow } from "@/components/habits/HabitRow";
 import { ScreenTopBar } from "@/components/navigation";
@@ -19,7 +24,7 @@ import { ProLockCard } from "@/components/billing";
 import { useProfile, useSystem } from "@/contexts/AppContext";
 import { useBilling } from "@/contexts/BillingContext";
 import { useHabits } from "@/contexts/HabitsContext";
-import { EVERY_DAY, frequencyLabel } from "@/models/habit";
+import { EVERY_DAY, frequencyLabel, retiredSummaryLine } from "@/models/habit";
 import { canCreateHabit, habitLimit } from "@/services/billing";
 import { isDueToday } from "@/services/HabitService";
 import { Ionicons } from "@expo/vector-icons";
@@ -62,7 +67,7 @@ const SUGGESTIONS: Suggestion[] = [
 export default function HabitsScreen() {
   const router = useRouter();
   const { colors } = useColors();
-  const { views, toggleToday, createHabit, loading } = useHabits();
+  const { views, retired, toggleToday, createHabit, loading } = useHabits();
   const { currentDate } = useSystem();
   const { userBio } = useProfile();
   const { tier, openUpgrade } = useBilling();
@@ -282,6 +287,47 @@ export default function HabitsScreen() {
         </>
       )}
 
+      {/* No longer tracking. Deliberately the quietest block on the screen:
+          a finished habit is history, not a to-do, so it gets no icon plate, no
+          chevron and nothing to tap. It states what the habit was worth and
+          then stops talking — which is also the answer to "where did my streak
+          go?" for anyone who deleted something and got nervous. */}
+      {retired.length > 0 && (
+        <>
+          <AppText variant="caption" color="tertiary" uppercase style={styles.sectionLabel}>
+            No longer tracking
+          </AppText>
+          <Card padding="lg">
+            {retired.slice(0, 6).map((r, i) => (
+              <View key={r.habit.id}>
+                {i > 0 && <Divider spacing={0} />}
+                <View style={styles.retiredRow}>
+                  <View
+                    style={[
+                      styles.retiredDot,
+                      { backgroundColor: alpha(r.habit.color, 0.5) },
+                    ]}
+                  />
+                  <View style={styles.flex}>
+                    <AppText variant="body" color="secondary" numberOfLines={1}>
+                      {r.habit.name}
+                    </AppText>
+                    <AppText variant="footnote" color="tertiary" numberOfLines={1}>
+                      {r.record.totalDone > 0
+                        ? `${r.record.totalDone} day${r.record.totalDone === 1 ? "" : "s"} · ${retiredSummaryLine(r.record)}`
+                        : "Never got going"}
+                    </AppText>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </Card>
+          <AppText variant="caption" color="tertiary" style={styles.retiredNote}>
+            Kept for as long as Gozlin&apos;s memory is — clearing that clears these too.
+          </AppText>
+        </>
+      )}
+
       {/* The cap, stated plainly. Shown only once it's actually reached — a
           counter on an empty tracker is noise, and a limit you haven't met yet
           isn't information the user needs. */}
@@ -331,6 +377,14 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     paddingVertical: Spacing.md,
   },
+  retiredRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+  },
+  retiredDot: { width: 8, height: 8, borderRadius: 4, marginLeft: 4 },
+  retiredNote: { marginTop: Spacing.sm, marginLeft: Spacing.xs },
   addBtn: {
     width: 32,
     height: 32,

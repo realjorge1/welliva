@@ -19,6 +19,8 @@ import {
   type HabitLogs,
   type HabitStats,
   type HeatWeek,
+  type RetiredHabit,
+  type RetiredRecord,
 } from "../models/habit";
 import {
   parseLocalDate,
@@ -36,6 +38,14 @@ import { REMINDERS_CHANNEL_ID, ensureRemindersChannel } from "./notifications/in
 const HABITS_KEY = "@welliva_habits";
 const LOGS_KEY = "@welliva_habit_logs";
 const SEEDED_KEY = "@welliva_habits_seeded";
+/** Habits the user stopped tracking, with their completion history intact. */
+const RETIRED_KEY = "@welliva_habits_retired";
+
+/**
+ * How many retired habits are kept. Generous on purpose: this is the only
+ * record that a thing was ever done, and each one is a few hundred bytes.
+ */
+const RETIRED_CAP = 60;
 
 /** How far back streak/heatmap scans ever look. */
 const MAX_LOOKBACK_DAYS = 400;
@@ -108,6 +118,103 @@ export async function seedDefaultHabits(
   await writeJSON(SEEDED_KEY, true);
   await saveHabits(seedHabits);
   return seedHabits;
+}
+
+// ── Retirement (a deleted habit, kept) ──────────────────────────────
+
+/**
+ * Every habit the user has stopped tracking, newest first.
+ *
+ * This is HISTORY, not a recycle bin. Nothing in the app resurrects from here;
+ * it exists so that "I used to do this" remains a true and citable statement
+ * after the row is gone from the tracker.
+ */
+export async function loadRetiredHabits(): Promise<RetiredHabit[]> {
+  const all = await readJSON<RetiredHabit[]>(RETIRED_KEY, []);
+  return [...all]
+    .filter((r) => r && r.habit && Array.isArray(r.done))
+    .sort((a, b) => (a.retiredAt < b.retiredAt ? 1 : -1));
+}
+
+export async function saveRetiredHabits(retired: RetiredHabit[]): Promise<void> {
+  await writeJSON(RETIRED_KEY, retired.slice(0, RETIRED_CAP));
+}
+
+/**
+ * Freeze what a habit amounted to.
+ *
+ * Computed ONCE, at retirement, and stored — so a later change to the streak
+ * engine can never quietly rewrite someone's past, and nothing downstream has
+ * to walk a date list to say one sentence. The span runs from the first day the
+ * habit could have been done to its last completion (not to today): a habit
+ * abandoned in March shouldn't read as "0.4× a week" in September because the
+ * months since have been counted against it.
+ */
+export function retiredRecordFor(habit: Habit, done: Set<string>): RetiredRecord {
+  const dates = [...done].sort();
+  const firstDone = dates[0] ?? null;
+  const lastDone = dates[dates.length - 1] ?? null;
+  const start = firstRelevantDate(habit, done);
+  const end = lastDone ?? start;
+  const spanDays = Math.max(
+    1,
+    Math.round(
+      (parseLocalDate(end).getTime() - parseLocalDate(start).getTime()) / 86_400_000,
+    ) + 1,
+  );
+  const perWeek = Math.round((dates.length / (spanDays / 7)) * 10) / 10;
+  // Best streak is read at the habit's own last day, so a habit that ran hot
+  // right up to the end keeps the streak it actually finished on.
+  const { bestStreak, streakUnit } = computeStats(habit, done, end);
+
+  return {
+    totalDone: dates.length,
+    spanDays,
+    perWeek: Number.isFinite(perWeek) ? perWeek : 0,
+    bestStreak,
+    streakUnit,
+    firstDone,
+    lastDone,
+  };
+}
+
+/**
+ * Retire a habit: it leaves the tracker, its history does not.
+ *
+ * The completion dates MOVE — out of the live log blob and into the retired
+ * record — so the record travels as one self-contained object and the active
+ * log holds only habits that still exist. Returns the stored record, or null if
+ * there was no such habit.
+ *
+ * Only manual habits reach here in practice (the linked water/meals/workout
+ * ones are not removable), but the function does not care: it archives whatever
+ * completion set it is handed, which is the honest thing for a linked habit too.
+ */
+export async function retireHabit(
+  habit: Habit,
+  done: Set<string>,
+  today: string,
+): Promise<RetiredHabit> {
+  const entry: RetiredHabit = {
+    habit,
+    done: [...done].sort(),
+    retiredAt: today,
+    record: retiredRecordFor(habit, done),
+  };
+  const existing = await loadRetiredHabits();
+  // Retiring the same id twice replaces the older record rather than stacking
+  // two half-histories of one habit.
+  await saveRetiredHabits([
+    entry,
+    ...existing.filter((r) => r.habit.id !== habit.id),
+  ]);
+  return entry;
+}
+
+/** Forget a retired habit for good. Used by the memory-erasure path only. */
+export async function forgetRetiredHabit(id: string): Promise<void> {
+  const existing = await loadRetiredHabits();
+  await saveRetiredHabits(existing.filter((r) => r.habit.id !== id));
 }
 
 // ── Pure engine ─────────────────────────────────────────────────────
