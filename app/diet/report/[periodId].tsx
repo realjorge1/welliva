@@ -21,7 +21,6 @@ import { useMealPlan } from "@/contexts/MealPlanContext";
 import {
   formatDuration,
   parseLocalDate,
-  periodLengthDays,
   type PeriodReport,
 } from "@/models/mealPlan";
 
@@ -118,8 +117,10 @@ export default function PeriodReportScreen() {
           {report.headline}
         </AppText>
         <AppText variant="caption" color="secondary" align="center">
+          {/* totalDays, not the span between the dates: a menu built from four
+              picked days sits inside a fortnight it never claimed to cover. */}
           {fmt(report.startDate)} – {fmt(report.endDate)} ·{" "}
-          {formatDuration(periodLengthDays(report))}
+          {formatDuration(report.totalDays)}
         </AppText>
       </View>
 

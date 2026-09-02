@@ -24,6 +24,8 @@ import React, {
 import type { MealType, ScheduledMeal } from "../models/diet";
 import {
   addDays,
+  periodDays,
+  scheduleDays,
   toLocalDate,
   type CustomMenuEntry,
   type MealPlanPeriod,
@@ -31,6 +33,7 @@ import {
   type PlanDuration,
   type PlanMode,
   type SavedMeal,
+  type ScheduleChoice,
 } from "../models/mealPlan";
 import type { FoodAnalysis, NutrientKey, NutrientPanel } from "../models/nutrients";
 import {
@@ -44,6 +47,7 @@ import {
 import { analyzeFoodText } from "../services/gozlin/GozlinFoodAnalyst";
 import {
   syncCustomDay,
+  syncCustomDays,
   syncWholeCustomPeriod,
 } from "../services/CustomMenuSchedule";
 import * as MealPlan from "../services/MealPlanService";
@@ -93,6 +97,15 @@ interface MealPlanContextValue {
   /** A finished period whose report the user hasn't seen — drives the takeover. */
   finishedPeriod: MealPlanPeriod | null;
   startPeriod: (input: MealPlan.StartPeriodInput) => Promise<MealPlanPeriod>;
+  /**
+   * Change the running plan's schedule — a day, a week, or hand-picked dates —
+   * keeping the period and every meal already planned inside it. Days that fall
+   * outside the new schedule are dropped (and un-scheduled); the count comes
+   * back so the caller can say so afterwards.
+   */
+  reschedulePlan: (choice: ScheduleChoice) => Promise<{ droppedDays: number }>;
+  /** Planned days from today onward that `choice` would no longer cover. */
+  daysDroppedBy: (choice: ScheduleChoice) => string[];
   endPeriodEarly: () => Promise<void>;
   extendActivePeriod: (newEndDate: string) => Promise<void>;
   /** Re-run a finished plan with the same settings, starting today. */
@@ -327,6 +340,39 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
       return period;
     },
     [nutritionTargets, refresh],
+  );
+
+  /**
+   * Which planned days a new schedule would let go of. Only days from today
+   * forward: a reschedule never reaches back into days the user already lived.
+   */
+  const daysDroppedBy = useCallback(
+    (choice: ScheduleChoice) => {
+      const keep = new Set(scheduleDays(choice));
+      return plannedDates.filter((d) => d >= currentDate && !keep.has(d));
+    },
+    [plannedDates, currentDate],
+  );
+
+  const reschedulePlan = useCallback(
+    async (choice: ScheduleChoice) => {
+      if (!activePeriod) return { droppedDays: 0 };
+      const dropped = daysDroppedBy(choice);
+      if (dropped.length > 0) await MealPlan.dropCustomDates(activePeriod.id, dropped);
+
+      const period = await MealPlan.reschedulePeriod(activePeriod.id, choice);
+      if (period) {
+        // The dropped days are visited explicitly: they may now sit outside the
+        // window, and a whole-period sweep would leave their old projection
+        // standing on the calendar still serving meals that no longer exist.
+        await syncCustomDays(period, dropped, currentDate);
+        await syncWholeCustomPeriod(period, currentDate);
+      }
+      await refresh();
+      await refreshTodayDiet();
+      return { droppedDays: dropped.length };
+    },
+    [activePeriod, daysDroppedBy, currentDate, refresh, refreshTodayDiet],
   );
 
   const endPeriodEarly = useCallback(async () => {
@@ -616,20 +662,15 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
   const clearAdHocResult = useCallback(() => setAdHocResult(null), []);
 
   // ------------------------------------------------------------ derived ----
+  // Counted over the days the plan actually covers, so a menu built from four
+  // picked dates reads "day 2 of 4" rather than day 2 of the fortnight they
+  // happen to be spread across.
   const periodProgress = useMemo(() => {
     if (!activePeriod) return null;
-    const total =
-      Math.round(
-        (new Date(activePeriod.endDate).getTime() -
-          new Date(activePeriod.startDate).getTime()) /
-          86_400_000,
-      ) + 1;
-    const elapsed =
-      Math.round(
-        (new Date(currentDate).getTime() - new Date(activePeriod.startDate).getTime()) /
-          86_400_000,
-      ) + 1;
-    const day = Math.max(1, Math.min(total, elapsed));
+    const days = periodDays(activePeriod);
+    const total = days.length;
+    if (total === 0) return null;
+    const day = Math.max(1, Math.min(total, days.filter((d) => d <= currentDate).length));
     return { day, total, remaining: Math.max(0, total - day) };
   }, [activePeriod, currentDate]);
 
@@ -644,6 +685,8 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
       periodProgress,
       finishedPeriod,
       startPeriod,
+      reschedulePlan,
+      daysDroppedBy,
       endPeriodEarly,
       extendActivePeriod,
       restartPeriod,
@@ -684,7 +727,8 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       trackingMode, setTrackingMode, activePeriod, periodProgress, finishedPeriod,
-      startPeriod, endPeriodEarly, extendActivePeriod, restartPeriod, buildReport,
+      startPeriod, reschedulePlan, daysDroppedBy, endPeriodEarly,
+      extendActivePeriod, restartPeriod, buildReport,
       dismissReport, periodArchive, customEntriesToday, getCustomEntries,
       setCustomMeal, removeCustomMeal, copyDayTo, repeatWeekPattern, plannedDates,
       savedMeals, saveMealForReuse, deleteSavedMeal, todayFoodLog, todayNutrients,

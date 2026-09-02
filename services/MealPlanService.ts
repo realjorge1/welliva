@@ -24,7 +24,10 @@ import {
   dateRange,
   isDateInPeriod,
   resolveEndDate,
+  scheduleDays,
+  sortedUniqueDates,
   toLocalDate,
+  type ScheduleChoice,
   type CustomMenu,
   type CustomMenuEntry,
   type MealPlanPeriod,
@@ -107,8 +110,14 @@ export interface StartPeriodInput {
   durationKind: PlanDuration;
   /** Defaults to today. Allows scheduling a plan to begin later. */
   startDate?: string;
-  /** Required when durationKind is "custom". */
+  /** Required when durationKind is "custom" and no dates were picked. */
   customEndDate?: string;
+  /**
+   * A "custom" plan made of individually picked days. Takes precedence over
+   * customEndDate: the window is stretched to cover the picks, and only the
+   * picked days are planned.
+   */
+  selectedDates?: string[];
   baseline?: Partial<PeriodBaseline>;
   restartedFromId?: string;
 }
@@ -140,7 +149,17 @@ export async function startPeriod(
       }
     }
 
-    const endDate = resolveEndDate(start, input.durationKind, input.customEndDate);
+    // Picked days stretch the window to cover them but never move the start
+    // earlier or later than the day the user set the plan up: a period that
+    // began tomorrow would not be *active*, and the planner would show its own
+    // setup screen again instead of the plan just created.
+    const picked = sortedUniqueDates(
+      (input.selectedDates ?? []).filter((d) => d >= start),
+    );
+    const endDate =
+      picked.length > 0
+        ? (picked[picked.length - 1] as string)
+        : resolveEndDate(start, input.durationKind, input.customEndDate);
     const label =
       input.label ??
       input.dietName ??
@@ -155,6 +174,7 @@ export async function startPeriod(
       durationKind: input.durationKind,
       startDate: start,
       endDate,
+      ...(picked.length > 0 ? { selectedDates: picked } : {}),
       status: start > today() ? "scheduled" : "active",
       baseline: { capturedAt: now, ...input.baseline },
       createdAt: now,
@@ -232,6 +252,93 @@ export async function markReportSeen(periodId: string): Promise<void> {
     if (!period || period.reportSeenAt) return;
     period.reportSeenAt = new Date().toISOString();
     await savePeriods(periods);
+  });
+}
+
+/**
+ * Change a running period's schedule WITHOUT restarting it.
+ *
+ * Re-choosing "a day / this week / these dates" must not go through
+ * {@link startPeriod}: that closes the incumbent and mints a new id, and custom
+ * menus are keyed by period id — so every meal the user had already planned
+ * would be orphaned by the act of changing their mind. This mutates the window
+ * in place instead, and the menu comes with it.
+ *
+ * DAYS ALREADY BEHIND US ARE KEPT. Rescheduling is a statement about the days
+ * ahead; shrinking the window must never delete a day the user has already
+ * eaten from, so the start date only ever moves earlier and past days that carry
+ * picks stay inside the selection.
+ *
+ * Dropping FUTURE days that already carry picks is the caller's decision, made
+ * before this is called (see MealPlanContext.reschedulePlan) — this function
+ * does not silently discard menu entries.
+ */
+export async function reschedulePeriod(
+  periodId: string,
+  choice: ScheduleChoice,
+): Promise<MealPlanPeriod | null> {
+  return withLock(async () => {
+    const periods = await getAllPeriods();
+    const period = periods.find((p) => p.id === periodId);
+    if (!period) return null;
+
+    const chosen = scheduleDays(choice);
+    if (chosen.length === 0) return period;
+
+    const date = today();
+    const keptPast = (await getPlannedDates(periodId)).filter((d) => d < date);
+    const covered = sortedUniqueDates([...keptPast, ...chosen]);
+    const first = covered[0] as string;
+    const last = covered[covered.length - 1] as string;
+
+    period.durationKind = choice.durationKind;
+    period.startDate = period.startDate < first ? period.startDate : first;
+    // `chosen` is anchored at the choice's start date, so the last covered day
+    // is never behind us and the window can't invert.
+    period.endDate = last;
+    if (choice.durationKind === "custom" && choice.selectedDates?.length) {
+      period.selectedDates = covered;
+    } else {
+      delete period.selectedDates;
+    }
+    // A period the user is actively re-planning is running, whatever a stale
+    // sweep decided while its old window was expiring.
+    if (period.status === "completed" || period.status === "ended-early") {
+      period.status = "active";
+      delete period.closedAt;
+      delete period.reportSeenAt;
+    }
+
+    await savePeriods(periods);
+    return period;
+  });
+}
+
+/**
+ * Forget every pick on the given dates — what "I'm planning fewer days now"
+ * means for the days that fell away. The projection on those dates is cleared
+ * separately by CustomMenuSchedule, which is what takes them off the calendar.
+ */
+export async function dropCustomDates(
+  periodId: string,
+  dates: string[],
+): Promise<number> {
+  return withLock(async () => {
+    const menus = await getAllMenus();
+    const menu = menus[periodId];
+    if (!menu) return 0;
+    let dropped = 0;
+    for (const date of dates) {
+      if (menu.entriesByDate[date]) {
+        delete menu.entriesByDate[date];
+        dropped++;
+      }
+    }
+    if (dropped === 0) return 0;
+    menu.updatedAt = new Date().toISOString();
+    menus[periodId] = menu;
+    await saveAllMenus(menus);
+    return dropped;
   });
 }
 

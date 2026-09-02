@@ -23,6 +23,20 @@
  * the schedule store, so a meal planned here is the meal the Diet screen serves
  * on the day, tickable and counted. See services/CustomMenuSchedule for why that
  * projection exists rather than a second reader.
+ *
+ * ── THE SCHEDULE IS A STEP, NOT A ONE-TIME GATE ─────────────────────────────
+ * "A day / this week / the days I pick" used to be shown only when no custom
+ * period existed, which meant the very first answer was permanent: reopen the
+ * planner and you landed straight in the day strip with no way back to the
+ * question. Changing your mind an hour later — "actually, just today" — was
+ * impossible without ending the plan.
+ *
+ * So the screen has two views and the schedule is reachable from both. Changing
+ * it RE-SCHEDULES the running period rather than starting a new one (see
+ * MealPlanService.reschedulePeriod): custom menus are keyed by period id, so
+ * restarting would orphan every meal already planned. Days that fall outside the
+ * new schedule are named and counted in a confirmation before they go, and days
+ * already behind us are never touched.
  */
 
 import { Ionicons } from "@expo/vector-icons";
@@ -39,11 +53,14 @@ import type { MealType } from "@/models/diet";
 import {
   addDays,
   dateRange,
+  formatDuration,
   parseLocalDate,
-  resolveEndDate,
+  periodDays,
+  scheduleDays,
   toLocalDate,
   type CustomMenuEntry,
   type PlanDuration,
+  type ScheduleChoice,
 } from "@/models/mealPlan";
 import * as Haptics from "@/utils/haptics";
 
@@ -61,6 +78,8 @@ export default function PlanMenuScreen() {
   const {
     activePeriod,
     startPeriod,
+    reschedulePlan,
+    daysDroppedBy,
     getCustomEntries,
     setCustomMeal,
     removeCustomMeal,
@@ -73,15 +92,37 @@ export default function PlanMenuScreen() {
 
   const isCustom = activePeriod?.mode === "custom";
 
-  // --- Setup state (only used before a custom period exists) ---------------
+  // --- Schedule state ------------------------------------------------------
+  // Shown before a plan exists AND whenever the user reopens the question. The
+  // three options are the same both times; only the button that commits them
+  // differs, because with a plan running there is something to preserve.
+  const [editingSchedule, setEditingSchedule] = useState(false);
   const [duration, setDuration] = useState<PlanDuration>("week");
   const [customEnd, setCustomEnd] = useState<string | null>(null);
+  const [pickedDates, setPickedDates] = useState<string[]>([]);
   const [starting, setStarting] = useState(false);
 
   // --- Planning state ------------------------------------------------------
   const [selectedDate, setSelectedDate] = useState(currentDate);
   const [entries, setEntries] = useState<CustomMenuEntry[]>([]);
   const [picking, setPicking] = useState<MealType | null>(null);
+
+  const showSchedule = !isCustom || editingSchedule;
+
+  /**
+   * Open the schedule question with the plan's CURRENT answer already filled
+   * in — including its days on the calendar, so "change one date" is one tap
+   * rather than a re-pick of all of them. Only days from today forward: the
+   * question is about what happens next.
+   */
+  const openSchedule = useCallback(() => {
+    if (activePeriod) {
+      setDuration(activePeriod.durationKind);
+      setCustomEnd(activePeriod.durationKind === "custom" ? activePeriod.endDate : null);
+      setPickedDates(periodDays(activePeriod).filter((d) => d >= currentDate));
+    }
+    setEditingSchedule(true);
+  }, [activePeriod, currentDate]);
 
   const loadDay = useCallback(
     async (date: string) => setEntries(await getCustomEntries(date)),
@@ -92,40 +133,126 @@ export default function PlanMenuScreen() {
     if (isCustom) void loadDay(selectedDate);
   }, [isCustom, selectedDate, loadDay, plannedDates.length]);
 
-  // Keep the selected day inside the period window.
+  // Keep the selected day on a day the plan actually covers. With hand-picked
+  // dates the gaps between them aren't plannable, so a stale selection has to
+  // move to a real day rather than merely into the window.
   useEffect(() => {
     if (!activePeriod) return;
-    if (selectedDate < activePeriod.startDate) setSelectedDate(activePeriod.startDate);
-    else if (selectedDate > activePeriod.endDate) setSelectedDate(activePeriod.endDate);
-  }, [activePeriod, selectedDate]);
+    const days = periodDays(activePeriod);
+    if (days.length === 0 || days.includes(selectedDate)) return;
+    setSelectedDate(days.find((d) => d >= currentDate) ?? (days[days.length - 1] as string));
+  }, [activePeriod, selectedDate, currentDate]);
 
   // ========================================================================
-  // SETUP — no custom period running yet
+  // SCHEDULE — which days am I planning? Asked before the first plan, and again
+  // any time the user reopens it.
   // ========================================================================
-  if (!isCustom) {
+  if (showSchedule) {
     const start = currentDate;
-    const end = resolveEndDate(start, duration, customEnd ?? undefined);
+    const choice: ScheduleChoice = {
+      durationKind: duration,
+      startDate: start,
+      customEndDate: customEnd,
+      selectedDates: pickedDates,
+    };
+    const chosenDays = scheduleDays(choice);
+    const lastDay = chosenDays[chosenDays.length - 1] ?? start;
+    // Only meaningful when there's already a plan; with none, nothing can drop.
+    const dropped = isCustom ? daysDroppedBy(choice) : [];
+    const noDaysPicked = duration === "custom" && pickedDates.length === 0;
+
+    const commit = async () => {
+      setStarting(true);
+      try {
+        if (isCustom) {
+          const { droppedDays } = await reschedulePlan(choice);
+          setEditingSchedule(false);
+          setSelectedDate(chosenDays.find((d) => d >= start) ?? start);
+          if (droppedDays > 0) {
+            Alert.alert(
+              "Schedule updated",
+              `${droppedDays} planned day${droppedDays === 1 ? " was" : "s were"} removed.`,
+            );
+          }
+        } else {
+          await startPeriod({
+            mode: "custom",
+            label: "My menu",
+            durationKind: duration,
+            startDate: start,
+            customEndDate: lastDay,
+            ...(duration === "custom" && pickedDates.length > 0
+              ? { selectedDates: pickedDates }
+              : {}),
+          });
+          setSelectedDate(chosenDays[0] ?? start);
+          setEditingSchedule(false);
+        }
+      } finally {
+        setStarting(false);
+      }
+    };
+
+    // Days already planned that the new schedule wouldn't cover are named
+    // before they go. Silently deleting a Thursday dinner someone chose is the
+    // one thing this screen must never do.
+    const onCommit = () => {
+      if (dropped.length === 0) {
+        void commit();
+        return;
+      }
+      const names = dropped.slice(0, 3).map(fmt).join(", ");
+      Alert.alert(
+        dropped.length === 1 ? "Drop a planned day?" : "Drop planned days?",
+        `${names}${dropped.length > 3 ? ` and ${dropped.length - 3} more` : ""} ${
+          dropped.length === 1 ? "is" : "are"
+        } outside the new schedule, and the meals planned on ${
+          dropped.length === 1 ? "it" : "them"
+        } will be removed. Days already behind you are untouched.`,
+        [
+          { text: "Keep it as it is", style: "cancel" },
+          { text: "Update schedule", style: "destructive", onPress: () => void commit() },
+        ],
+      );
+    };
 
     return (
       <Screen scroll contentStyle={styles.body}>
-        <ScreenHeader title="Plan your own menu" />
+        <ScreenHeader
+          title={isCustom ? "Change schedule" : "Plan your own menu"}
+          {...(isCustom ? { onBack: () => setEditingSchedule(false) } : {})}
+        />
 
-        <Card padding="lg">
-          <AppText variant="body" weight="700">
-            No diet, just your food
-          </AppText>
-          <AppText variant="caption" color="secondary" style={styles.para}>
-            {`Pick exactly what you want to eat on each day. Days you don't fill in stay empty — nothing gets chosen for you, and empty days aren't counted against you at the end.`}
-          </AppText>
-        </Card>
+        {isCustom && activePeriod ? (
+          <Card padding="lg">
+            <AppText variant="body" weight="700">
+              Planning {formatDuration(periodDays(activePeriod).length)} right now
+            </AppText>
+            <AppText variant="caption" color="secondary" style={styles.para}>
+              {`Pick a different stretch below and the meals you've already planned come with you. Days you've already had stay as they are.`}
+            </AppText>
+          </Card>
+        ) : (
+          <Card padding="lg">
+            <AppText variant="body" weight="700">
+              No diet, just your food
+            </AppText>
+            <AppText variant="caption" color="secondary" style={styles.para}>
+              {`Pick exactly what you want to eat on each day. Days you don't fill in stay empty — nothing gets chosen for you, and empty days aren't counted against you at the end.`}
+            </AppText>
+          </Card>
+        )}
 
         <AppText variant="body" weight="700">
-          How long?
+          Which days?
         </AppText>
         <PlanDurationPicker
           startDate={start}
           value={duration}
           customEndDate={customEnd}
+          customKind="dates"
+          selectedDates={pickedDates}
+          onDatesChange={setPickedDates}
           onChange={(d, ce) => {
             setDuration(d);
             setCustomEnd(ce);
@@ -133,27 +260,36 @@ export default function PlanMenuScreen() {
         />
 
         <Button
-          label={starting ? "Setting up…" : "Start planning"}
+          label={
+            starting
+              ? isCustom
+                ? "Updating…"
+                : "Setting up…"
+              : isCustom
+                ? "Update schedule"
+                : "Start planning"
+          }
           icon="create-outline"
           fullWidth
           loading={starting}
-          onPress={async () => {
-            setStarting(true);
-            try {
-              await startPeriod({
-                mode: "custom",
-                label: "My menu",
-                durationKind: duration,
-                startDate: start,
-                customEndDate: end,
-              });
-              setSelectedDate(start);
-            } finally {
-              setStarting(false);
-            }
-          }}
+          disabled={noDaysPicked}
+          onPress={onCommit}
         />
-        {activePeriod ? (
+        {noDaysPicked ? (
+          <AppText variant="caption" color="secondary" align="center">
+            Tap the days you want to plan on the calendar above.
+          </AppText>
+        ) : null}
+
+        {isCustom ? (
+          <Button
+            label="Back to planning"
+            variant="ghost"
+            fullWidth
+            disabled={starting}
+            onPress={() => setEditingSchedule(false)}
+          />
+        ) : activePeriod ? (
           <AppText variant="caption" color="secondary" align="center">
             This will end your current {activePeriod.label} plan.
           </AppText>
@@ -165,7 +301,10 @@ export default function PlanMenuScreen() {
   // ========================================================================
   // PLANNING
   // ========================================================================
-  const days = dateRange(activePeriod.startDate, activePeriod.endDate);
+  // The days this plan covers — every day of the window, or just the ones the
+  // user picked off the calendar.
+  const days = periodDays(activePeriod);
+  const pickedDaysPlan = (activePeriod.selectedDates?.length ?? 0) > 0;
   const plannedSet = new Set(plannedDates);
   const bySlot = (slot: MealType) => entries.filter((e) => e.slot === slot);
 
@@ -203,10 +342,31 @@ export default function PlanMenuScreen() {
     <Screen scroll contentStyle={styles.body}>
       <ScreenHeader title={activePeriod.label} />
 
-      <AppText variant="caption" color="secondary">
-        {fmt(activePeriod.startDate)} – {fmt(activePeriod.endDate)} · {days.length} days ·{" "}
-        {plannedDates.length} planned
-      </AppText>
+      {/* The schedule, and the way back to it. The answer to "which days?" is a
+          decision people revise — an hour in, or a week in — so it stays a
+          visible, tappable statement of what's running rather than a question
+          asked once at setup and then sealed. */}
+      <Pressable
+        onPress={openSchedule}
+        accessibilityRole="button"
+        accessibilityLabel={`Schedule: ${
+          pickedDaysPlan
+            ? `${days.length} picked days`
+            : `${fmt(activePeriod.startDate)} to ${fmt(activePeriod.endDate)}`
+        }. Change it.`}
+        accessibilityHint="Switch between a day, a week, or days you pick"
+        style={[styles.scheduleRow, { borderColor: colors.border }]}
+      >
+        <Ionicons name="calendar-outline" size={16} color={colors.textSecondary} />
+        <AppText variant="caption" color="secondary" style={styles.flex}>
+          {pickedDaysPlan
+            ? `${days.length} picked day${days.length === 1 ? "" : "s"} · ${plannedDates.length} planned`
+            : `${fmt(activePeriod.startDate)} – ${fmt(activePeriod.endDate)} · ${days.length} days · ${plannedDates.length} planned`}
+        </AppText>
+        <AppText variant="caption" weight="700" style={{ color: colors.primary }}>
+          Change
+        </AppText>
+      </Pressable>
 
       {/* --- Day strip ----------------------------------------------------- */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -396,35 +556,48 @@ export default function PlanMenuScreen() {
           <AppText variant="caption" color="secondary" style={{ marginTop: 2 }}>
             {`Planning a long stretch one meal at a time isn't realistic.`}
           </AppText>
+          {/* Both actions are clipped to days this plan actually covers. On a
+              picked-days plan the gaps between the picks are not days the user
+              chose, so filling them would plan food for dates they deliberately
+              left out — and "repeat every Monday" has no meaning at all. */}
           <View style={styles.bulkRow}>
             <Button
-              label="Copy to rest of week"
+              label={pickedDaysPlan ? "Copy to my other days" : "Copy to rest of week"}
               variant="tonal"
               size="sm"
               onPress={async () => {
-                const targets = dateRange(
-                  addDays(selectedDate, 1),
-                  minDate(addDays(selectedDate, 6), activePeriod.endDate),
-                );
+                const targets = pickedDaysPlan
+                  ? days.filter((d) => d > selectedDate)
+                  : dateRange(
+                      addDays(selectedDate, 1),
+                      minDate(addDays(selectedDate, 6), activePeriod.endDate),
+                    );
                 const n = await copyDayTo(selectedDate, targets);
-                Alert.alert("Copied", `Applied to ${n} day${n === 1 ? "" : "s"}.`);
-              }}
-            />
-            <Button
-              label="Repeat this week onward"
-              variant="tonal"
-              size="sm"
-              onPress={async () => {
-                const weekStart = mondayOf(selectedDate, activePeriod.startDate);
-                const n = await repeatWeekPattern(weekStart, activePeriod.endDate);
                 Alert.alert(
-                  "Repeated",
+                  "Copied",
                   n > 0
-                    ? `This week's pattern now fills ${n} more day${n === 1 ? "" : "s"}.`
-                    : "Nothing to repeat yet — plan a few days in this week first.",
+                    ? `Applied to ${n} day${n === 1 ? "" : "s"}.`
+                    : "No later days to copy onto.",
                 );
               }}
             />
+            {pickedDaysPlan ? null : (
+              <Button
+                label="Repeat this week onward"
+                variant="tonal"
+                size="sm"
+                onPress={async () => {
+                  const weekStart = mondayOf(selectedDate, activePeriod.startDate);
+                  const n = await repeatWeekPattern(weekStart, activePeriod.endDate);
+                  Alert.alert(
+                    "Repeated",
+                    n > 0
+                      ? `This week's pattern now fills ${n} more day${n === 1 ? "" : "s"}.`
+                      : "Nothing to repeat yet — plan a few days in this week first.",
+                  );
+                }}
+              />
+            )}
           </View>
         </Card>
       ) : null}
@@ -454,12 +627,13 @@ export default function PlanMenuScreen() {
 
 // ============================================================================
 
-function ScreenHeader({ title }: { title: string }) {
+/** `onBack` overrides leaving the screen — the schedule step goes back a VIEW. */
+function ScreenHeader({ title, onBack }: { title: string; onBack?: () => void }) {
   const { colors } = useColors();
   return (
     <View style={styles.modalHeader}>
       <Pressable
-        onPress={() => router.back()}
+        onPress={onBack ?? (() => router.back())}
         hitSlop={12}
         accessibilityRole="button"
         accessibilityLabel="Back"
@@ -498,6 +672,15 @@ const styles = StyleSheet.create({
   body: { gap: Spacing.lg, paddingBottom: 140 },
   para: { marginTop: Spacing.sm, lineHeight: 18 },
   modalHeader: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
+  scheduleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: Radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   strip: { flexDirection: "row", gap: Spacing.sm, paddingVertical: 2 },
   dayChip: {
     alignItems: "center",

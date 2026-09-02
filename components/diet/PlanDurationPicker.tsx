@@ -9,6 +9,16 @@
  * The picker deliberately shows the resolved window ("Mon 21 Jul → Sun 14 Sep ·
  * 8 weeks") for every option including the presets. A user committing to a
  * stretch of eating should see the actual dates before they commit, not after.
+ *
+ * ── TWO KINDS OF "CUSTOM" ───────────────────────────────────────────────────
+ * `customKind="range"` (the default, used when starting a DIET) means "pick an
+ * end date": the plan then runs every day from here to there, because a diet
+ * generates days for you and a diet with holes in it isn't a diet.
+ *
+ * `customKind="dates"` (used by "plan your own menu") means "pick the days" —
+ * any number of them, in any month, contiguous or not. Hand-planning is exactly
+ * the case where someone wants the 5th, the 9th and next Saturday and nothing in
+ * between, so tapping a day toggles it rather than closing a range.
  */
 
 import { Ionicons } from "@expo/vector-icons";
@@ -34,12 +44,17 @@ export interface PlanDurationPickerProps {
   onChange: (duration: PlanDuration, customEndDate: string | null) => void;
   /** How many months the calendar can scroll forward. */
   monthsAhead?: number;
+  /** What "Custom" means here. See the two-kinds note at the top of the file. */
+  customKind?: "range" | "dates";
+  /** The days picked so far, when customKind is "dates". */
+  selectedDates?: string[];
+  onDatesChange?: (dates: string[]) => void;
 }
 
-const OPTIONS: { key: PlanDuration; label: string; hint: string; icon: string }[] = [
-  { key: "day", label: "Just today", hint: "One day", icon: "today-outline" },
-  { key: "week", label: "This week", hint: "7 days", icon: "calendar-outline" },
-  { key: "custom", label: "Custom", hint: "Pick an end date", icon: "calendar-number-outline" },
+const OPTIONS: { key: PlanDuration; label: string; icon: string }[] = [
+  { key: "day", label: "Just today", icon: "today-outline" },
+  { key: "week", label: "This week", icon: "calendar-outline" },
+  { key: "custom", label: "Custom", icon: "calendar-number-outline" },
 ];
 
 export function PlanDurationPicker({
@@ -48,11 +63,25 @@ export function PlanDurationPicker({
   customEndDate,
   onChange,
   monthsAhead = 18,
+  customKind = "range",
+  selectedDates,
+  onDatesChange,
 }: PlanDurationPickerProps) {
   const { colors } = useColors();
 
+  const picksDates = customKind === "dates";
+  const picked = useMemo(
+    () => [...new Set(selectedDates ?? [])].sort(),
+    [selectedDates],
+  );
   const endDate = resolveEndDate(startDate, value, customEndDate ?? undefined);
   const totalDays = daysBetween(startDate, endDate) + 1;
+
+  const hint = (key: PlanDuration): string => {
+    if (key === "day") return "One day";
+    if (key === "week") return "7 days";
+    return picksDates ? "Pick the days" : "Pick an end date";
+  };
 
   return (
     <View style={styles.wrap}>
@@ -62,12 +91,17 @@ export function PlanDurationPicker({
           return (
             <Pressable
               key={opt.key}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`${opt.label}, ${hint(opt.key)}`}
               onPress={() => {
                 Haptics.selectionAsync().catch(() => {});
-                // Seed custom with a sensible month so the summary is never blank.
+                // In dates mode there is no end date to seed — the days the user
+                // taps ARE the schedule. Otherwise seed custom with a sensible
+                // month so the summary is never blank.
                 onChange(
                   opt.key,
-                  opt.key === "custom"
+                  opt.key === "custom" && !picksDates
                     ? (customEndDate ?? addDays(startDate, 29))
                     : null,
                 );
@@ -89,34 +123,66 @@ export function PlanDurationPicker({
                 {opt.label}
               </AppText>
               <AppText variant="caption" color="secondary" align="center">
-                {opt.hint}
+                {hint(opt.key)}
               </AppText>
             </Pressable>
           );
         })}
       </View>
 
-      {/* The resolved window — shown for every option, not just custom. */}
+      {/* What was chosen, resolved — shown for every option, not just custom.
+          Picked days get counted rather than bracketed: "Fri 5 → Sat 20" would
+          claim a fortnight the user never asked for. */}
       <View style={[styles.summary, { borderColor: colors.border }]}>
         <Ionicons name="time-outline" size={15} color={colors.textSecondary} />
-        <AppText variant="caption" color="secondary">
-          {formatLong(startDate)} → {formatLong(endDate)} ·{" "}
-          <AppText variant="caption" weight="700">
-            {formatDuration(totalDays)}
+        {value === "custom" && picksDates ? (
+          <AppText variant="caption" color="secondary" style={styles.flex}>
+            {picked.length === 0
+              ? "Tap the days you want to plan — as many as you like."
+              : picked.length === 1
+                ? formatLong(picked[0] as string)
+                : `${picked.length} days picked · ${formatLong(picked[0] as string)} → ${formatLong(
+                    picked[picked.length - 1] as string,
+                  )}`}
           </AppText>
-        </AppText>
+        ) : (
+          <AppText variant="caption" color="secondary" style={styles.flex}>
+            {formatLong(startDate)} → {formatLong(endDate)} ·{" "}
+            <AppText variant="caption" weight="700">
+              {formatDuration(totalDays)}
+            </AppText>
+          </AppText>
+        )}
       </View>
 
       {value === "custom" ? (
-        <MonthCalendar
-          startDate={startDate}
-          selected={customEndDate}
-          monthsAhead={monthsAhead}
-          onSelect={(date) => {
-            Haptics.selectionAsync().catch(() => {});
-            onChange("custom", date);
-          }}
-        />
+        picksDates ? (
+          <MonthCalendar
+            startDate={startDate}
+            multi={picked}
+            monthsAhead={monthsAhead}
+            onSelect={(date) => {
+              Haptics.selectionAsync().catch(() => {});
+              const next = picked.includes(date)
+                ? picked.filter((d) => d !== date)
+                : [...picked, date].sort();
+              onDatesChange?.(next);
+            }}
+            onClear={
+              picked.length > 0 ? () => onDatesChange?.([]) : undefined
+            }
+          />
+        ) : (
+          <MonthCalendar
+            startDate={startDate}
+            selected={customEndDate}
+            monthsAhead={monthsAhead}
+            onSelect={(date) => {
+              Haptics.selectionAsync().catch(() => {});
+              onChange("custom", date);
+            }}
+          />
+        )
       ) : null}
     </View>
   );
@@ -130,17 +196,25 @@ const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
 function MonthCalendar({
   startDate,
-  selected,
+  selected = null,
+  multi,
   monthsAhead,
   onSelect,
+  onClear,
 }: {
   startDate: string;
-  selected: string | null;
+  /** End-date mode: the one day that closes the range. */
+  selected?: string | null;
+  /** Days mode: every day picked so far. Its presence switches the mode. */
+  multi?: string[];
   monthsAhead: number;
   onSelect: (date: string) => void;
+  onClear?: () => void;
 }) {
   const { colors } = useColors();
   const [offset, setOffset] = useState(0);
+  const multiMode = multi !== undefined;
+  const pickedSet = useMemo(() => new Set(multi ?? []), [multi]);
 
   const start = parseLocalDate(startDate);
   const month = useMemo(() => {
@@ -157,6 +231,8 @@ function MonthCalendar({
           onPress={() => setOffset((o) => Math.max(0, o - 1))}
           disabled={offset === 0}
           hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Previous month"
         >
           <Ionicons
             name="chevron-back"
@@ -171,6 +247,8 @@ function MonthCalendar({
           onPress={() => setOffset((o) => Math.min(monthsAhead, o + 1))}
           disabled={offset >= monthsAhead}
           hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Next month"
         >
           <Ionicons
             name="chevron-forward"
@@ -199,62 +277,115 @@ function MonthCalendar({
         {cells.map((date, i) => {
           if (!date) return <View key={`e${i}`} style={styles.cell} />;
 
-          // The end date can't precede the start; earlier days are inert.
+          // A plan can't be made for a day that's already gone; earlier days
+          // are inert. In days mode the start date is an ordinary day — the user
+          // may well not want to plan today — so it is only filled if picked.
           const isBefore = date < startDate;
-          const isStart = date === startDate;
-          const isSelected = date === selected;
+          const isStart = !multiMode && date === startDate;
+          const isSelected = multiMode
+            ? pickedSet.has(date)
+            : date === selected;
           const inRange =
-            selected !== null && date > startDate && date < selected;
+            !multiMode && selected !== null && date > startDate && date < selected;
+          const filled = isSelected || isStart;
+          // The two ends of a range carry the band too, or the circles now
+          // sitting on them would punch a hole in each end of it.
+          const banded =
+            inRange ||
+            (!multiMode && selected !== null && selected !== startDate && filled);
 
+          // The day the schedule is anchored to — today, for every caller. Read
+          // off startDate rather than the clock: this component has no business
+          // owning a second one.
+          const isAnchor = date === startDate;
+
+          /*
+           * THE MARK GOES ON A CIRCLE INSIDE THE CELL, NOT ON THE CELL.
+           * Filling the whole 1/7-wide square made the selection a slab that
+           * ran edge to edge and fused with its neighbours — two picked days in
+           * a row read as one block, and nothing looked like it was marking a
+           * date. The cell stays the touch target; a circle sits inside it.
+           * Only the range tint spans the full cell, because a range is
+           * supposed to read as one continuous band.
+           */
           return (
             <Pressable
               key={date}
               disabled={isBefore}
               onPress={() => onSelect(date)}
+              accessibilityRole={multiMode ? "checkbox" : "button"}
+              accessibilityState={multiMode ? { checked: isSelected } : undefined}
+              accessibilityLabel={formatLong(date)}
               style={[
                 styles.cell,
                 styles.dayCell,
-                inRange ? { backgroundColor: `${colors.primary}14` } : null,
-                isSelected || isStart
-                  ? { backgroundColor: colors.primary, borderRadius: Radius.md }
-                  : null,
+                banded ? { backgroundColor: `${colors.primary}14` } : null,
               ]}
             >
-              <AppText
-                variant="caption"
-                weight={isSelected || isStart ? "800" : "500"}
-                style={{
-                  color: isSelected || isStart
-                    ? colors.background
-                    : isBefore
-                      ? colors.border
-                      : colors.text,
-                }}
+              <View
+                style={[
+                  styles.dayPill,
+                  filled ? { backgroundColor: colors.primary } : null,
+                  // Today keeps a ring when it isn't picked — in days mode it is
+                  // an ordinary day, so without one the grid has no anchor.
+                  !filled && isAnchor
+                    ? { borderWidth: 1.5, borderColor: colors.primary }
+                    : null,
+                ]}
               >
-                {Number(date.slice(8, 10))}
-              </AppText>
+                <AppText
+                  variant="caption"
+                  weight={filled ? "800" : "500"}
+                  style={{
+                    color: filled
+                      ? colors.background
+                      : isBefore
+                        ? colors.border
+                        : colors.text,
+                  }}
+                >
+                  {Number(date.slice(8, 10))}
+                </AppText>
+              </View>
             </Pressable>
           );
         })}
       </View>
 
       <View style={styles.quickRow}>
-        {[
-          { label: "2 weeks", days: 13 },
-          { label: "1 month", days: 29 },
-          { label: "3 months", days: 89 },
-          { label: "6 months", days: 179 },
-        ].map((q) => (
-          <Pressable
-            key={q.label}
-            onPress={() => onSelect(addDays(startDate, q.days))}
-            style={[styles.quickChip, { borderColor: colors.border }]}
-          >
-            <AppText variant="caption" weight="600">
-              {q.label}
-            </AppText>
-          </Pressable>
-        ))}
+        {multiMode ? (
+          onClear ? (
+            <Pressable
+              onPress={onClear}
+              accessibilityRole="button"
+              accessibilityLabel="Clear all picked days"
+              style={[styles.quickChip, { borderColor: colors.border }]}
+            >
+              <AppText variant="caption" weight="600">
+                Clear picked days
+              </AppText>
+            </Pressable>
+          ) : null
+        ) : (
+          [
+            { label: "2 weeks", days: 13 },
+            { label: "1 month", days: 29 },
+            { label: "3 months", days: 89 },
+            { label: "6 months", days: 179 },
+          ].map((q) => (
+            <Pressable
+              key={q.label}
+              onPress={() => onSelect(addDays(startDate, q.days))}
+              accessibilityRole="button"
+              accessibilityLabel={`End after ${q.label}`}
+              style={[styles.quickChip, { borderColor: colors.border }]}
+            >
+              <AppText variant="caption" weight="600">
+                {q.label}
+              </AppText>
+            </Pressable>
+          ))
+        )}
       </View>
     </Card>
   );
@@ -288,6 +419,7 @@ function formatLong(date: string): string {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   wrap: { gap: Spacing.md },
   options: { flexDirection: "row", gap: Spacing.sm },
   option: {
@@ -318,6 +450,19 @@ const styles = StyleSheet.create({
   grid: { flexDirection: "row", flexWrap: "wrap" },
   cell: { width: `${100 / 7}%`, aspectRatio: 1 },
   dayCell: { alignItems: "center", justifyContent: "center" },
+  /*
+   * Sized as a share of the cell rather than in points, so the circle keeps its
+   * proportion (and its gap from the next day) on a 320pt phone and a tablet
+   * alike. aspectRatio holds it round; the large radius rounds whatever that
+   * resolves to.
+   */
+  dayPill: {
+    width: "76%",
+    aspectRatio: 1,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   quickRow: {
     flexDirection: "row",
     flexWrap: "wrap",

@@ -68,6 +68,18 @@ export interface MealPlanPeriod {
   startDate: string;
   /** YYYY-MM-DD, inclusive. Equals startDate for a single-day period. */
   endDate: string;
+  /**
+   * The individual days a "custom" plan covers, when the user picked days off a
+   * calendar rather than a stretch of time — "the 5th, the 9th and both days of
+   * that weekend". Absent for day/week plans and for older custom periods, which
+   * cover every day between start and end.
+   *
+   * startDate/endDate still bracket the selection so that everything asking
+   * "which period governs date D?" keeps working unchanged; this field is what
+   * says which days inside that bracket are actually planned. Read it through
+   * {@link periodDays} rather than directly.
+   */
+  selectedDates?: string[];
   status: PeriodStatus;
   baseline: PeriodBaseline;
   createdAt: string;
@@ -79,20 +91,61 @@ export interface MealPlanPeriod {
   restartedFromId?: string;
 }
 
-/** Inclusive day count of a period. */
+/**
+ * The days a period actually plans, in order.
+ *
+ * For a day/week/range period that is every date in the window. For a period
+ * built from hand-picked dates it is only those dates — which is the whole point
+ * of picking them, so nothing should walk a custom period with `dateRange`.
+ */
+export function periodDays(period: {
+  startDate: string;
+  endDate: string;
+  selectedDates?: string[];
+}): string[] {
+  if (period.selectedDates && period.selectedDates.length > 0) {
+    return sortedUniqueDates(
+      period.selectedDates.filter(
+        (d) => d >= period.startDate && d <= period.endDate,
+      ),
+    );
+  }
+  return dateRange(period.startDate, period.endDate);
+}
+
+/** Does this period plan `date`? False for a gap between hand-picked days. */
+export function periodPlansDate(
+  period: { startDate: string; endDate: string; selectedDates?: string[] },
+  date: string,
+): boolean {
+  if (period.selectedDates && period.selectedDates.length > 0) {
+    return period.selectedDates.includes(date);
+  }
+  return isDateInPeriod(period, date);
+}
+
+/** Inclusive day count of a period — planned days only when days were picked. */
 export function periodLengthDays(period: {
   startDate: string;
   endDate: string;
+  selectedDates?: string[];
 }): number {
+  if (period.selectedDates && period.selectedDates.length > 0) {
+    return periodDays(period).length;
+  }
   return daysBetween(period.startDate, period.endDate) + 1;
 }
 
 /** How many days of a period have elapsed as of `today` (1-based, clamped). */
 export function periodDayIndex(
-  period: { startDate: string; endDate: string },
+  period: { startDate: string; endDate: string; selectedDates?: string[] },
   today: string,
 ): number {
   const total = periodLengthDays(period);
+  if (period.selectedDates && period.selectedDates.length > 0) {
+    const arrived = periodDays(period).filter((d) => d <= today).length;
+    return Math.max(1, Math.min(total, arrived));
+  }
   const idx = daysBetween(period.startDate, today) + 1;
   return Math.max(1, Math.min(total, idx));
 }
@@ -307,6 +360,44 @@ export function resolveEndDate(
   if (duration === "day") return start;
   if (duration === "week") return addDays(start, 6);
   return customEnd && customEnd >= start ? customEnd : start;
+}
+
+/** Sorted, de-duplicated dates. */
+export function sortedUniqueDates(dates: string[]): string[] {
+  return [...new Set(dates)].sort();
+}
+
+/**
+ * A schedule the user has chosen but not yet committed to — the three options
+ * behind "how long?": one day, this week, or the days they picked themselves.
+ */
+export interface ScheduleChoice {
+  durationKind: PlanDuration;
+  /** The day the schedule is anchored to — normally today. */
+  startDate: string;
+  /** Used by a "custom" choice that runs to an end date. */
+  customEndDate?: string | null;
+  /** Used by a "custom" choice made of individually picked days. */
+  selectedDates?: string[] | null;
+}
+
+/**
+ * Which days a choice covers. One function so the picker, the confirmation
+ * ("2 planned days fall outside this") and the stored period can never disagree
+ * about what "this week" or "those four days" means.
+ */
+export function scheduleDays(choice: ScheduleChoice): string[] {
+  if (choice.durationKind === "custom" && choice.selectedDates?.length) {
+    return sortedUniqueDates(
+      choice.selectedDates.filter((d) => d >= choice.startDate),
+    );
+  }
+  const end = resolveEndDate(
+    choice.startDate,
+    choice.durationKind,
+    choice.customEndDate ?? undefined,
+  );
+  return dateRange(choice.startDate, end);
 }
 
 /** "3 months, 2 weeks" style label for a period length. */

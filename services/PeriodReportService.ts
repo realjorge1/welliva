@@ -20,8 +20,8 @@
 
 import type { DietHistoryEntry, MealType } from "../models/diet";
 import {
-  dateRange,
   daysBetween,
+  periodDays,
   periodLengthDays,
   type DayOutcome,
   type MealPlanPeriod,
@@ -59,7 +59,10 @@ export interface BuildReportInput {
  */
 export function buildPeriodReport(input: BuildReportInput): PeriodReport {
   const { period, history, bodyLogs } = input;
-  const dates = dateRange(period.startDate, period.endDate);
+  // The days the plan actually covered — for a menu built from picked dates
+  // that's those dates, not every day in between, or the gaps the user never
+  // planned would be reported as days they failed to eat.
+  const dates = periodDays(period);
   const byDate = new Map(history.map((h) => [h.date, h]));
 
   // --- Day-by-day outcomes ------------------------------------------------
