@@ -25,7 +25,7 @@ import { useProfile, useSystem } from "@/contexts/AppContext";
 import { useBilling } from "@/contexts/BillingContext";
 import { useHabits } from "@/contexts/HabitsContext";
 import { EVERY_DAY, frequencyLabel, retiredSummaryLine } from "@/models/habit";
-import { canCreateHabit, habitLimit } from "@/services/billing";
+import { canCreateHabit, featureMinTier, habitLimit, TIER_NAME } from "@/services/billing";
 import { isDueToday } from "@/services/HabitService";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -144,7 +144,9 @@ export default function HabitsScreen() {
           onPress={() =>
             canAddHabit ? router.push("/habit/new" as any) : openUpgrade("habits")
           }
-          accessibilityLabel={canAddHabit ? "New habit" : "New habit — requires Welliva Plus"}
+          accessibilityLabel={
+            canAddHabit ? "New habit" : `New habit — requires ${TIER_NAME[featureMinTier("habits")]}`
+          }
           style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
         >
           <Ionicons
@@ -245,7 +247,7 @@ export default function HabitsScreen() {
                   accessibilityLabel={
                     canAddHabit
                       ? `Add ${s.name}, ${frequencyLabel(EVERY_DAY, s.weeklyGoal ?? null).toLowerCase()}`
-                      : `Add ${s.name} — requires Welliva Plus`
+                      : `Add ${s.name} — requires ${TIER_NAME[featureMinTier("habits")]}`
                   }
                   style={({ pressed }) => [
                     styles.suggestRow,
@@ -331,12 +333,24 @@ export default function HabitsScreen() {
       {/* The cap, stated plainly. Shown only once it's actually reached — a
           counter on an empty tracker is noise, and a limit you haven't met yet
           isn't information the user needs. */}
+      {/* The lock, stated as what it is.
+          Two ways this used to go wrong and now can't. The title interpolated
+          the free slot count — which is 0 on Free, so it read "You're using all
+          0 free habits", an allowance nobody was ever given. And the blurb sold
+          "Plus", a tier that was merged into Pro and no longer exists anywhere
+          but in this sentence. Both branches below name the boundary honestly
+          and both lead with what the user keeps: the three auto-tracked habits
+          are theirs, free, and are most of what this screen shows. */}
       {!canAddHabit && freeSlots !== null && (
         <ProLockCard
           lock="habits"
           compact
-          title={`You're using all ${freeSlots} free habits`}
-          blurb="Plus removes the limit, so you can track as many as you want. Your auto-tracked water, meal and workout habits never count toward it."
+          title={freeSlots === 0 ? undefined : `You're using all ${freeSlots} of your habits`}
+          blurb={
+            freeSlots === 0
+              ? "Food, water and workouts tick themselves off your logs, free, and always will. Pro adds habits you pick yourself — the suggested ones and your own — with no limit and full streak history."
+              : "Pro removes the limit, so you can track as many as you want. Your auto-tracked water, meal and workout habits never count toward it."
+          }
           style={styles.lockCard}
         />
       )}

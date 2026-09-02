@@ -77,8 +77,11 @@ export function effectiveTier(): Tier {
   if (__DEV__ && getDevTierOverride() !== null) return real;
 
   // The HIGHER of the two, never a replacement: a trial can lift a free user to
-  // Pro, but must never demote a paying one, and a Plus subscriber who trials
-  // Pro drops back to Plus — not to free — when the window closes.
+  // Pro, but must never demote a paying one. With one paid tier the two can no
+  // longer disagree, so this reads as belt-and-braces — keep it anyway. It is
+  // what makes the trial a pure addition to whatever someone already holds, and
+  // it is the line that stops a second tier from being mis-handled if one ever
+  // returns.
   const trial = trialTier();
   return trial ? higherTier(real, trial) : real;
 }

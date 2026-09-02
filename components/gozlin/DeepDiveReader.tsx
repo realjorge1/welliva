@@ -51,6 +51,7 @@
 import { AppText, Button } from "@/components/ui";
 import { useColors } from "@/components/ui/useColors";
 import { alpha, Radius, Spacing } from "@/constants/theme";
+import { featureMinTier, TIER_NAME, TIER_SHORT_NAME } from "@/services/billing";
 import { copyText } from "@/utils/clipboard";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "@/utils/haptics";
@@ -417,7 +418,7 @@ function Poster({
       </AppText>
       <AppText variant="bodyLg" color="secondary" style={styles.posterBody}>
         {locked
-          ? "Plus opens the evidence behind everything Gozlin tells you — what the research actually shows, the effect sizes, and the caveats that matter."
+          ? `${TIER_NAME[featureMinTier("deep-dive")]} opens the evidence behind everything Gozlin tells you — what the research actually shows, the effect sizes, and the caveats that matter.`
           : offline
             ? "Your coach still works offline. The reading behind an answer doesn't."
             : "Nothing was lost. Give it another moment."}
@@ -425,7 +426,11 @@ function Poster({
 
       <View style={styles.posterCta}>
         {locked ? (
-          <Button label="Upgrade to Plus" onPress={onUpgrade} fullWidth />
+          <Button
+            label={`Upgrade to ${TIER_SHORT_NAME[featureMinTier("deep-dive")]}`}
+            onPress={onUpgrade}
+            fullWidth
+          />
         ) : onRetry ? (
           <Button label="Try again" variant="tonal" onPress={onRetry} fullWidth />
         ) : null}

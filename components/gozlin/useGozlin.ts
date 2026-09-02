@@ -44,6 +44,7 @@ import { useHabits } from "@/contexts/HabitsContext";
 import {
   checkCoachQuota,
   checkDeepDive,
+  coachDailyLimit,
   spendCoachTurn,
   spendDeepDive,
   type MeteredState,
@@ -137,18 +138,32 @@ export interface PendingConfirm extends ToolConfirmRequest {
  * is `gentle`: they did nothing wrong by asking a fourth question.
  */
 function limitReply(quota: MeteredState): GozlinMessage {
+  /**
+   * THE ZERO CASE IS NOT A CAP, AND MUST NOT READ AS ONE.
+   *
+   * Free's `coachMessagesPerDay` is 0 (services/billing/tiers.ts), so this fires
+   * on the user's very FIRST message. Interpolating the limit the way the paid
+   * branches do produced "That's my 0 messages for today", which is nonsense
+   * dressed as an allowance — it tells someone they used up something they were
+   * never given, and it reads as a bug rather than a price.
+   *
+   * So zero gets its own sentence: what this is, what they keep, and no
+   * arithmetic. It also does NOT apologise. The tracking half of the app they
+   * are standing in is free and stays free, and saying so is the honest frame.
+   */
   const content =
-    quota.tier === "pro"
-      ? `We've covered a lot today — ${quota.limit} messages. Let's pick this up ` +
-        `tomorrow; I'll still be tracking everything in the meantime.`
-      : quota.tier === "plus"
-        ? `That's my ${quota.limit} messages for today — Plus is a generous ` +
-          `allowance, and Pro lifts it entirely. Either way I'll keep watching ` +
-          `your logs overnight.`
-        : `That's my ${quota.limit} messages for today. A plan raises the daily ` +
-          `limit and lets me remember our history, so the advice builds on ` +
-          `itself instead of starting over. Either way I'll keep watching your ` +
-          `logs — your plan, streaks and tracking don't change.`;
+    quota.limit === 0
+      ? `Talking things through is part of Welliva Pro — that's where I can read ` +
+        `your logs and answer properly. Everything you're already doing stays ` +
+        `free: your diet and its schedule, training, water, habits and Memory. ` +
+        `I'll keep watching all of it either way.`
+      : quota.tier === "pro"
+        ? `We've covered a lot today — ${quota.limit} messages. Let's pick this up ` +
+          `tomorrow; I'll still be tracking everything in the meantime.`
+        : `That's my ${quota.limit} messages for today. Pro raises the daily limit ` +
+          `to ${coachDailyLimit("pro")}, so a conversation can actually finish. ` +
+          `Either way I'll keep watching your logs — your plan, streaks and ` +
+          `tracking don't change.`;
   return {
     id: `gz_limit_${Date.now()}`,
     role: "coach",

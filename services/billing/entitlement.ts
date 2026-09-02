@@ -71,9 +71,8 @@ let current: Entitlement = FREE;
  * Every lock in the app has to be exercisable before the RevenueCat account
  * exists — otherwise the paywall and the gated screens are written blind and
  * first get tested during store review, which is the worst possible time. This
- * lets the upgrade screen's developer row flip the whole app between tiers
- * instantly, including the middle one, which is the tier most likely to be
- * mis-gated precisely because nobody can buy it yet.
+ * lets the upgrade screen's developer row flip the whole app between free and
+ * Pro instantly.
  *
  * Stripped in release: the setter no-ops and the getter is never consulted when
  * `__DEV__` is false, so a production bundle cannot be talked into granting Pro.
@@ -118,17 +117,19 @@ export function currentTier(): Tier {
   return stillValid(current) ? current.tier : "free";
 }
 
-/** True on the top tier. Reporting only — locks should ask `allows()`. */
+/** True on the paid tier. Reporting only — locks should ask `allows()`. */
 export function isPro(): boolean {
   return currentTier() === "pro";
 }
 
-/** True on the entry paid tier, specifically (not Pro). */
-export function isPlus(): boolean {
-  return currentTier() === "plus";
-}
-
-/** True on any paid tier — "is this person actually giving us money?" */
+/**
+ * True on any paid tier — "is this person actually giving us money?"
+ *
+ * Identical to `isPro()` now that Pro is the only paid tier, and kept apart from
+ * it on purpose: the two ask different questions, and they will diverge again
+ * the day a second tier or a lifetime SKU appears. Call the one that matches
+ * what you actually mean.
+ */
 export function isSubscriber(): boolean {
   return currentTier() !== "free";
 }
@@ -207,12 +208,16 @@ export async function setEntitlement(
 }
 
 /**
- * Read a persisted record, including one written before tiers existed.
+ * Read a persisted record, including one written under an older tier scheme.
  *
- * The v1 cache stored `{ isPro: boolean }`. An install that upgrades across this
- * change must not be downgraded to free on the first offline launch, so a legacy
- * `isPro: true` is read as `pro` — the tier that user actually paid for, since
- * Plus did not exist when the record was written.
+ * Two migrations run through here, and both resolve upward — a cache is read
+ * offline, before the store can correct it, so the only acceptable error is
+ * granting slightly too much for one launch rather than locking a paying user
+ * out of what they bought:
+ *
+ *  · v1 stored `{ isPro: boolean }` with no tier at all → `pro`.
+ *  · v2 stored `tier: "plus"` → `pro`, via `toTier`. Plus is a strict subset of
+ *    Pro, so this over-grants nothing a Plus subscriber wasn't already owed.
  */
 function parseStored(raw: string): Entitlement {
   const parsed = JSON.parse(raw) as Partial<Entitlement> & { isPro?: boolean };
@@ -240,9 +245,11 @@ export async function hydrateEntitlement(): Promise<Entitlement> {
     // back to the real tier mid-way through testing a lock.
     try {
       const flag = await AsyncStorage.getItem(DEV_OVERRIDE_KEY);
-      // "pro" / "free" also covers the pre-tiers dev flag, which used the same
-      // two words — a developer's stored switch survives the upgrade.
-      if (flag === "pro" || flag === "plus" || flag === "free") devOverride = flag;
+      // A stored "plus" is read as "pro" by `toTier` — a developer who left the
+      // switch on the retired tier lands on the surviving one rather than on a
+      // value the app no longer has limits for.
+      if (flag === "pro" || flag === "plus") devOverride = "pro";
+      else if (flag === "free") devOverride = "free";
     } catch {
       /* best-effort */
     }

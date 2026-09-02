@@ -1,62 +1,123 @@
 /**
- * PLAN COPY — how the three tiers describe themselves on the storefront, and how
+ * PLAN COPY — how the two tiers describe themselves on the storefront, and how
  * a price becomes the two lines a person actually reads.
  *
  * The numbers are NOT written here. Every quantity on a plan card is read from
  * services/billing/tiers.ts and every amount from the live store (or, where no
  * store exists, the list prices in services/billing/pricing.ts). A card is a
- * promise: if the copy says 25 messages and the gate allows 20, the user is
+ * promise: if the copy says 100 messages and the gate allows 25, the user is
  * right to call it a lie. Prose is authored; quantities are derived.
  *
  * WHY FREE IS A CARD AND NOT A FOOTNOTE
  *
- * The picker shows Free, Plus and Pro as three cards of the same shape, because
- * that is the actual choice — staying is a choice too. A storefront that hides
- * the tier you're on reads as a trap, and it also throws away the strongest
- * argument for paying: "3 messages a day" sitting directly above "25 a day" is
- * what makes the ask land.
+ * The picker shows Free and Pro as two cards of the same shape, because that is
+ * the actual choice — staying is a choice too. A storefront that hides the tier
+ * you're on reads as a trap. It also throws away the argument for paying: the
+ * two cards side by side are the whole pitch, one being the tracking app and the
+ * other being Gozlin.
  *
  * EACH CARD CARRIES ITS OWN DIFFERENCE — THERE IS NO COMPARISON TABLE
  *
- * A three-column table asked the reader to hold a row label on the left and a
+ * A multi-column table asked the reader to hold a row label on the left and a
  * cell on the right in their head at the same time, scan sideways, and work out
- * for themselves which column changed. It also said everything three times: a
- * feature every tier has burned a full row to print the same check mark thrice.
+ * for themselves which column changed. It also said everything twice over: a
+ * feature every tier has burned a full row to print the same check mark again.
  *
  * So the difference lives on the card instead. `highlights` is not a feature
  * dump — it is strictly WHAT THIS TIER ADDS TO THE ONE BELOW IT, which is the
- * only question a picker has to answer. Free lists what costs nothing; Plus
- * lists what Free does not have; Pro lists what Plus does not have. Anything
- * shared is carried by the "Everything in Free / Plus" line at the foot of the
- * card, once, instead of by a row of identical ticks.
+ * only question a picker has to answer. Free lists what costs nothing; Pro
+ * lists what Free does not have. Anything shared is carried by the "Everything
+ * in Free" line at the foot of the card, once, instead of by a row of identical
+ * ticks.
  *
- * The rule that survives from the table: a line that states a quantity
- * INTERPOLATES it from services/billing/tiers.ts. If the copy says 25 messages
- * and the gate allows 20, the user is right to call it a lie.
+ * PRO'S LIST IS LONG, AND IT HAS A RULE
+ *
+ * THERE IS ONE LINE PER LOCK. Every Pro entry below carries the `FeatureId` it
+ * sells, every `FeatureId` except `generic` appears exactly once, and
+ * `services/__tests__/planCopy.test.ts` fails the build if that stops being
+ * true. A lock that sends someone here and finds nothing on the card about what
+ * they just hit is the worst version of this screen; a line that promises
+ * something no lock actually withholds is the second worst, and it is the one
+ * that happens by accident when copy is edited without the gate.
+ *
+ * Within that, order by how much people pay for the line, not by code order.
+ *
+ * NEITHER CARD LISTS WHAT IT DOESN'T DO
+ *
+ * The free card briefly carried a second "Not included" list, on the reasoning
+ * that a zero AI allowance can't sell itself the way "3 a day" above "100 a day"
+ * once did. It is gone, and the reason it is gone is the same principle the
+ * comparison table lost to: each card states what it IS, and the difference
+ * between them is carried by the Pro card's own list.
+ *
+ * A tier that spends half its card apologising undersells itself. Free IS the
+ * whole tracking app — diets, fitness, logs, habits that tick themselves,
+ * Memory, streaks — and reading Pro's list is how you learn what it doesn't
+ * have. That is one place to maintain instead of two that can contradict each
+ * other, and it keeps the free card a description rather than a disclaimer.
+ *
+ * The rule that survives from the old comparison table: a line that states a
+ * quantity INTERPOLATES it from services/billing/tiers.ts. If the copy says 100
+ * messages and the gate allows 25, the user is right to call it a lie.
  */
 import type { Ionicons } from "@expo/vector-icons";
 
+/*
+ * IMPORTED FROM THE LEAF MODULES, NOT FROM `@/services/billing`.
+ *
+ * The barrel re-exports `config.ts`, which imports `react-native` for
+ * `Platform`, which drags the whole native module graph in behind it. This file
+ * is pure data and prose — it has no runtime dependency on the store, the SDK
+ * or the device — and going through the barrel was the only thing making it
+ * untestable outside a React Native runtime. `services/billing/pricing.ts` and
+ * `tiers.ts` import nothing at runtime, so reaching for them directly keeps the
+ * storefront's copy checkable in plain Node (components/__tests__/planCopy.test.ts).
+ *
+ * `Billing` is TYPE-ONLY and must stay that way: it loads react-native-purchases.
+ */
+import type { BillingPeriod, PlanOption } from "@/services/billing/Billing";
 import {
   annualSaving,
   formatMoney,
-  FREE_TIER,
-  historyWindowDays,
-  TIER_SHORT_NAME,
   LIST_CURRENCY,
   LIST_PRICES,
   perMonthOfAnnual,
-  PLUS_TIER,
-  PRO_TIER,
+} from "@/services/billing/pricing";
+/*
+ * `PRO_TIER` is deliberately NOT imported any more. Both lines that used to
+ * interpolate one of its numbers — 100 coach messages a day, 30 photo scans a
+ * day — now describe the capability instead of counting it, because both of
+ * those figures are fair-use ceilings against scripted abuse rather than the
+ * shape of the product. Quantities are still derived wherever a card states
+ * one (see `historySpan`); the rule is unchanged, there is simply less to state.
+ */
+import {
+  type FeatureId,
+  historyWindowDays,
   TIER_NAME,
-  type BillingPeriod,
-  type PlanOption,
+  TIER_SHORT_NAME,
   type Tier,
-} from "@/services/billing";
+} from "@/services/billing/tiers";
 
 export type PaidTier = Exclude<Tier, "free">;
 
-/** Card order, top to bottom. Cheapest first — the ladder reads upward. */
-export const PLAN_CARD_ORDER: readonly Tier[] = ["free", "plus", "pro"] as const;
+/** Card order, top to bottom. Free first — the ladder reads upward. */
+export const PLAN_CARD_ORDER: readonly Tier[] = ["free", "pro"] as const;
+
+/**
+ * One line on a plan card.
+ *
+ * `feature` is what makes the one-line-per-lock rule checkable instead of
+ * aspirational: a Pro line names the `FeatureId` it sells, so the test can pair
+ * the storefront against FEATURE_MIN_TIER and fail when they drift. Free lines
+ * describe things no gate withholds, so they carry no id.
+ */
+export interface PlanLine {
+  text: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  /** The lock this line sells. Required on Pro, absent on Free. */
+  feature?: FeatureId;
+}
 
 export interface PlanIdentity {
   /** Short name, as it appears on the card. */
@@ -66,15 +127,14 @@ export interface PlanIdentity {
   /**
    * WHAT THIS TIER ADDS TO THE ONE BELOW IT — not everything it includes.
    *
-   * Free lists what costs nothing. Plus lists only what Free lacks, Pro only
-   * what Plus lacks; the card's own "Everything in Free / Plus" foot line
-   * carries the rest. Repeating an inherited feature here is the bug this
-   * replaced a comparison table to avoid.
+   * Free lists what costs nothing. Pro lists only what Free lacks; the card's
+   * own "Everything in Free" foot line carries the rest. Repeating an inherited
+   * feature here is the bug this replaced a comparison table to avoid.
    *
    * Ordered by how much people actually pay for the line. Quantities are
    * interpolated from the tier limits, never typed out.
    */
-  highlights: string[];
+  highlights: PlanLine[];
   icon: keyof typeof Ionicons.glyphMap;
 }
 
@@ -96,36 +156,111 @@ function historySpan(tier: Tier): string {
 export const PLAN_IDENTITY: Record<Tier, PlanIdentity> = {
   free: {
     name: "Free",
-    tagline: "Everything you log, kept forever.",
+    /* Not "the basics" and not "a taste". Free is the entire tracking app, and
+       saying so is what makes the Pro card an addition rather than a ransom.
+       It deliberately does NOT end "no card, no trial, no expiry" — that is
+       FREE_PRICE.detail, which renders two lines below this one. */
+    tagline: "The whole tracking app — diets, fitness, logs and Memory.",
     highlights: [
-      "Every diet and recommendation in the catalog — the whole thing",
-      `${FREE_TIER.coachMessagesPerDay} coach messages a day, ${FREE_TIER.habits} habits`,
-      `${historySpan("free")} of charts and trends`,
-      "Streaks, reminders and data export — always",
+      {
+        text: "Every diet in the catalog — choose one, schedule it, track it",
+        icon: "restaurant-outline",
+      },
+      {
+        text: "Fitness in full: the activity library, your schedule and guided sessions",
+        icon: "barbell-outline",
+      },
+      {
+        text: "Unlimited food, water, weight and workout logs",
+        icon: "water-outline",
+      },
+      {
+        /* The three seeded LINKED habits, named individually. "3 habits" is a
+           quota; "food, water and workouts" is a description of what they'll
+           actually open the tab and see, and it is the honest version — those
+           three tick themselves off logs and never count against anything. */
+        text: "Three habits that track themselves: food, water and workouts",
+        icon: "repeat-outline",
+      },
+      {
+        text: "Memory — everything Welliva has worked out about you, in your words",
+        icon: "book-outline",
+      },
+      {
+        text: `${historySpan("free")} of charts and trends`,
+        icon: "stats-chart-outline",
+      },
+      {
+        text: "Streaks, achievements, reminders and data export — always",
+        icon: "trophy-outline",
+      },
     ],
     icon: "leaf-outline",
   },
-  plus: {
-    name: "Plus",
-    tagline: "Your whole app, unlocked.",
-    highlights: [
-      `${PLUS_TIER.coachMessagesPerDay} coach messages a day — up from ${FREE_TIER.coachMessagesPerDay} — and Gozlin remembers`,
-      "Unlimited habits, with full heatmaps and streak history",
-      `${historySpan("plus")} of charts and trends, not ${historySpan("free")}`,
-      "Cloud backup and every device you sign in on",
-      `Log a meal from a photo, ${PLUS_TIER.photoScansPerDay} a day`,
-      "The research behind any answer — evidence, effect sizes, caveats",
-    ],
-    icon: "sparkles",
-  },
   pro: {
     name: "Pro",
-    tagline: "And Gozlin thinks with you.",
+    /* One idea, not eight. Pro is Gozlin; everything below is that sentence
+       itemised. */
+    tagline: "Gozlin, unlocked — a coach that reads your data and answers back.",
     highlights: [
-      "Diet and workout plans generated for your body",
-      "Insights, correlations and nudges before you need them",
-      `Charts with no cutoff — ${historySpan("pro")}`,
-      `${PRO_TIER.coachMessagesPerDay} coach messages a day, and ${PRO_TIER.photoScansPerDay} photo meal logs`,
+      {
+        /* NO NUMBER HERE, deliberately. Pro's `coachMessagesPerDay` is a
+           fair-use ceiling against scripted abuse, not a feature — see the note
+           on PRO_TIER. Printing it turns "talk to your coach" into "you get
+           100 of something", which invites the reader to wonder what happens at
+           101 and to price a conversation by the message. The cap still exists
+           and is still enforced; it just isn't the pitch. */
+        text: "Gozlin chat — talk it through with a coach that has read your logs",
+        icon: "chatbubbles-outline",
+        feature: "coach-limit",
+      },
+      {
+        text: "Coaching you can open: insights, correlations and nudges before you need them",
+        icon: "bulb-outline",
+        feature: "insights",
+      },
+      {
+        /* Worded to match the poster in components/gozlin/DeepDiveReader, which
+           is where someone who tapped this and hit the lock has just been.
+           Deliberately NOT in quotation marks: the affordance in the thread is
+           labelled "Details", so quoting a phrase no button actually carries
+           would send them hunting for a control that doesn't exist. */
+        text: "The research behind any answer — evidence, effect sizes and caveats",
+        icon: "library-outline",
+        feature: "deep-dive",
+      },
+      {
+        text: "Diet and workout plans written for your body, not picked for it",
+        icon: "sparkles-outline",
+        feature: "ai-plans",
+      },
+      {
+        text: "Suggested-for-you and custom habits — unlimited, with full heatmaps",
+        icon: "repeat-outline",
+        feature: "habits",
+      },
+      {
+        text: "The Foods catalog — search anything you eat, log it at a real portion",
+        icon: "search-outline",
+        feature: "foods",
+      },
+      {
+        /* No count, for the same reason the chat line carries none: 30/day is
+           a fair-use ceiling, not the shape of the feature. */
+        text: "Log a meal from a photo — portions read, not guessed",
+        icon: "camera-outline",
+        feature: "photo-log",
+      },
+      {
+        text: `Charts with no cutoff — ${historySpan("pro")}, not ${historySpan("free")}`,
+        icon: "trending-up-outline",
+        feature: "history",
+      },
+      {
+        text: "Cloud backup, on every device you sign in on",
+        icon: "cloud-done-outline",
+        feature: "sync",
+      },
     ],
     icon: "diamond",
   },
@@ -140,10 +275,27 @@ export interface PriceView {
   unit: string;
   /** The monthly price, struck through, when the annual plan beats it. */
   strikethrough: string | null;
-  /** The small line under the price: what is actually charged, and the saving. */
+  /** The small line under the price: what is actually charged. */
   detail: string;
+  /**
+   * THE SAVING, AS MONEY, ALREADY FORMATTED — "$10.00". Null when there is
+   * nothing honest to claim (monthly selected, or a gap under 5%).
+   *
+   * This is a separate field rather than a phrase inside `detail` because the
+   * saving is the single strongest number on the storefront and it was being
+   * whispered: "…billed yearly · save $10.00" put it fourth in a grey footnote,
+   * behind a figure it has nothing to do with. The screen now renders it as its
+   * own block (see the SAVINGS BANNER note in app/(tabs)/upgrade.tsx), which it
+   * can only do if the amount arrives as a value instead of pre-baked prose.
+   *
+   * Formatted here, in the currency the LIVE PLAN came back in, because the
+   * screen has no business knowing which currency a price was quoted in.
+   */
+  saveAmount: string | null;
   /** Whole-percent annual saving, when there's one worth claiming. */
   savePercent: number | null;
+  /** What actually leaves the account, formatted — "$25.88". Annual only. */
+  billedTotal: string | null;
   /** The per-month amount as a number, for comparing tiers against each other. */
   perMonthAmount: number;
   /**
@@ -159,7 +311,9 @@ export const FREE_PRICE: PriceView = {
   unit: "forever",
   strikethrough: null,
   detail: "No card, no trial, no expiry",
+  saveAmount: null,
   savePercent: null,
+  billedTotal: null,
   perMonthAmount: 0,
   estimated: false,
 };
@@ -185,8 +339,8 @@ function amountFor(
  *
  * Annual is always quoted per month with the monthly price struck through beside
  * it, and the real yearly charge spelled out underneath. That's the only
- * presentation that lets someone compare Plus and Pro at a glance without doing
- * arithmetic, while still stating plainly what will leave their account today —
+ * presentation that lets someone compare the two periods at a glance without
+ * doing arithmetic, while still stating plainly what will leave their account —
  * quoting a year's price as if it were a monthly one is the dishonest version of
  * the same layout, and it is what makes people distrust an annual toggle.
  */
@@ -207,7 +361,9 @@ export function priceView(
       unit: "per month",
       strikethrough: null,
       detail: "Billed monthly · cancel any time",
+      saveAmount: null,
       savePercent: null,
+      billedTotal: null,
       perMonthAmount: monthly.amount.value,
       estimated: monthly.plan === null,
     };
@@ -220,60 +376,70 @@ export function priceView(
     headline: annual.plan?.pricePerMonthString ?? formatMoney(perMonth, currency),
     unit: "per month",
     strikethrough: saving ? monthly.amount.text : null,
-    detail: saving
-      ? `${annual.amount.text} billed yearly · save ${formatMoney(saving.amount, currency)}`
-      : `${annual.amount.text} billed yearly`,
+    // The saving has moved OUT of this line and into its own block. What is left
+    // is the one fact the big per-month figure doesn't state: the amount that
+    // actually leaves the account, and when.
+    detail: `${annual.amount.text} billed once a year · cancel any time`,
+    saveAmount: saving ? formatMoney(saving.amount, currency) : null,
     savePercent: saving?.percent ?? null,
+    billedTotal: annual.amount.text,
     perMonthAmount: perMonth,
     estimated: annual.plan === null,
   };
 }
 
-/** The best annual saving on offer, for the period switch's own badge. */
-export function bestAnnualSaving(tiers: readonly PaidTier[], plans: PlanOption[]): number | null {
-  const percents = tiers
-    .map((t) => priceView(t, "annual", plans).savePercent)
-    .filter((p): p is number => p !== null);
-  return percents.length > 0 ? Math.max(...percents) : null;
+/**
+ * The best annual saving on offer, for the period switch's own badge.
+ *
+ * Returns the MONEY as well as the percent. A "SAVE 28%" badge asks the reader
+ * to work out what 28% of a price they haven't read yet comes to; "SAVE $10.00"
+ * is the answer, and it is the number people actually weigh. The percent rides
+ * along for the cases where it flatters the offer more than the amount does —
+ * which, on a $2.99 subscription, it usually does not.
+ */
+export interface BestSaving {
+  /** Formatted money — "$10.00". */
+  amount: string;
+  percent: number;
+}
+
+export function bestAnnualSaving(
+  tiers: readonly PaidTier[],
+  plans: PlanOption[],
+): BestSaving | null {
+  let best: BestSaving | null = null;
+  let bestValue = 0;
+  for (const t of tiers) {
+    const view = priceView(t, "annual", plans);
+    if (view.saveAmount === null || view.savePercent === null) continue;
+    // Compare on the per-month gap rather than parsing the formatted string —
+    // a localised amount is not a number, and never will be.
+    const monthly = amountFor(t, "monthly", plans).amount.value;
+    const gap = monthly - view.perMonthAmount;
+    if (gap > bestValue) {
+      bestValue = gap;
+      best = { amount: view.saveAmount, percent: view.savePercent };
+    }
+  }
+  return best;
 }
 
 /**
- * The one-line argument under the Pro button, when Pro is close enough to Plus
- * that the price gap IS the argument.
+ * The one-line argument under the Pro button.
  *
- * Kept because the gap is a console value, not a constant: a regional price, a
- * promo, or a future repricing can put the two tiers back within a rounding
- * error of each other, and when that happens the strongest thing the card can
- * say is the true subtraction. Until then it stands down.
+ * This used to be a function. `proUpsell()` computed the live price gap between
+ * Plus and Pro and printed "only 70¢ a month more than Plus" — an argument that
+ * only exists when there is a cheaper paid tier to be measured against. With one
+ * paid tier the comparison has no second term, so the note goes back to naming
+ * what the money actually buys.
  *
- * Real subtraction on real prices, and `null` the moment "only" would be a
- * stretch rather than a fact — Pro cheaper, or a gap wider than Plus’s own
- * price. At the current $6.99 / $2.99 it returns null and the card falls back to
- * {@link PRO_VALUE_NOTE}, which is the honest replacement: when a tier costs
- * meaningfully more, it has to justify itself on what it does, not on how little
- * more it costs.
+ * It names Gozlin rather than a feature deliberately: the nine lines above it
+ * are all one thing, and a reader who has just scanned them needs the sentence
+ * that ties them together, not a tenth feature. Reasoning against this body,
+ * these logs and these conditions is also the only claim on this screen that a
+ * competitor cannot match by shipping a feature.
  */
-export function proUpsell(plans: PlanOption[], period: BillingPeriod): string | null {
-  if (period !== "annual" && period !== "monthly") return null;
-  const plus = priceView("plus", period, plans);
-  const pro = priceView("pro", period, plans);
-  const gap = pro.perMonthAmount - plus.perMonthAmount;
-  if (gap <= 0 || gap > plus.perMonthAmount) return null;
-  const currency = plans.find((p) => p.tier === "pro")?.currency ?? LIST_CURRENCY;
-  return `Only ${formatMoney(Math.round(gap * 100) / 100, currency)} a month more than Plus`;
-}
-
-/**
- * The fallback argument under the Pro button, used whenever {@link proUpsell}
- * declines to quote a price gap.
- *
- * Names the one thing Plus genuinely cannot do — generate against your own body
- * rather than match you to something pre-written. That distinction is the whole
- * reason the two tiers exist (see the note at the top of services/billing/
- * tiers.ts), so it is what the more expensive card should say.
- */
-export const PRO_VALUE_NOTE =
-  "The only tier that writes your plan from your own data";
+export const PRO_VALUE_NOTE = "Everything above is one thing: Gozlin, thinking about your data";
 
 /* ──────────────────────────── The personal line ─────────────────────────────
  * One true sentence about THIS user, shown above the plans.
@@ -331,9 +497,15 @@ export function historyReachLine(daysLogged: number, tier: Tier): string | null 
   );
 }
 
-/** Shown under the cards so free users know what never gets taken away. */
+/**
+ * Shown under the cards so free users know what never gets taken away.
+ *
+ * It matters more now than it did when Free had a coach allowance: a tier whose
+ * AI is switched off entirely needs to be told, in the last thing on the page,
+ * that the app they already use is not what is being held hostage.
+ */
 export const ALWAYS_FREE_NOTE =
-  "Logging food, water, weight and workouts is always free — along with every diet in the catalog, your streaks, achievements, reminders and data export.";
+  "Logging food, water, weight and workouts is always free — along with every diet in the catalog, your fitness schedule, your Memory, your streaks, achievements, reminders and data export. Cancelling Pro never touches any of it.";
 
 /** "per month" / "per year", for a price line. */
 export function periodLabel(period: BillingPeriod): string {

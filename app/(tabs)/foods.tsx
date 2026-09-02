@@ -48,6 +48,7 @@ import {
   FoodFilterSheet,
   FoodLookupSheet,
 } from "@/components/foods";
+import { ProLockCard } from "@/components/billing";
 import { ScreenTopBar } from "@/components/navigation";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -76,6 +77,7 @@ import {
 } from "@/constants/foodTags";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useProfile } from "@/contexts/AppContext";
+import { useAllows } from "@/contexts/BillingContext";
 import { useMealPlan } from "@/contexts/MealPlanContext";
 import type { MealType } from "@/models/diet";
 import {
@@ -187,6 +189,8 @@ export default function FoodsScreen() {
   const { colors, isDark } = useColors();
   const { logCatalogFood, removeLoggedFood } = useMealPlan();
   const { userBio } = useProfile();
+  /** The catalog is Pro. See the note above this screen's return. */
+  const allowsFoods = useAllows("foods");
 
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState<string | null>(null); // null = All
@@ -671,7 +675,12 @@ export default function FoodsScreen() {
          * captioned, and it mirrors the title/subtitle pair on the left so the
          * header reads as one row rather than a title with a button stuck on it.
          */
+        /* The scanner comes with the catalog, so it goes when the catalog goes.
+           Leaving a live camera button pinned above a lock card would be the
+           worst of both: the one control still working on a screen that just
+           said the feature is Pro. */
         titleRight={
+          !allowsFoods ? null : (
           <Pressable
             onPress={() => setScannerOpen(true)}
             hitSlop={10}
@@ -695,6 +704,7 @@ export default function FoodsScreen() {
               Scan barcode
             </AppText>
           </Pressable>
+          )
         }
       />
 
@@ -874,6 +884,32 @@ export default function FoodsScreen() {
       )}
     </Card>
   );
+
+  /*
+   * THE CATALOG IS PRO — but the tab is not hidden, and that is the point.
+   *
+   * Deleting the destination for free users would be tidier and worse: they'd
+   * never learn the feature exists, so it could never be a reason to upgrade.
+   * The screen keeps its name and its header and swaps the list for the lock,
+   * which is the standard shape (see components/billing/ProLockCard).
+   *
+   * WHAT IS NOT GATED, and must stay that way: logging. `/diet/log-food` and
+   * the diet plan's own tracking are the free paths to record a meal, and this
+   * screen is the open SEARCH across the whole dictionary — a different thing.
+   * If a future change routes free logging through here, this gate has to move
+   * with it, or the free tier loses data entry, which is the one boundary
+   * tiers.ts says never to cross.
+   *
+   * The return sits after every hook above it, so the branch cannot change the
+   * hook order between renders when an entitlement lands mid-session.
+   */
+  if (!allowsFoods) {
+    return (
+      <Screen header={header}>
+        <ProLockCard lock="foods" />
+      </Screen>
+    );
+  }
 
   return (
     // `scroll={false}`: the SectionList owns the scroll. Nesting it inside the

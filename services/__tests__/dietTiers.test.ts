@@ -51,6 +51,11 @@ describe("no tier gates the diet catalog", () => {
       "ai-plans",
       "coach-limit",
       "deep-dive",
+      // The whole-foods CATALOG — open search across the dictionary, the user's
+      // own foods, barcode and lookup. Not the diet catalog, and deliberately
+      // not logging: choosing a diet, scheduling it and tracking against it all
+      // stay free, which is what the test above is guarding.
+      "foods",
       "generic",
       "habits",
       "history",

@@ -741,7 +741,7 @@ export default function SettingsScreen() {
           // THE COPY IS TIER-AWARE because this has never been able to touch
           // the cloud, and the login reconcile adopts the remote profile
           // whenever there is no local one — which, right after a wipe, is
-          // always. On Plus/Pro the profile comes back at the next sign-in.
+          // always. On Pro the profile comes back at the next sign-in.
           lead: syncStatus.cloudDisabled
             ? "Nothing here is backed up, so this cannot be undone. Erased from this phone:"
             : "You'll start again at onboarding. Erased from this phone:",
@@ -1284,7 +1284,7 @@ export default function SettingsScreen() {
                           billing.entitlement.expiresAt,
                         ).toLocaleDateString()} · manage, change or restore`
                       : "Manage, change or restore your subscription"
-                    : "See Plus and Pro, restore a purchase, or stay on free"
+                    : `See ${TIER_NAME.pro}, restore a purchase, or stay on free`
                 }
                 onPress={() => router.push("/upgrade" as never)}
               />
@@ -1384,7 +1384,7 @@ export default function SettingsScreen() {
                     screens can be edited and tested like a brand-new user. Remove
                     before ship, with the `?preview=1` handling in onboarding.
                     The tier switch that used to sit beside it now lives on
-                    /upgrade, next to the table that says what each tier gets. */}
+                    /upgrade, under the cards that say what each tier gets. */}
                 <ListRow
                   icon="albums"
                   tone={colors.warning}

@@ -32,27 +32,44 @@ export const LIST_CURRENCY = "USD";
  * "two months free": at these amounts the yearly commitment is what makes the
  * subscription worth servicing, and the saving is the honest reason to take it.
  *
- * WHY PRO IS $6.99 AND NOT $3.50
+ * PRICING HISTORY, AND THE OPEN RISK AT $2.99 PRO
  *
- * Pro sells generated intelligence, and its cost of goods scales with use in a
- * way Plus’s does not: Plus unlocks depth over data the user already owns, which
- * costs cents a month to serve, while every Pro turn spends real Haiku
- * inference. At $3.50 against a 100/day ceiling the tier lost money on anyone
- * past roughly ten turns a day — precisely the engaged user it exists for, so
- * the better they liked it the more it cost us.
+ * Pro launched at $3.50, moved to $6.99 because its cost of goods scales with
+ * use — every Pro turn spends real Haiku inference, and at $3.50 against a
+ * 100/day ceiling the tier lost money on anyone past roughly ten turns a day —
+ * then came back down to $2.99, where it now stands as the single paid tier
+ * after Plus was merged into it.
  *
- * Pricing the inference properly is what lets the caps stay generous instead of
- * being quietly cut later, and a cap cut after launch costs far more trust than
- * a higher price at launch.
+ * The annual plan is priced BACKWARDS FROM THE CLAIM: the storefront says "save
+ * $10 a year", so the price is whatever makes that sentence exactly true.
+ * 12 × $2.99 = $35.88, so annual = $35.88 − $10.00 = **$25.88**. It was $25.99,
+ * which saved $9.89 — near enough to round to ten in conversation, and not near
+ * enough to print. A round number in the pitch has to be a round number in the
+ * arithmetic, or the badge is a rounding error the customer can catch with a
+ * calculator, and both stores treat a misstated saving as a misstated price.
  *
- * The consequence for the storefront: Pro is no longer “a dollar more than
- * Plus”, so its card cannot lean on the price gap. `proUpsell()` in
- * components/billing/planCopy.ts already returns null once that gap stops being
- * small, and the card argues the value instead — see `PRO_VALUE_NOTE` there.
+ * That is 28% — a shade under "two months free", and a normal, defensible
+ * discount rather than a lever. It is worth taking and worth badging; it is not
+ * steep enough to make the monthly plan a decoy, so the storefront still has to
+ * sell Pro on what it does rather than on the size of the annual saving.
+ *
+ * ⚠️ IF THE MONTHLY PRICE EVER MOVES, THE ANNUAL ONE MUST MOVE WITH IT or the
+ * $10 stops being true. services/__tests__/pricing.test.ts asserts the saving is
+ * exactly 10.00 and will fail rather than let the two drift apart quietly.
+ *
+ * ⚠️ WHAT THAT LEAVES LOAD-BEARING: `coachMessagesPerDay: 100` and
+ * `photoScansPerDay: 30` on `PRO_TIER` (tiers.ts) are the ONLY things between a
+ * heavy user and a loss on the subscription, and both are client constants.
+ *
+ * Size the ceiling against the ANNUAL plan, not the monthly one — an annual
+ * subscriber pays $25.88 a year, about $2.16 a month, and 100 Haiku turns a day
+ * has to fit inside that. Those limits MUST be enforced server-side
+ * (docs/monetization/setup.md Part 6): a client-only ceiling gives inference
+ * away at a loss with no backstop, and one abusing account costs more than
+ * several honest ones bring in.
  */
 export const LIST_PRICES: Record<Exclude<Tier, "free">, Record<"monthly" | "annual", number>> = {
-  plus: { monthly: 2.99, annual: 22.99 }, // save $12.89/yr — 36%
-  pro: { monthly: 6.99, annual: 58.99 }, //  save $24.89/yr — 30%
+  pro: { monthly: 2.99, annual: 25.88 }, // save exactly $10.00/yr — 28%
 };
 
 /**

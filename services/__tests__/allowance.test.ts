@@ -28,17 +28,33 @@ describe("lifetime allowances", () => {
     await resetAllowances();
   });
 
-  it("gives the free tier exactly three deep dives, then closes", async () => {
+  /**
+   * Free gets NO deep dives. The lifetime taste was three; it is now zero, and
+   * this test pins the arithmetic that a zero limit has to satisfy, because a
+   * `0` flowing through code written for a positive cap is exactly where an
+   * off-by-one gives the feature away.
+   */
+  it("closes the free tier's deep dives immediately — zero is a real limit", async () => {
     const limit = deepDiveLifetimeLimit("free");
-    expect(limit).toBe(3);
-    expect(FREE_TIER.deepDivesLifetime).toBe(3);
+    expect(limit).toBe(0);
+    expect(FREE_TIER.deepDivesLifetime).toBe(0);
 
+    const first = await checkAllowance("deepDive", limit);
+    expect(first.allowed).toBe(false);
+    expect(first.used).toBe(0);
+    expect(first.remaining).toBe(0);
+  });
+
+  it("still counts down correctly if a positive lifetime cap ever returns", async () => {
+    // The zero above is a pricing decision, not a property of the store. This
+    // keeps the counting behaviour covered so the cap can be re-tuned in
+    // tiers.ts without re-deriving whether the mechanism still works.
     for (let i = 1; i <= 3; i++) {
-      expect((await checkAllowance("deepDive", limit)).allowed).toBe(true);
-      await spendAllowance("deepDive", limit);
+      expect((await checkAllowance("deepDive", 3)).allowed).toBe(true);
+      await spendAllowance("deepDive", 3);
     }
 
-    const after = await checkAllowance("deepDive", limit);
+    const after = await checkAllowance("deepDive", 3);
     expect(after.allowed).toBe(false);
     expect(after.used).toBe(3);
     expect(after.remaining).toBe(0);
@@ -59,13 +75,12 @@ describe("lifetime allowances", () => {
   });
 
   it("treats a null limit as unlimited and counts nothing", async () => {
-    expect(deepDiveLifetimeLimit("plus")).toBeNull();
     expect(deepDiveLifetimeLimit("pro")).toBeNull();
 
     const state = await spendAllowance("deepDive", null);
     expect(state.allowed).toBe(true);
     expect(state.remaining).toBe(Number.POSITIVE_INFINITY);
-    // Nothing was recorded: a Plus user carries no count into a downgrade.
+    // Nothing was recorded: a Pro user carries no count into a downgrade.
     expect(await getAllowanceUsed("deepDive")).toBe(0);
   });
 

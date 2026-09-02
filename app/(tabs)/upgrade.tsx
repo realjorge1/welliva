@@ -10,25 +10,77 @@
  * every lock in the app opens THIS route with its own `source`, and the menu
  * opens it cold — one surface, one set of prices, one place to cancel.
  *
- * THE PICKER: THREE CARDS AND A PERIOD SWITCH
+ * THE PICKER: TWO CARDS AND A PERIOD SWITCH
  *
- * Free, Plus and Pro are three cards of the same shape, each carrying its own
- * price and its own button — the shape Google's own plan pickers settled on, and
- * for good reasons worth stating:
+ * Free and Pro are two cards of the same shape, each carrying its own price and
+ * its own button — the shape Google's own plan pickers settled on, and for good
+ * reasons worth stating:
  *
  *  · ONE CARD, ONE DECISION. A radio list with a shared button at the bottom
  *    makes you hold "which did I pick?" in your head while you scroll the
  *    benefits. A button inside each card means the thing you just read about is
  *    the thing the button buys.
- *  · FREE IS A CARD. Staying is a real choice, and "3 messages a day" sitting
- *    directly above "25 a day" is what makes the ask land. Hiding the tier
- *    someone is on reads as a trap.
+ *  · FREE IS A CARD. Staying is a real choice, and hiding the tier someone is
+ *    on reads as a trap. It used to earn its place by arithmetic too — "3
+ *    messages a day" sitting directly above "100 a day". Free's AI allowance is
+ *    0 now, so the contrast is categorical rather than numeric: one card is the
+ *    tracking app, the other is Gozlin.
+ *
+ * There were three cards until Plus was merged into Pro. Two changes that came
+ * with that and are worth not undoing by accident: the "BEST VALUE" badge is
+ * gone, because a badge that marks the only purchasable option is decoration
+ * pretending to be guidance; and the line under the Pro button is now a fixed
+ * value note rather than a computed price gap, since there is no cheaper paid
+ * tier left to measure against.
  *  · ANNUAL IS ALWAYS QUOTED PER MONTH, with the monthly price struck through
  *    beside it and the real yearly charge spelled out underneath. Per-month is
  *    the only unit in which two plans can be compared at a glance — but quoting
  *    a year's price as though it were monthly, without saying what actually
  *    leaves the account today, is the dishonest version of this same layout and
  *    is what teaches people to distrust an annual toggle.
+ *
+ * EXACTLY ONE CARD IS EVER HIGHLIGHTED
+ *
+ * The cards are a real single-selection control now, not two static panels with
+ * the paid one permanently lit. `selected` holds the tier the reader is looking
+ * at, tapping a card moves it, and the gold emphasis — border, tinted ground,
+ * primary button — follows `selected` and nothing else.
+ *
+ * It used to follow `recommended && !isCurrent`, which meant Pro was lit from
+ * the moment the screen opened and stayed lit no matter what the reader did.
+ * Two things were wrong with that. Emphasis that never moves is not emphasis,
+ * it is decoration — it tells you nothing, because it would look the same if
+ * you had chosen the other one. And a subscriber saw their own plan and the
+ * pitch for it lit simultaneously, which reads as being sold something they
+ * already own.
+ *
+ * WHERE THE SELECTION STARTS is the one judgement here: Pro for a free user,
+ * because that is the question they opened this screen to answer, and the
+ * CURRENT plan for a subscriber, because for them the screen is a receipt
+ * before it is a shop. Either way it is one card, and either way tapping the
+ * other one moves it.
+ *
+ * The active plan is marked independently, by the "YOUR PLAN" pill and by the
+ * tier chip beside the screen title — status is not emphasis, and conflating
+ * the two is what produced the double-highlight in the first place.
+ *
+ * THE SAVING IS STATED TWICE, IN MONEY, AND THAT IS DELIBERATE
+ *
+ * Annual saves exactly $10.00 a year — the price in services/billing/pricing.ts
+ * is set backwards from that claim so the round number is literally true rather
+ * than a rounded $9.89. It appears in two places, and they are not redundant
+ * because they answer different questions at different scroll positions:
+ *
+ *  1. UNDER THE PERIOD SWITCH (see PeriodSwitch) — the control that decides it.
+ *     An offer while you're on monthly, a receipt once you're on annual.
+ *  2. ON THE PRO CARD, under the price it applies to — because the card is a
+ *     long scroll below the switch, and that is where the decision is made.
+ *
+ * Both lead with the AMOUNT and let the percentage trail. "28%" is a ratio
+ * waiting for a number the reader hasn't reached yet; "$10.00" is the number.
+ * Neither is ever the fourth clause of a grey footnote, which is where this used
+ * to live ("$25.99 billed yearly · save $9.89") — that is where you put
+ * something you are obliged to disclose, not something you want read.
  *
  * WHAT IS NON-NEGOTIABLE HERE — both stores reject storefronts that get this
  * wrong, and it is also simply the honest way to charge someone:
@@ -48,24 +100,35 @@
  * DEGRADED STATES ARE THE NORMAL CASE IN DEVELOPMENT
  *
  * `react-native-purchases` is native, so in Expo Go and on web there is no SDK
- * and no offerings. The screen says so plainly rather than spinning forever —
- * that state is what a developer sees every day until the dev build lands, and
- * it is also what a user sees if the store is down. The cards still render in
- * full, feature lists and all: they are the honest description of the product
- * even when nothing can be bought.
+ * and no offerings. The cards still render in full, feature lists and all: they
+ * are the honest description of the product even when nothing can be bought.
+ *
+ * ONE OF THOSE STATES NO LONGER ANNOUNCES ITSELF. There used to be a card at
+ * the top reading "Everything is already unlocked in this build", shown when
+ * gating was off. It has been removed. It was a developer's console note
+ * wearing the same card as the product, it was the first thing anyone saw on
+ * the screen whose entire job is to sell, and its sentence is the single worst
+ * thing a storefront can say — that the paid tier is already free. The
+ * condition it described is still real and still handled; it simply renders
+ * nothing now, and the disabled buy buttons plus the "USD list price" note
+ * under them are what say so, quietly and only where it matters.
+ *
+ * The other degraded state DOES still speak, and must: in a store build where
+ * offerings genuinely failed to load, saying nothing would leave a real
+ * customer looking at prices they cannot buy with no explanation.
  *
  * THERE IS NO COMPARISON TABLE
  *
- * There was one, under the cards, and it is gone. A three-column grid made the
+ * There was one, under the cards, and it is gone. A multi-column grid made the
  * reader carry a row label on the left and a cell on the right at the same
  * time, scan sideways, and work out for themselves which column had changed —
- * and it printed every shared feature three times to say nothing. Each card now
- * carries its own difference instead: `PLAN_IDENTITY[tier].highlights` is
+ * and it printed every shared feature in every column to say nothing. Each card
+ * now carries its own difference instead: `PLAN_IDENTITY[tier].highlights` is
  * strictly WHAT THAT TIER ADDS TO THE ONE BELOW, headed with that question and
- * closed by an "Everything in Free / Plus" line that inherits the rest in one
- * row rather than a column of identical ticks. The argument for a plan now sits
- * on the card whose own button buys it, which is the point of card-shaped
- * pickers in the first place.
+ * closed by an "Everything in Free" line that inherits the rest in one row
+ * rather than a column of identical ticks. The argument for a plan now sits on
+ * the card whose own button buys it, which is the point of card-shaped pickers
+ * in the first place.
  */
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import {
@@ -79,9 +142,9 @@ import {
   PLAN_IDENTITY,
   priceView,
   PRO_VALUE_NOTE,
-  proUpsell,
   renewalDisclosure,
   toLockId,
+  type BestSaving,
   type PaidTier,
   type PriceView,
 } from "@/components/billing";
@@ -174,6 +237,20 @@ export default function UpgradeScreen() {
   // Annual leads: it is the plan with the margin, and at these prices it is also
   // genuinely the better deal — the switch opens on the answer we'd defend.
   const [period, setPeriod] = useState<BillingPeriod>("annual");
+
+  /**
+   * The one highlighted card. See "EXACTLY ONE CARD IS EVER HIGHLIGHTED".
+   *
+   * Seeded from the tier the reader is here about — Pro if they're free, their
+   * own plan if they're paying — and moved by tapping a card. It is deliberately
+   * NOT re-synced to `currentTier` afterwards: a purchase that completes on this
+   * screen leaves the highlight where the user put it, which is on the card that
+   * just turned into their plan anyway.
+   */
+  const [selected, setSelected] = useState<Tier>(() =>
+    currentTier === "free" ? "pro" : currentTier,
+  );
+
   const [busy, setBusy] = useState<"restore" | Tier | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -193,22 +270,26 @@ export default function UpgradeScreen() {
   /** Nothing can be bought until the store has answered with real prices. */
   const canBuy = isAvailable && plans.length > 0;
 
-  const bestSaving = useMemo(() => bestAnnualSaving(["plus", "pro"], plans), [plans]);
-  /**
-   * The line under the Pro button. `proUpsell` quotes the price gap only while
-   * that gap is small enough for "only" to be honest; at the current prices it
-   * declines, and the card argues what Pro does instead. Never leave the top
-   * card with no argument at all — it is the one being asked to justify itself.
-   */
-  const upsell = useMemo(() => proUpsell(plans, period) ?? PRO_VALUE_NOTE, [plans, period]);
+  const bestSaving = useMemo(() => bestAnnualSaving(["pro"], plans), [plans]);
 
   /**
    * A free trial is a NEW-customer offer, but the store reports it on the
-   * product regardless of who's asking. Someone already subscribed (a Plus
-   * member moving up to Pro) will be charged today, so the trial must not be
-   * shown to them — on the card, on the button, or in the disclosure.
+   * product regardless of who's asking. Someone already subscribed (a legacy
+   * Plus member the store still bills) will be charged today, so the trial must
+   * not be shown to them — on the card, on the button, or in the disclosure.
    */
   const trialOffered = !isSubscriber;
+
+  /**
+   * Move the highlight. A selection tap is a light haptic, never a heavy one —
+   * this is reading, not buying, and the buy button has its own confirmation.
+   */
+  const onSelect = useCallback((tier: Tier) => {
+    setSelected((prev) => {
+      if (prev !== tier) Haptics.selectionAsync().catch(() => {});
+      return tier;
+    });
+  }, []);
 
   const onPurchase = useCallback(
     async (tier: PaidTier) => {
@@ -223,11 +304,7 @@ export default function UpgradeScreen() {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
           // Deliberately stays on this screen: the cards re-render from the new
           // entitlement, so the receipt IS the screen.
-          setNotice(
-            tier === "pro"
-              ? `You're on ${TIER_NAME.pro}. Everything is unlocked.`
-              : `You're on ${TIER_NAME.plus}. Your whole app is unlocked.`,
-          );
+          setNotice(`You're on ${TIER_NAME[tier]}. Everything is unlocked.`);
           return;
         }
         // A cancellation is a normal outcome, not an error — say nothing at all.
@@ -327,41 +404,36 @@ export default function UpgradeScreen() {
         )}
       </Reveal>
 
-      {/* ── Period switch ─────────────────────────────────────────────────── */}
+      {/* ── Period switch, and the saving it decides ─────────────────────── */}
       <Reveal index={1}>
-        <View style={styles.switchRow}>
-          <SegmentedControl<BillingPeriod>
-            label="Billing period"
-            value={period}
-            onChange={setPeriod}
-            options={PERIODS.map((p) => ({
-              value: p,
-              label: p === "annual" ? "Annual" : "Monthly",
-            }))}
-            style={styles.flex}
-          />
-          {bestSaving ? (
-            <Pill label={`SAVE ${bestSaving}%`} tone={colors.gold} icon="pricetag" size="sm" />
-          ) : null}
-        </View>
+        <PeriodSwitch
+          period={period}
+          onChange={setPeriod}
+          saving={bestSaving}
+          onTakeAnnual={() => {
+            Haptics.selectionAsync().catch(() => {});
+            setPeriod("annual");
+          }}
+        />
       </Reveal>
 
-      {/* ── The store's own state, when it isn't ready to sell ─────────────── */}
+      {/* ── The store's own state, when it isn't ready to sell ───────────────
+             `!isAvailable && !gatingActive` renders NOTHING. That is the
+             developer build, and the card that used to sit here announced "every
+             paid feature is open to you" at the top of the storefront. See the
+             note in the header. The `gatingActive` branch stays: a real customer
+             in a store build that can't reach the store needs the sentence. */}
       {!isAvailable ? (
-        <Reveal index={2}>
-          <Card padding="lg" style={styles.block}>
-            <AppText variant="callout">
-              {gatingActive
-                ? "Subscriptions aren't available here"
-                : "Everything is already unlocked in this build"}
-            </AppText>
-            <AppText variant="footnote" color="secondary" style={styles.gapSm}>
-              {gatingActive
-                ? `In-app purchases need the build from the app store. The prices below are ${LIST_CURRENCY} list prices; the store shows yours in your own currency.`
-                : `This build has no store connection, so nothing can be bought and every paid feature is open to you. The prices below are ${LIST_CURRENCY} list prices — what a released build sells.`}
-            </AppText>
-          </Card>
-        </Reveal>
+        gatingActive ? (
+          <Reveal index={2}>
+            <Card padding="lg" style={styles.block}>
+              <AppText variant="callout">Subscriptions aren&apos;t available here</AppText>
+              <AppText variant="footnote" color="secondary" style={styles.gapSm}>
+                {`In-app purchases need the build from the app store. The prices below are ${LIST_CURRENCY} list prices; the store shows yours in your own currency.`}
+              </AppText>
+            </Card>
+          </Reveal>
+        ) : null
       ) : isLoadingPlans && plans.length === 0 ? (
         <Reveal index={2}>
           <Card padding="lg" style={[styles.block, styles.loadingRow]}>
@@ -389,7 +461,7 @@ export default function UpgradeScreen() {
         </Reveal>
       ) : null}
 
-      {/* ── The three plans ───────────────────────────────────────────────── */}
+      {/* ── The two plans. Exactly one is highlighted: `selected`. ────────── */}
       {PLAN_CARD_ORDER.map((tier, i) => (
         <Reveal key={tier} index={3 + i}>
           <PlanCard
@@ -400,8 +472,9 @@ export default function UpgradeScreen() {
             currentTier={currentTier}
             canBuy={canBuy}
             trialOffered={trialOffered}
-            recommended={tier === RECOMMENDED}
-            note={tier === RECOMMENDED ? upsell : null}
+            selected={tier === selected}
+            onSelect={() => onSelect(tier)}
+            note={tier === RECOMMENDED ? PRO_VALUE_NOTE : null}
             busy={busy === tier}
             disabled={busy !== null}
             onBuy={() => void onPurchase(tier as PaidTier)}
@@ -495,6 +568,113 @@ export default function UpgradeScreen() {
 /* ─────────────────────────────── Sub-views ─────────────────────────────────*/
 
 /**
+ * The billing-period control, and the saving that choosing annual is worth.
+ *
+ * WHAT THIS REPLACED, AND WHY IT WASN'T GOOD ENOUGH
+ *
+ * A small `Pill` reading "SAVE 28%" sat in a row beside the segmented control,
+ * sharing the width with it. It failed in every way a component can:
+ *
+ *  · IT WAS SQUEEZED. Sharing a row with a two-option switch left it a sliver,
+ *    so the one number the screen most wants read was rendered at caption size
+ *    in the corner, and on a narrow phone it pushed the switch off its own
+ *    natural width.
+ *  · IT SAID THE WRONG QUANTITY. "28%" of what? The reader hasn't reached a
+ *    price yet — the cards are below the fold. A percentage is a ratio waiting
+ *    for a number; "$10.00" IS the number.
+ *  · IT DID NOTHING. It described a benefit of the option NOT currently
+ *    selected, sitting inches from the control that would select it, and was
+ *    not itself tappable.
+ *
+ * So the switch now gets the full width on its own line, and the saving gets a
+ * full-width band underneath it that changes state with the switch:
+ *
+ *  · ON MONTHLY it is an OFFER, and it is pressable: "Switch to annual and save
+ *    $10.00 a year ›". One tap does the thing it describes.
+ *  · ON ANNUAL it is a RECEIPT, not a button: "You're saving $10.00 a year",
+ *    with the percentage trailing in a quieter weight for anyone who wants the
+ *    ratio. Nothing to press, because it is already done.
+ *
+ * The amount leads in both states and the percent never appears without it.
+ */
+function PeriodSwitch({
+  period,
+  onChange,
+  saving,
+  onTakeAnnual,
+}: {
+  period: BillingPeriod;
+  onChange: (p: BillingPeriod) => void;
+  /** Null when there is no saving worth claiming — the band renders nothing. */
+  saving: BestSaving | null;
+  onTakeAnnual: () => void;
+}) {
+  const { colors, isDark } = useColors();
+  const onAnnual = period === "annual";
+
+  return (
+    <View style={styles.switchBlock}>
+      <SegmentedControl<BillingPeriod>
+        label="Billing period"
+        value={period}
+        onChange={onChange}
+        options={PERIODS.map((p) => ({
+          value: p,
+          label: p === "annual" ? "Annual" : "Monthly",
+        }))}
+      />
+
+      {saving ? (
+        <Pressable
+          // Pressable only when it has something to do. On annual this is a
+          // statement of fact, and a "button" that cannot act is worse than
+          // plain text — it invites a tap and answers with nothing.
+          onPress={onAnnual ? undefined : onTakeAnnual}
+          disabled={onAnnual}
+          accessibilityRole={onAnnual ? "text" : "button"}
+          accessibilityLabel={
+            onAnnual
+              ? `You are saving ${saving.amount} a year, ${saving.percent} percent off`
+              : `Switch to annual billing and save ${saving.amount} a year`
+          }
+          style={({ pressed }) => [
+            styles.saveBand,
+            {
+              backgroundColor: alpha(colors.gold, onAnnual ? (isDark ? 0.18 : 0.13) : 0.07),
+              borderColor: alpha(colors.gold, onAnnual ? 0.55 : 0.3),
+              opacity: pressed ? 0.7 : 1,
+            },
+          ]}
+        >
+          <View style={[styles.saveMark, { backgroundColor: alpha(colors.gold, 0.18) }]}>
+            <Ionicons name="pricetag" size={15} color={colors.gold} />
+          </View>
+
+          <View style={styles.flex}>
+            {/* The money is the headline, at headline size. Everything that
+                qualifies it is a size smaller and underneath. */}
+            <AppText variant="headline" style={{ color: colors.gold }}>
+              {onAnnual ? `You're saving ${saving.amount} a year` : `Save ${saving.amount} a year`}
+            </AppText>
+            <AppText variant="caption" color="tertiary" style={styles.gapXs}>
+              {onAnnual
+                ? `${saving.percent}% off paying month to month`
+                : "Tap to switch to annual billing"}
+            </AppText>
+          </View>
+
+          {onAnnual ? (
+            <Ionicons name="checkmark-circle" size={20} color={colors.gold} />
+          ) : (
+            <Ionicons name="chevron-forward" size={18} color={colors.gold} />
+          )}
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+/**
  * The subscriber's own card: what they have, until when, and the way out.
  *
  * "Ends" vs "Renews" is not a detail — someone who has already cancelled and
@@ -534,9 +714,7 @@ function CurrentPlanCard({
       </View>
 
       <AppText variant="footnote" color="tertiary" style={styles.gapMd}>
-        {tier === "pro"
-          ? "Thank you — it's what pays for the AI behind your coaching and plans."
-          : "Pro adds plans generated for your body, insights across your logs and coaching with no daily cap."}
+        Thank you — it&apos;s what pays for the AI behind your coaching and plans.
       </AppText>
 
       <Button
@@ -556,6 +734,15 @@ function CurrentPlanCard({
  * The button is the card's whole point, so it states the actual next action
  * rather than a generic "select" — buy it, keep it, or nothing at all when the
  * tier is already included in a higher one the user holds.
+ *
+ * THE WHOLE CARD IS A SELECTION TARGET, and the button inside it is not. Both
+ * are pressable and they do different things: the card moves the highlight, the
+ * button spends money. Nesting them is safe here because the button is a real
+ * `Pressable` that stops the event, and it is worth the care — a card you can
+ * only select by hitting its 40px header is a card nobody selects.
+ *
+ * `accessibilityState.selected` carries the highlight to screen readers, which
+ * a border colour cannot.
  */
 function PlanCard({
   tier,
@@ -565,7 +752,8 @@ function PlanCard({
   currentTier,
   canBuy,
   trialOffered,
-  recommended,
+  selected,
+  onSelect,
   note,
   busy,
   disabled,
@@ -580,8 +768,10 @@ function PlanCard({
   currentTier: Tier;
   canBuy: boolean;
   trialOffered: boolean;
-  recommended: boolean;
-  /** A line under the button — "only $0.51 a month more than Plus". */
+  /** The one highlighted card. Exactly one is true at a time. */
+  selected: boolean;
+  onSelect: () => void;
+  /** A line under the button — what the money actually buys. */
   note: string | null;
   busy: boolean;
   disabled: boolean;
@@ -594,32 +784,54 @@ function PlanCard({
   const isCurrent = tier === currentTier;
   /** Already covered by a higher tier the user holds — nothing to sell. */
   const included = !isCurrent && tierAtLeast(currentTier, tier);
-  const highlighted = recommended && !isCurrent && !included;
 
   return (
-    <View
+    <Pressable
+      onPress={onSelect}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      accessibilityLabel={`${identity.name} plan, ${price.headline} ${price.unit}${
+        isCurrent ? ", your current plan" : ""
+      }`}
       style={[
         styles.planCard,
         {
-          borderColor: isCurrent ? colors.gold : highlighted ? alpha(colors.gold, 0.55) : colors.border,
-          borderWidth: isCurrent || highlighted ? 2 : 1,
-          backgroundColor: highlighted
-            ? alpha(colors.gold, isDark ? 0.08 : 0.06)
-            : alpha(colors.surface, isDark ? 0.5 : 1),
+          // Emphasis follows selection and ONLY selection. The current plan is
+          // marked by its pill, not by being lit — see the header note.
+          borderColor: selected ? colors.gold : colors.border,
+          borderWidth: selected ? 2 : StyleSheet.hairlineWidth,
+          backgroundColor: selected
+            ? alpha(colors.gold, isDark ? 0.08 : 0.05)
+            : alpha(colors.surface, isDark ? 0.4 : 1),
         },
       ]}
     >
       {/* Name + status */}
       <View style={styles.planHead}>
-        <Ionicons name={identity.icon} size={17} color={colors.gold} />
+        <View
+          style={[
+            styles.planIcon,
+            {
+              backgroundColor: alpha(
+                selected ? colors.gold : colors.textTertiary,
+                selected ? 0.16 : 0.1,
+              ),
+            },
+          ]}
+        >
+          <Ionicons
+            name={identity.icon}
+            size={16}
+            color={selected ? colors.gold : colors.textSecondary}
+          />
+        </View>
         <AppText variant="headline" style={styles.flex}>
           {identity.name}
         </AppText>
-        {isCurrent ? (
-          <Pill label="YOUR PLAN" tone={colors.gold} size="sm" />
-        ) : highlighted ? (
-          <Pill label="BEST VALUE" tone={colors.gold} size="sm" solid />
-        ) : null}
+        {/* No "BEST VALUE" badge: with one paid card it would mark the only
+            thing that can be bought, which is decoration pretending to be
+            guidance. The card's own emphasis already carries it. */}
+        {isCurrent ? <Pill label="YOUR PLAN" tone={colors.gold} size="sm" /> : null}
       </View>
 
       <AppText variant="footnote" color="secondary" style={styles.planTagline}>
@@ -640,13 +852,37 @@ function PlanCard({
             {price.unit}
           </AppText>
         </View>
-        {price.savePercent ? (
-          <Pill label={`−${price.savePercent}%`} tone={colors.success} size="sm" />
-        ) : null}
       </View>
       <AppText variant="footnote" color="tertiary">
         {price.detail}
       </AppText>
+
+      {/* ── THE SAVING, IN MONEY ─────────────────────────────────────────────
+             Its own block, full width, gold, directly under the price it is
+             about. Previously the tail of the grey line above. The amount leads
+             and the percentage follows it in a lighter weight: "$9.89" is a
+             thing you can picture, "28%" is homework. */}
+      {price.saveAmount ? (
+        <View
+          style={[
+            styles.saveBanner,
+            {
+              backgroundColor: alpha(colors.gold, isDark ? 0.16 : 0.12),
+              borderColor: alpha(colors.gold, 0.4),
+            },
+          ]}
+        >
+          <Ionicons name="pricetag" size={15} color={colors.gold} />
+          <AppText variant="callout" weight="700" style={{ color: colors.gold }}>
+            {`Save ${price.saveAmount} a year`}
+          </AppText>
+          {price.savePercent ? (
+            <AppText variant="footnote" style={{ color: alpha(colors.gold, 0.85) }}>
+              {`· ${price.savePercent}% off`}
+            </AppText>
+          ) : null}
+        </View>
+      ) : null}
 
       {/* Action */}
       <View style={styles.planAction}>
@@ -666,11 +902,9 @@ function PlanCard({
             label={
               trialOffered && plan?.trialDays
                 ? `Start ${plan.trialDays}-day free trial`
-                : currentTier === "plus"
-                  ? "Upgrade to Pro"
-                  : `Get ${identity.name}`
+                : `Get ${identity.name}`
             }
-            variant={highlighted ? "primary" : "tonal"}
+            variant={selected ? "primary" : "tonal"}
             loading={busy}
             disabled={disabled || !canBuy || !plan}
             onPress={onBuy}
@@ -707,19 +941,24 @@ function PlanCard({
           {tier === "free" ? "What you get" : `What ${identity.name} adds`}
         </AppText>
         {identity.highlights.map((h) => (
-          <View key={h} style={styles.highlightRow}>
+          <View key={h.text} style={styles.highlightRow}>
+            {/* Each line carries its own glyph rather than a column of identical
+                ticks. Nine identical check marks is a texture, not a list — you
+                stop reading it at the third. A distinct icon per line lets
+                someone scanning for the ONE thing they came here about (the
+                camera, the search, the chat bubble) find it without reading. */}
             <Ionicons
-              name="checkmark-circle"
+              name={h.icon}
               size={15}
-              color={tier === "free" ? colors.textTertiary : colors.gold}
+              color={tier === "free" ? colors.textSecondary : colors.gold}
               style={styles.highlightIcon}
             />
             <AppText variant="footnote" color="secondary" style={styles.flex}>
-              {h}
+              {h.text}
             </AppText>
           </View>
         ))}
-        {tier === "plus" || tier === "pro" ? (
+        {tier !== "free" ? (
           <View style={styles.highlightRow}>
             <Ionicons
               name="add-circle-outline"
@@ -728,7 +967,7 @@ function PlanCard({
               style={styles.highlightIcon}
             />
             <AppText variant="footnote" color="tertiary" style={styles.flex}>
-              {tier === "plus" ? "Everything in Free" : "Everything in Plus"}
+              Everything in Free
             </AppText>
           </View>
         ) : null}
@@ -738,22 +977,24 @@ function PlanCard({
           switch is above the fold and cards are scrolled past it. */}
       {tier !== "free" ? (
         <AppText variant="caption" color="tertiary" style={styles.planPeriodNote}>
-          {period === "annual" ? "Yearly billing" : "Monthly billing"}
+          {period === "annual"
+            ? `Yearly billing${price.billedTotal ? ` · ${price.billedTotal} today` : ""}`
+            : "Monthly billing"}
         </AppText>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 
 /**
- * DEV-ONLY tier switch: real → free → plus → pro → real.
+ * DEV-ONLY tier switch: real → free → pro → real.
  *
  * Every lock has to be walkable before the RevenueCat account exists, otherwise
- * the free and Plus experiences first get tested during store review. It lives
- * here rather than in Settings because this is the screen that shows what each
- * tier is — flipping and watching which card claims "YOUR PLAN" and which
- * buttons fall back to "Included in…" is the fastest way to check a gate.
- * Stripped from release builds entirely.
+ * the free experience first gets tested during store review. It lives here
+ * rather than in Settings because this is the screen that shows what each tier
+ * is — flipping and watching which card claims "YOUR PLAN" and which buttons
+ * fall back to "Included in…" is the fastest way to check a gate. Stripped from
+ * release builds entirely.
  */
 function DevTierSwitch() {
   const { colors } = useColors();
@@ -770,7 +1011,7 @@ function DevTierSwitch() {
 
   const cycle = async () => {
     const next: Tier | null =
-      override === null ? "free" : override === "free" ? "plus" : override === "plus" ? "pro" : null;
+      override === null ? "free" : override === "free" ? "pro" : null;
     setOverride(next);
     await setDevTierOverride(next);
     // Clear the day's meters with the switch, so testing the free cap starts
@@ -790,7 +1031,7 @@ function DevTierSwitch() {
         <AppText variant="footnote">Force tier (dev only)</AppText>
         <AppText variant="caption" color="tertiary">
           {override === null
-            ? "Using your real entitlement — tap to walk Free, Plus, then Pro"
+            ? "Using your real entitlement — tap to walk Free, then Pro"
             : `Pretending you're ${TIER_SHORT_NAME[override]} — tap for the next tier`}
         </AppText>
       </View>
@@ -849,12 +1090,24 @@ const styles = StyleSheet.create({
   /* Current plan */
   currentHead: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
 
-  /* Period switch */
-  switchRow: {
+  /* Period switch. The control gets the full width to itself; the saving band
+     sits under it rather than fighting it for the same row. */
+  switchBlock: { gap: Spacing.sm, marginBottom: Spacing.lg },
+  saveBand: {
     flexDirection: "row",
     alignItems: "center",
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.lg,
+  },
+  saveMark: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   loadingRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
@@ -866,10 +1119,32 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   planHead: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
-  planTagline: { marginTop: 2, marginBottom: Spacing.md },
+  /** A plated glyph rather than a bare one: it gives the card head a fixed
+   *  left edge that the tagline and price line up against. */
+  planIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  planTagline: { marginTop: Spacing.xs, marginBottom: Spacing.md },
   priceRow: { flexDirection: "row", alignItems: "baseline", gap: Spacing.sm },
   priceSide: { flexShrink: 1 },
   struck: { textDecorationLine: "line-through" },
+
+  /** The saving. Full width and loud — the one number this screen is selling. */
+  saveBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: Spacing.xs,
+    marginTop: Spacing.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.lg,
+  },
   planAction: { marginTop: Spacing.lg },
   planNote: { marginTop: Spacing.sm, fontWeight: "600" },
   terms: { marginTop: Spacing.sm },
@@ -885,6 +1160,7 @@ const styles = StyleSheet.create({
   /** Optically centres a 15px glyph on a 17px footnote line. */
   highlightIcon: { marginTop: 1 },
   highlightRow: { flexDirection: "row", alignItems: "flex-start", gap: Spacing.sm },
+
   planPeriodNote: { marginTop: Spacing.md },
 
   freeNote: {

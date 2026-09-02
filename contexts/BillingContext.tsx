@@ -83,7 +83,6 @@ interface BillingContextType {
    * keys gets locked out of a storefront that cannot sell them anything.
    */
   isPro: boolean;
-  isPlus: boolean;
   isSubscriber: boolean;
   /** Full snapshot — `source` tells you whether it's confirmed or cached. */
   entitlement: Entitlement;
@@ -160,7 +159,7 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => subscribeTrial(() => setTrialTick((n) => n + 1)), []);
 
   // 1b ── Teach the sync engine who may upload. Cloud backup + multi-device sync
-  //       is a paid feature (Plus and up); the engine can't import billing
+  //       is a Pro feature; the engine can't import billing
   //       directly (it is unit-tested without a react-native runtime), so the
   //       predicate is injected. It reads live module state on every call, so
   //       this closure stays correct for the life of the app and needs no
@@ -283,7 +282,6 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
       // tier switch re-renders every gated screen.
       tier: effectiveTier(),
       isPro: entitlement.tier === "pro",
-      isPlus: entitlement.tier === "plus",
       isSubscriber: entitlement.tier !== "free",
       allows,
       hasPaidAccess: hasPaidAccess(),

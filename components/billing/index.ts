@@ -20,9 +20,10 @@ export {
   periodName,
   priceView,
   PRO_VALUE_NOTE,
-  proUpsell,
   renewalDisclosure,
+  type BestSaving,
   type PaidTier,
   type PlanIdentity,
+  type PlanLine,
   type PriceView,
 } from "./planCopy";

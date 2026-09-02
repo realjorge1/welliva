@@ -50,42 +50,50 @@ export const REVENUECAT_KEY: string | null = looksValid ? rawKey! : null;
 export const isBillingConfigured = REVENUECAT_KEY !== null;
 
 /**
- * The two entitlement identifiers the app checks. Each must match an identifier
- * created in RevenueCat → Entitlements, and every product in a tier must be
- * attached to that tier's entitlement (the monthly AND the annual one).
+ * The entitlement identifier the app checks. Must match an identifier created in
+ * RevenueCat → Entitlements, with every product attached to it (the monthly AND
+ * the annual one).
  *
- * Two entitlements rather than one-with-metadata because the store is the only
- * thing that actually knows what someone bought: reading two booleans off
- * `customerInfo` needs no product-id table in the client, so adding a promo
- * price, a regional plan or a lifetime SKU later is a console change with no app
- * update. `PRO` outranks `PLUS` when both are somehow active (a mid-cycle
- * upgrade leaves both live until the old one lapses) — see `higherTier`.
+ * An entitlement rather than a product-id table because the store is the only
+ * thing that actually knows what someone bought: reading one boolean off
+ * `customerInfo` needs no mapping in the client, so adding a promo price, a
+ * regional plan or a lifetime SKU later is a console change with no app update.
  */
 export const PRO_ENTITLEMENT = "pro";
-export const PLUS_ENTITLEMENT = "plus";
+
+/**
+ * The retired Plus entitlement, still read — and still granting Pro.
+ *
+ * Plus was merged into Pro, but the identifier may well still exist in the
+ * console attached to live subscriptions, and RevenueCat keeps reporting it for
+ * as long as those periods run. Dropping the check would downgrade a paying
+ * customer to free on their next launch, which is the one billing bug that
+ * costs a refund AND a review. Delete this only once the console shows no
+ * active `plus` entitlements at all.
+ */
+export const LEGACY_PLUS_ENTITLEMENT = "plus";
 
 /** The offering to display. `default` is the one marked current in RevenueCat. */
 export const DEFAULT_OFFERING = "default";
 
 /**
- * Offering identifiers, when the two tiers are modelled as two offerings.
+ * The offering holding Pro's packages, when the console models it as a named
+ * offering rather than the current one.
  *
  * BOTH LAYOUTS ARE SUPPORTED, because RevenueCat allows either and the console
  * is not ours to constrain from here:
  *
- *  1. TWO OFFERINGS — `plus` and `pro`, each with its own monthly + annual
- *     package. Cleanest, and what docs/monetization/setup.md walks through.
- *  2. ONE OFFERING — the current one, holding all four packages, each package
- *     or product id naming its tier ("welliva_plus_annual", "$rc_pro_monthly").
+ *  1. A NAMED `pro` OFFERING with its monthly + annual package. What
+ *     docs/monetization/setup.md walks through.
+ *  2. THE CURRENT OFFERING holding those packages directly.
  *
- * `Billing.ts` tries (1) and falls back to (2), classifying by the substrings
- * below. A package that names neither tier is treated as Pro: mislabelling the
- * *higher* plan as the lower one would sell full access at the lower price.
+ * `Billing.ts` tries (1) and falls back to (2). Every package either layout
+ * yields sells Pro — there is no longer a tier to classify a package into, so a
+ * stray `plus`-named package left in the console simply sells Pro, which is the
+ * safe direction: it honours a price the store may still be showing someone
+ * rather than refusing a purchase.
  */
-export const TIER_OFFERINGS = { plus: "plus", pro: "pro" } as const;
-
-/** Substrings that identify a tier inside a package or product identifier. */
-export const TIER_ID_HINTS = { plus: "plus", pro: "pro" } as const;
+export const TIER_OFFERINGS = { pro: "pro" } as const;
 
 /** Where "Manage subscription" sends the user. Required by both stores. */
 export const MANAGE_SUBSCRIPTION_URL = Platform.select({

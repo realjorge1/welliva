@@ -23,14 +23,13 @@
  */
 import {
   isBillingConfigured,
-  PLUS_ENTITLEMENT,
+  LEGACY_PLUS_ENTITLEMENT,
   PRO_ENTITLEMENT,
   REVENUECAT_KEY,
-  TIER_ID_HINTS,
   TIER_OFFERINGS,
 } from "./config";
 import { clearEntitlement, setEntitlement } from "./entitlement";
-import { higherTier, type Tier } from "./tiers";
+import { type Tier } from "./tiers";
 import { clearTrial } from "./trial";
 import { resetUsage } from "./usage";
 import { resetAllowances } from "./allowance";
@@ -148,8 +147,8 @@ export function isBillingAvailable(): boolean {
 export type BillingPeriod = "monthly" | "annual" | "other";
 
 /**
- * One buyable plan: a tier at a billing period. Four of these make up the
- * storefront (Plus/Pro × monthly/annual).
+ * One buyable plan: a tier at a billing period. Two of these make up the
+ * storefront — Pro monthly and Pro annual.
  */
 export interface PlanOption {
   /** Unique within the storefront: tier + package identifier. */
@@ -239,10 +238,15 @@ export async function signOutBilling(): Promise<void> {
 /**
  * Translate a RevenueCat CustomerInfo into our entitlement snapshot.
  *
- * BOTH entitlements are read, and the HIGHER one wins. That matters during an
- * upgrade: buying Pro while a Plus subscription is still inside its paid period
- * leaves both entitlements active for days, and taking the first one found would
- * hand a paying Pro user the Plus limits until their old plan lapsed.
+ * BOTH entitlements are read and both grant Pro. Plus was merged into Pro, but
+ * a subscription bought under the old identifier keeps reporting it until its
+ * period ends — checking only `pro` would downgrade those customers to free on
+ * their next launch. See LEGACY_PLUS_ENTITLEMENT in config.ts.
+ *
+ * When both are somehow active (someone who bought Pro mid-Plus-period), the
+ * one that runs LONGER wins the expiry: it is the date access actually ends,
+ * and quoting the earlier one would tell a paying user their plan lapses on a
+ * day it doesn't.
  */
 function tierOf(info: RCCustomerInfo): {
   tier: Tier;
@@ -250,20 +254,25 @@ function tierOf(info: RCCustomerInfo): {
   willRenew: boolean;
 } {
   const active = info.entitlements.active;
-  const pro = active[PRO_ENTITLEMENT];
-  const plus = active[PLUS_ENTITLEMENT];
+  const granting = [active[PRO_ENTITLEMENT], active[LEGACY_PLUS_ENTITLEMENT]].filter(
+    (e): e is RCEntitlementInfo => e?.isActive === true,
+  );
 
-  let tier: Tier = "free";
-  if (pro?.isActive) tier = higherTier(tier, "pro");
-  if (plus?.isActive) tier = higherTier(tier, "plus");
+  if (granting.length === 0) return { tier: "free", expiresAt: null, willRenew: false };
 
-  const winner = tier === "pro" ? pro : tier === "plus" ? plus : null;
+  // A null expiry is a lifetime grant — it outranks every date.
+  const winner = granting.reduce((best, e) => {
+    if (best.expirationDate === null) return best;
+    if (e.expirationDate === null) return e;
+    return new Date(e.expirationDate) > new Date(best.expirationDate) ? e : best;
+  });
+
   return {
-    tier,
-    expiresAt: winner?.expirationDate ?? null,
+    tier: "pro",
+    expiresAt: winner.expirationDate ?? null,
     // Absent on a lifetime grant; "will renew" is the honest default for an
     // active entitlement the store didn't flag as cancelled.
-    willRenew: winner ? winner.willRenew !== false : false,
+    willRenew: winner.willRenew !== false,
   };
 }
 
@@ -330,26 +339,10 @@ function periodOf(pkg: RCPackage): BillingPeriod {
   return "other";
 }
 
-/**
- * Which tier a package sells, when the two tiers share ONE offering.
- *
- * Reads the package identifier first and the product id second, because a
- * console that models tiers inside one offering almost always names the packages
- * ("plus_monthly") while the product id may carry a store prefix. Anything that
- * names neither tier is treated as Pro — mislabelling the higher plan as the
- * lower one would sell full access at the lower price, which is the one mistake
- * here that costs money rather than a support email.
- */
-function tierOfPackage(pkg: RCPackage): Exclude<Tier, "free"> {
-  const haystack = `${pkg.identifier} ${pkg.product.identifier}`.toLowerCase();
-  if (haystack.includes(TIER_ID_HINTS.plus)) return "plus";
-  return "pro";
-}
-
-function toPlan(pkg: RCPackage, tier: Exclude<Tier, "free">): PlanOption {
+function toPlan(pkg: RCPackage): PlanOption {
   return {
-    id: `${tier}:${pkg.identifier}`,
-    tier,
+    id: `pro:${pkg.identifier}`,
+    tier: "pro",
     period: periodOf(pkg),
     priceString: pkg.product.priceString,
     priceAmount: pkg.product.price,
@@ -361,23 +354,16 @@ function toPlan(pkg: RCPackage, tier: Exclude<Tier, "free">): PlanOption {
   };
 }
 
-/** Plus before Pro, annual before monthly — reading order on the storefront. */
-const PLAN_ORDER: Record<string, number> = {
-  "plus:annual": 0,
-  "plus:monthly": 1,
-  "plus:other": 2,
-  "pro:annual": 3,
-  "pro:monthly": 4,
-  "pro:other": 5,
-};
+/** Annual before monthly — reading order on the storefront. */
+const PERIOD_ORDER: Record<BillingPeriod, number> = { annual: 0, monthly: 1, other: 2 };
 
 /**
  * Every plan the storefront can sell, in display order.
  *
- * Supports both console layouts (see `TIER_OFFERINGS` in config.ts): two
- * per-tier offerings if they exist, otherwise the current offering with its
- * packages classified by identifier. Returns [] when billing is unavailable or
- * the offering is empty — the upgrade screen renders an explanatory state rather
+ * Supports both console layouts (see `TIER_OFFERINGS` in config.ts): a named
+ * `pro` offering if one exists, otherwise the current offering. Every package
+ * either layout yields sells Pro. Returns [] when billing is unavailable or the
+ * offering is empty — the upgrade screen renders an explanatory state rather
  * than an empty list.
  */
 export async function getPlanOptions(): Promise<PlanOption[]> {
@@ -386,24 +372,16 @@ export async function getPlanOptions(): Promise<PlanOption[]> {
   try {
     const offerings = await p.getOfferings();
 
-    // Layout 1 — one offering per tier.
-    const plusOffering = offerings.all[TIER_OFFERINGS.plus];
-    const proOffering = offerings.all[TIER_OFFERINGS.pro];
-    const plans: PlanOption[] = [];
-    if (plusOffering || proOffering) {
-      for (const pkg of plusOffering?.availablePackages ?? []) plans.push(toPlan(pkg, "plus"));
-      for (const pkg of proOffering?.availablePackages ?? []) plans.push(toPlan(pkg, "pro"));
-    } else {
-      // Layout 2 — one offering holding all four packages.
-      const offering = offerings.current ?? Object.values(offerings.all)[0] ?? null;
-      if (!offering) return [];
-      for (const pkg of offering.availablePackages) plans.push(toPlan(pkg, tierOfPackage(pkg)));
-    }
+    const offering =
+      offerings.all[TIER_OFFERINGS.pro] ??
+      offerings.current ??
+      Object.values(offerings.all)[0] ??
+      null;
+    if (!offering) return [];
 
-    return plans.sort(
-      (a, b) =>
-        (PLAN_ORDER[`${a.tier}:${a.period}`] ?? 9) - (PLAN_ORDER[`${b.tier}:${b.period}`] ?? 9),
-    );
+    return offering.availablePackages
+      .map(toPlan)
+      .sort((a, b) => PERIOD_ORDER[a.period] - PERIOD_ORDER[b.period]);
   } catch (e) {
     console.warn("[billing] getOfferings failed:", e);
     return [];
@@ -417,9 +395,10 @@ export async function getPlanOptions(): Promise<PlanOption[]> {
  * must not show an error toast for it, which is why it has its own status
  * rather than being folded into the failure case.
  *
- * Switching plans (Plus → Pro, monthly → annual) is the same call: both stores
- * handle the proration and the old subscription themselves, and RevenueCat
- * reports the result through the entitlements we re-read here.
+ * Switching plans (monthly → annual, or off a legacy Plus subscription) is the
+ * same call: both stores handle the proration and the old subscription
+ * themselves, and RevenueCat reports the result through the entitlements we
+ * re-read here.
  */
 export async function purchasePlan(plan: PlanOption): Promise<PurchaseOutcome> {
   const p = loadSdk();

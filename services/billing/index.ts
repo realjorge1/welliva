@@ -4,15 +4,14 @@
  *   import { allows, effectiveTier, coachDailyLimit } from "@/services/billing";
  *
  * Setup runbook: docs/monetization/setup.md
- * What Free / Plus / Pro each get: ./tiers.ts
+ * What Free and Pro each get: ./tiers.ts
  */
 export {
   DEFAULT_OFFERING,
   isBillingConfigured,
+  LEGACY_PLUS_ENTITLEMENT,
   MANAGE_SUBSCRIPTION_URL,
-  PLUS_ENTITLEMENT,
   PRO_ENTITLEMENT,
-  TIER_ID_HINTS,
   TIER_OFFERINGS,
 } from "./config";
 
@@ -24,7 +23,6 @@ export {
   getDevTierOverride,
   getEntitlement,
   hydrateEntitlement,
-  isPlus,
   isPro,
   isSubscriber,
   setDevTierOverride,
@@ -62,7 +60,6 @@ export {
   historyWindowDays,
   isHistoryRangeLocked,
   photoScanDailyLimit,
-  PLUS_TIER,
   PRO_TIER,
   TIER_LIMITS,
   TIER_NAME,

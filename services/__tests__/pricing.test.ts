@@ -1,6 +1,6 @@
 /**
- * The storefront makes an arithmetic promise: "save $12.89" and "−36%" have to
- * be what the two prices beside them actually work out to. Nobody recomputes a
+ * The storefront makes an arithmetic promise: "save $10.00" and "28% off" have to
+ * what the two prices beside them actually work out to. Nobody recomputes a
  * percentage by hand while reading a plan card, which is exactly why a wrong one
  * is so corrosive — and why it should fail here rather than in a screenshot.
  *
@@ -18,46 +18,31 @@ import {
 
 describe("published prices", () => {
   it("are the ones the store is configured with", () => {
-    expect(LIST_PRICES.plus).toEqual({ monthly: 2.99, annual: 22.99 });
-    expect(LIST_PRICES.pro).toEqual({ monthly: 6.99, annual: 58.99 });
+    expect(LIST_PRICES.pro).toEqual({ monthly: 2.99, annual: 25.88 });
   });
 
-  it("prices Pro above Plus on both periods", () => {
-    expect(LIST_PRICES.pro.monthly).toBeGreaterThan(LIST_PRICES.plus.monthly);
-    expect(perMonthOfAnnual(LIST_PRICES.pro.annual)).toBeGreaterThan(
-      perMonthOfAnnual(LIST_PRICES.plus.annual),
-    );
-  });
-
-  it("has opened the tier gap past what a \"price gap\" line can carry", () => {
-    // Pro used to sit $0.51/month above Plus and the card said so. At $6.99 it
-    // does not, and proUpsell() must stand down rather than call a $4 gap
-    // "only" — the card argues PRO_VALUE_NOTE instead. This test is what keeps
-    // the two in step: if a future price change closes the gap again, it fails
-    // and the copy decision gets revisited deliberately.
-    for (const period of ["monthly", "annual"] as const) {
-      const plus =
-        period === "annual" ? perMonthOfAnnual(LIST_PRICES.plus.annual) : LIST_PRICES.plus.monthly;
-      const pro =
-        period === "annual" ? perMonthOfAnnual(LIST_PRICES.pro.annual) : LIST_PRICES.pro.monthly;
-      expect(pro - plus).toBeGreaterThan(plus);
-    }
+  it("sells exactly one paid tier", () => {
+    // Plus was merged into Pro. A second key reappearing here means someone
+    // added a tier to the price list without going through tiers.ts, which is
+    // how the storefront and the gates start disagreeing.
+    expect(Object.keys(LIST_PRICES)).toEqual(["pro"]);
   });
 });
 
 describe("annualSaving", () => {
-  it("computes Plus at $12.89 a year, 36% off", () => {
-    const saving = annualSaving(LIST_PRICES.plus.monthly, LIST_PRICES.plus.annual);
-    expect(saving).not.toBeNull();
-    expect(saving!.amount).toBeCloseTo(12.89, 2);
-    expect(saving!.percent).toBe(36);
-  });
-
-  it("computes Pro at $24.89 a year, 30% off", () => {
+  it("computes Pro at exactly $10.00 a year, 28% off", () => {
     const saving = annualSaving(LIST_PRICES.pro.monthly, LIST_PRICES.pro.annual);
     expect(saving).not.toBeNull();
-    expect(saving!.amount).toBeCloseTo(24.89, 2);
-    expect(saving!.percent).toBe(30);
+    expect(saving!.amount).toBeCloseTo(10.0, 2);
+    expect(saving!.percent).toBe(28);
+  });
+
+  it("keeps the annual saving worth badging at all", () => {
+    // `annualSaving` returns null under 5%, which would silently drop the
+    // "SAVE 28%" pill and the struck-through monthly price off the plan card.
+    // A reprice that narrows the gap should fail here rather than quietly
+    // change what the storefront renders.
+    expect(annualSaving(LIST_PRICES.pro.monthly, LIST_PRICES.pro.annual)).not.toBeNull();
   });
 
   it("claims nothing when the annual plan isn't actually cheaper", () => {
@@ -81,12 +66,12 @@ describe("perMonthOfAnnual", () => {
   it("quotes the monthly equivalent to the cent, rounding UP", () => {
     // Never round a price down: the card must not imply a cheaper month than
     // twelve of them add up to.
-    expect(perMonthOfAnnual(22.99)).toBe(1.92); // 1.9158…
-    expect(perMonthOfAnnual(58.99)).toBe(4.92); // 4.9158…
+    expect(perMonthOfAnnual(25.88)).toBe(2.16); // 2.1566…
+    expect(perMonthOfAnnual(19.99)).toBe(1.67); // 1.6658…
   });
 
   it("times twelve, never comes out under the yearly price", () => {
-    for (const annual of [22.99, 58.99, 69.99, 49.99]) {
+    for (const annual of [25.88, 19.99, 26.99, 69.99, 49.99]) {
       expect(perMonthOfAnnual(annual) * 12).toBeGreaterThanOrEqual(annual);
     }
   });

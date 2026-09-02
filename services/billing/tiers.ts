@@ -1,6 +1,6 @@
 /**
- * TIERS — what Free gets, what Plus adds, and what Pro unlocks. The one source
- * of truth for the whole product boundary.
+ * TIERS — what Free gets and what Pro unlocks. The one source of truth for the
+ * whole product boundary.
  *
  * Every gate in the app reads a constant or an accessor from here instead of
  * hardcoding a number at the call site. The tier boundary is a pricing decision,
@@ -10,23 +10,27 @@
  * disagree about what "3 messages" means — a user who is told 3 and cut off at 2
  * files a bug, and rightly.
  *
- * WHY THERE ARE TWO PAID TIERS
+ * WHY THERE IS ONE PAID TIER
  *
- * The two things Welliva sells have completely different marginal costs. Depth
- * over data the user already owns — full history, unlimited habits, cloud
- * backup — costs cents a month to serve. Generated intelligence — a plan
- * written against your body, correlations across your logs, a coach with no
- * daily cap — costs real Haiku inference per use. Pricing both at one number
- * means either overcharging the person who just wants their own data back, or
- * losing money on the person who talks to Gozlin forty times a day.
+ * There used to be two. PLUS sold depth over data the user already owns — full
+ * history, unlimited habits, cloud backup, which costs cents a month to serve —
+ * and PRO added generated intelligence, which spends real Haiku inference on
+ * every use. The split was defensible on cost of goods and indefensible on the
+ * shelf: because Pro contained every Plus feature and beat every Plus limit, the
+ * two tiers only ever differed by price, and the gap had narrowed to 70¢ a
+ * month. At that distance nobody has a reason to buy the smaller one, so Plus
+ * was a decision the storefront asked people to make and then punished them for
+ * getting right.
  *
- * So: PLUS is the "all of your app, unlocked" tier. PRO is the "and Gozlin
- * thinks for you" tier. `FEATURE_MIN_TIER` below is where that split is
- * actually decided, and it is the only place it may be decided.
+ * So there is now FREE and PRO, and `FEATURE_MIN_TIER` below is the single line
+ * between them. The cost-of-goods argument that justified the split has not gone
+ * away — it moved onto `coachMessagesPerDay` and `photoScansPerDay`, which are
+ * now the only things keeping an inference-heavy user inside the price of one
+ * subscription. See the note on PRO_TIER.
  *
  * THE PRINCIPLE BEHIND THE FREE TIER
  *
- * Free is a genuinely useful app, not a demo. Four things are deliberately
+ * Free is a genuinely useful app, not a demo. Five things are deliberately
  * never gated:
  *
  *  • DATA ENTRY — food, water, weight, workouts. Paywalling logging kills the
@@ -38,18 +42,53 @@
  *    them reads as hostile.
  *  • THE DIET CATALOG AND ITS RECOMMENDATIONS. Every diet, including the
  *    condition protocols and the regional and specialist plans — see the
- *    section below for why this stopped being a paid boundary.
+ *    section below for why this stopped being a paid boundary. Choosing one,
+ *    scheduling it and tracking against it are all free, and so is the whole
+ *    fitness side: activities, schedules and guided sessions.
+ *  • MEMORY. Everything Welliva has worked out about this person from their own
+ *    logs stays readable on Free (`/knows`). It is their data being reflected
+ *    back, not generated intelligence, and locking it would make the free tier
+ *    feel like surveillance rather than a tool.
+ *
+ * WHERE THE LINE NOW SITS: ANYTHING THAT SPENDS INFERENCE IS PRO
+ *
+ * The boundary used to be a set of tastes — three coach messages, three habits,
+ * three deep dives — on the theory that a small free allowance sells the paid
+ * one. It did not survive contact with the cost of goods. Every one of those
+ * tastes spends real Haiku inference on a user who has not paid and, at $2.99,
+ * mostly never will; the free tier was subsidising the paid one rather than
+ * feeding it.
+ *
+ * So the free allowance for AI is now ZERO, stated plainly rather than metered:
+ * `coachMessagesPerDay: 0`, `deepDivesLifetime: 0`, `photoScansPerDay: 0`. Free
+ * is the whole tracking app — diets, fitness, hydration, logs, Memory, streaks —
+ * and PRO IS GOZLIN. That is a cleaner sentence than any allowance was, it is
+ * far easier to sell, and it is the only shape in which the unit economics work
+ * at this price.
+ *
+ * A ZERO IS A BINARY LOCK, AND THE COPY MUST READ AS ONE. "That's my 0 messages
+ * for today" is what a metered cap says when its limit is zeroed, and it is
+ * nonsense. Anywhere a limit is rendered, the zero case gets its own sentence —
+ * see `limitReply` in components/gozlin/useGozlin.ts and the habits lock card.
+ *
+ * WHAT FREE STILL SEES OF GOZLIN, DELIBERATELY
+ *
+ * Insight and suggestion cards keep rendering on Home for a free user. They are
+ * built by the deterministic on-device coach, they cost nothing to show, and
+ * they are the honest advertisement for what opening one would give you. What
+ * is withheld is the OPENING — the conversation, the deep dive, the plan. The
+ * shelf stays full; the door is what costs money.
  */
 
 /* ────────────────────────────────── Tiers ───────────────────────────────────*/
 
-/** The three tiers, lowest to highest. `free` is what an unpaid account has. */
-export type Tier = "free" | "plus" | "pro";
+/** The two tiers, lowest to highest. `free` is what an unpaid account has. */
+export type Tier = "free" | "pro";
 
 /** Lowest to highest. Iterate this rather than hardcoding the order anywhere. */
-export const TIER_ORDER: readonly Tier[] = ["free", "plus", "pro"] as const;
+export const TIER_ORDER: readonly Tier[] = ["free", "pro"] as const;
 
-const RANK: Record<Tier, number> = { free: 0, plus: 1, pro: 2 };
+const RANK: Record<Tier, number> = { free: 0, pro: 1 };
 
 /** Does `tier` include everything `min` includes? The one comparison to use. */
 export function tierAtLeast(tier: Tier, min: Tier): boolean {
@@ -61,22 +100,29 @@ export function higherTier(a: Tier, b: Tier): Tier {
   return RANK[a] >= RANK[b] ? a : b;
 }
 
-/** Narrow an untrusted string (a stored cache, a route param) to a Tier. */
+/**
+ * Narrow an untrusted string (a stored cache, a route param) to a Tier.
+ *
+ * `"plus"` still resolves — to `pro`, never to free. Plus was a real tier with
+ * real records behind it (a cached entitlement, a dev override, a RevenueCat
+ * entitlement id that may still be attached to a product in the console), and
+ * the one unacceptable outcome when a tier is retired is silently downgrading
+ * somebody who paid. Upward is the only safe direction for an unknown paid
+ * value, and Plus is a strict subset of Pro, so nothing is over-granted either.
+ */
 export function toTier(value: unknown): Tier {
-  return value === "pro" || value === "plus" ? value : "free";
+  return value === "pro" || value === "plus" ? "pro" : "free";
 }
 
-/** Full product name — "Welliva Plus". For headlines and store-facing copy. */
+/** Full product name — "Welliva Pro". For headlines and store-facing copy. */
 export const TIER_NAME: Record<Tier, string> = {
   free: "Welliva Free",
-  plus: "Welliva Plus",
   pro: "Welliva Pro",
 };
 
-/** One word — "Plus". For pills, badges and anywhere the brand is already implied. */
+/** One word — "Pro". For pills, badges and anywhere the brand is already implied. */
 export const TIER_SHORT_NAME: Record<Tier, string> = {
   free: "Free",
-  plus: "Plus",
   pro: "Pro",
 };
 
@@ -119,6 +165,11 @@ export interface TierLimits {
   /**
    * AI coach turns per day. Only turns that actually reach the backend count —
    * the deterministic on-device coach is always free (see `services/gozlin`).
+   *
+   * `0` is a real value and means the conversation is a PAID FEATURE, not a
+   * metered one. Free is zero: see the header. Any UI that prints this number
+   * must branch on zero rather than interpolating it into a sentence about
+   * having "used up" an allowance nobody ever had.
    */
   coachMessagesPerDay: number;
   /**
@@ -128,56 +179,51 @@ export interface TierLimits {
    */
   historyDays: number | null;
   /**
-   * MANUAL habit slots. `null` = unlimited. HabitKit's exact model, and it
-   * converts.
+   * MANUAL habit slots — the ones the user creates themselves, from "Suggested
+   * for you" or from scratch. `null` = unlimited, `0` = Pro only.
    *
    * Manual only, and that is not a detail: every user is seeded with three
    * auto-tracked habits (water / meals / workout — see `seedDefaultHabits`)
-   * that complete themselves from logged data. Counting those against the cap
-   * would leave a brand-new free user with zero slots and no way to create a
-   * single habit, and it would be gating logging feedback through the back
-   * door. Linked habits are always free and always uncapped.
+   * that complete themselves from logged data. Those are LINKED habits, they
+   * are always free and always uncapped, and they are what a free user's habit
+   * screen actually is: food, water and workouts, ticking themselves off the
+   * logs they were already keeping.
+   *
+   * Counting linked habits against the cap would leave a free user staring at
+   * an empty screen and gating logging feedback through the back door, which is
+   * why every call site filters on `source === "manual"` before asking.
    */
   habits: number | null;
   /** Photo meal scans per day. 0 = not available on this tier. */
   photoScansPerDay: number;
   /**
-   * DEEP DIVES — the research expansion behind a coach reply — allowed EVER,
-   * not per day. `null` = unlimited.
+   * DEEP DIVES — the research expansion behind a coach reply ("the research
+   * behind my answer") — allowed EVER, not per day. `null` = unlimited,
+   * `0` = Pro only.
    *
-   * A lifetime figure because this is the one capability whose value is
-   * obvious on first contact and impossible to describe: nobody upgrades for
-   * "more detailed answers", and everybody understands it after reading one.
-   * Free gets real uses, unannounced and uncounted (services/billing/
-   * allowance.ts), and after that it is what it is — a Plus feature.
+   * A lifetime figure rather than a daily one because a dive is not a rhythm,
+   * it is a thing you go and read. Free is now zero: a dive is a second Haiku
+   * call on top of a reply a free user cannot send in the first place, so a
+   * lifetime taste here would be an allowance attached to a door that is
+   * already shut.
    */
   deepDivesLifetime: number | null;
 }
 
 export const FREE_TIER: TierLimits = {
-  /** Three is enough to feel what Gozlin is; the fourth is where the value has
-   *  landed and the ask makes sense. */
-  coachMessagesPerDay: 3,
-  historyDays: 30,
-  habits: 3,
-  photoScansPerDay: 0,
-  /** Enough to see what a deep dive actually is, twice over. */
-  deepDivesLifetime: 3,
-};
-
-export const PLUS_TIER: TierLimits = {
   /**
-   * Generous enough that a normal daily user never notices it (the median
-   * engaged user sends 4–6 turns), low enough that the heavy-inference user is
-   * the one being asked to pay for Pro rather than the one being subsidised.
+   * ZERO. The conversation is the product Pro sells; see the header. Free still
+   * sees Gozlin's insight and suggestion cards on Home — they cost nothing to
+   * render and they are the argument for opening one.
    */
-  coachMessagesPerDay: 25,
-  /** A full year back — every trend, every seasonal comparison. */
-  historyDays: 365,
-  habits: null,
-  /** Enough to log every meal of a day by camera, with room to redo one. */
-  photoScansPerDay: 5,
-  deepDivesLifetime: null,
+  coachMessagesPerDay: 0,
+  historyDays: 30,
+  /** Zero MANUAL habits. The three auto-tracked ones — food, water, workouts —
+   *  are not manual and are never counted, so a free user keeps a working habit
+   *  screen; "Suggested for you" and custom habits are what Pro adds. */
+  habits: 0,
+  photoScansPerDay: 0,
+  deepDivesLifetime: 0,
 };
 
 export const PRO_TIER: TierLimits = {
@@ -187,8 +233,19 @@ export const PRO_TIER: TierLimits = {
    * cannot run up unbounded Haiku spend on one subscription. Anyone who hits
    * this is not a real user.
    *
+   * ⚠️ THIS NUMBER IS NOW THE WHOLE MARGIN. It was set when Pro sold at $6.99
+   * and survived the drop to $2.99, which is where the single paid tier now
+   * sits — and an annual subscriber pays about $2.17 a month. So the turns one
+   * subscription can spend have to be worth less than that in Haiku for the
+   * tier to make money. At 100/day they are not: a user who actually ran the
+   * ceiling every day would cost multiples of the subscription. That is
+   * tolerable only because almost nobody does, which makes this a bet on the
+   * distribution rather than a limit that protects the business.
+   *
    * MUST be mirrored server-side (docs/monetization/setup.md Part 6). A client
-   * ceiling is a courtesy; a modified client ignores it.
+   * ceiling is a courtesy; a modified client ignores it. At the old price that
+   * was a risk worth carrying for a release; at this one it is the difference
+   * between a cheap tier and an unbounded one.
    */
   coachMessagesPerDay: 100,
   /** Unbounded history. `null` means "no cutoff". */
@@ -201,7 +258,6 @@ export const PRO_TIER: TierLimits = {
 /** Limits by tier. The accessors below are the preferred way to read these. */
 export const TIER_LIMITS: Record<Tier, TierLimits> = {
   free: FREE_TIER,
-  plus: PLUS_TIER,
   pro: PRO_TIER,
 };
 
@@ -220,25 +276,27 @@ export type FeatureId =
   | "history"
   | "insights"
   | "habits"
+  | "foods"
   | "photo-log"
   | "deep-dive"
   | "generic";
 
 export const FEATURE_MIN_TIER: Record<FeatureId, Tier> = {
-  /* ── Plus: your own app, fully unlocked. Cheap to serve, high felt value. ──*/
-  "coach-limit": "plus", // the cap rises at Plus, effectively lifts at Pro
-  sync: "plus",
-  history: "plus", // 30d → a year at Plus, everything at Pro
-  habits: "plus",
-  "photo-log": "plus", // 5 scans/day at Plus, 30 at Pro
-  "deep-dive": "plus", // 3 lifetime on free, then Plus opens it for good
-
-  /* ── Pro: generated intelligence. Every use of these costs inference. ──────*/
+  /* ── Gozlin. Every one of these spends inference on a real question. ───────*/
+  "coach-limit": "pro", // 0 on free — the conversation IS the paid feature
+  "deep-dive": "pro", // "the research behind my answer"
   "ai-plans": "pro",
   insights: "pro",
+  "photo-log": "pro", // none on free, 30/day on Pro
 
-  /** The unattributed ask. Offers the entry paid tier. */
-  generic: "plus",
+  /* ── Depth over data the user already owns. Cents a month to serve. ────────*/
+  habits: "pro", // "Suggested for you" + custom; the linked three stay free
+  foods: "pro", // the searchable whole-foods catalog
+  sync: "pro",
+  history: "pro", // 30 days → no cutoff at all
+
+  /** The unattributed ask. There is only one thing to offer. */
+  generic: "pro",
 };
 
 /** The tier a feature starts at. */
@@ -259,7 +317,7 @@ export function tierAllowsFeature(tier: Tier, feature: FeatureId): boolean {
 
 /* ─────────────────────────────────  Accessors  ──────────────────────────────
  * Prefer these over reading the constants directly: the tier branch lives in
- * one place, so a gate can never accidentally apply a free limit to a Plus user.
+ * one place, so a gate can never accidentally apply a free limit to a Pro user.
  */
 
 /** Coach turns allowed today. */
@@ -294,7 +352,12 @@ export function habitLimit(tier: Tier): number | null {
  * `manualCount` must exclude auto-tracked (linked) habits — see the note on
  * `TierLimits.habits`. Callers get this right by filtering on
  * `habit.source === "manual"`; passing a total that includes the three seeded
- * linked habits would lock every free user out of the feature entirely.
+ * linked habits would also hide those three from a free user, which is the one
+ * thing their habit screen is made of.
+ *
+ * On Free the limit is 0, so this is now a flat "no" rather than a countdown.
+ * UI that explains the refusal must say "Pro adds your own habits", never
+ * "you've used all 0 of your free habits".
  */
 export function canCreateHabit(manualCount: number, tier: Tier): boolean {
   const limit = habitLimit(tier);

@@ -91,23 +91,36 @@ resets it and a modified client ignores it entirely.
    the Authorization header value RevenueCat generates.
 2. Verify that header. Read `app_user_id` — it is the Supabase user id, because
    the app configures the SDK with it (`configureBilling`).
-3. Write `tier` (`free` | `plus` | `pro`) and `tier_expires_at` onto that user's
-   profile row.
+3. Write `tier` (`free` | `pro`) and `tier_expires_at` onto that user's profile
+   row. A webhook naming the retired `plus` entitlement writes `pro` — same rule
+   as the client's `tierOf()`, so the two cannot disagree about a mid-period
+   subscriber.
 
 ### The gate
 
 The existing `/v1` JWT middleware reads that column and enforces:
 
-| Path | Rule |
+| Path | Rule — `free` / `pro` |
 |---|---|
-| `/v1/coach/turn`, `/v1/coach/chat` | daily cap by tier — **3 / 25 / 100** |
-| `/v1/log/photo` | daily cap by tier — **0 / 5 / 30** |
+| `/v1/coach/turn`, `/v1/coach/chat` | daily cap — **0 / 100** |
+| `/v1/log/photo` | daily cap — **0 / 30** |
+| `/v1/nutrition/lookup` | **`pro` only** (the `foods` feature) |
 | `/v1/diet/generate`, `/v1/workout/generate` | **`pro` only** (the `ai-plans` feature) |
+
+> **The free column is 0 now, not 3.** The tier boundary moved: Free is the whole
+> tracking app (diets, fitness, logs, habits, Memory) and **Pro is Gozlin**, so
+> nothing on a free account should reach an inference endpoint at all. A server
+> built to the old `3 / 25 / 100` row hands three free Haiku turns to every
+> account that asks — the exact spend this gate exists to stop. The three-number
+> row was also a leftover from the retired Plus tier; there are two tiers.
+>
+> **Deep dives ride `/v1/coach/*`** rather than having a route of their own, so
+> the coach cap already covers them. There is no separate number to enforce.
 
 Mirror the numbers from
 [services/billing/tiers.ts](../../services/billing/tiers.ts) — that file is the
-source of truth and the storefront's comparison table is generated from it, so a
-server that disagrees makes the app a liar in whichever direction it drifts.
+source of truth and every line of the storefront is derived from it, so a server
+that disagrees makes the app a liar in whichever direction it drifts.
 
 Return **402** past the cap with a JSON body; the client already degrades to its
 deterministic on-device engines on any non-2xx.
@@ -127,8 +140,10 @@ failure, including the 404 it gets today. So this can ship independently of the
 webhook, and the app needs no release when it does.
 
 **Ship it in the same change as the tier gate above.** If the gate lands first, a
-trialling free user gets Pro in the app and a 402 at 3 coach turns from the
-server — the exact mismatch this endpoint exists to prevent.
+trialling free user gets Pro in the app and a 402 on their FIRST coach turn from
+the server — the exact mismatch this endpoint exists to prevent, and now a
+harder failure than it was: with the free cap at 0 the trial is the only thing
+standing between a trialling user and an immediate refusal.
 
 ```jsonc
 POST /v1/billing/trial/claim
@@ -202,18 +217,32 @@ generosity, so this is worth doing *before* deciding any cap is too expensive.
   false, every buy button is inert, and gating fails open — **nobody can pay**.
   The console runbook is [setup.md](./setup.md); it is mostly clicking, plus one
   EAS build.
+- **There is one paid tier now.** Plus was merged into Pro: every feature it
+  used to gate opens at Pro, and Pro sells at what Plus used to cost. Anything
+  outside this repo that names three tiers — a store listing, a screenshot, a
+  landing page, an email — is now wrong. The client still honours a live `plus`
+  entitlement as Pro so nobody mid-period is downgraded, so **do not delete that
+  entitlement in RevenueCat** until its subscriptions have expired (setup.md
+  §3.5).
 - **The whole diet catalog is now free.** Every diet — the 13 Condition mode
   protocols and the 5 specialist and regional plans included — and every
-  recommendation built on one is available on Free, Plus and Pro. Nothing
-  server-side depends on this, but any store listing or marketing copy that
-  sells diets as a paid feature ("6 free diets", "22 clinical diets with Plus")
-  is now wrong. What Plus sells is depth over the user's own data; what Pro
-  sells is generated intelligence.
+  recommendation built on one is available on both tiers. Nothing server-side
+  depends on this, but any store listing or marketing copy that sells diets as a
+  paid feature ("6 free diets", "22 clinical diets with Plus") is now wrong.
+  What Pro sells is depth over the user's own data plus generated intelligence.
 - **Play/App Store product prices must be changed to match the new list prices**
-  (Pro is now **$6.99 / $58.99**, up from $3.50 / $35 — see
+  (Pro is **$2.99 monthly / $25.88 annual**, an exactly-$10.00 — 28% — annual saving; the
+  annual came down from $26.99, see
   [services/billing/pricing.ts](../../services/billing/pricing.ts)). The store is
   the authority on price at runtime; these constants are only shown where no
   offering can load.
+- **⚠️ Pro's 100-turn/day ceiling is now the entire margin.** `coachMessagesPerDay:
+  100` and `photoScansPerDay: 30` are client constants a modified client ignores.
+  Size them against the annual plan — **$25.88/yr is about $2.16 a month**, and
+  100 Haiku turns a day has to fit inside that, not inside $2.99. At $6.99 an
+  unenforced ceiling was a risk worth carrying for a release; here it is the
+  difference between a cheap tier and an unbounded one. Enforce it server-side
+  (setup.md Part 6) before launch, not after.
 - **A native rebuild is required** for the camera path — `app.json` now declares
   `cameraPermission` on the `expo-image-picker` plugin.
 - **Two legal placeholders are unfilled** and are failing
