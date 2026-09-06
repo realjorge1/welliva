@@ -9,6 +9,7 @@ import { OrbField, useOrbTouch } from "@/components/OrbField";
 import { Radius, Spacing, brandGradientDark } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "@/utils/haptics";
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef } from "react";
@@ -38,6 +39,14 @@ const WHITE_70 = "rgba(255,255,255,0.7)";
 const WHITE_55 = "rgba(255,255,255,0.55)";
 /** Soft warm red for inline validation / auth errors, legible on the dark canvas. */
 const ERROR_TINT = "#FF9E9E";
+
+/**
+ * The real app icon — the gold/teal crescent, the same artwork app.json ships as
+ * the launcher icon. Its own ground is near-black, so on this canvas the mark
+ * reads as floating rather than as a plate. The 512 raster is already bundled
+ * (adaptive + notification icon), so reusing it here costs nothing.
+ */
+const APP_ICON = require("@/assets/images/welliva512.png");
 
 /**
  * Master switch for the Google social button. Enabled now that Google OAuth is
@@ -92,14 +101,7 @@ export function AuthBackground({ children }: { children: React.ReactNode }) {
 export function AuthBrand({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <View style={styles.brand}>
-      <LinearGradient
-        colors={brandGradientDark}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.logo}
-      >
-        <Ionicons name="leaf" size={26} color={INK} />
-      </LinearGradient>
+      <Image source={APP_ICON} style={styles.logo} contentFit="contain" accessibilityLabel="welliva" />
       <Text style={styles.wordmark}>welliva</Text>
       <Text style={styles.tagline}>Your AI-powered wellness companion</Text>
       <Text style={styles.title}>{title}</Text>
@@ -288,11 +290,11 @@ const styles = StyleSheet.create({
   },
   brand: { alignItems: "center", marginBottom: Spacing.xxl },
   logo: {
-    width: 56,
-    height: 56,
+    // Larger than the old plate: the crescent sits inside its own square margin,
+    // so the mark needs the extra box to carry the same weight.
+    width: 88,
+    height: 88,
     borderRadius: Radius.lg,
-    alignItems: "center",
-    justifyContent: "center",
     marginBottom: Spacing.lg,
   },
   wordmark: {

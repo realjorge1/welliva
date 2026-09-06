@@ -39,7 +39,6 @@ import {
   type CoachCard,
 } from "@/components/home/coachDeck";
 import { pickWeeklyInsight, WEEKLY_INSIGHT_EYEBROW } from "@/components/home/weeklyInsight";
-import { useBilling } from "@/contexts/BillingContext";
 import { Gradients, Radius, Spacing, alpha } from "@/constants/theme";
 import { useGamification, useNutrition, useProfile, useWorkout } from "@/contexts/AppContext";
 import { calculateProgress } from "@/services/NutritionService";
@@ -87,25 +86,6 @@ export default function HomeScreen() {
    * pickWeeklyInsight, which stays silent rather than inventing a pattern.
    */
   const weekly = useMemo(() => pickWeeklyInsight(habitReport, todayDate()), [habitReport]);
-
-  /**
-   * THE TRIAL TRIGGER.
-   *
-   * The 48-hour Pro window opens here — the first moment Welliva has an
-   * evidence-backed finding about this person — rather than at sign-up, when it
-   * would be spent against an empty database and expire before the product had
-   * anything to show. See services/billing/trial.ts.
-   *
-   * Firing it from the render that first shows `weekly` is deliberate: the trial
-   * and the proof arrive together, so the user is looking at a true thing about
-   * themselves at the exact moment the rest of the tier unlocks. The call is
-   * idempotent and self-declining (already used, already subscribed, gating off),
-   * so running it on every qualifying mount costs one guarded read.
-   */
-  const { startInsightTrial } = useBilling();
-  useEffect(() => {
-    if (weekly) void startInsightTrial();
-  }, [weekly, startInsightTrial]);
 
   // A habit the user stopped tracking, on one of the handful of days it is
   // allowed to come up. Null nearly always — see GozlinTrackerHabits.

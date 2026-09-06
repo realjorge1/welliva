@@ -132,18 +132,26 @@ deterministic on-device engines on any non-2xx.
 - **Keep the fair-use ceiling.** Pro's 100/day exists so a scripted abuser cannot
   run unbounded Haiku spend on one subscription. A real user never sees it.
 
-### The insight trial — `POST /v1/billing/trial/claim`
+### The Gozlin intro window — `POST /v1/billing/trial/claim`
 
 **The client already calls this.** [trial.ts](../../services/billing/trial.ts)
 asks the server to open the window and falls back to a local grant on any
 failure, including the 404 it gets today. So this can ship independently of the
 webhook, and the app needs no release when it does.
 
+**It is 30 hours, it starts at FIRST LAUNCH, and it opens the AI only.** The
+client grants `coach-limit`, `deep-dive`, `ai-plans`, `insights` and `photo-log`
+— not `habits`, `foods`, `sync` or `history`. The server does not have to model
+that split, because the only client capabilities it meters are AI ones: for the
+backend the window may still be read as "Pro for 30 hours". If a non-AI endpoint
+is ever metered server-side, this stops being true and the split has to move
+here too.
+
 **Ship it in the same change as the tier gate above.** If the gate lands first, a
-trialling free user gets Pro in the app and a 402 on their FIRST coach turn from
-the server — the exact mismatch this endpoint exists to prevent, and now a
-harder failure than it was: with the free cap at 0 the trial is the only thing
-standing between a trialling user and an immediate refusal.
+user inside the window gets Gozlin in the app and a 402 on their FIRST coach turn
+from the server — the exact mismatch this endpoint exists to prevent, and now a
+harder failure than it was: with the free cap at 0 the window is the only thing
+standing between a new user and an immediate refusal.
 
 ```jsonc
 POST /v1/billing/trial/claim
@@ -160,7 +168,7 @@ Authorization: Bearer <supabase access token>
 
 Two profile columns: `trial_claimed_at`, `trial_expires_at`.
 
-- `trial_claimed_at` null → set it to now, `trial_expires_at` to now + 48h,
+- `trial_claimed_at` null → set it to now, `trial_expires_at` to now + 30h,
   return `alreadyClaimed: false`.
 - Otherwise → return the stored window unchanged with `alreadyClaimed: true`,
   **including when it has already expired.** That is the anti-farming property:
@@ -178,12 +186,16 @@ That one line is what makes the app and the backend agree.
 
 **Diagnosing the fallback:** `trialSource()` returns `"local"` when the window
 was granted on-device because the endpoint could not be reached. If anyone
-reports "it says Pro but the coach stopped answering", check that first.
+reports "Gozlin was open but the coach stopped answering", check that first.
 
-⚠️ **Cost note:** a 48-hour Pro window is a worst case of ~200 Haiku turns given
-away per user who reaches their first insight. If that bites, cap coach turns
-during the trial rather than shortening the window — the window is what makes the
-feature legible; the turns are what cost money.
+⚠️ **Cost note — this is now the largest uncapped spend in the product.** The
+window used to fire only for users who reached a real insight; since it moved to
+first launch it fires for EVERY install, tyre-kickers and bots included, and
+during it the coach resolves to Pro's 100/day. Worst case is ~125 Haiku turns per
+install. Two levers, in order of preference: ship this endpoint (it makes the
+window once-per-ACCOUNT instead of once-per-install, which is most of the abuse),
+then cap coach turns during the window rather than shortening it — the 30 hours
+are what make the offer legible; the turns are what cost money.
 
 ---
 

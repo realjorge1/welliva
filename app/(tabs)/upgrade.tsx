@@ -208,6 +208,7 @@ export default function UpgradeScreen() {
     trialHoursLeft,
     gatingActive,
     isAvailable,
+    isReady,
     plans,
     isLoadingPlans,
     loadPlans,
@@ -255,11 +256,21 @@ export default function UpgradeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Offerings are fetched on mount rather than at startup: it's a network call
-  // that only this screen needs, and prices must be fresh at the moment of sale.
+  /*
+   * Offerings are fetched on mount rather than at startup: it's a network call
+   * that only this screen needs, and prices must be fresh at the moment of sale.
+   *
+   * Gated on `isReady`, NOT on `isAvailable` alone. Availability only means a key
+   * and a native module exist; `getPlanOptions()` returns [] until the SDK has
+   * been configured, and configure waits on auth. Fetching on availability alone
+   * loses that race on a cold start — and because nothing about `isAvailable`
+   * changes afterwards, the effect never re-ran and the storefront stayed empty
+   * for the rest of the session. `isReady` flips exactly when configure lands,
+   * which is what makes this retry itself.
+   */
   useEffect(() => {
-    if (isAvailable) void loadPlans();
-  }, [isAvailable, loadPlans]);
+    if (isAvailable && isReady) void loadPlans();
+  }, [isAvailable, isReady, loadPlans]);
 
   const planFor = useCallback(
     (tier: PaidTier, p: BillingPeriod): PlanOption | null =>
@@ -375,20 +386,24 @@ export default function UpgradeScreen() {
             <AppText variant="body" color="secondary" align="center">
               {copy.blurb}
             </AppText>
-            {/* A live trial is stated plainly, with the clock and what happens
-                when it stops. Someone enjoying Pro for free must never be left
-                to discover the ending on their own — and "nothing will be
-                charged" is the sentence that makes the offer trustworthy rather
-                than suspicious, since no card was ever taken. */}
+            {/* The open window is stated plainly, with the clock and what
+                happens when it stops. Someone using Gozlin for free must never
+                be left to discover the ending on their own — and "nothing will
+                be charged" is the sentence that makes the offer trustworthy
+                rather than suspicious, since no card was ever taken.
+
+                It names GOZLIN, not the tier. The window opens the AI and
+                nothing else (services/billing/trial.ts), so "you're on Pro"
+                would promise history, backup and the Foods catalog that are
+                still locked one screen away — the kind of small lie a user
+                discovers by tapping. */}
             {isTrialing ? (
               <View style={[styles.personal, { borderColor: alpha(colors.gold, 0.55) }]}>
                 <Ionicons name="hourglass-outline" size={14} color={colors.gold} />
                 <AppText variant="footnote" style={styles.flex}>
-                  {`You're on ${TIER_NAME.pro} free for another ${trialHoursLeft} ${
+                  {`Gozlin is open for another ${trialHoursLeft} ${
                     trialHoursLeft === 1 ? "hour" : "hours"
-                  }. Nothing will be charged and nothing renews — when it ends you go back to ${
-                    TIER_NAME[currentTier]
-                  } unless you pick a plan.`}
+                  }, free. Nothing will be charged and nothing renews — when the window closes, chat, insights, deep dives and AI plans lock unless you pick a plan.`}
                 </AppText>
               </View>
             ) : null}

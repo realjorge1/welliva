@@ -141,6 +141,24 @@ export function isBillingAvailable(): boolean {
   return isBillingConfigured && loadSdk() !== null;
 }
 
+/**
+ * True once `configureBilling` has actually configured the SDK.
+ *
+ * DELIBERATELY SEPARATE FROM `isBillingAvailable()`, which only reports that a
+ * key and a native module exist. Everything below — `getPlanOptions`,
+ * `purchasePlan`, `restorePurchases` — returns an empty or failed result while
+ * this is false, and configure cannot run until auth has resolved and the
+ * entitlement refresh has come back over the network.
+ *
+ * So a screen that fetches offerings must wait for THIS, not for availability:
+ * fetching on availability alone races the configure and renders a storefront
+ * that is empty forever, because nothing about availability changes afterwards
+ * to trigger a retry. That is a user who wanted to pay and was shown nothing.
+ */
+export function isBillingReady(): boolean {
+  return configured;
+}
+
 // ── Normalized shapes the UI consumes ───────────────────────────────────────
 
 /** How often a plan bills. `other` covers weekly/lifetime/custom packages. */

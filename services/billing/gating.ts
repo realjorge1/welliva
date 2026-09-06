@@ -20,19 +20,25 @@
  * (docs/monetization/setup.md Part 6). Client gating shapes the experience;
  * the server protects the spend.
  *
+ * THE GOZLIN INTRO WINDOW RIDES A NARROWER PATH
+ *
+ * The 30-hour window (services/billing/trial.ts) opens SOME features, not a
+ * tier. It used to raise `effectiveTier()` to `pro`, which lifted every lock at
+ * once; scoping it to Gozlin means that no longer works, because
+ * `effectiveTier()` is also what history clamping and the storefront read, and
+ * lifting it there would give away `history` and `sync` too.
+ *
+ * So the window is folded in by `featureTier(feature)` instead — the tier to use
+ * FOR ONE FEATURE — and `allows()` plus every metered check below route through
+ * it. `effectiveTier()` deliberately still reports `free` during the window.
+ *
  * THE ONE RULE FOR CALLERS
  *
- * THE INSIGHT TRIAL RIDES THE SAME PATH
- *
- * A live 48-hour trial (services/billing/trial.ts) raises `effectiveTier()` and
- * nothing else. Because every lock and every limit already reads that one
- * function, the trial needed no call-site changes at all — which is the whole
- * reason the fail-open rule was expressed as a value in the first place.
- *
  * Ask `allows(feature)` for a binary lock and `effectiveTier()` for a graded
- * limit. Never branch a lock on `isPro()` / `isSubscriber()` from entitlement.ts
- * — those report what someone PAID, which is the right answer for the upgrade
- * screen and the wrong answer for a lock in a build that cannot sell anything.
+ * limit that is not one of the metered three below. Never branch a lock on
+ * `isPro()` / `isSubscriber()` from entitlement.ts — those report what someone
+ * PAID, which is the right answer for the upgrade screen and the wrong answer
+ * for a lock in a build that cannot sell anything.
  */
 import { isBillingConfigured } from "./config";
 import { currentTier, getDevTierOverride } from "./entitlement";
@@ -45,7 +51,7 @@ import {
   type FeatureId,
   type Tier,
 } from "./tiers";
-import { trialTier } from "./trial";
+import { trialGrants } from "./trial";
 import { checkQuota, recordUsage, type QuotaState } from "./usage";
 import { checkAllowance, spendAllowance } from "./allowance";
 
@@ -68,27 +74,42 @@ export function isGatingActive(): boolean {
  */
 export function effectiveTier(): Tier {
   if (!isGatingActive()) return "pro";
+  // `currentTier()` already resolves the dev override, so this is the real tier
+  // in every build. The intro window is deliberately NOT folded in here — see
+  // the header, and use `featureTier()` when a feature could be inside it.
+  return currentTier();
+}
 
-  const real = currentTier();
+/**
+ * Whether a live intro window should be honoured at all in this session.
+ *
+ * False under a dev override, and that is the point: flipping the developer
+ * switch to "Free" is how the locks get walked, and a window silently opening
+ * Gozlin would make the free experience untestable for the 30 hours during
+ * which those locks are being written.
+ */
+function trialApplies(): boolean {
+  if (!isGatingActive()) return false;
+  if (__DEV__ && getDevTierOverride() !== null) return false;
+  return true;
+}
 
-  // A dev override means someone is deliberately walking a tier's experience.
-  // An insight trial silently lifting them to Pro would make the free tier
-  // untestable for two days — precisely when the locks get written.
-  if (__DEV__ && getDevTierOverride() !== null) return real;
-
-  // The HIGHER of the two, never a replacement: a trial can lift a free user to
-  // Pro, but must never demote a paying one. With one paid tier the two can no
-  // longer disagree, so this reads as belt-and-braces — keep it anyway. It is
-  // what makes the trial a pure addition to whatever someone already holds, and
-  // it is the line that stops a second tier from being mis-handled if one ever
-  // returns.
-  const trial = trialTier();
-  return trial ? higherTier(real, trial) : real;
+/**
+ * The tier to judge ONE feature by — the user's real tier, raised to `pro` when
+ * the intro window happens to cover that particular feature.
+ *
+ * The HIGHER of the two, never a replacement: the window can lift a free user
+ * into Gozlin but must never demote a paying one.
+ */
+export function featureTier(feature: FeatureId): Tier {
+  const base = effectiveTier();
+  if (!trialApplies()) return base;
+  return trialGrants(feature) ? higherTier(base, "pro") : base;
 }
 
 /** May this user use `feature` right now? The single check for binary locks. */
 export function allows(feature: FeatureId): boolean {
-  return tierAllowsFeature(effectiveTier(), feature);
+  return tierAllowsFeature(featureTier(feature), feature);
 }
 
 /** True when `feature` must be withheld — the readable inverse of `allows`. */
@@ -131,12 +152,13 @@ const UNMETERED: Omit<MeteredState, "tier"> = {
 /**
  * May the user send another AI coach turn today?
  *
- * Call BEFORE the turn. The free cap is what creates the upgrade moment; the
- * Plus cap is a generous daily allowance and the Pro cap is a fair-use ceiling a
- * normal user will never reach (see tiers.ts).
+ * Call BEFORE the turn. Free is zero — the conversation is the paid feature, not
+ * a metered one — and the Pro cap is a fair-use ceiling a normal user will never
+ * reach (see tiers.ts). During the intro window a free user resolves to the Pro
+ * cap, which is why this reads `featureTier` rather than `effectiveTier`.
  */
 export async function checkCoachQuota(): Promise<MeteredState> {
-  const tier = effectiveTier();
+  const tier = featureTier("coach-limit");
   if (!isGatingActive()) return { ...UNMETERED, tier };
   const state = await checkQuota("coach", coachDailyLimit(tier));
   return { ...state, metered: true, tier };
@@ -147,7 +169,7 @@ export async function checkCoachQuota(): Promise<MeteredState> {
  * a turn that failed on a dead network must not cost one of three.
  */
 export async function spendCoachTurn(): Promise<MeteredState> {
-  const tier = effectiveTier();
+  const tier = featureTier("coach-limit");
   if (!isGatingActive()) return { ...UNMETERED, tier };
   const state = await recordUsage("coach", coachDailyLimit(tier));
   return { ...state, metered: true, tier };
@@ -155,7 +177,7 @@ export async function spendCoachTurn(): Promise<MeteredState> {
 
 /** May the user scan another meal photo today? */
 export async function checkPhotoScanQuota(): Promise<MeteredState> {
-  const tier = effectiveTier();
+  const tier = featureTier("photo-log");
   if (!isGatingActive()) return { ...UNMETERED, tier };
   const state = await checkQuota("photoScan", photoScanDailyLimit(tier));
   return { ...state, metered: true, tier };
@@ -163,7 +185,7 @@ export async function checkPhotoScanQuota(): Promise<MeteredState> {
 
 /** Spend one photo scan, after a successful analysis. */
 export async function spendPhotoScan(): Promise<MeteredState> {
-  const tier = effectiveTier();
+  const tier = featureTier("photo-log");
   if (!isGatingActive()) return { ...UNMETERED, tier };
   const state = await recordUsage("photoScan", photoScanDailyLimit(tier));
   return { ...state, metered: true, tier };
@@ -187,7 +209,7 @@ export async function spendPhotoScan(): Promise<MeteredState> {
  * one it already has.
  */
 export async function checkDeepDive(): Promise<MeteredState> {
-  const tier = effectiveTier();
+  const tier = featureTier("deep-dive");
   if (!isGatingActive()) return { ...UNMETERED, tier };
   const limit = deepDiveLifetimeLimit(tier);
   if (limit === null) return { ...UNMETERED, tier };
@@ -200,7 +222,7 @@ export async function checkDeepDive(): Promise<MeteredState> {
  * that failed on a dead network must not cost one of a lifetime's three.
  */
 export async function spendDeepDive(): Promise<MeteredState> {
-  const tier = effectiveTier();
+  const tier = featureTier("deep-dive");
   if (!isGatingActive()) return { ...UNMETERED, tier };
   const limit = deepDiveLifetimeLimit(tier);
   if (limit === null) return { ...UNMETERED, tier };

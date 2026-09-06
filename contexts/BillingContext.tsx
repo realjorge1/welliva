@@ -12,7 +12,8 @@
  * Gozlin transports — which have no React in scope — read the same answer.
  *
  * WHAT IT WIRES UP
- *  1. Hydrate the cached entitlement before first paint (offline paid users).
+ *  1. Hydrate the cached entitlement before first paint (offline paid users),
+ *     then open the 30-hour Gozlin intro window if this is the first launch.
  *  2. Configure the SDK once auth resolves.
  *  3. logIn / logOut as the account changes.
  *  4. Listen for store-side changes (renewal, cancellation, refund).
@@ -44,16 +45,17 @@ import {
   identifyUser,
   installEntitlementListener,
   isBillingAvailable,
+  isBillingReady,
   isGatingActive,
   purchasePlan,
   refreshEntitlement,
   restorePurchases,
   activeTrial,
   signOutBilling,
-  maybeStartInsightTrial,
   subscribe,
   subscribeTrial,
   trialHoursLeft,
+  maybeStartTrial,
   type Entitlement,
   type FeatureId,
   type PlanOption,
@@ -99,24 +101,27 @@ interface BillingContextType {
   isHydrating: boolean;
 
   /**
-   * Whether a 48-hour insight trial is running right now.
+   * Whether the 30-hour Gozlin intro window is open right now.
    *
    * Distinct from `isSubscriber`, which stays FALSE throughout: nobody is paying
-   * and nothing renews. UI that reports subscription status must not claim
-   * otherwise, and UI that sells should still sell — a trial is the strongest
-   * possible moment to ask, not a reason to go quiet.
+   * and nothing renews. It is also distinct from `tier`, which stays `free` —
+   * the window opens the AI features only, not the tier (see
+   * services/billing/trial.ts). UI that reports subscription status must not
+   * claim otherwise, and UI that sells should still sell — an open window is the
+   * strongest possible moment to ask, not a reason to go quiet.
    */
   isTrialing: boolean;
-  /** Whole hours left in the trial window. 0 when none is running. */
+  /** Whole hours left in the intro window. 0 when none is running. */
   trialHoursLeft: number;
-  /**
-   * Open the trial window if this user has earned one. Called from the surface
-   * that first has a real insight to show; a no-op every other time.
-   * Returns true only on the call that actually started it.
-   */
-  startInsightTrial: () => Promise<boolean>;
   /** False in Expo Go, on web, or without a RevenueCat key. */
   isAvailable: boolean;
+  /**
+   * True once the SDK has actually been configured — which cannot happen until
+   * auth resolves. Anything that FETCHES from the store (offerings, prices) must
+   * wait for this rather than for `isAvailable`, or it races the configure and
+   * renders an empty storefront it never retries. See `isBillingReady`.
+   */
+  isReady: boolean;
 
   /** Plus/Pro × monthly/annual, for the upgrade screen. Loaded by `loadPlans`. */
   plans: PlanOption[];
@@ -148,13 +153,17 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
 
   const configuredFor = useRef<string | null | undefined>(undefined);
+  // Mirrors the module's `configured` flag into React, so a screen can re-run a
+  // store fetch at the moment configure lands instead of racing it.
+  const [isReady, setIsReady] = useState(isBillingReady);
 
   // 1 ── Mirror the module store into React state.
   useEffect(() => subscribe(setEntitlementState), []);
 
-  // 1a ── The insight trial changes what `effectiveTier()` answers without
-  //       touching the entitlement, so it needs its own nudge or the React tree
-  //       would keep rendering the pre-trial tier until something else changed.
+  // 1a ── The intro window changes what `allows()` answers without touching the
+  //       entitlement, so it needs its own nudge or the React tree would keep
+  //       rendering the locked version of Gozlin until something else changed.
+  //       It fires on open AND on the first read after expiry.
   const [trialTick, setTrialTick] = useState(0);
   useEffect(() => subscribeTrial(() => setTrialTick((n) => n + 1)), []);
 
@@ -184,15 +193,43 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // 2 ── Hydrate the cache before anything else, so a paying user who opens the
-  //      app offline is on their tier on the first frame instead of flashing free.
+  //      app offline is on their tier on the first frame instead of flashing
+  //      free — then open the Gozlin intro window if this is the first launch.
   useEffect(() => {
     let alive = true;
-    // Both, together: a user mid-trial who cold-starts offline must be on Pro on
-    // the first frame for the same reason a paying user must be on their tier —
-    // a flash of the locked experience reads as the app taking something away.
-    void Promise.all([hydrateEntitlement(), hydrateTrial()]).finally(() => {
-      if (alive) setIsHydrating(false);
-    });
+    void (async () => {
+      try {
+        // Both, together: a user mid-window who cold-starts offline must have
+        // Gozlin open on the first frame for the same reason a paying user must
+        // be on their tier — a flash of the locked experience reads as the app
+        // taking something away.
+        await Promise.all([hydrateEntitlement(), hydrateTrial()]);
+        if (!alive) return;
+        setIsHydrating(false);
+
+        /*
+         * THE WINDOW OPENS HERE. "First launch" is the first run that reaches
+         * this line with gating on and nothing already recorded on disk.
+         *
+         * It must come AFTER hydration, or it would grant a second window over
+         * one already stored. It reads the live module functions rather than
+         * rendered state because the entitlement it must not override was
+         * resolved microseconds ago and has not reached React yet — a paying
+         * customer handed a "free trial" of what they already bought is the one
+         * outcome this ordering exists to prevent.
+         *
+         * Self-declining and idempotent, so there is no `hasEverStarted` check
+         * to duplicate here.
+         */
+        await maybeStartTrial({
+          isSubscriber: hasPaidAccess(),
+          gatingActive: isGatingActive(),
+        });
+      } catch (e) {
+        console.warn("[billing] hydrate/intro-window failed:", e);
+        if (alive) setIsHydrating(false);
+      }
+    })();
     return () => {
       alive = false;
     };
@@ -211,11 +248,16 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
     void (async () => {
       if (first) {
         await configureBilling(uid);
-        return;
+      } else if (uid) {
+        // Account switched after configure — transfer or detach.
+        await identifyUser(uid);
+      } else {
+        await signOutBilling();
       }
-      // Account switched after configure — transfer or detach.
-      if (uid) await identifyUser(uid);
-      else await signOutBilling();
+      // Publish readiness however this resolved. Configure can legitimately fail
+      // (no key, dead network on the entitlement refresh), and the flag stays
+      // false there — which is the honest answer, because nothing can be sold.
+      setIsReady(isBillingReady());
     })();
   }, [user?.id, authLoading]);
 
@@ -246,22 +288,6 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
 
   const purchase = useCallback(async (plan: PlanOption) => purchasePlan(plan), []);
 
-  /**
-   * Grant the insight trial, if it is owed.
-   *
-   * Reads subscription state through the live module functions rather than the
-   * rendered snapshot, so a caller firing this during the same commit that
-   * resolves an entitlement cannot hand a paying user a trial by racing it.
-   */
-  const startInsightTrial = useCallback(
-    () =>
-      maybeStartInsightTrial({
-        isSubscriber: hasPaidAccess(),
-        gatingActive: isGatingActive(),
-      }),
-    [],
-  );
-
   const restore = useCallback(async () => restorePurchases(), []);
   const refresh = useCallback(async () => refreshEntitlement(), []);
 
@@ -290,8 +316,8 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
       isHydrating,
       isTrialing: activeTrial() !== null,
       trialHoursLeft: trialHoursLeft(),
-      startInsightTrial,
       isAvailable: isBillingAvailable(),
+      isReady,
       plans,
       isLoadingPlans,
       loadPlans,
@@ -302,11 +328,11 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       entitlement,
-      // The tick itself is the dependency: trial start/expiry changes what
-      // effectiveTier() returns without changing `entitlement`.
+      // The tick itself is the dependency: the window opening or lapsing changes
+      // what `allows()` answers without changing `entitlement`.
       trialTick,
-      startInsightTrial,
       isHydrating,
+      isReady,
       plans,
       isLoadingPlans,
       loadPlans,
