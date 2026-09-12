@@ -1,63 +1,85 @@
 /**
- * ONBOARDING — a short coaching consultation, not a questionnaire.
+ * ONBOARDING — a guided ritual, not a questionnaire.
  *
  * A first-person coach captures only what the engines truly need, in as few
  * beats as possible: goals → you → daily activity → (training, only if wanted)
  * → food → safety, then *builds and reveals* a personalized plan before Home so
  * the user arrives already invested.
  *
- * Design rules that keep it from feeling like an exam:
+ * ── WHAT THIS FILE IS ─────────────────────────────────────────────────────
+ * This file is the STEP MACHINE and the DATA. It owns every piece of state, the
+ * branching, the validation bounds, `buildBio()`, the engine calls and the
+ * save. It renders almost no layout of its own: the presentation lives in
+ * `components/onboarding/flow`, which knows nothing about bios, targets or
+ * persistence. That split is deliberate and load-bearing — the visual language
+ * can be re-cut entirely without touching a single rule about what gets stored.
+ *
+ * ── DESIGN RULES THAT KEEP IT FROM FEELING LIKE AN EXAM ───────────────────
  *  • Multi-select goals; the choices BRANCH the flow. Pick a movement goal and
  *    we ask about training; pick only diet/health goals and we skip it entirely
  *    (workouts stay available in-app, and we offer to set them up later —
  *    see `trainingEnabled`).
- *  • Merged steps: age+sex+body on one screen, diet+cuisine+meals on one screen,
- *    experience+equipment+days on one screen.
+ *  • Merged steps: age+sex+body on one screen, diet+cuisine+meals on one
+ *    screen, experience+equipment+days on one screen.
  *  • Region is DETECTED silently from the device time-zone (no "what world are
  *    you in?" screen, no permission) — we only surface a tiny confirm chip.
+ *  • Every question arrives before its options do. The ~300ms gap
+ *    (`OPTIONS_DELAY`) is the beat where the screen is still and the user is
+ *    reading; it is what makes this read as a conversation rather than a form
+ *    that rendered.
+ *  • Every selection is acknowledged — the card settles, the siblings recede,
+ *    and where it matters the flow says something back (`goalReaction`).
  *
- * All plan numbers shown in the reveal are computed from the SAME bio that gets
- * saved (`buildBio`), so what they see is exactly what they get.
+ * ── WHAT THE SCREEN SHOWS IS WHAT GETS SAVED ──────────────────────────────
+ * All plan numbers in the reveal are computed from the SAME bio that gets
+ * persisted (`buildBio`), by the same engines the rest of the app uses. The
+ * reveal animates the presentation of those numbers and never invents one.
  */
 
 import {
-  AmbientCanvas,
-  AnimatedNumber,
-  AppText,
-  Button,
-  Card,
-  IconBadge,
-  Reveal,
-  Ring,
-  Stat,
-  ThemedIcon,
-  useColors,
-  useKeyboardInset,
-} from "@/components/ui";
-import AILogoBadge from "@/components/gozlin/AILogoBadge";
+  ActivityDeck,
+  AnimatedQuestion,
+  AnimatedText,
+  Appear,
+  BuildingAnimation,
+  ChipField,
+  CinematicExit,
+  FoodPreferenceSelector,
+  type GridOption,
+  Gutter,
+  HealthGroup,
+  InputRow,
+  MeasureMotif,
+  MicroReaction,
+  MultiSelectGrid,
+  NoteField,
+  NothingApplies,
+  OnboardingActions,
+  OnboardingContainer,
+  OnboardingHeader,
+  OnboardingTransition,
+  OPTIONS_DELAY,
+  Pace,
+  PlanReveal,
+  ProgressiveText,
+  Recede,
+  SafetyMotif,
+  SelectionCard,
+  StaggerReveal,
+  StepCentre,
+  StepScroll,
+  TrainingSelector,
+  WelcomeVisual,
+} from "@/components/onboarding/flow";
 import { DisclaimerNote } from "@/components/legal";
-import { TargetGuidanceNote } from "@/components/nutrition/TargetGuidanceNote";
-import { OrbField, useOrbTouch } from "@/components/OrbField";
-import { hasSeenNotificationPrimer } from "@/services/notifications/primer";
-import { Gradients, Radius, Spacing, alpha, brandGradientDark } from "@/constants/theme";
-import { Ionicons } from "@expo/vector-icons";
+import { AppText, useColors } from "@/components/ui";
+import { Radius, Spacing, alpha } from "@/constants/theme";
 import * as Haptics from "@/utils/haptics";
 import { detectRegion } from "@/utils/region";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Alert,
-  Animated,
-  Dimensions,
-  Easing,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  View,
-} from "react-native";
-import Reanimated from "react-native-reanimated";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { Alert, StyleSheet, View, useWindowDimensions } from "react-native";
+import { hasSeenNotificationPrimer } from "@/services/notifications/primer";
 import { useProfile } from "../contexts/AppContext";
 import { ensureDietLibraryLoaded } from "../constants/DietDatabase";
 import { recommendDiets } from "../services/intelligence";
@@ -80,23 +102,6 @@ import {
 } from "../models/user";
 import { Equipment } from "../models/workout";
 
-const { width } = Dimensions.get("window");
-
-/** Step hand-over: a short, confident nudge rather than a full-width whip — the
- *  screen changes without the content ever looking thrown across it. */
-const STEP_SLIDE = 36;
-const STEP_OUT_MS = 130;
-const STEP_IN_MS = 220;
-
-/**
- * Option grids are MEASURED, not wrapped. Every row — including a short last
- * row, whose cells stretch to share the leftover space — spans the full content
- * width, so a block of options can never hang to one side of the screen.
- */
-const GRID_GAP = Spacing.sm;
-const GRID_WIDTH = width - Spacing.screen * 2;
-const gridCell = (columns: number) => (GRID_WIDTH - GRID_GAP * (columns - 1)) / columns;
-
 type Step =
   | "welcome"
   | "goal"
@@ -116,9 +121,9 @@ const TRAINING_GOALS = new Set<PrimaryGoal>([
   "athletic_performance",
 ]);
 
-const SEX_OPTIONS: { value: Sex; label: string; icon: string }[] = [
-  { value: "male", label: "Male", icon: "male" },
-  { value: "female", label: "Female", icon: "female" },
+const SEX_OPTIONS: GridOption<Sex>[] = [
+  { value: "male", label: "Male", glyph: "male" },
+  { value: "female", label: "Female", glyph: "female" },
 ];
 
 /**
@@ -130,38 +135,28 @@ const ACTIVITY_OPTIONS: {
   value: ActivityLevel;
   label: string;
   desc: string;
-  icon: string;
   level: number;
 }[] = [
-  { value: "sedentary", label: "Mostly sitting", desc: "Desk work, driving, screen time", icon: "desktop-outline", level: 1 },
-  { value: "light", label: "Lightly active", desc: "On my feet here and there", icon: "walk-outline", level: 2 },
-  { value: "moderate", label: "Active", desc: "Moving for much of the day", icon: "bicycle-outline", level: 3 },
-  { value: "active", label: "Very active", desc: "Physical job or hard training most days", icon: "flame-outline", level: 4 },
-  { value: "very_active", label: "Extra active", desc: "Physical job AND daily training", icon: "barbell-outline", level: 5 },
+  { value: "sedentary", label: "Mostly sitting", desc: "Desk work, driving, screen time", level: 1 },
+  { value: "light", label: "Lightly active", desc: "On my feet here and there", level: 2 },
+  { value: "moderate", label: "Active", desc: "Moving for much of the day", level: 3 },
+  { value: "active", label: "Very active", desc: "Physical job or hard training most days", level: 4 },
+  { value: "very_active", label: "Extra active", desc: "Physical job AND daily training", level: 5 },
 ];
 
-const EXERCISE_LEVEL_OPTIONS: {
-  value: ExerciseLevel;
-  label: string;
-  desc: string;
-  icon: string;
-}[] = [
-  { value: "beginner", label: "New to it", desc: "Just starting out", icon: "leaf-outline" },
-  { value: "intermediate", label: "Regular", desc: "I train fairly often", icon: "fitness-outline" },
-  { value: "advanced", label: "Experienced", desc: "Training is second nature", icon: "barbell-outline" },
+const EXERCISE_LEVEL_OPTIONS: GridOption<ExerciseLevel>[] = [
+  { value: "beginner", label: "New to it", subtitle: "Just starting", glyph: "sprout" },
+  { value: "intermediate", label: "Regular", subtitle: "Fairly often", glyph: "steady" },
+  { value: "advanced", label: "Experienced", subtitle: "Second nature", glyph: "crest" },
 ];
 
-const GOAL_OPTIONS: {
-  value: PrimaryGoal;
-  label: string;
-  icon: string;
-}[] = [
-  { value: "lose_weight", label: "Lose weight", icon: "trending-down" },
-  { value: "build_muscle", label: "Build muscle", icon: "barbell" },
-  { value: "improve_fitness", label: "Get fit", icon: "fitness" },
-  { value: "increase_energy", label: "More energy", icon: "flash" },
-  { value: "better_health", label: "Better health", icon: "heart" },
-  { value: "athletic_performance", label: "Perform better", icon: "trophy" },
+const GOAL_OPTIONS: GridOption<PrimaryGoal>[] = [
+  { value: "lose_weight", label: "Lose weight", glyph: "descend" },
+  { value: "build_muscle", label: "Build muscle", glyph: "strength" },
+  { value: "improve_fitness", label: "Get fit", glyph: "motion" },
+  { value: "increase_energy", label: "More energy", glyph: "spark" },
+  { value: "better_health", label: "Better health", glyph: "heart" },
+  { value: "athletic_performance", label: "Perform better", glyph: "aim" },
 ];
 
 /** Short verb phrase per goal for coach copy ("Built around your goal to …"). */
@@ -174,6 +169,21 @@ const GOAL_PHRASE: Record<PrimaryGoal, string> = {
   athletic_performance: "perform at your best",
 };
 
+/**
+ * What the flow says back when a goal is chosen. The FIRST goal picked becomes
+ * `primaryGoal` and drives every engine, so the reaction names it out loud —
+ * the rule was previously invisible, and a user who wanted a different one had
+ * no way to know how to get it.
+ */
+const GOAL_REACTION: Record<PrimaryGoal, string> = {
+  lose_weight: "Good. We'll shape your calories and meals around losing weight — steadily.",
+  build_muscle: "Good. Protein and progressive training lead from here.",
+  improve_fitness: "Good. We'll build a base you can actually keep.",
+  increase_energy: "Good. Steady energy comes from how you eat and how you move — we'll do both.",
+  better_health: "Good. Everything stays balanced, gentle and sustainable.",
+  athletic_performance: "Good. We'll train for output and feed it properly.",
+};
+
 /** Sensible weekly training default per goal for users who skip the training step. */
 const DEFAULT_DAYS_FOR_GOAL: Record<PrimaryGoal, number> = {
   lose_weight: 3,
@@ -184,7 +194,7 @@ const DEFAULT_DAYS_FOR_GOAL: Record<PrimaryGoal, number> = {
   athletic_performance: 5,
 };
 
-const DIETARY_RESTRICTION_OPTIONS: { value: DietaryRestriction; label: string }[] = [
+const DIETARY_RESTRICTION_OPTIONS: GridOption<DietaryRestriction>[] = [
   { value: "none", label: "No restrictions" },
   { value: "vegetarian", label: "Vegetarian" },
   { value: "vegan", label: "Vegan" },
@@ -195,31 +205,21 @@ const DIETARY_RESTRICTION_OPTIONS: { value: DietaryRestriction; label: string }[
   { value: "dairy_free", label: "Dairy-free" },
 ];
 
-const CUISINE_OPTIONS: {
-  value: CuisinePreference;
-  label: string;
-  desc: string;
-  icon: string;
-}[] = [
-  { value: "mixed", label: "A bit of everything", desc: "Draw from all cuisines", icon: "globe-outline" },
-  { value: "african", label: "African", desc: "Nigerian & West-African dishes", icon: "leaf" },
-  { value: "western", label: "European & Western", desc: "Classic Western meals", icon: "restaurant" },
-  { value: "mediterranean", label: "Mediterranean", desc: "Greek, Italian & coastal", icon: "fish" },
+const CUISINE_OPTIONS: GridOption<CuisinePreference>[] = [
+  { value: "mixed", label: "A bit of everything", subtitle: "Draw from all cuisines", glyph: "globe" },
+  { value: "african", label: "African", subtitle: "Nigerian & West-African dishes", glyph: "leaf" },
+  { value: "western", label: "European & Western", subtitle: "Classic Western meals", glyph: "plate" },
+  { value: "mediterranean", label: "Mediterranean", subtitle: "Greek, Italian & coastal", glyph: "coast" },
 ];
 
 /** Equipment the user can train with. Each unlocks real exercises in the DB. */
-const EQUIPMENT_OPTIONS: {
-  value: Equipment;
-  label: string;
-  desc: string;
-  icon: string;
-}[] = [
-  { value: "none", label: "Bodyweight & mat", desc: "No gear — just you and the floor", icon: "body-outline" },
-  { value: "dumbbells", label: "Dumbbells", desc: "Adjustable or fixed", icon: "barbell-outline" },
-  { value: "resistance_bands", label: "Resistance bands", desc: "Loops or tubes", icon: "git-compare-outline" },
-  { value: "kettlebell", label: "Kettlebell", desc: "Any weight", icon: "fitness-outline" },
-  { value: "pull_up_bar", label: "Pull-up bar", desc: "Doorway or wall-mounted", icon: "reorder-four-outline" },
-  { value: "bench", label: "Bench", desc: "Flat or adjustable", icon: "tablet-landscape-outline" },
+const EQUIPMENT_OPTIONS: GridOption<Equipment>[] = [
+  { value: "none", label: "Bodyweight & mat", subtitle: "No gear — just you and the floor", glyph: "mat" },
+  { value: "dumbbells", label: "Dumbbells", subtitle: "Adjustable or fixed", glyph: "strength" },
+  { value: "resistance_bands", label: "Resistance bands", subtitle: "Loops or tubes", glyph: "band" },
+  { value: "kettlebell", label: "Kettlebell", subtitle: "Any weight", glyph: "kettlebell" },
+  { value: "pull_up_bar", label: "Pull-up bar", subtitle: "Doorway or wall-mounted", glyph: "bar" },
+  { value: "bench", label: "Bench", subtitle: "Flat or adjustable", glyph: "bench" },
 ];
 
 /** Short label for the equipment summary on the reveal. */
@@ -232,11 +232,20 @@ const EQUIPMENT_SHORT: Record<Equipment, string> = {
   kettlebell: "Kettlebell",
 };
 
+/**
+ * The bounds the About step accepts. They are shown in the field as a faint
+ * scale — the user meets them before the alert does — and enforced on Continue
+ * from these same numbers, so the guide can never promise a range the
+ * validation then rejects.
+ */
+const HEIGHT_RANGE = { min: 100, max: 250 } as const;
+const WEIGHT_RANGE = { min: 30, max: 300 } as const;
+
 const WORKOUT_DAY_OPTIONS = [2, 3, 4, 5, 6];
 
-const MEALS_OPTIONS: { value: 3 | 4; label: string; desc: string }[] = [
-  { value: 3, label: "3 meals", desc: "Breakfast, lunch, dinner + a snack" },
-  { value: 4, label: "4 meals", desc: "Three meals + two snacks" },
+const MEALS_OPTIONS: GridOption<string>[] = [
+  { value: "3", label: "3 meals", subtitle: "Breakfast, lunch, dinner + a snack" },
+  { value: "4", label: "4 meals", subtitle: "Three meals + two snacks" },
 ];
 
 const ALLERGY_OPTIONS: { value: CommonAllergy; label: string }[] = [
@@ -252,14 +261,14 @@ const ALLERGY_OPTIONS: { value: CommonAllergy; label: string }[] = [
 ];
 
 /**
- * Medical conditions, GROUPED. Thirty flat pills read as an intimidating wall
- * and wrap into a ragged, one-sided block; five labelled groups of measured
- * tiles read as a short scan. "None" is lifted out into its own full-width
- * row above the groups (see the health step) rather than buried at the end.
+ * Medical conditions, GROUPED and COLLAPSED. Thirty flat pills read as an
+ * intimidating wall; five closed rows that say how much they hold read as a
+ * short scan with nothing hidden. "None" is lifted out into its own full-width
+ * row above the groups rather than buried at the end.
  */
 const MEDICAL_GROUPS: {
   title: string;
-  items: { value: MedicalCondition; label: string }[];
+  items: GridOption<MedicalCondition>[];
 }[] = [
   {
     title: "Heart & metabolic",
@@ -317,8 +326,8 @@ const MEDICAL_GROUPS: {
   },
 ];
 
-/** A short name for the beat the user is in — shown under the progress rail so
- *  the header says WHERE they are, not just how far along. */
+/** A short name for the beat the user is in — shown in the header so it says
+ *  WHERE they are, not just how far along. */
 const STEP_KICKER: Partial<Record<Step, string>> = {
   goal: "Your goals",
   about: "About you",
@@ -335,20 +344,30 @@ const BUILD_LINES = [
   "Putting it all together…",
 ];
 
-const tapHaptic = () => Haptics.selectionAsync().catch(() => {});
+/** The welcome's score. The line finishes drawing at ~1350ms; type follows. */
+const WELCOME = { title: 1350, support: 1500, chips: 1660, action: 2000 } as const;
+
+/** Split by SENTENCE, never by line. Hard-wrapping the promise would read as
+ *  a ragged three-line block on an SE and a short two-liner on a 15 Pro Max;
+ *  whole sentences re-wrap correctly at every width. */
+const WELCOME_LINES = [
+  "A few quick questions and I’ll shape a diet and training plan around your life.",
+  "About 2 minutes.",
+];
+
+const WELCOME_CHIPS = [
+  "Meals for your goals",
+  "Training that fits",
+  "Safe by design",
+];
 
 export default function OnboardingScreen() {
   const router = useRouter();
   const { completeOnboarding } = useProfile();
   const { colors } = useColors();
-  const insets = useSafeAreaInsets();
-  // The keyboard is consumed as a window inset, not a resize (edge-to-edge is
-  // on), so the flow pads itself frame-by-frame from the system's own animation
-  // instead of leaning on a KeyboardAvoidingView that has nothing to react to.
-  const kb = useKeyboardInset({ bottomInset: insets.bottom, gap: Spacing.lg });
-  // Bubble-phase touch observers — any press or swipe landing on a background
-  // orb bounces it off elastically, without interfering with the flow itself.
-  const { touch, touchHandlers } = useOrbTouch();
+  const { width } = useWindowDimensions();
+  /** Content width available to measured grids, inside the flow's gutters. */
+  const contentWidth = width - Gutter * 2;
 
   // Preview mode (?preview=1): launched from the Profile "board" test button to
   // replay the whole flow. Everything looks identical to a new user, but the
@@ -357,6 +376,7 @@ export default function OnboardingScreen() {
   const isPreview = preview === "1";
 
   const [currentStep, setCurrentStep] = useState<Step>("welcome");
+  const [direction, setDirection] = useState<"forward" | "back">("forward");
   const [loading, setLoading] = useState(false);
   // The diet library + exercise pool are lazy-loaded (Phase D — bundle trim).
   // The plan preview reads both synchronously, so warm them up and recompute the
@@ -394,6 +414,20 @@ export default function OnboardingScreen() {
   const [region, setRegion] = useState("");
   const [detectedRegion, setDetectedRegion] = useState<string | null>(null);
 
+  /* ── Presentation-only state ──────────────────────────────────────────── */
+
+  /** Which field on the "about" step holds the caret (the rest recede). */
+  const [focusedField, setFocusedField] = useState<string | null>(null);
+  /** How many of the training step's three questions are on screen (1–3). */
+  const [trainingRevealed, setTrainingRevealed] = useState(1);
+  /** Which of the food step's three questions is on screen (0–2). */
+  const [foodQuestion, setFoodQuestion] = useState(0);
+  /** Which medical group is open. Only one at a time — five open groups is
+   *  the wall of thirty again, in a different shape. */
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  /** The final transition is running; the save may still be in flight. */
+  const [exiting, setExiting] = useState(false);
+
   const primaryGoal = goals[0] ?? null;
   const trainingEnabled = useMemo(() => goals.some((g) => TRAINING_GOALS.has(g)), [goals]);
 
@@ -417,12 +451,6 @@ export default function OnboardingScreen() {
     [STEPS],
   );
 
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-  const slideAnim = useRef(new Animated.Value(0)).current;
-  const buildPulse = useRef(new Animated.Value(1)).current;
-  const buildRing = useRef(new Animated.Value(0)).current;
-  const [buildLineIdx, setBuildLineIdx] = useState(0);
-
   // Detect region + a starting cuisine silently on mount — no screen, no prompt.
   useEffect(() => {
     const d = detectRegion();
@@ -433,55 +461,24 @@ export default function OnboardingScreen() {
     setCuisinePreference(d.cuisine);
   }, []);
 
-  const animateTransition = (direction: "forward" | "back") => {
-    const out = direction === "forward" ? -STEP_SLIDE : STEP_SLIDE;
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: STEP_OUT_MS,
-        easing: Easing.in(Easing.quad),
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: out,
-        duration: STEP_OUT_MS,
-        easing: Easing.in(Easing.quad),
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      slideAnim.setValue(-out);
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: STEP_IN_MS,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: STEP_IN_MS,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]).start();
-    });
+  /* ── Step machine ─────────────────────────────────────────────────────── */
+
+  const goTo = (step: Step, dir: "forward" | "back") => {
+    setDirection(dir);
+    setCurrentStep(step);
   };
 
   const nextStep = () => {
     const idx = STEPS.indexOf(currentStep);
     if (idx >= 0 && idx < STEPS.length - 1) {
       if (!validateCurrentStep()) return;
-      animateTransition("forward");
-      setTimeout(() => setCurrentStep(STEPS[idx + 1]), STEP_OUT_MS);
+      goTo(STEPS[idx + 1], "forward");
     }
   };
 
   const prevStep = () => {
     const idx = STEPS.indexOf(currentStep);
-    if (idx > 0) {
-      animateTransition("back");
-      setTimeout(() => setCurrentStep(STEPS[idx - 1]), STEP_OUT_MS);
-    }
+    if (idx > 0) goTo(STEPS[idx - 1], "back");
   };
 
   // Advance from a KNOWN step without re-validating — used by tap-to-advance
@@ -489,79 +486,8 @@ export default function OnboardingScreen() {
   // React state would still see the stale, pre-selection value).
   const advanceFrom = (step: Step) => {
     const idx = STEPS.indexOf(step);
-    if (idx >= 0 && idx < STEPS.length - 1) {
-      animateTransition("forward");
-      setTimeout(() => setCurrentStep(STEPS[idx + 1]), STEP_OUT_MS);
-    }
+    if (idx >= 0 && idx < STEPS.length - 1) goTo(STEPS[idx + 1], "forward");
   };
-
-  // The "building" beat: pulse + rotating lines, then auto-advance to the reveal.
-  useEffect(() => {
-    if (currentStep !== "building") return;
-    setBuildLineIdx(0);
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(buildPulse, { toValue: 1.08, duration: 620, useNativeDriver: true }),
-        Animated.timing(buildPulse, { toValue: 1, duration: 620, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    // A single hairline ring that swells out of the badge and dissolves — the
-    // "working" signal, carried by motion rather than by a glow.
-    buildRing.setValue(0);
-    const ringLoop = Animated.loop(
-      Animated.timing(buildRing, {
-        toValue: 1,
-        duration: 1800,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    );
-    ringLoop.start();
-    const lineTimer = setInterval(
-      () => setBuildLineIdx((i) => Math.min(i + 1, BUILD_LINES.length - 1)),
-      480,
-    );
-    const advance = setTimeout(() => {
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: STEP_OUT_MS,
-          easing: Easing.in(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: -STEP_SLIDE,
-          duration: STEP_OUT_MS,
-          easing: Easing.in(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        slideAnim.setValue(STEP_SLIDE);
-        setCurrentStep("plan");
-        Animated.parallel([
-          Animated.timing(fadeAnim, {
-            toValue: 1,
-            duration: STEP_IN_MS,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-          Animated.timing(slideAnim, {
-            toValue: 0,
-            duration: STEP_IN_MS,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-        ]).start();
-      });
-    }, 2000);
-    return () => {
-      loop.stop();
-      ringLoop.stop();
-      clearInterval(lineTimer);
-      clearTimeout(advance);
-    };
-  }, [currentStep, buildPulse, buildRing, fadeAnim, slideAnim]);
 
   const validateCurrentStep = (): boolean => {
     switch (currentStep) {
@@ -580,12 +506,26 @@ export default function OnboardingScreen() {
           Alert.alert("Quick check", "Select your biological sex — it sharpens your calorie math.");
           return false;
         }
-        if (!heightCm || parseInt(heightCm) < 100 || parseInt(heightCm) > 250) {
-          Alert.alert("Quick check", "Enter a valid height (100–250 cm).");
+        if (
+          !heightCm ||
+          parseInt(heightCm) < HEIGHT_RANGE.min ||
+          parseInt(heightCm) > HEIGHT_RANGE.max
+        ) {
+          Alert.alert(
+            "Quick check",
+            `Enter a valid height (${HEIGHT_RANGE.min}–${HEIGHT_RANGE.max} cm).`,
+          );
           return false;
         }
-        if (!weightKg || parseFloat(weightKg) < 30 || parseFloat(weightKg) > 300) {
-          Alert.alert("Quick check", "Enter a valid weight (30–300 kg).");
+        if (
+          !weightKg ||
+          parseFloat(weightKg) < WEIGHT_RANGE.min ||
+          parseFloat(weightKg) > WEIGHT_RANGE.max
+        ) {
+          Alert.alert(
+            "Quick check",
+            `Enter a valid weight (${WEIGHT_RANGE.min}–${WEIGHT_RANGE.max} kg).`,
+          );
           return false;
         }
         return true;
@@ -599,6 +539,8 @@ export default function OnboardingScreen() {
         return true;
     }
   };
+
+  /* ── The bio, and the plan built from it ──────────────────────────────── */
 
   // Single source of truth for the bio — the reveal preview and the saved bio
   // are built from this exact function, so they can never drift.
@@ -677,47 +619,86 @@ export default function OnboardingScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep, age, sex, heightCm, weightKg, activityLevel, primaryGoal, buildBio, plansReady]);
 
-  const handleComplete = async () => {
-    // Preview: don't touch the real profile — just leave the flow.
+  /* ── Finishing ────────────────────────────────────────────────────────── */
+
+  /**
+   * The save and the cinematic run CONCURRENTLY. `saved` records the outcome of
+   * the write; `covered` records that the exit has taken the screen. Routing
+   * waits for both, so the user never sees a half-covered navigation and never
+   * waits on an animation that has already finished.
+   */
+  const saved = useRef<"pending" | "ok" | "failed">("pending");
+  const covered = useRef(false);
+  const routed = useRef(false);
+
+  const land = useCallback(async () => {
+    if (routed.current) return;
+    if (!covered.current || saved.current !== "ok") return;
+    routed.current = true;
     if (isPreview) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       if (router.canGoBack()) router.back();
       else router.replace("/(tabs)" as any);
       return;
     }
+    // Ask for reminders here, not at cold boot: the user has just seen their
+    // plan, so "a nudge at the right time" is a concrete promise rather than an
+    // abstract permission. The primer marks itself seen and lands on the tabs.
+    if (await hasSeenNotificationPrimer()) router.replace("/(tabs)" as any);
+    else router.replace("/notifications-setup?from=onboarding" as any);
+  }, [isPreview, router]);
+
+  const handleComplete = async () => {
+    if (exiting) return;
+    saved.current = "pending";
+    covered.current = false;
+    routed.current = false;
+    setExiting(true);
     setLoading(true);
+
+    // Preview: don't touch the real profile — just leave the flow.
+    if (isPreview) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      saved.current = "ok";
+      land();
+      return;
+    }
+
     try {
       await completeOnboarding(buildBio());
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      // Ask for reminders here, not at cold boot: the user has just seen their
-      // plan, so "a nudge at the right time" is a concrete promise rather than an
-      // abstract permission. The primer marks itself seen and lands on the tabs.
-      if (await hasSeenNotificationPrimer()) router.replace("/(tabs)" as any);
-      else router.replace("/notifications-setup?from=onboarding" as any);
+      saved.current = "ok";
+      land();
     } catch (error) {
       console.error("Error completing onboarding:", error);
-      Alert.alert("Error", "Failed to save your information. Please try again.");
+      saved.current = "failed";
+      // Put the plan back before saying anything — an alert over a black
+      // cover-screen would leave the user with nowhere to return to.
+      setExiting(false);
       setLoading(false);
+      Alert.alert("Error", "Failed to save your information. Please try again.");
     }
   };
 
+  const onCovered = useCallback(() => {
+    covered.current = true;
+    land();
+  }, [land]);
+
+  /* ── Selection handlers (business rules live here, not in the UI) ─────── */
+
   const toggleGoal = (value: PrimaryGoal) => {
-    tapHaptic();
     setGoals((prev) =>
       prev.includes(value) ? prev.filter((g) => g !== value) : [...prev, value],
     );
   };
-  const handleSexSelect = (value: Sex) => {
-    tapHaptic();
-    setSex(value);
-  };
+  const handleSexSelect = (value: Sex) => setSex(value);
   const handleActivitySelect = (value: ActivityLevel) => {
-    tapHaptic();
     setActivityLevel(value);
-    setTimeout(() => advanceFrom("activity"), 380);
+    // The established beat: long enough to see the card open and its meter
+    // fill, short enough that it is never a wait.
+    setTimeout(() => advanceFrom("activity"), Pace.advance);
   };
   const toggleEquipment = (value: Equipment) => {
-    tapHaptic();
     setEquipment((prev) => {
       if (value === "none") return ["none"];
       const withoutNone = prev.filter((e) => e !== "none");
@@ -728,13 +709,11 @@ export default function OnboardingScreen() {
     });
   };
   const toggleAllergy = (allergy: string) => {
-    tapHaptic();
     setAllergies((prev) =>
       prev.includes(allergy) ? prev.filter((a) => a !== allergy) : [...prev, allergy],
     );
   };
   const toggleMedicalCondition = (condition: MedicalCondition) => {
-    tapHaptic();
     if (condition === "none") {
       // Un-tickable: tapping the row again clears it rather than locking the
       // user into a "None" they picked by accident.
@@ -749,1262 +728,495 @@ export default function OnboardingScreen() {
     }
   };
 
+  /* ── What the header and the action bar say on each step ──────────────── */
+
   const formIndex = FORM_STEPS.indexOf(currentStep);
-  const showHeader = formIndex >= 0;
-  const showNav = currentStep !== "building" && currentStep !== "plan";
-  const currentStepIndex = STEPS.indexOf(currentStep);
   const isLastForm = formIndex === FORM_STEPS.length - 1;
+  const showHeader = formIndex >= 0;
+  const aboutComplete = Boolean(age && sex && heightCm && weightKg);
 
-  const inputStyle = [
-    styles.input,
-    { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text },
-  ];
+  // The header and the action bar stay mounted across every step and fade
+  // their contents rather than unmounting, so on the three steps that have no
+  // header we keep showing the LAST values while the bar fades — otherwise the
+  // label would vanish a beat before the bar that holds it.
+  const kicker = STEP_KICKER[currentStep];
+  const lastKicker = useRef(kicker);
+  if (kicker) lastKicker.current = kicker;
+  const lastFormIndex = useRef(1);
+  if (formIndex >= 0) lastFormIndex.current = formIndex + 1;
 
-  const renderStepContent = () => {
+  const headerBack = () => {
+    // Inside the food step the questions replace each other, so "back" means
+    // the previous question before it means the previous step.
+    if (currentStep === "food" && foodQuestion > 0) {
+      setFoodQuestion((q) => q - 1);
+      return;
+    }
+    prevStep();
+  };
+
+  const primaryAction = () => {
+    if (currentStep === "training" && trainingRevealed < 3) {
+      setTrainingRevealed((r) => Math.min(r + 1, 3));
+      return;
+    }
+    if (currentStep === "food" && foodQuestion < 2) {
+      setFoodQuestion((q) => q + 1);
+      return;
+    }
+    nextStep();
+  };
+
+  const lastLabel = useRef("Let's go");
+  const actionLabel = (() => {
+    if (currentStep === "welcome") return "Let's go";
+    // The build and the reveal have no action bar; hold the last wording so the
+    // label does not re-cut to "Continue" underneath its own fade-out.
+    if (currentStep === "building" || currentStep === "plan") return lastLabel.current;
+    if (currentStep === "training" && trainingRevealed < 3) return "Continue";
+    if (currentStep === "food" && foodQuestion < 2) return "Continue";
+    return isLastForm ? "Build my plan" : "Continue";
+  })();
+  lastLabel.current = actionLabel;
+
+  const actionReady = (() => {
     switch (currentStep) {
+      case "goal":
+        return goals.length > 0;
+      case "about":
+        return aboutComplete;
+      case "activity":
+        return activityLevel !== null;
+      default:
+        return true;
+    }
+  })();
+
+  // The action bar mounts once, on the welcome, and persists for the rest of
+  // the flow — so its entrance delay is the welcome score, full stop.
+  const actionDelay = WELCOME.action;
+
+  const goalReaction = (() => {
+    if (!primaryGoal) return null;
+    if (goals.length === 1) return GOAL_REACTION[primaryGoal];
+    return `Good. ${GOAL_PHRASE[primaryGoal].replace(/^./, (c) => c.toUpperCase())} leads — the rest shapes the details.`;
+  })();
+
+  /* ── Step content ─────────────────────────────────────────────────────── */
+
+  const renderStep = (step: Step): React.ReactNode => {
+    switch (step) {
       case "welcome":
         return (
-          <View style={styles.welcomeWrap}>
-            <Reveal index={0} style={styles.stretch}>
-              <View style={styles.welcomeHero}>
-                {/* Three concentric hairlines instead of a bloom: the badge is
-                    held by structure, not by light. */}
-                <View style={styles.centerLayer} pointerEvents="none">
-                  <View style={[styles.ring, styles.ringOuter, { borderColor: alpha(colors.primary, 0.07) }]}>
-                    <View style={[styles.ring, styles.ringMid, { borderColor: alpha(colors.primary, 0.13) }]}>
-                      <View style={[styles.ring, styles.ringInner, { borderColor: alpha(colors.primary, 0.22) }]} />
-                    </View>
-                  </View>
+          <StepCentre>
+            <WelcomeVisual width={width} />
+            <AnimatedText
+              variant="kicker"
+              color="brand"
+              uppercase
+              align="center"
+              delay={WELCOME.title}
+              duration={400}
+            >
+              Welliva
+            </AnimatedText>
+            <AnimatedText variant="statement" align="center" delay={WELCOME.title + 60}>
+              Let&apos;s build your plan
+            </AnimatedText>
+            {/* The promise assembles a clause at a time — the one place in the
+                flow where the user is reading rather than answering. */}
+            <ProgressiveText
+              lines={WELCOME_LINES}
+              variant="support"
+              color="secondary"
+              align="center"
+              delay={WELCOME.support}
+              step={200}
+              wrapperStyle={styles.welcomeSupport}
+            />
+            <StaggerReveal delay={WELCOME.chips} step={110} distance={8} style={styles.chips}>
+              {WELCOME_CHIPS.map((text) => (
+                <View
+                  key={text}
+                  style={[
+                    styles.chip,
+                    {
+                      borderColor: alpha(colors.border, 0.9),
+                      backgroundColor: alpha(colors.surface, 0.5),
+                    },
+                  ]}
+                >
+                  <AppText variant="footnote" color="secondary">
+                    {text}
+                  </AppText>
                 </View>
-                <AILogoBadge size={68} />
-              </View>
-            </Reveal>
-            <Reveal index={1} style={styles.stretch}>
-              <AppText variant="caption" color="brand" uppercase align="center">
-                Welliva
-              </AppText>
-              <AppText variant="displayLg" align="center" style={styles.welcomeTitle}>
-                Let&apos;s build your plan
-              </AppText>
-            </Reveal>
-            <Reveal index={2} style={styles.stretch}>
-              <AppText variant="bodyLg" color="secondary" align="center" style={styles.welcomeSub}>
-                A few quick questions and I&apos;ll shape a diet and training plan around your life. About 2 minutes.
-              </AppText>
-            </Reveal>
-            <Reveal index={3} style={styles.stretch}>
-              <View style={styles.welcomeChips}>
-                {[
-                  { icon: "restaurant-outline", text: "Meals for your goals" },
-                  { icon: "barbell-outline", text: "Training that fits" },
-                  { icon: "shield-checkmark-outline", text: "Safe by design" },
-                ].map((p) => (
-                  <View
-                    key={p.text}
-                    style={[styles.welcomeChip, { borderColor: colors.border, backgroundColor: colors.surface }]}
-                  >
-                    <Ionicons name={p.icon as any} size={16} color={colors.primary} />
-                    <AppText variant="footnote" color="secondary">
-                      {p.text}
-                    </AppText>
-                  </View>
-                ))}
-              </View>
-            </Reveal>
-          </View>
+              ))}
+            </StaggerReveal>
+          </StepCentre>
         );
 
       case "goal":
         return (
-          <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
-            <View style={styles.step}>
-              <StepHead
-                title="What brings you here?"
-                subtitle="Pick everything that fits — it shapes your whole plan."
-              />
-              <View style={styles.goalGrid}>
-                {GOAL_OPTIONS.map((option) => {
-                  const selected = goals.includes(option.value);
-                  return (
-                    <SelectableCard
-                      key={option.value}
-                      selected={selected}
-                      onPress={() => toggleGoal(option.value)}
-                      colors={colors}
-                      style={styles.goalCard}
-                    >
-                      <View style={styles.goalTop}>
-                        <IconBadge
-                          name={option.icon as any}
-                          tone={selected ? colors.primary : colors.textTertiary}
-                          size={38}
-                        />
-                        {selected && (
-                          <Ionicons name="checkmark-circle" size={19} color={colors.primary} />
-                        )}
-                      </View>
-                      <AppText
-                        variant="callout"
-                        color={selected ? "brand" : "secondary"}
-                        style={styles.goalLabel}
-                      >
-                        {option.label}
-                      </AppText>
-                    </SelectableCard>
-                  );
-                })}
-              </View>
-            </View>
-          </ScrollView>
+          <StepScroll>
+            <AnimatedQuestion
+              title="What brings you here?"
+              support="Pick everything that fits — the first one you choose leads your plan."
+            />
+            <MultiSelectGrid
+              options={GOAL_OPTIONS}
+              selected={goals}
+              onToggle={toggleGoal}
+              width={contentWidth}
+              columns={2}
+              delay={OPTIONS_DELAY}
+              primaryTag="Main focus"
+            />
+            <MicroReaction text={goalReaction} />
+          </StepScroll>
         );
 
       case "about":
         return (
-          <ScrollView
-            style={styles.flex}
-            contentContainerStyle={styles.formScroll}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            <View style={[styles.step, styles.stepCompact]}>
-              <StepHead
-                title="A little about you"
-                subtitle="The essentials for accurate calorie and macro targets."
+          <StepScroll tail={Spacing.giant}>
+            <AnimatedQuestion
+              title="A little about you"
+              support="The essentials for accurate calorie and macro targets."
+              motif={<MeasureMotif tone={colors.primary} />}
+            />
+            <View style={styles.fields}>
+              <InputRow
+                label="Age"
+                value={age}
+                onChangeText={setAge}
+                placeholder="—"
+                unit="years"
+                maxLength={3}
+                delay={OPTIONS_DELAY}
+                dimmed={focusedField !== null && focusedField !== "age"}
+                onFocus={() => setFocusedField("age")}
+                onBlur={() => setFocusedField(null)}
               />
-              <View style={[styles.group, styles.groupTight]}>
-                <AppText variant="subhead" color="secondary">Age</AppText>
-                <TextInput
-                  style={inputStyle}
-                  value={age}
-                  onChangeText={setAge}
-                  placeholder="Enter your age"
-                  keyboardType="numeric"
-                  placeholderTextColor={colors.textTertiary}
-                />
-              </View>
-              <View style={[styles.group, styles.groupTight]}>
-                <AppText variant="subhead" color="secondary">Sex</AppText>
-                <View style={styles.row}>
-                  {SEX_OPTIONS.map((option) => {
-                    const selected = sex === option.value;
-                    return (
-                      <SelectableCard
+
+              {/* Recedes with its neighbours: the field holding the caret is
+                  the only thing at full strength, whichever kind it is. */}
+              <Appear delay={OPTIONS_DELAY + 90}>
+                <Recede active={focusedField !== null} style={styles.sexBlock}>
+                  <AppText variant="caption" color="tertiary" uppercase>
+                    Sex
+                  </AppText>
+                  <View style={styles.sexRow} accessibilityRole="radiogroup">
+                    {SEX_OPTIONS.map((option) => (
+                      <SelectionCard
                         key={option.value}
-                        selected={selected}
+                        selected={sex === option.value}
                         onPress={() => handleSexSelect(option.value)}
-                        colors={colors}
-                        style={styles.sexCard}
-                      >
-                        <IconBadge
-                          name={option.icon as any}
-                          tone={selected ? colors.primary : colors.textTertiary}
-                          size={40}
-                        />
-                        <AppText variant="callout" color={selected ? "brand" : "secondary"}>
-                          {option.label}
-                        </AppText>
-                      </SelectableCard>
-                    );
-                  })}
-                </View>
-              </View>
-              <View style={styles.row}>
-                <View style={[styles.group, styles.groupTight, styles.flex]}>
-                  <AppText variant="subhead" color="secondary">Height (cm)</AppText>
-                  <TextInput
-                    style={inputStyle}
-                    value={heightCm}
-                    onChangeText={setHeightCm}
-                    placeholder="175"
-                    keyboardType="numeric"
-                    placeholderTextColor={colors.textTertiary}
-                  />
-                </View>
-                <View style={[styles.group, styles.groupTight, styles.flex]}>
-                  <AppText variant="subhead" color="secondary">Weight (kg)</AppText>
-                  <TextInput
-                    style={inputStyle}
-                    value={weightKg}
-                    onChangeText={setWeightKg}
-                    placeholder="70"
-                    keyboardType="numeric"
-                    placeholderTextColor={colors.textTertiary}
-                  />
-                </View>
-              </View>
+                        title={option.label}
+                        glyph={option.glyph}
+                        layout="row"
+                        role="radio"
+                        showCheck={false}
+                        recede={sex !== null && sex !== option.value}
+                        style={styles.flex}
+                      />
+                    ))}
+                  </View>
+                  <AppText variant="footnote" color="tertiary">
+                    Biological sex. It sharpens your calorie math.
+                  </AppText>
+                </Recede>
+              </Appear>
+
+              <InputRow
+                label="Height"
+                value={heightCm}
+                onChangeText={setHeightCm}
+                placeholder="—"
+                unit="cm"
+                range={HEIGHT_RANGE}
+                maxLength={3}
+                delay={OPTIONS_DELAY + 180}
+                dimmed={focusedField !== null && focusedField !== "height"}
+                onFocus={() => setFocusedField("height")}
+                onBlur={() => setFocusedField(null)}
+              />
+              <InputRow
+                label="Weight"
+                value={weightKg}
+                onChangeText={setWeightKg}
+                placeholder="—"
+                unit="kg"
+                range={WEIGHT_RANGE}
+                keyboardType="decimal-pad"
+                maxLength={5}
+                delay={OPTIONS_DELAY + 270}
+                dimmed={focusedField !== null && focusedField !== "weight"}
+                onFocus={() => setFocusedField("weight")}
+                onBlur={() => setFocusedField(null)}
+              />
             </View>
-          </ScrollView>
+          </StepScroll>
         );
 
       case "activity":
         return (
-          <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
-            <View style={styles.step}>
-              <StepHead
-                title="How active is your day?"
-                subtitle="Just everyday life — work, errands, getting around. Not your workouts."
-              />
-              <View style={styles.stack}>
-                {ACTIVITY_OPTIONS.map((option) => {
-                  const selected = activityLevel === option.value;
-                  return (
-                    <SelectableCard
-                      key={option.value}
-                      selected={selected}
-                      onPress={() => handleActivitySelect(option.value)}
-                      colors={colors}
-                      style={styles.activityCard}
-                    >
-                      <IconBadge
-                        name={option.icon as any}
-                        tone={selected ? colors.primary : colors.textTertiary}
-                        size={46}
-                      />
-                      <View style={styles.flex}>
-                        <AppText variant="callout" color={selected ? "brand" : "secondary"}>
-                          {option.label}
-                        </AppText>
-                        <AppText variant="footnote" color="tertiary" style={styles.activityDesc}>
-                          {option.desc}
-                        </AppText>
-                        <IntensityMeter level={option.level} active={selected} colors={colors} />
-                      </View>
-                    </SelectableCard>
-                  );
-                })}
-              </View>
-            </View>
-          </ScrollView>
+          <StepScroll>
+            <AnimatedQuestion
+              title="How active is your day?"
+              support="Just everyday life — work, errands, getting around. Not your workouts."
+            />
+            <ActivityDeck
+              options={ACTIVITY_OPTIONS}
+              value={activityLevel}
+              onSelect={handleActivitySelect}
+              delay={OPTIONS_DELAY}
+            />
+          </StepScroll>
         );
 
       case "training":
         return (
-          <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
-            <View style={styles.step}>
-              <StepHead
-                title="Let's set up your training"
-                subtitle="A few details so your workouts match you — nothing you can't change later."
-              />
-
-              <View style={styles.group}>
-                <SectionLabel icon="ribbon-outline" text="Your experience" colors={colors} />
-                <View style={styles.row}>
-                  {EXERCISE_LEVEL_OPTIONS.map((option) => {
-                    const selected = exerciseLevel === option.value;
-                    return (
-                      <SelectableCard
-                        key={option.value}
-                        selected={selected}
-                        onPress={() => {
-                          tapHaptic();
-                          setExerciseLevel(option.value);
-                        }}
-                        colors={colors}
-                        style={styles.expCard}
-                      >
-                        <IconBadge
-                          name={option.icon as any}
-                          tone={selected ? colors.primary : colors.textTertiary}
-                          size={34}
-                        />
-                        <AppText variant="footnote" color={selected ? "brand" : "secondary"} align="center" weight="600">
-                          {option.label}
-                        </AppText>
-                        <AppText variant="caption" color="tertiary" align="center" style={styles.expDesc}>
-                          {option.desc}
-                        </AppText>
-                      </SelectableCard>
-                    );
-                  })}
-                </View>
-              </View>
-
-              <View style={styles.group}>
-                <SectionLabel icon="construct-outline" text="What can you train with?" colors={colors} />
-                <View style={styles.stack}>
-                  {EQUIPMENT_OPTIONS.map((option) => {
-                    const selected = equipment.includes(option.value);
-                    return (
-                      <SelectableCard
-                        key={option.value}
-                        selected={selected}
-                        onPress={() => toggleEquipment(option.value)}
-                        colors={colors}
-                        style={styles.largeOption}
-                      >
-                        <IconBadge
-                          name={option.icon as any}
-                          tone={selected ? colors.primary : colors.textTertiary}
-                          size={40}
-                        />
-                        <View style={styles.flex}>
-                          <AppText variant="callout" color={selected ? "brand" : "secondary"}>
-                            {option.label}
-                          </AppText>
-                          <AppText variant="footnote" color="tertiary">
-                            {option.desc}
-                          </AppText>
-                        </View>
-                        {selected && (
-                          <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-                        )}
-                      </SelectableCard>
-                    );
-                  })}
-                </View>
-              </View>
-
-              <View style={styles.group}>
-                <SectionLabel icon="calendar-outline" text="Days per week" colors={colors} />
-                <View style={styles.chips}>
-                  {WORKOUT_DAY_OPTIONS.map((d) => (
-                    <Chip
-                      key={d}
-                      label={`${d} days`}
-                      selected={workoutDaysPerWeek === d}
-                      onPress={() => {
-                        tapHaptic();
-                        setWorkoutDaysPerWeek(d);
-                      }}
-                      colors={colors}
-                    />
-                  ))}
-                </View>
-              </View>
-            </View>
-          </ScrollView>
+          <StepScroll>
+            <AnimatedQuestion
+              kicker="Training"
+              title="Let's set up your training"
+              support="A few details so your workouts match you — nothing you can't change later."
+            />
+            <TrainingSelector
+              experienceOptions={EXERCISE_LEVEL_OPTIONS}
+              experience={exerciseLevel}
+              onExperience={setExerciseLevel}
+              equipmentOptions={EQUIPMENT_OPTIONS}
+              equipment={equipment}
+              onEquipment={toggleEquipment}
+              dayOptions={WORKOUT_DAY_OPTIONS}
+              days={workoutDaysPerWeek}
+              onDays={setWorkoutDaysPerWeek}
+              revealed={trainingRevealed}
+              onRevealNext={() => setTrainingRevealed((r) => Math.min(r + 1, 3))}
+              width={contentWidth}
+              delay={OPTIONS_DELAY}
+            />
+          </StepScroll>
         );
 
       case "food":
         return (
-          <ScrollView
-            style={styles.flex}
-            contentContainerStyle={styles.formScroll}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            <View style={styles.step}>
-              <StepHead
-                title="Your food preferences"
-                subtitle="So your meals feel like food you'd actually choose."
-              />
-
-              {detectedRegion && (
-                <View style={[styles.regionChip, { backgroundColor: colors.primarySoft }]}>
-                  <Ionicons name="location-outline" size={15} color={colors.primary} />
-                  <AppText variant="footnote" color="secondary" style={styles.flex}>
-                    Meals tuned for {detectedRegion} — change the cuisine anytime below.
-                  </AppText>
-                </View>
-              )}
-
-              <View style={styles.group}>
-                <SectionLabel icon="nutrition-outline" text="Any dietary style?" colors={colors} />
-                <View style={styles.chips}>
-                  {DIETARY_RESTRICTION_OPTIONS.map((option) => (
-                    <Chip
-                      key={option.value}
-                      label={option.label}
-                      selected={dietaryRestriction === option.value}
-                      onPress={() => {
-                        tapHaptic();
-                        setDietaryRestriction(option.value);
-                      }}
-                      colors={colors}
-                    />
-                  ))}
-                </View>
-              </View>
-
-              <View style={styles.group}>
-                <SectionLabel icon="globe-outline" text="Cuisine you enjoy most" colors={colors} />
-                <View style={styles.stack}>
-                  {CUISINE_OPTIONS.map((option) => {
-                    const selected = cuisinePreference === option.value;
-                    return (
-                      <SelectableCard
-                        key={option.value}
-                        selected={selected}
-                        onPress={() => {
-                          tapHaptic();
-                          setCuisinePreference(option.value);
-                        }}
-                        colors={colors}
-                        style={styles.largeOption}
-                      >
-                        <IconBadge
-                          name={option.icon as any}
-                          tone={selected ? colors.primary : colors.textTertiary}
-                          size={40}
-                        />
-                        <View style={styles.flex}>
-                          <AppText variant="callout" color={selected ? "brand" : "secondary"}>
-                            {option.label}
-                          </AppText>
-                          <AppText variant="footnote" color="tertiary">
-                            {option.desc}
-                          </AppText>
-                        </View>
-                      </SelectableCard>
-                    );
-                  })}
-                </View>
-              </View>
-
-              <View style={styles.group}>
-                <SectionLabel icon="time-outline" text="Meals per day" colors={colors} />
-                <View style={styles.row}>
-                  {MEALS_OPTIONS.map((option) => {
-                    const selected = mealsPerDay === option.value;
-                    return (
-                      <SelectableCard
-                        key={option.value}
-                        selected={selected}
-                        onPress={() => {
-                          tapHaptic();
-                          setMealsPerDay(option.value);
-                        }}
-                        colors={colors}
-                        style={styles.mealCard}
-                      >
-                        <AppText variant="callout" color={selected ? "brand" : "secondary"}>
-                          {option.label}
-                        </AppText>
-                        <AppText variant="caption" color="tertiary" align="center">
-                          {option.desc}
-                        </AppText>
-                      </SelectableCard>
-                    );
-                  })}
-                </View>
-              </View>
-            </View>
-          </ScrollView>
+          <StepScroll>
+            <FoodPreferenceSelector
+              dietOptions={DIETARY_RESTRICTION_OPTIONS}
+              cuisineOptions={CUISINE_OPTIONS}
+              mealOptions={MEALS_OPTIONS}
+              diet={dietaryRestriction}
+              onDiet={setDietaryRestriction}
+              cuisine={cuisinePreference}
+              onCuisine={setCuisinePreference}
+              meals={mealsPerDay}
+              onMeals={(v) => setMealsPerDay(v as 3 | 4)}
+              question={foodQuestion}
+              onJump={setFoodQuestion}
+              onAnswered={() => setFoodQuestion((q) => Math.min(q + 1, 2))}
+              detectedRegion={detectedRegion}
+              width={contentWidth}
+            />
+          </StepScroll>
         );
 
-      case "health":
+      case "health": {
+        const noneSelected = medicalConditions.includes("none");
         return (
-          <ScrollView
-            style={styles.flex}
-            contentContainerStyle={styles.formScroll}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            <View style={styles.step}>
-              <StepHead
-                title="Anything I should know?"
-                subtitle="All optional — it just helps me keep your plan safe. Skip if nothing applies."
-              />
-              {/* The most sensitive screen in the app. The reminder that this
-                  shapes a plan, not a treatment, belongs right here. */}
-              <DisclaimerNote compact />
+          <StepScroll tail={Spacing.giant}>
+            <AnimatedQuestion
+              title="Anything I should know?"
+              support="All optional — it just helps me keep your plan safe. Skip if nothing applies."
+              motif={<SafetyMotif tone={colors.primary} />}
+            />
 
-              <View style={styles.group}>
-                <SectionLabel icon="pulse-outline" text="Medical conditions" colors={colors} />
-                {/* Lifted out of the groups: the fastest honest answer on this
-                    screen is "nothing", and it should be the first thing here. */}
-                <OptionTile
-                  label="Nothing applies"
-                  selected={medicalConditions.includes("none")}
-                  onPress={() => toggleMedicalCondition("none")}
-                  colors={colors}
-                  cellWidth={GRID_WIDTH}
-                />
-                {MEDICAL_GROUPS.map((group) => (
-                  <View key={group.title} style={styles.groupTight}>
-                    <AppText variant="caption" color="tertiary" uppercase>
-                      {group.title}
-                    </AppText>
-                    <OptionGrid
+            {/* The most sensitive screen in the app. The reminder that this
+                shapes a plan, not a treatment, belongs right here. */}
+            <Appear delay={OPTIONS_DELAY}>
+              <DisclaimerNote compact />
+            </Appear>
+
+            <View style={styles.section}>
+              <AppText variant="caption" color="tertiary" uppercase>
+                Medical conditions
+              </AppText>
+              {/* Lifted out of the groups: the fastest honest answer on this
+                  screen is "nothing", and it should be the first thing here. */}
+              <NothingApplies
+                selected={noneSelected}
+                onPress={() => toggleMedicalCondition("none")}
+                delay={OPTIONS_DELAY + 80}
+              />
+              {MEDICAL_GROUPS.map((group, i) => {
+                const chosen = group.items.filter((item) =>
+                  medicalConditions.includes(item.value),
+                ).length;
+                return (
+                  <HealthGroup
+                    key={group.title}
+                    title={group.title}
+                    count={group.items.length}
+                    selectedCount={chosen}
+                    open={openGroup === group.title}
+                    onToggle={() =>
+                      setOpenGroup((g) => (g === group.title ? null : group.title))
+                    }
+                    muted={noneSelected}
+                    delay={OPTIONS_DELAY + 160 + i * 60}
+                  >
+                    <MultiSelectGrid
                       options={group.items}
                       selected={medicalConditions}
                       onToggle={toggleMedicalCondition}
+                      width={contentWidth - Spacing.md * 2}
                       columns={2}
-                      colors={colors}
+                      delay={0}
                     />
-                  </View>
-                ))}
-              </View>
-
-              <View style={styles.group}>
-                <SectionLabel icon="bandage-outline" text="Injuries or pain" colors={colors} />
-                <TextInput
-                  style={[inputStyle, styles.textArea]}
-                  value={injuries}
-                  onChangeText={setInjuries}
-                  placeholder="e.g. Knee pain, lower back"
-                  placeholderTextColor={colors.textTertiary}
-                  multiline
-                />
-              </View>
-
-              <View style={styles.group}>
-                <SectionLabel icon="medkit-outline" text="Medications" colors={colors} />
-                <TextInput
-                  style={[inputStyle, styles.textArea]}
-                  value={medications}
-                  onChangeText={setMedications}
-                  placeholder="e.g. Blood pressure medication"
-                  placeholderTextColor={colors.textTertiary}
-                  multiline
-                />
-              </View>
-
-              <View style={styles.group}>
-                <SectionLabel icon="alert-circle-outline" text="Food allergies" colors={colors} />
-                <OptionGrid
-                  options={ALLERGY_OPTIONS}
-                  selected={allergies}
-                  onToggle={toggleAllergy}
-                  columns={3}
-                  colors={colors}
-                  align="center"
-                />
-                <TextInput
-                  style={inputStyle}
-                  value={customAllergy}
-                  onChangeText={setCustomAllergy}
-                  placeholder="Other allergies (comma-separated)"
-                  placeholderTextColor={colors.textTertiary}
-                />
-              </View>
+                  </HealthGroup>
+                );
+              })}
             </View>
-          </ScrollView>
+
+            <View style={styles.section}>
+              <NoteField
+                label="Injuries or pain"
+                value={injuries}
+                onChangeText={setInjuries}
+                placeholder="e.g. Knee pain, lower back"
+                delay={OPTIONS_DELAY + 220}
+              />
+              <NoteField
+                label="Medications"
+                value={medications}
+                onChangeText={setMedications}
+                placeholder="e.g. Blood pressure medication"
+                delay={OPTIONS_DELAY + 280}
+              />
+            </View>
+
+            <View style={styles.section}>
+              <AppText variant="caption" color="tertiary" uppercase>
+                Food allergies
+              </AppText>
+              <ChipField
+                options={ALLERGY_OPTIONS}
+                selected={allergies}
+                onToggle={toggleAllergy}
+                delay={OPTIONS_DELAY + 320}
+              />
+              <NoteField
+                label="Anything else"
+                value={customAllergy}
+                onChangeText={setCustomAllergy}
+                placeholder="Other allergies, comma-separated"
+                multiline={false}
+                delay={OPTIONS_DELAY + 400}
+              />
+            </View>
+          </StepScroll>
         );
+      }
 
       case "building":
         return (
-          <View style={styles.buildingWrap}>
-            <View style={styles.buildingHero}>
-              <View style={styles.centerLayer} pointerEvents="none">
-                <Animated.View
-                  style={[
-                    styles.pulseRing,
-                    {
-                      borderColor: colors.primary,
-                      opacity: buildRing.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [0.4, 0],
-                      }),
-                      transform: [
-                        {
-                          scale: buildRing.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [0.72, 1.5],
-                          }),
-                        },
-                      ],
-                    },
-                  ]}
-                />
-              </View>
-              <Animated.View style={{ transform: [{ scale: buildPulse }] }}>
-                <AILogoBadge size={84} />
-              </Animated.View>
-            </View>
-            <AppText variant="display" align="center" style={styles.buildingTitle}>
-              Building your plan
-            </AppText>
-            <AppText variant="bodyLg" color="secondary" align="center">
-              {BUILD_LINES[buildLineIdx]}
-            </AppText>
-            <View style={styles.buildRail}>
-              {BUILD_LINES.map((line, i) => (
-                <View
-                  key={line}
-                  style={[
-                    styles.buildSeg,
-                    {
-                      backgroundColor:
-                        i <= buildLineIdx ? colors.primary : alpha(colors.primary, 0.16),
-                    },
-                  ]}
-                />
-              ))}
-            </View>
-          </View>
+          <StepCentre>
+            <BuildingAnimation
+              lines={BUILD_LINES}
+              minimumMs={2000}
+              ready={plansReady}
+              onComplete={() => goTo("plan", "forward")}
+            />
+          </StepCentre>
         );
 
       case "plan":
-        return renderPlan();
-    }
-  };
-
-  const renderPlan = () => {
-    if (!planPreview) {
-      return (
-        <View style={styles.buildingWrap}>
-          <AppText variant="bodyLg" color="secondary" align="center">
-            Preparing your plan…
-          </AppText>
-        </View>
-      );
-    }
-    const { targets, topDiet, splitType, trainingDays, equipmentSummary, bio } = planPreview;
-    const goalLede =
-      goals.length > 1
-        ? "Built around your goals. Everything below adapts as you go."
-        : `Built around your goal to ${GOAL_PHRASE[bio.primaryGoal]}. Everything below adapts as you go.`;
-    return (
-      <ScrollView
-        style={styles.flex}
-        contentContainerStyle={[
-          styles.planContent,
-          { paddingBottom: Spacing.xxxl + insets.bottom },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
-        <Reveal index={0}>
-          <View style={styles.planHero}>
-            <AppText variant="caption" color="brand" uppercase align="center">
-              Your personalized plan
-            </AppText>
-            <AppText variant="display" align="center" style={styles.planTitle}>
-              Here&apos;s where we start
-            </AppText>
-            <AppText variant="body" color="secondary" align="center" style={styles.planLede}>
-              {goalLede}
-            </AppText>
-          </View>
-        </Reveal>
-
-        {/* Calorie + macro hero */}
-        <Reveal index={1}>
-          <Card style={styles.planCard}>
-            <View style={styles.ringWrap}>
-              <Ring progress={1} size={150} strokeWidth={13} gradient={Gradients.calories}>
-                <AnimatedNumber value={targets.calories} variant="metric" />
-                <AppText variant="caption" color="tertiary" uppercase>
-                  kcal / day
-                </AppText>
-              </Ring>
-            </View>
-            <View style={styles.macroRow}>
-              <Stat value={`${targets.proteinG}g`} label="Protein" tone={colors.protein} />
-              <Stat value={`${targets.carbsG}g`} label="Carbs" tone={colors.carbs} />
-              <Stat value={`${targets.fatG}g`} label="Fat" tone={colors.fat} />
-              <Stat value={`${(targets.waterMl / 1000).toFixed(1)}L`} label="Water" tone={colors.water} />
-            </View>
-          </Card>
-        </Reveal>
-
-        {/* Best-match diet */}
-        {topDiet && (
-          <Reveal index={2}>
-            <Card style={styles.planCard}>
-              <View style={styles.cardHead}>
-                <IconBadge name="restaurant" tone={colors.primary} size={42} />
-                <View style={styles.flex}>
-                  <AppText variant="caption" color="tertiary" uppercase>
-                    Best diet match
-                  </AppText>
-                  <AppText variant="headline">{topDiet.diet.name}</AppText>
-                </View>
-                <View style={[styles.scoreBadge, { backgroundColor: colors.primarySoft }]}>
-                  <AppText variant="callout" color="brand">
-                    {topDiet.score}%
-                  </AppText>
-                </View>
-              </View>
-              <View style={styles.reasonList}>
-                {topDiet.reasons.slice(0, 3).map((reason) => (
-                  <View key={reason} style={styles.reasonRow}>
-                    <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
-                    <AppText variant="subhead" color="secondary" style={styles.flex}>
-                      {reason}
-                    </AppText>
-                  </View>
-                ))}
-              </View>
-            </Card>
-          </Reveal>
-        )}
-
-        {/* Training — shown when the user opted into it; otherwise a soft,
-            no-pressure note that workouts are ready whenever they want them. */}
-        <Reveal index={3}>
-          {trainingEnabled ? (
-            <Card style={styles.planCard}>
-              <View style={styles.cardHead}>
-                <IconBadge name="barbell" tone={colors.primary} size={42} />
-                <View style={styles.flex}>
-                  <AppText variant="caption" color="tertiary" uppercase>
-                    Your training
-                  </AppText>
-                  <AppText variant="headline">{splitType}</AppText>
-                </View>
-              </View>
-              <View style={styles.trainRow}>
-                <View style={[styles.trainPill, { backgroundColor: alpha(colors.primary, 0.12) }]}>
-                  <ThemedIcon name="calendar-outline" size={16} role="textSecondary" />
-                  <AppText variant="subhead" color="secondary">
-                    {trainingDays} days / week
-                  </AppText>
-                </View>
-                <View style={[styles.trainPill, { backgroundColor: alpha(colors.primary, 0.12) }]}>
-                  <ThemedIcon name="construct-outline" size={16} role="textSecondary" />
-                  <AppText variant="subhead" color="secondary">
-                    {equipmentSummary}
-                  </AppText>
-                </View>
-              </View>
-            </Card>
-          ) : (
-            <View style={[styles.signoff, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}>
-              <IconBadge name="barbell-outline" tone={colors.primary} size={38} />
-              <AppText variant="subhead" color="secondary" style={styles.flex}>
-                Whenever you feel like moving, I&apos;ve got workouts ready — no pressure.
-              </AppText>
-            </View>
-          )}
-        </Reveal>
-
-        {/* Coach sign-off */}
-        <Reveal index={4}>
-          <View style={[styles.signoff, { backgroundColor: colors.primarySoft }]}>
-            <AILogoBadge size={36} />
-            <AppText variant="body" color="secondary" style={styles.flex}>
-              This is your starting point — I&apos;ll adjust it as I learn how you eat and move. Let&apos;s get going.
-            </AppText>
-          </View>
-        </Reveal>
-
-        {/* If a condition they just told us about CONSTRAINED these numbers,
-            say so here — at the first sight of the target, before it's had a
-            chance to read as a prescription. Silent for everyone else. */}
-        <Reveal index={5}>
-          <TargetGuidanceNote guidance={targets.guidance} />
-        </Reveal>
-
-        {/* The plan above is the first place Welliva hands the user real
-            numbers — calories, protein, sodium — so the disclaimer travels with
-            them rather than living only in Settings. */}
-        <Reveal index={5}>
-          <DisclaimerNote variant="card" />
-        </Reveal>
-
-        <Reveal index={5}>
-          <Button
-            label={loading ? "Setting up…" : "Start my journey"}
-            icon="arrow-forward"
-            iconRight
-            loading={loading}
-            disabled={loading}
-            onPress={handleComplete}
-            style={styles.startBtn}
-          />
-        </Reveal>
-      </ScrollView>
-    );
-  };
-
-  return (
-    <View style={styles.flex} {...touchHandlers}>
-      <AmbientCanvas />
-      {/* The exact drifting orbs from the sign-in screen, softened to sit gently
-          over the onboarding background. Persists across every onboarding step;
-          above the base gradient, below content. */}
-      <OrbField color={brandGradientDark[0]} opacityScale={0.65} touch={touch} />
-      <SafeAreaView style={styles.flex} edges={["top"]}>
-        {/* Header — a segmented rail rather than one long bar: the flow reads as
-            a countable handful of beats, and the beat you're in has a name. */}
-        {showHeader && (
-          <View style={styles.header}>
-            <View style={styles.rail}>
-              {FORM_STEPS.map((s, i) => (
-                <View
-                  key={s}
-                  style={[
-                    styles.railSeg,
-                    i <= formIndex
-                      ? { backgroundColor: colors.primary, opacity: i === formIndex ? 1 : 0.5 }
-                      : { backgroundColor: alpha(colors.primary, 0.14) },
-                  ]}
-                />
-              ))}
-            </View>
-            <View style={styles.headerMeta}>
-              <AppText variant="caption" color="brand" uppercase>
-                {STEP_KICKER[currentStep] ?? ""}
-              </AppText>
-              <AppText variant="caption" color="tertiary">
-                {formIndex + 1} / {FORM_STEPS.length}
-              </AppText>
-            </View>
-          </View>
-        )}
-
-        {/* Content + nav share one container, so the keyboard inset lifts the
-            action bar and shrinks the form together, in one motion. */}
-        <Reanimated.View style={[styles.flex, kb.containerStyle]}>
-          <Animated.View
-            style={[
-              styles.content,
-              { opacity: fadeAnim, transform: [{ translateX: slideAnim }] },
-            ]}
-          >
-            {renderStepContent()}
-          </Animated.View>
-
-          {showNav && (
-            <Reanimated.View
-              style={[styles.nav, { borderTopColor: colors.border }, kb.restingStyle]}
-            >
-              {currentStepIndex > 0 ? (
-                <Button label="Back" icon="arrow-back" variant="tonal" fullWidth={false} onPress={prevStep} />
-              ) : (
-                <View />
-              )}
-              <View style={styles.flex} />
-              <Button
-                label={currentStep === "welcome" ? "Let's go" : isLastForm ? "Build my plan" : "Continue"}
-                icon="arrow-forward"
-                iconRight
-                fullWidth={false}
-                onPress={nextStep}
+        return (
+          <StepScroll>
+            {planPreview ? (
+              <PlanReveal
+                preview={planPreview}
+                lede={
+                  goals.length > 1
+                    ? "Built around your goals. Everything below adapts as you go."
+                    : `Built around your goal to ${GOAL_PHRASE[planPreview.bio.primaryGoal]}. Everything below adapts as you go.`
+                }
+                trainingEnabled={trainingEnabled}
+                loading={loading}
+                onStart={handleComplete}
               />
-            </Reanimated.View>
-          )}
-        </Reanimated.View>
-      </SafeAreaView>
-    </View>
-  );
-}
+            ) : (
+              <AnimatedText variant="support" color="secondary" align="center">
+                Preparing your plan…
+              </AnimatedText>
+            )}
+          </StepScroll>
+        );
+    }
+  };
 
-/* ───────────────────────────── Sub-components ──────────────────────────── */
+  /* ── Frame ────────────────────────────────────────────────────────────── */
 
-function StepHead({ title, subtitle }: { title: string; subtitle: string }) {
+  const showActions = currentStep !== "building" && currentStep !== "plan";
+
   return (
-    <View style={styles.stepHead}>
-      <AppText variant="title" style={styles.title}>
-        {title}
-      </AppText>
-      <AppText variant="body" color="secondary" style={styles.subtitle}>
-        {subtitle}
-      </AppText>
-    </View>
-  );
-}
-
-function SectionLabel({
-  icon,
-  text,
-  colors,
-}: {
-  icon: string;
-  text: string;
-  colors: ReturnType<typeof useColors>["colors"];
-}) {
-  return (
-    <View style={styles.sectionLabel}>
-      <Ionicons name={icon as any} size={16} color={colors.primary} />
-      <AppText variant="callout">{text}</AppText>
-    </View>
-  );
-}
-
-/** Four little bars that fill to `level` — a quick visual read of intensity. */
-function IntensityMeter({
-  level,
-  active,
-  colors,
-}: {
-  level: number;
-  active: boolean;
-  colors: ReturnType<typeof useColors>["colors"];
-}) {
-  return (
-    <View style={styles.meter}>
-      {[1, 2, 3, 4].map((i) => (
-        <View
-          key={i}
-          style={[
-            styles.meterBar,
-            {
-              backgroundColor:
-                i <= level ? (active ? colors.primary : colors.textTertiary) : colors.border,
-              height: 4 + i * 2,
-            },
-          ]}
-        />
-      ))}
-    </View>
-  );
-}
-
-function SelectableCard({
-  selected,
-  onPress,
-  colors,
-  style,
-  children,
-}: {
-  selected: boolean;
-  onPress: () => void;
-  colors: ReturnType<typeof useColors>["colors"];
-  style?: any;
-  children: React.ReactNode;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.selectable,
-        {
-          // De-boxed: soft filled surface, no hard outline. Only the SELECTED
-          // state draws a brand ring, so the screen reads calm, not form-y.
-          backgroundColor: selected ? colors.primarySoft : colors.surfaceMuted,
-          borderColor: selected ? colors.primary : "transparent",
-        },
-        pressed && { transform: [{ scale: 0.98 }] },
-        style,
-      ]}
-    >
-      {children}
-    </Pressable>
-  );
-}
-
-/**
- * OptionTile — one measured, tickable option. Unlike a wrapping pill it is
- * given its width, which is what lets a grid of them stay flush on both edges.
- */
-function OptionTile({
-  label,
-  selected,
-  onPress,
-  colors,
-  cellWidth,
-  align = "left",
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-  colors: ReturnType<typeof useColors>["colors"];
-  cellWidth: number;
-  align?: "left" | "center";
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="checkbox"
-      accessibilityLabel={label}
-      accessibilityState={{ checked: selected }}
-      style={({ pressed }) => [
-        styles.tile,
-        align === "center" && styles.tileCenter,
-        {
-          width: cellWidth,
-          backgroundColor: selected ? colors.primarySoft : colors.surfaceMuted,
-          borderColor: selected ? colors.primary : colors.border,
-        },
-        pressed && { opacity: 0.7 },
-      ]}
-    >
-      {align === "left" && (
-        <View
-          style={[
-            styles.tileCheck,
-            {
-              borderColor: selected ? colors.primary : colors.borderStrong,
-              backgroundColor: selected ? colors.primary : "transparent",
-            },
-          ]}
-        >
-          {selected && <Ionicons name="checkmark" size={11} color={colors.onPrimary} />}
-        </View>
-      )}
-      <AppText
-        variant="subhead"
-        color={selected ? "brand" : "secondary"}
-        numberOfLines={2}
-        align={align === "center" ? "center" : undefined}
-        style={styles.tileLabel}
+    <>
+      {/* Header and action bar are mounted for the life of the flow and fade
+          their contents per step. Unmounting either one would resize the canvas
+          in the middle of a dissolve, which is the one jump a continuous canvas
+          cannot hide. */}
+      <OnboardingContainer
+        header={
+          <OnboardingHeader
+            label={lastKicker.current}
+            index={lastFormIndex.current}
+            total={FORM_STEPS.length}
+            onBack={headerBack}
+            visible={showHeader}
+          />
+        }
+        footer={
+          <OnboardingActions
+            label={actionLabel}
+            onPress={primaryAction}
+            ready={actionReady}
+            visible={showActions}
+            delay={actionDelay}
+          />
+        }
       >
-        {label}
-      </AppText>
-    </Pressable>
-  );
-}
+        <OnboardingTransition step={currentStep} direction={direction} render={renderStep} />
+      </OnboardingContainer>
 
-/**
- * OptionGrid — a set of options laid out in fixed columns.
- *
- * The point of measuring rather than wrapping: a short LAST row stretches its
- * cells to share the full width, so a block of 7 options in 2 columns still
- * ends flush with both margins instead of trailing off to one side.
- */
-function OptionGrid<T extends string>({
-  options,
-  selected,
-  onToggle,
-  columns,
-  colors,
-  align = "left",
-}: {
-  options: { value: T; label: string }[];
-  selected: readonly string[];
-  onToggle: (value: T) => void;
-  columns: number;
-  colors: ReturnType<typeof useColors>["colors"];
-  align?: "left" | "center";
-}) {
-  const remainder = options.length % columns;
-  const lastRowStart = options.length - remainder;
-  return (
-    <View style={styles.grid}>
-      {options.map((option, i) => (
-        <OptionTile
-          key={option.value}
-          label={option.label}
-          selected={selected.includes(option.value)}
-          onPress={() => onToggle(option.value)}
-          colors={colors}
-          align={align}
-          cellWidth={gridCell(remainder !== 0 && i >= lastRowStart ? remainder : columns)}
-        />
-      ))}
-    </View>
-  );
-}
-
-function Chip({
-  label,
-  selected,
-  onPress,
-  colors,
-  capitalize,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-  colors: ReturnType<typeof useColors>["colors"];
-  capitalize?: boolean;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[
-        styles.chip,
-        {
-          backgroundColor: selected ? colors.primary : colors.surface,
-          borderColor: selected ? colors.primary : colors.border,
-        },
-      ]}
-    >
-      <AppText
-        variant="subhead"
-        color={selected ? colors.onPrimary : "secondary"}
-        style={[styles.chipText, capitalize && styles.cap]}
-      >
-        {label}
-      </AppText>
-    </Pressable>
+      <CinematicExit active={exiting} onCovered={onCovered} />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
 
-  header: {
-    paddingHorizontal: Spacing.screen,
-    paddingTop: Spacing.md,
-    paddingBottom: Spacing.xl,
-    gap: Spacing.md,
-  },
-  rail: { flexDirection: "row", gap: 5 },
-  railSeg: { flex: 1, height: 3, borderRadius: 2 },
-  headerMeta: {
+  // `alignSelf` matters: ProgressiveText stretches by default, so a bare
+  // maxWidth would leave the block anchored to the left gutter on a wide
+  // display while its text centred inside it — off-centre by half the slack.
+  welcomeSupport: { maxWidth: 360, alignSelf: "center" },
+  chips: {
     flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-
-  content: { flex: 1, paddingHorizontal: Spacing.screen },
-
-  step: { gap: Spacing.xxl, paddingBottom: Spacing.xl, paddingTop: Spacing.xs },
-  /** Denser rhythm for form-heavy steps (e.g. the basics screen). */
-  stepCompact: { gap: Spacing.lg },
-  /** Extra scroll room on input screens so the last field always clears the keyboard. */
-  formScroll: { paddingBottom: Spacing.giant },
-  stepHead: { gap: Spacing.sm },
-  title: {},
-  subtitle: {},
-
-  // Welcome
-  welcomeWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: Spacing.lg, paddingHorizontal: Spacing.lg },
-  welcomeHero: { alignItems: "center", justifyContent: "center", height: 200 },
-  /** Centered, non-interactive decoration layer — symmetric centering keeps the
-   *  rings behind the hero content regardless of the container's width. */
-  centerLayer: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
+    flexWrap: "wrap",
     justifyContent: "center",
-  },
-  /** Concentric hairlines, nested so each one centres inside the last. */
-  ring: { borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  ringOuter: { width: 196, height: 196, borderRadius: 98 },
-  ringMid: { width: 146, height: 146, borderRadius: 73 },
-  ringInner: { width: 102, height: 102, borderRadius: 51 },
-  stretch: { alignSelf: "stretch" },
-  welcomeTitle: { marginTop: Spacing.xs },
-  welcomeSub: { paddingHorizontal: Spacing.md },
-  welcomeChips: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: Spacing.sm, marginTop: Spacing.sm },
-  welcomeChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.xs,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: Radius.pill,
-    borderWidth: 1,
-  },
-
-  group: { gap: Spacing.md },
-  /** Tighter label→field pairing for compact forms. */
-  groupTight: { gap: Spacing.sm },
-  input: {
-    borderWidth: 1,
-    borderRadius: Radius.md,
-    padding: Spacing.lg,
-    fontSize: 16,
-  },
-  textArea: { height: 72, textAlignVertical: "top" },
-
-  row: { flexDirection: "row", gap: Spacing.md },
-  stack: { gap: Spacing.md },
-
-  sectionLabel: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
-
-  selectable: {
-    borderWidth: 1.5,
-    borderRadius: Radius.lg,
-    padding: Spacing.lg,
-  },
-  sexCard: { flex: 1, alignItems: "center", gap: Spacing.sm, paddingVertical: Spacing.lg },
-  largeOption: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
-  activityCard: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
-  activityDesc: { marginTop: 1 },
-  expCard: { flex: 1, alignItems: "center", gap: Spacing.xs, paddingVertical: Spacing.lg, paddingHorizontal: Spacing.sm },
-  expDesc: { marginTop: 1 },
-  mealCard: { flex: 1, alignItems: "center", gap: Spacing.xs, paddingVertical: Spacing.lg },
-
-  // Intensity meter
-  meter: { flexDirection: "row", alignItems: "flex-end", gap: 4, marginTop: Spacing.sm, height: 12 },
-  meterBar: { width: 16, borderRadius: 2 },
-
-  // Region confirm chip
-  regionChip: {
-    flexDirection: "row",
-    alignItems: "center",
     gap: Spacing.sm,
-    padding: Spacing.md,
-    borderRadius: Radius.md,
+    marginTop: Spacing.xs,
   },
-
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm },
   chip: {
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
     borderRadius: Radius.pill,
     borderWidth: 1,
   },
-  chipText: { fontWeight: "600" },
-  cap: { textTransform: "capitalize" },
 
-  goalGrid: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.md },
-  goalCard: {
-    width: (width - Spacing.screen * 2 - Spacing.md) / 2,
-    gap: Spacing.sm,
-    alignItems: "flex-start",
-  },
-  goalLabel: { marginTop: 2 },
-  goalTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    alignSelf: "stretch",
-  },
+  fields: { gap: Spacing.md },
+  sexBlock: { gap: Spacing.sm },
+  sexRow: { flexDirection: "row", gap: Spacing.md },
 
-  /* Balanced option grids (health step). */
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: GRID_GAP },
-  tile: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
-    minHeight: 50,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderWidth: 1,
-    borderRadius: Radius.md,
-  },
-  tileCenter: { justifyContent: "center" },
-  tileCheck: {
-    width: 19,
-    height: 19,
-    borderRadius: Radius.pill,
-    borderWidth: 1.5,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  tileLabel: { flexShrink: 1 },
-
-  // Building beat
-  buildingWrap: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: Spacing.lg,
-    paddingHorizontal: Spacing.screen,
-  },
-  buildingHero: { alignItems: "center", justifyContent: "center", height: 190 },
-  buildingTitle: { marginTop: Spacing.sm },
-  /** The "working" signal: one hairline that swells out of the badge and goes. */
-  pulseRing: { width: 150, height: 150, borderRadius: 75, borderWidth: 1.5 },
-  buildRail: { flexDirection: "row", gap: 5, marginTop: Spacing.sm },
-  buildSeg: { width: 26, height: 3, borderRadius: 2 },
-
-  // Plan reveal
-  planContent: { paddingBottom: Spacing.xxxl, gap: Spacing.lg },
-  planHero: { alignItems: "center", justifyContent: "center", paddingVertical: Spacing.sm },
-  planTitle: { marginTop: Spacing.xs },
-  planLede: { paddingHorizontal: Spacing.md, marginTop: Spacing.xs },
-  planCard: { gap: Spacing.lg },
-  ringWrap: { alignItems: "center" },
-  macroRow: { flexDirection: "row", justifyContent: "space-between" },
-  cardHead: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
-  scoreBadge: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    borderRadius: Radius.pill,
-  },
-  reasonList: { gap: Spacing.sm },
-  reasonRow: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
-  trainRow: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm },
-  trainPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.xs,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: Radius.pill,
-  },
-  signoff: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-    padding: Spacing.lg,
-    borderRadius: Radius.lg,
-  },
-  startBtn: { marginTop: Spacing.sm },
-
-  nav: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: Spacing.screen,
-    paddingTop: Spacing.lg,
-    gap: Spacing.md,
-    // A hairline lifts the actions off the form so they read as a fixed bar.
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
+  section: { gap: Spacing.md },
 });

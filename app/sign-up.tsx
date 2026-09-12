@@ -1,53 +1,51 @@
 import {
   AuthBackground,
   AuthBrand,
-  AuthDivider,
   AuthError,
   AuthField,
   AuthFooter,
   AuthLegalNote,
   AuthPrimaryButton,
-  SOCIAL_ENABLED,
-  SocialButton,
+  SocialSignInRow,
   authStyles,
+  type PendingSocial,
 } from "@/components/AuthKit";
+import { friendlyAuthError } from "@/components/auth/authErrors";
 import { useAuth } from "@/components/SupabaseAuthProvider";
 import { Link, useRouter } from "expo-router";
 import React, { useState } from "react";
-import { Pressable, Text, View } from "react-native";
-
-/** Map a Supabase signUp error to a short, user-facing sentence. */
-function friendlySignUpError(err: any): string {
-  const msg = String(err?.message ?? "").toLowerCase();
-  if (msg.includes("already registered") || msg.includes("already been registered")) {
-    return "That email is already registered. Try signing in instead.";
-  }
-  if (msg.includes("password")) {
-    return "Please choose a stronger password (at least 6 characters).";
-  }
-  if (msg.includes("valid email") || msg.includes("invalid email") || msg.includes("unable to validate")) {
-    return "Please enter a valid email address.";
-  }
-  return err?.message || "Could not create account. Please try again.";
-}
+import { Pressable, Text } from "react-native";
 
 export default function SignUpScreen() {
-  const { signUpWithEmail, signInWithGoogle, isLoading } = useAuth();
+  const {
+    signUpWithEmail,
+    signInWithGoogle,
+    signInWithFacebook,
+    isLoading,
+    redirectError,
+    clearRedirectError,
+  } = useAuth();
   const router = useRouter();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [emailLoading, setEmailLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
+  const [pendingSocial, setPendingSocial] = useState<PendingSocial>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loading = emailLoading || googleLoading || isLoading;
+  const loading = emailLoading || pendingSocial !== null || isLoading;
+  const shownError = error ?? redirectError;
+
+  const clearErrors = () => {
+    if (error) setError(null);
+    if (redirectError) clearRedirectError();
+  };
 
   const onEmailSignUp = async () => {
-    setError(null);
+    clearErrors();
     if (!email || !password || !confirmPassword) {
       setError("Please fill in all fields");
       return;
@@ -74,24 +72,27 @@ export default function SignUpScreen() {
           params: { email: email.trim() },
         });
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error("Email sign up error:", err);
-      setError(friendlySignUpError(err));
+      // Worth knowing when this fires on the project's e-mail quota
+      // (`over_email_send_rate_limit`): NO account was created, so the details
+      // they just typed will also fail to sign in. friendlyAuthError says so.
+      setError(friendlyAuthError(err));
     } finally {
       setEmailLoading(false);
     }
   };
 
-  const onGoogleSignIn = async () => {
-    setError(null);
-    setGoogleLoading(true);
+  const onSocialSignIn = (provider: Exclude<PendingSocial, null>) => async () => {
+    clearErrors();
+    setPendingSocial(provider);
     try {
-      await signInWithGoogle();
-    } catch (err: any) {
-      console.error("Google sign in error:", err);
-      setError(err?.message || "Google sign-in failed. Please try again.");
+      await (provider === "google" ? signInWithGoogle() : signInWithFacebook());
+    } catch (err) {
+      console.error(`${provider} sign in error:`, err);
+      setError(friendlyAuthError(err));
     } finally {
-      setGoogleLoading(false);
+      setPendingSocial(null);
     }
   };
 
@@ -105,7 +106,7 @@ export default function SignUpScreen() {
         value={email}
         onChangeText={(t) => {
           setEmail(t);
-          if (error) setError(null);
+          clearErrors();
         }}
         keyboardType="email-address"
         autoCapitalize="none"
@@ -117,7 +118,7 @@ export default function SignUpScreen() {
         value={password}
         onChangeText={(t) => {
           setPassword(t);
-          if (error) setError(null);
+          clearErrors();
         }}
         secure={!showPassword}
         showSecureToggle
@@ -130,7 +131,7 @@ export default function SignUpScreen() {
         value={confirmPassword}
         onChangeText={(t) => {
           setConfirmPassword(t);
-          if (error) setError(null);
+          clearErrors();
         }}
         secure={!showConfirmPassword}
         showSecureToggle
@@ -138,20 +139,18 @@ export default function SignUpScreen() {
         editable={!loading}
       />
 
-      <AuthError message={error} />
+      <AuthError message={shownError} />
 
       <AuthPrimaryButton label="Create Account" onPress={onEmailSignUp} loading={emailLoading} disabled={loading} />
 
       <AuthLegalNote />
 
-      {SOCIAL_ENABLED && (
-        <>
-          <AuthDivider />
-          <View style={[{ flexDirection: "row", justifyContent: "center" }, authStyles.rowGap]}>
-            <SocialButton icon="logo-google" tint="#DB4437" loading={googleLoading} onPress={onGoogleSignIn} disabled={loading} />
-          </View>
-        </>
-      )}
+      <SocialSignInRow
+        onGoogle={onSocialSignIn("google")}
+        onFacebook={onSocialSignIn("facebook")}
+        pending={pendingSocial}
+        disabled={loading}
+      />
 
       <AuthFooter
         prompt="Already have an account?"

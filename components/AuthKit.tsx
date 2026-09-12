@@ -5,6 +5,7 @@
  * surface feels alive but never busy. Premium and theme-agnostic (auth is a
  * fixed branded surface, independent of light/dark).
  */
+import { useSocialProviders } from "@/components/auth/socialProviders";
 import { OrbField, useOrbTouch } from "@/components/OrbField";
 import { Radius, Spacing, brandGradientDark } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
@@ -48,13 +49,10 @@ const ERROR_TINT = "#FF9E9E";
  */
 const APP_ICON = require("@/assets/images/welliva512.png");
 
-/**
- * Master switch for the Google social button. Enabled now that Google OAuth is
- * configured (Supabase provider + Google Cloud client — Phase C2). The button
- * runs the real signInWithGoogle flow; the deep-link handler in
- * SupabaseAuthProvider completes it via welliva://auth-callback.
- */
-export const SOCIAL_ENABLED: boolean = true;
+/** Facebook blue, as the brand guidelines specify it. */
+const FACEBOOK_BLUE = "#1877F2";
+/** Google's red, from the same wordmark the button's glyph is drawn from. */
+const GOOGLE_RED = "#DB4437";
 
 export function AuthBackground({ children }: { children: React.ReactNode }) {
   const fade = useRef(new Animated.Value(0)).current;
@@ -196,7 +194,8 @@ export function AuthError({ message }: { message?: string | null }) {
   );
 }
 
-export function AuthDivider({ label = "or continue with" }: { label?: string }) {
+/** Internal to `SocialSignInRow` — the divider only ever precedes that row. */
+function AuthDivider({ label = "or continue with" }: { label?: string }) {
   return (
     <View style={styles.divider}>
       <View style={styles.dividerLine} />
@@ -206,15 +205,17 @@ export function AuthDivider({ label = "or continue with" }: { label?: string }) 
   );
 }
 
-export function SocialButton({
+function SocialButton({
   icon,
   tint,
+  label,
   loading,
   onPress,
   disabled,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   tint: string;
+  label: string;
   loading?: boolean;
   onPress: () => void;
   disabled?: boolean;
@@ -223,10 +224,73 @@ export function SocialButton({
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
+      // The button is a bare glyph, so without this a screen reader announces
+      // nothing at all — the icon name is not a label.
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled, busy: !!loading }}
       style={({ pressed }) => [styles.social, pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] }]}
     >
       {loading ? <ActivityIndicator color={tint} /> : <Ionicons name={icon} size={24} color={tint} />}
     </Pressable>
+  );
+}
+
+/** Which social sign-in is mid-flight, so only that button shows a spinner. */
+export type PendingSocial = "google" | "facebook" | null;
+
+/**
+ * The "or continue with" block — divider and provider buttons, in one piece.
+ *
+ * Sign-in and sign-up had a hand-copied version of this each, which is how
+ * adding a provider turns into a two-file change that is easy to half-do. It
+ * also owns the decision of WHICH buttons exist: `useSocialProviders` asks the
+ * Supabase project what it actually has enabled, so a provider that would fail
+ * with "provider is not enabled" is never drawn (see auth/socialProviders.ts).
+ *
+ * Renders nothing at all when the project has no social providers on — the
+ * email form stands alone rather than under an empty divider.
+ */
+export function SocialSignInRow({
+  onGoogle,
+  onFacebook,
+  pending,
+  disabled,
+}: {
+  onGoogle: () => void;
+  onFacebook: () => void;
+  pending: PendingSocial;
+  disabled?: boolean;
+}) {
+  const providers = useSocialProviders();
+  if (!providers.google && !providers.facebook) return null;
+
+  return (
+    <>
+      <AuthDivider />
+      <View style={styles.socialRow}>
+        {providers.google && (
+          <SocialButton
+            icon="logo-google"
+            tint={GOOGLE_RED}
+            label="Continue with Google"
+            loading={pending === "google"}
+            onPress={onGoogle}
+            disabled={disabled}
+          />
+        )}
+        {providers.facebook && (
+          <SocialButton
+            icon="logo-facebook"
+            tint={FACEBOOK_BLUE}
+            label="Continue with Facebook"
+            loading={pending === "facebook"}
+            onPress={onFacebook}
+            disabled={disabled}
+          />
+        )}
+      </View>
+    </>
   );
 }
 
@@ -277,7 +341,6 @@ export function AuthLegalNote() {
 
 export const authStyles = StyleSheet.create({
   link: { color: BUBBLE_YELLOW, fontSize: 14, fontWeight: "700" },
-  rowGap: { gap: Spacing.md },
 });
 
 const styles = StyleSheet.create({
@@ -361,6 +424,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#FFFFFF",
   },
+  // Centred rather than spread, so the row stays balanced whether it holds one
+  // provider or three — the set is decided at runtime, not at build time.
+  socialRow: { flexDirection: "row", justifyContent: "center", gap: Spacing.md },
 
   footer: { flexDirection: "row", justifyContent: "center", marginTop: Spacing.xxl },
   footerText: { color: WHITE_70, fontSize: 14 },

@@ -22,28 +22,35 @@ placeholder strings.
 The gate is version-pinned: bump `LEGAL_VERSION` in `constants/legal.ts` on any
 material wording change and every user re-accepts on next launch.
 
-## 2. Before submitting — the two that are still blocking
+## 2. Before submitting — the one that is still blocking
 
-`constants/legal.ts` holds four identity constants. **Two of them are real; two
-are still bracketed placeholder text, and CI is red because of it.**
+`constants/legal.ts` holds four identity constants. **Three of them are real; one
+is still bracketed placeholder text, and CI is red because of it.**
 
 | Constant | State | Notes |
 |---|---|---|
 | `LEGAL_ENTITY` | `"Welliva"` | Passes the gate. Replace if the registered name differs from the trading name. |
 | `LEGAL_CONTACT_EMAIL` | `"privacy@welliva.app"` | Passes the gate. Must be a **monitored** mailbox — the policy commits to a 30-day response on rights requests. |
+| `LEGAL_JURISDICTION` | `"Nigeria"` | Filled 10 September 2026. Renders as "the laws of Nigeria" in the Terms' governing-law section. |
 | `LEGAL_POSTAL_ADDRESS` | **placeholder** | Blocking. Required by GDPR-style transparency rules. |
-| `LEGAL_JURISDICTION` | **placeholder** | Blocking. Governing law for the Terms. |
 
 ### What the failure looks like
 
-`npm test` fails three assertions until these are filled:
+`npm test` fails two assertions until the address is filled:
 
 ```
 FAIL  constants/__tests__/legal.test.ts
   › LEGAL_POSTAL_ADDRESS is filled in, not a placeholder
-  › LEGAL_JURISDICTION is filled in, not a placeholder
   › renders no placeholder text in any document body
 ```
+
+**This red is a standing, deliberate decision — not an unnoticed regression.**
+The owner's instruction is to keep it red rather than publish an invented
+address. Every session that runs the suite will see these two failures; report
+them as the known hold and move on. The test prints the same explanation in its
+own failure message (`KNOWN_HOLD` in
+[constants/\_\_tests\_\_/legal.test.ts](../../constants/__tests__/legal.test.ts)),
+so it travels with the CI log.
 
 **This gate is correct. Do not relax it, skip it, or loosen the `PLACEHOLDER`
 regex.** These strings are interpolated verbatim into the privacy policy and the
@@ -56,9 +63,7 @@ written to fail loudly rather than to warn.
 
 ```diff
 -export const LEGAL_POSTAL_ADDRESS = "[registered business address — to be completed]";
--export const LEGAL_JURISDICTION = "[governing jurisdiction — to be completed]";
-+export const LEGAL_POSTAL_ADDRESS = "<street, city, postcode, country>";
-+export const LEGAL_JURISDICTION = "<e.g. England and Wales / the Federal Republic of Nigeria>";
++export const LEGAL_POSTAL_ADDRESS = "<street, city, postcode, Nigeria>";
 ```
 
 Requirements the test enforces, so get them right first time:
@@ -68,9 +73,9 @@ Requirements the test enforces, so get them right first time:
 - No `TODO`, `TBD`, `FIXME`, `XXX`, or the phrase "to be completed".
 - The address must be the **registered** one for the operating entity, not a
   mailbox or a co-working desk — a regulator writing to it has to reach you.
-- The jurisdiction is a place, phrased to sit inside the sentence
-  *"These Terms are governed by the laws of ___"*. "Nigeria" reads correctly;
-  "Nigerian law" does not.
+- The jurisdiction is already filled as `"Nigeria"`, phrased to sit inside the
+  sentence *"These Terms are governed by the laws of ___"*. If you ever change
+  it, keep that shape: "Nigeria" reads correctly; "Nigerian law" does not.
 
 Then bump `LEGAL_LAST_UPDATED` to the date you made the change.
 

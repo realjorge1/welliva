@@ -6,6 +6,8 @@ import {
   AuthPrimaryButton,
   authStyles,
 } from "@/components/AuthKit";
+import { friendlyAuthError, isEmailRateLimited } from "@/components/auth/authErrors";
+import { useAuth } from "@/components/SupabaseAuthProvider";
 import { supabase } from "@/lib/supabase";
 import { Link, useLocalSearchParams } from "expo-router";
 import React, { useState } from "react";
@@ -20,9 +22,15 @@ import { Pressable, Text, View } from "react-native";
  * session and routing takes over. This screen just explains that and offers a
  * Resend. With confirmations OFF the app never lands here (sign-up gets a live
  * session and routes straight to onboarding).
+ *
+ * It is also where a FAILED link lands. Tapping an expired one re-opens the app
+ * with an error and no session; `redirectError` carries the reason across, so
+ * the screen can say "that link expired" next to the button that fixes it,
+ * rather than leaving the user staring at an inbox that looks fine.
  */
 export default function VerifyEmailScreen() {
   const { email } = useLocalSearchParams<{ email?: string }>();
+  const { redirectError, clearRedirectError } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
@@ -30,6 +38,7 @@ export default function VerifyEmailScreen() {
   const onResend = async () => {
     if (!email) return;
     setError(null);
+    if (redirectError) clearRedirectError();
     setSent(false);
     setLoading(true);
     try {
@@ -39,8 +48,12 @@ export default function VerifyEmailScreen() {
       });
       if (resendError) throw resendError;
       setSent(true);
-    } catch (err: any) {
-      setError(err?.message || "Could not resend the email. Please try again.");
+    } catch (err) {
+      // The likeliest failure here by far is the project's own e-mail quota,
+      // not anything the user did — friendlyAuthError says as much rather than
+      // showing them "email rate limit exceeded".
+      setError(friendlyAuthError(err));
+      if (isEmailRateLimited(err)) console.warn("Resend blocked by email quota:", err);
     } finally {
       setLoading(false);
     }
@@ -57,7 +70,7 @@ export default function VerifyEmailScreen() {
         }
       />
 
-      <AuthError message={error} />
+      <AuthError message={error ?? redirectError} />
       {sent && (
         <View style={{ marginBottom: 12 }}>
           <Text style={{ color: "#8FE3A6", fontSize: 13, fontWeight: "600", textAlign: "center" }}>

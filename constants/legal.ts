@@ -19,10 +19,10 @@
  * on next launch, because their stored acceptance records the version they saw.
  * See services/legal/LegalAcceptance.ts.
  *
- * ⚠️ BEFORE STORE SUBMISSION: fill in the four `TODO(legal)` constants below and
- * host the same text at PRIVACY_POLICY_URL / TERMS_URL — both stores require a
- * publicly reachable policy URL on the listing itself, not only in-app.
- * See docs/legal/store-submission.md.
+ * ⚠️ BEFORE STORE SUBMISSION: fill in `LEGAL_POSTAL_ADDRESS` below — the last
+ * unfilled identity constant — and host the same text at PRIVACY_POLICY_URL /
+ * TERMS_URL, because both stores require a publicly reachable policy URL on the
+ * listing itself, not only in-app. See docs/legal/store-submission.md.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -30,14 +30,22 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * TODO(legal): replace with the operating entity's registered name, address and
- * governing jurisdiction. These strings are interpolated verbatim into the
- * documents below, so a placeholder left here ships as a placeholder.
+ * The operating entity's registered name, address and governing jurisdiction.
+ * These strings are interpolated verbatim into the documents below, so a
+ * placeholder left here ships as a placeholder.
+ *
+ * ONE IS STILL OUTSTANDING — and deliberately so. `LEGAL_POSTAL_ADDRESS` holds
+ * bracketed text because the registered address is not yet decided, and the
+ * owner's instruction is to leave it red rather than publish an invented one.
+ * constants/__tests__/legal.test.ts therefore fails two assertions on purpose.
+ * That is the intended state, not a regression to fix: do NOT invent an address,
+ * and do NOT loosen the guard's regex. Replace the string with the real
+ * registered address and both assertions go green on their own.
  */
 export const LEGAL_ENTITY = "Welliva";
 export const LEGAL_CONTACT_EMAIL = "privacy@welliva.app";
 export const LEGAL_POSTAL_ADDRESS = "[registered business address — to be completed]";
-export const LEGAL_JURISDICTION = "[governing jurisdiction — to be completed]";
+export const LEGAL_JURISDICTION = "Nigeria";
 
 /** Public mirrors of these documents. Required on both store listings. */
 export const PRIVACY_POLICY_URL = "https://welliva.app/legal/privacy";
@@ -47,7 +55,7 @@ export const TERMS_URL = "https://welliva.app/legal/terms";
 export const LEGAL_VERSION = 1;
 
 /** Shown in each document header. Update alongside LEGAL_VERSION. */
-export const LEGAL_LAST_UPDATED = "26 July 2026";
+export const LEGAL_LAST_UPDATED = "10 September 2026";
 
 /** Minimum age to hold an account (the onboarding age field enforces it too). */
 export const MINIMUM_AGE = 13;

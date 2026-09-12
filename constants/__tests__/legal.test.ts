@@ -4,7 +4,8 @@
  * WHY THIS FILE EXISTS. constants/legal.ts interpolates four identity constants
  * verbatim into the privacy policy, terms and medical disclaimer — the three
  * documents a user must accept before the app will ask them about pregnancy,
- * medication or kidney disease. Two of them shipped as literal bracket text:
+ * medication or kidney disease. Two of them shipped as literal bracket text;
+ * one (the jurisdiction) has since been filled, and one still reads:
  *
  *     LEGAL_POSTAL_ADDRESS = "[registered business address — to be completed]"
  *
@@ -22,6 +23,9 @@
  *
  * It also pins the two invariants that make LEGAL_VERSION meaningful, because a
  * consent record is only as good as the version stamped on it.
+ *
+ * ⚠️ THIS FILE IS CURRENTLY RED ON PURPOSE. See `KNOWN_HOLD` below before
+ * "fixing" anything here.
  */
 import { describe, expect, it } from "vitest";
 
@@ -44,6 +48,21 @@ import {
  * case the next one is spelled TODO or TBD instead.
  */
 const PLACEHOLDER = /\[[^\]]*\]|TODO|TBD|FIXME|XXX|to be completed|lorem ipsum/i;
+
+/**
+ * Printed on every failure this file can produce, because the failures are
+ * currently EXPECTED and each fresh reader otherwise rediscovers that the hard
+ * way. Keep this in the message, not only in a comment — the message is what a
+ * CI log and a code-reading agent actually see.
+ */
+const KNOWN_HOLD =
+  "KNOWN DELIBERATE HOLD (as of 10 September 2026): LEGAL_POSTAL_ADDRESS is the " +
+  "only field still unfilled, and the owner has chosen to leave it red until the " +
+  "registered business address is decided. Two assertions here fail on purpose. " +
+  "Do NOT invent an address, do NOT loosen PLACEHOLDER, do NOT skip these tests — " +
+  "a fabricated address in a live privacy policy is worse than a red build. " +
+  "Fill the real address in constants/legal.ts and both go green. " +
+  "See docs/legal/store-submission.md.";
 
 const IDENTITY: Record<string, string> = {
   LEGAL_ENTITY,
@@ -69,7 +88,9 @@ describe("legal identity constants", () => {
         PLACEHOLDER.test(value),
         `${name} still contains placeholder text: ${JSON.stringify(value)}\n` +
           `Replace it in constants/legal.ts with the real value — it is ` +
-          `rendered verbatim in the privacy policy, terms and disclaimer.`,
+          `rendered verbatim in the privacy policy, terms and disclaimer.\n` +
+          `\n` +
+          `${KNOWN_HOLD}`,
       ).toBe(false);
     },
   );
@@ -111,7 +132,7 @@ describe("legal documents", () => {
 
       expect(
         offending,
-        `${id} contains unfilled text:\n  ${offending.join("\n  ")}`,
+        `${id} contains unfilled text:\n  ${offending.join("\n  ")}\n\n${KNOWN_HOLD}`,
       ).toEqual([]);
     }
   });

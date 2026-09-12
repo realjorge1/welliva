@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "clear-cache": "bash ./scripts/clear-cache.sh"
+    "clear-cache": "bash ./scripts/clear-cache.sh",
+    "auth:doctor": "node ./scripts/auth-doctor.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
