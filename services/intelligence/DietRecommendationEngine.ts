@@ -20,7 +20,7 @@ import {
 import { DietMatchScore } from "../../models/diet";
 import { NutritionTargets } from "../../models/nutrition";
 import { UserBio } from "../../models/user";
-import { calculateDietMatches } from "../DietMatchService";
+import { byBestMatch, calculateDietMatches, cuisineFit } from "../DietMatchService";
 
 export type DietBand = "recommended" | "safe";
 
@@ -54,14 +54,6 @@ function estimateMealProtein(diet: DietData): number {
   return mains.reduce((s, m) => s + avg(m.protein), 0) / mains.length;
 }
 
-function hasNigerianOptions(diet: DietData): boolean {
-  return [
-    ...diet.breakfastOptions,
-    ...diet.lunchOptions,
-    ...diet.dinnerOptions,
-  ].some((m) => m.isNigerian);
-}
-
 const MUSCLE_GOALS = new Set(["build_muscle", "athletic_performance"]);
 
 /**
@@ -78,6 +70,20 @@ export function buildDietReasons(
   matchReasons: string[] = [],
 ): string[] {
   const reasons: string[] = [];
+
+  // Cultural fit leads: it is the preference the user stated in so many words,
+  // so it is the first thing a recommendation should prove it heard. This used
+  // to be a trailing "Includes Nigerian meal options" shown to EVERY user,
+  // whatever cuisine they had picked.
+  const fit = bio ? cuisineFit(diet, bio) : null;
+  if (fit?.reason) reasons.push(fit.reason);
+
+  // Condition / restriction / goal reasons from the scorer ("Targeted for type
+  // 2 diabetes") come next: they are why THIS diet won, where the generic lines
+  // below are true of most diets. They used to trail, and the cap cut them off.
+  for (const r of matchReasons) {
+    if (!reasons.includes(r)) reasons.push(r);
+  }
 
   // Calorie fit — the daily plan for any diet is assembled around the user's
   // calorie target (see DietPlanGenerator.getMealCalorieSplit), so this is
@@ -97,16 +103,6 @@ export function buildDietReasons(
   // Adherence / difficulty.
   if (diet.difficulty === "Easy") {
     reasons.push("Beginner-friendly — easy to follow");
-  }
-
-  // Goal / condition reasons from the scorer (e.g. "Good for hypertension").
-  for (const r of matchReasons) {
-    if (!reasons.includes(r)) reasons.push(r);
-  }
-
-  // Cultural fit.
-  if (hasNigerianOptions(diet)) {
-    reasons.push("Includes Nigerian meal options");
   }
 
   return reasons.slice(0, 4);
@@ -145,13 +141,13 @@ export function recommendDiets(
 
   const recommended = matches
     .filter((m) => m.isRecommended && !m.isBlocked)
-    .sort((a, b) => b.score - a.score)
+    .sort(byBestMatch)
     .map((m) => toRecommendation(m, "recommended", bio, targets))
     .filter((r): r is DietRecommendation => r !== null);
 
   const safeOptions = matches
     .filter((m) => m.isSafeOption && !m.isBlocked)
-    .sort((a, b) => b.score - a.score)
+    .sort(byBestMatch)
     .map((m) => toRecommendation(m, "safe", bio, targets))
     .filter((r): r is DietRecommendation => r !== null);
 

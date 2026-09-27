@@ -14,11 +14,12 @@ import type { NutritionTargets } from "../../models/nutrition";
 import type { PlanState } from "../../models/planState";
 import type { CuisinePreference, UserBio, UserGoals } from "../../models/user";
 import type { BodyLogEntry, GeneratedWorkoutPlan } from "../../models/workout";
-import type { BioChangeSummary } from "../AppContext";
+import type { BioChangeSummary, OnboardingPlanOptions } from "../AppContext";
 import { ensureDietLibraryLoaded } from "../../constants/DietDatabase";
 import { addBodyLog } from "../../services/BodyLogService";
 import { generateDietPlan } from "../../services/DietPlanGenerator";
 import {
+  dietConflictsWithCuisine,
   getAllAvailableDiets,
   getMedicationAdvisories,
 } from "../../services/DietMatchService";
@@ -232,7 +233,7 @@ export function useProfileState({
     [userBio, planState, workoutPlan, refreshTodayDiet],
   );
 
-  const completeOnboarding = useCallback(async (bio: UserBio) => {
+  const completeOnboarding = useCallback(async (bio: UserBio, plan?: OnboardingPlanOptions) => {
     setUserBio(bio);
     const targets = calculateNutritionTargets(bio);
     setNutritionTargets(targets);
@@ -258,15 +259,28 @@ export function useProfileState({
     setWorkoutPlan(wp);
     await writeJSON(KEYS.WORKOUT_PLAN, wp);
 
-    // Auto-generate today's diet (AI-first), then fill the rest of the week's
-    // offline buffer in the background so the plan works without a connection.
+    // Today's meals. The reveal already built and SHOWED a day; that day is the
+    // one saved, so the first plan the user opens is the one they just agreed
+    // to. Only without it (or across a midnight) is today generated fresh —
+    // AI-first — and a hand-picked menu writes today itself (see the option).
     const today = todayDate();
-    const diet = await regenerateDietForDate(bio, targets, today);
-    void ensureDietBuffer(bio, targets, today, diet?.dietId);
+    let dietId: string | null = plan?.dietId ?? null;
+    if (plan?.menuPlanned) {
+      // MealPlanContext.startMenuPlan projects today with the rest of the menu.
+    } else if (plan?.firstDay && plan.firstDay.date === today) {
+      await saveDaySchedule(plan.firstDay);
+      dietId = plan.firstDay.dietId;
+    } else {
+      const diet = await regenerateDietForDate(bio, targets, today, dietId ?? undefined);
+      dietId = diet?.dietId ?? dietId;
+    }
+    // Then fill the rest of the week's offline buffer in the background so the
+    // plan works without a connection — in the same eating style.
+    if (!plan?.menuPlanned) void ensureDietBuffer(bio, targets, today, dietId ?? undefined);
 
     // Save plan state
     const newPlanState: PlanState = {
-      activeDietId: diet?.dietId || null,
+      activeDietId: dietId,
       activeWorkoutPlanId: wp.id,
       dateStamp: today,
       weekStartDate: weekStart,
@@ -296,14 +310,16 @@ export function useProfileState({
       await writeJSON(KEYS.USER_BIO, newBio);
 
       // Refresh the WHOLE plan (today + the cached week ahead) so the new
-      // cuisine is felt across every upcoming day, not just today.
+      // cuisine is felt across every upcoming day, not just today. The active
+      // diet is kept — unless its NAME is a different cuisine ("Mediterranean
+      // Diet" for someone who just chose African), in which case it is
+      // re-matched: keeping it would serve the right dishes under a title that
+      // says we ignored the change.
       const today = todayDate();
-      const result = await applyDietPreferenceChange(
-        newBio,
-        targets,
-        today,
-        planState.activeDietId ?? undefined,
-      );
+      const keepDiet = dietConflictsWithCuisine(planState.activeDietId, pref)
+        ? undefined
+        : (planState.activeDietId ?? undefined);
+      const result = await applyDietPreferenceChange(newBio, targets, today, keepDiet);
       if (result) {
         const newPlanState: PlanState = {
           ...planState,

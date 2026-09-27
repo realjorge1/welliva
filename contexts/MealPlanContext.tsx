@@ -29,6 +29,7 @@ import {
   toLocalDate,
   type CustomMenuEntry,
   type MealPlanPeriod,
+  type PeriodBaseline,
   type PeriodReport,
   type PlanDuration,
   type PlanMode,
@@ -83,6 +84,19 @@ export interface BacklogPrompt {
   unloggedMeals: { mealType: MealType; name: string; snackIndex?: number }[];
 }
 
+export interface StartMenuPlanInput {
+  label: string;
+  /** First day of the menu (YYYY-MM-DD). */
+  startDate: string;
+  /** How many days it runs, start day included. */
+  lengthDays: number;
+  /** Every day's picks, as `menuBuilder.buildMenuDays` returns them. */
+  days: Record<string, MealPlan.MenuDayPick[]>;
+  /** Targets in force at the start — passed in because the provider's own
+   *  copy can still be the pre-onboarding null when this is called. */
+  baseline?: Partial<PeriodBaseline>;
+}
+
 interface MealPlanContextValue {
   // --- Engagement ---
   trackingMode: TrackingMode;
@@ -97,6 +111,13 @@ interface MealPlanContextValue {
   /** A finished period whose report the user hasn't seen — drives the takeover. */
   finishedPeriod: MealPlanPeriod | null;
   startPeriod: (input: MealPlan.StartPeriodInput) => Promise<MealPlanPeriod>;
+  /**
+   * Start a hand-picked menu with every day already planned — onboarding's
+   * "let me choose". One period, one bulk write, one projection, so a month
+   * of meals lands on the calendar in a single pass rather than as a hundred
+   * separate picks.
+   */
+  startMenuPlan: (input: StartMenuPlanInput) => Promise<MealPlanPeriod>;
   /**
    * Change the running plan's schedule — a day, a week, or hand-picked dates —
    * keeping the period and every meal already planned inside it. Days that fall
@@ -342,6 +363,28 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
       return period;
     },
     [nutritionTargets, refresh],
+  );
+
+  const startMenuPlan = useCallback(
+    async (input: StartMenuPlanInput) => {
+      const length = Math.max(1, Math.round(input.lengthDays));
+      const period = await startPeriod({
+        mode: "custom",
+        label: input.label,
+        durationKind: length === 7 ? "week" : "custom",
+        startDate: input.startDate,
+        customEndDate: addDays(input.startDate, length - 1),
+        ...(input.baseline ? { baseline: input.baseline } : {}),
+      });
+      await MealPlan.setCustomMenuDays(period.id, input.days);
+      // Projected against the menu's own first day: this runs during
+      // onboarding, before the provider's clock has necessarily ticked over.
+      await syncCustomDays(period, Object.keys(input.days), input.startDate);
+      await refresh();
+      await refreshTodayDiet();
+      return period;
+    },
+    [startPeriod, refresh, refreshTodayDiet],
   );
 
   /**
@@ -689,6 +732,7 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
       periodProgress,
       finishedPeriod,
       startPeriod,
+      startMenuPlan,
       reschedulePlan,
       daysDroppedBy,
       endPeriodEarly,
@@ -731,7 +775,7 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       trackingMode, setTrackingMode, activePeriod, periodProgress, finishedPeriod,
-      startPeriod, reschedulePlan, daysDroppedBy, endPeriodEarly,
+      startPeriod, startMenuPlan, reschedulePlan, daysDroppedBy, endPeriodEarly,
       extendActivePeriod, restartPeriod, buildReport,
       dismissReport, periodArchive, customEntriesToday, getCustomEntries,
       setCustomMeal, removeCustomMeal, copyDayTo, repeatWeekPattern, plannedDates,

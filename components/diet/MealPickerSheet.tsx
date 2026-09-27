@@ -1410,7 +1410,6 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xl,
     borderRadius: Radius.lg,
     borderWidth: 1,
-    borderStyle: "dashed",
   },
 
   confirmBody: { paddingHorizontal: Spacing.xl, gap: Spacing.lg },

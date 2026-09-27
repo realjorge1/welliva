@@ -75,6 +75,7 @@ import {
 } from "@/models/mealPlan";
 import { router } from "expo-router";
 import {
+  byBestMatch,
   calculateDietMatches,
   getMedicationAdvisories,
   getRecommendedDiets,
@@ -349,7 +350,7 @@ export default function DietScreen() {
       .sort(([a], [b]) => rank(a) - rank(b))
       .map(([family, items]) => ({
         family,
-        items: items.sort((x, y) => y.match.score - x.match.score),
+        items: items.sort((x, y) => byBestMatch(x.match, y.match)),
       }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userBio, dietLibraryReady]);
@@ -1978,7 +1979,7 @@ export default function DietScreen() {
                   onPress={() => setShowCustomMealForm(true)}
                   accessibilityRole="button"
                   accessibilityLabel="Add custom meal"
-                  style={[styles.dashedBtn, { borderColor: alpha(colors.primary, 0.5) }]}
+                  style={[styles.outlineBtn, { borderColor: alpha(colors.primary, 0.5) }]}
                 >
                   <Ionicons name="create-outline" size={20} color={colors.primary} />
                   <AppText variant="callout" color="brand">
@@ -2964,7 +2965,7 @@ const styles = StyleSheet.create({
   swapCard: { marginBottom: Spacing.sm },
   swapRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
   swapMacros: { marginTop: 4 },
-  dashedBtn: {
+  outlineBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -2972,7 +2973,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.lg,
     borderRadius: Radius.md,
     borderWidth: 1.5,
-    borderStyle: "dashed",
     marginBottom: Spacing.lg,
   },
 

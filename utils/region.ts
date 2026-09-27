@@ -13,6 +13,7 @@
  * throws, we simply fall back to no-region / "mixed" and the app behaves exactly
  * as it did before.
  */
+import { METRIC_UNITS, type MeasurementUnits } from "@/models/units";
 import type { CuisinePreference } from "@/models/user";
 
 export interface DetectedRegion {
@@ -86,5 +87,51 @@ export function detectRegion(): DetectedRegion {
     return { region: city || undefined, cuisine };
   } catch {
     return DEFAULT;
+  }
+}
+
+/*
+ * Measurement units, by the same silent time-zone read.
+ *
+ * The United States and Canada talk about their bodies in feet, inches and
+ * pounds; the UK and Ireland in feet, inches and STONE; Liberia is the other
+ * country still on pounds. Everyone else starts metric. This only picks the
+ * starting unit — the field's own switch changes it — so a zone missing from
+ * these lists costs one tap, never a wrong number.
+ */
+const US_CANADA_ZONES = new Set([
+  // United States
+  "America/New_York", "America/Detroit", "America/Chicago", "America/Menominee",
+  "America/Denver", "America/Boise", "America/Phoenix", "America/Los_Angeles",
+  "America/Anchorage", "America/Juneau", "America/Sitka", "America/Metlakatla",
+  "America/Yakutat", "America/Nome", "America/Adak", "Pacific/Honolulu",
+  // Canada
+  "America/St_Johns", "America/Halifax", "America/Glace_Bay", "America/Moncton",
+  "America/Goose_Bay", "America/Toronto", "America/Montreal", "America/Nipigon",
+  "America/Thunder_Bay", "America/Iqaluit", "America/Winnipeg", "America/Regina",
+  "America/Swift_Current", "America/Edmonton", "America/Vancouver", "America/Whitehorse",
+  "America/Dawson", "America/Yellowknife", "America/Cambridge_Bay", "America/Rankin_Inlet",
+  "America/Resolute", "America/Atikokan", "America/Creston", "America/Dawson_Creek",
+  "America/Fort_Nelson", "America/Inuvik", "America/Rainy_River", "America/Blanc-Sablon",
+]);
+const US_ZONE_PREFIXES = ["America/Indiana/", "America/Kentucky/", "America/North_Dakota/"];
+const STONE_ZONES = new Set([
+  "Europe/London", "Europe/Dublin", "Europe/Belfast", "Europe/Isle_of_Man",
+  "Europe/Jersey", "Europe/Guernsey",
+]);
+
+/** The units a person here most likely uses for their own height and weight. */
+export function detectUnits(timeZone?: string): MeasurementUnits {
+  try {
+    const tz = timeZone ?? Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone;
+    if (!tz) return METRIC_UNITS;
+    if (US_CANADA_ZONES.has(tz) || US_ZONE_PREFIXES.some((p) => tz.startsWith(p))) {
+      return { height: "ftin", weight: "lb" };
+    }
+    if (STONE_ZONES.has(tz)) return { height: "ftin", weight: "stlb" };
+    if (tz === "Africa/Monrovia") return { height: "ftin", weight: "lb" };
+    return METRIC_UNITS;
+  } catch {
+    return METRIC_UNITS;
   }
 }

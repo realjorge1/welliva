@@ -9,6 +9,13 @@
 export interface DietMatchScore {
   dietId: string;
   score: number; // 0-96
+  /**
+   * The unclamped score, for ORDERING only. `score` is clamped at 96 for
+   * display, so several diets used to tie at 96 and array order broke the tie —
+   * which is how the first diet in the catalog (Mediterranean) won for almost
+   * everyone. Never shown.
+   */
+  rank?: number;
   isRecommended: boolean; // 87-96%
   isSafeOption: boolean; // 75-86%
   isBlocked: boolean; // Medical/allergy conflict

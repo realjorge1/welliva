@@ -35,7 +35,7 @@ import React, {
   useState,
 } from "react";
 
-import { DietHistoryEntry, TodayDiet } from "../models/diet";
+import { DaySchedule, DietHistoryEntry, TodayDiet } from "../models/diet";
 import { NutritionTargets } from "../models/nutrition";
 import { DEFAULT_PLAN_STATE, PlanState } from "../models/planState";
 import { SessionSummaryData } from "../models/session";
@@ -114,6 +114,28 @@ export interface ConsumedNutrition {
 }
 
 /**
+ * What the onboarding reveal already decided, handed to `completeOnboarding` so
+ * the plan the user lands on is the plan they were shown.
+ */
+export interface OnboardingPlanOptions {
+  /**
+   * The day the reveal SHOWED. Saved as today exactly as displayed, rather than
+   * regenerated — a regeneration can come back different (the AI branch always
+   * does), and "here is where we start" must not be followed by something else.
+   */
+  firstDay?: DaySchedule | null;
+  /** The eating style the reveal named; it fills every day after the first. */
+  dietId?: string | null;
+  /**
+   * The user chose their own dishes. Their menu is written by
+   * MealPlanContext.startMenuPlan straight after this returns, so today is
+   * left to it and the AI read-ahead is not started (it would only race the
+   * menu for days the menu is about to fill).
+   */
+  menuPlanned?: boolean;
+}
+
+/**
  * Human-readable summary of how a profile edit re-fit the plan — shown back to
  * the user so a change never feels silent ("here's what I changed for you").
  */
@@ -134,7 +156,7 @@ interface AppContextType {
    * Returns a human summary of everything it changed.
    */
   updateUserBio: (bio: Partial<UserBio>) => Promise<BioChangeSummary>;
-  completeOnboarding: (bio: UserBio) => Promise<void>;
+  completeOnboarding: (bio: UserBio, plan?: OnboardingPlanOptions) => Promise<void>;
   /** Change the cuisine preference and regenerate today's meals from it. */
   setCuisinePreference: (pref: CuisinePreference) => Promise<void>;
   /**

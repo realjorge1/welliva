@@ -497,6 +497,20 @@ function hashString(str: string): number {
 // GENERATOR
 // ============================================================================
 
+/**
+ * Training days per sessions-a-week, Monday = 0. Each set leaves at least one
+ * rest day between sessions where the count allows it (2–3 a week), and puts
+ * the unavoidable back-to-back pairs where a split trains different muscles
+ * on consecutive days (4–6 a week).
+ */
+const SPACED_DAYS: Record<number, number[]> = {
+  2: [0, 3], // Mon, Thu
+  3: [0, 2, 4], // Mon, Wed, Fri
+  4: [0, 1, 3, 4], // Mon, Tue, Thu, Fri
+  5: [0, 1, 2, 4, 5], // Mon–Wed, Fri, Sat
+  6: [0, 1, 2, 3, 4, 5], // Mon–Sat, Sunday off
+};
+
 export function generateWorkoutPlan(
   bio: UserBio,
   weekStart: string,
@@ -536,10 +550,16 @@ export function generateWorkoutPlan(
   const contra = buildContraindications(bio);
   const pool = filterExercisePool(input.difficulty, input.equipment, contra);
 
-  // Distribute sessions across week days using randomized spacing
+  // Distribute sessions across the week. Known split lengths use fixed,
+  // recovery-spaced days; the old seeded shuffle could stack a 3-day
+  // full-body plan on Mon/Tue/Wed — three full-body sessions back to back with
+  // no rest between them, and a different set of days every week.
   const availableDays = [0, 1, 2, 3, 4, 5, 6]; // Mon-Sun
   const sessionDays: number[] = [];
-  if (split.length >= availableDays.length) {
+  const spaced = SPACED_DAYS[split.length];
+  if (spaced) {
+    sessionDays.push(...spaced);
+  } else if (split.length >= availableDays.length) {
     // If as many sessions as days, use all days
     for (let i = 0; i < split.length; i++) sessionDays.push(i % 7);
   } else {

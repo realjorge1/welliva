@@ -12,7 +12,7 @@
  * - Below 75: not shown
  */
 
-import { DIET_DATABASE, DietData } from "../constants/DietDatabase";
+import { DIET_DATABASE, DietData, DietMealOption } from "../constants/DietDatabase";
 import { DietMatchScore } from "../models/diet";
 import {
   DietaryRestriction,
@@ -20,6 +20,14 @@ import {
   MedicationCategory,
   UserBio,
 } from "../models/user";
+import {
+  breaksRestriction,
+  cuisineWord,
+  dietNameContradicts,
+  restrictionWord,
+  servesPreference,
+  signatureDietFor,
+} from "./nutrition/mealRules";
 
 /**
  * Condition → diet intelligence.
@@ -257,6 +265,30 @@ const RESTRICTION_COMPATIBLE_DIETS: Record<DietaryRestriction, string[]> = {
 };
 
 /**
+ * The diet each restriction was AUTHORED for. The compatibility table above
+ * says which diets can be adapted; this says which one needs no adapting —
+ * every meal in the vegetarian plan was written vegetarian, whereas the
+ * Mediterranean plan is "compatible" only once its fish is filtered out.
+ */
+const RESTRICTION_HOME_DIETS: Partial<Record<DietaryRestriction, string[]>> = {
+  vegetarian: ["vegetarian"],
+  vegan: ["vegan", "plant-based"],
+  pescatarian: ["pescatarian"],
+  gluten_free: ["gluten-free", "gluten-free-lifestyle"],
+  dairy_free: ["lactose-free"],
+};
+
+/**
+ * Best first. Orders by the UNCLAMPED rank so a tie at the 96 display ceiling
+ * is broken by the actual fit rather than by where a diet sits in the catalog.
+ * Every ranked list in the app goes through this one comparator, so the diet a
+ * screen recommends is always the diet the generator picks.
+ */
+export function byBestMatch(a: DietMatchScore, b: DietMatchScore): number {
+  return (b.rank ?? b.score) - (a.rank ?? a.score);
+}
+
+/**
  * Calculate match scores for all diets
  */
 export function calculateDietMatches(bio: UserBio): DietMatchScore[] {
@@ -264,23 +296,19 @@ export function calculateDietMatches(bio: UserBio): DietMatchScore[] {
 }
 
 /**
- * Get recommended diets (score 96-100)
+ * Get recommended diets (score 87-96)
  */
 export function getRecommendedDiets(bio: UserBio): DietMatchScore[] {
   const matches = calculateDietMatches(bio);
-  return matches
-    .filter((m) => m.isRecommended && !m.isBlocked)
-    .sort((a, b) => b.score - a.score);
+  return matches.filter((m) => m.isRecommended && !m.isBlocked).sort(byBestMatch);
 }
 
 /**
- * Get safe options (score 85-95)
+ * Get safe options (score 75-86)
  */
 export function getSafeOptionDiets(bio: UserBio): DietMatchScore[] {
   const matches = calculateDietMatches(bio);
-  return matches
-    .filter((m) => m.isSafeOption && !m.isBlocked)
-    .sort((a, b) => b.score - a.score);
+  return matches.filter((m) => m.isSafeOption && !m.isBlocked).sort(byBestMatch);
 }
 
 /**
@@ -288,7 +316,97 @@ export function getSafeOptionDiets(bio: UserBio): DietMatchScore[] {
  */
 export function getAllAvailableDiets(bio: UserBio): DietMatchScore[] {
   const matches = calculateDietMatches(bio);
-  return matches.filter((m) => !m.isBlocked).sort((a, b) => b.score - a.score);
+  return matches.filter((m) => !m.isBlocked).sort(byBestMatch);
+}
+
+// ── Cuisine fit ──────────────────────────────────────────────────────────────
+
+export interface CuisineFit {
+  /** Points added to (or taken from) the match score. */
+  delta: number;
+  /** The fewest dishes in the user's cuisine across breakfast, lunch and dinner. */
+  depth: number;
+  /** A plain-language reason to show when the fit is good. */
+  reason?: string;
+  /** Said out loud when this diet cannot really serve the cuisine. */
+  warning?: string;
+}
+
+/** Dishes in one slot that serve both the user's cuisine and their restriction. */
+function servingCount(options: DietMealOption[], bio: UserBio): number {
+  return options.filter(
+    (o) =>
+      servesPreference(o, bio.cuisinePreference) &&
+      !breaksRestriction(o.name, bio.dietaryRestriction),
+  ).length;
+}
+
+/**
+ * How well a diet can feed the user from the cuisine they chose.
+ *
+ * DEPTH is the measurement: the thinnest of the three main slots, counted
+ * after the restriction filter, because that is the slot where the plan will
+ * run out of the user's food first and start repeating — or fall back to
+ * another kitchen entirely. A diet with one African breakfast is not an African
+ * plan, however well it scores on goals.
+ *
+ * Two NAMING rules sit on top, because the diet's name is the first thing the
+ * user reads: a diet named after a different cuisine is marked down (an African
+ * user is never headlined "Mediterranean Diet" unless their health calls for
+ * it), and the diet that IS their cuisine's tradition is marked up — strongly
+ * when nothing medical competes for the top spot, gently when something does,
+ * so a condition's therapeutic diet still leads.
+ */
+export function cuisineFit(diet: DietData, bio: UserBio): CuisineFit {
+  const pref = bio.cuisinePreference;
+  if (!pref || pref === "mixed") return { delta: 0, depth: Infinity };
+
+  const depth = Math.min(
+    servingCount(diet.breakfastOptions, bio),
+    servingCount(diet.lunchOptions, bio),
+    servingCount(diet.dinnerOptions, bio),
+  );
+  const word = cuisineWord(pref);
+
+  let delta = 0;
+  let reason: string | undefined;
+  let warning: string | undefined;
+
+  if (depth === 0) {
+    delta -= 12;
+    warning = `Few ${word} dishes in this plan`;
+  } else if (depth === 1) {
+    delta -= 6;
+    warning = `Only a handful of ${word} dishes here`;
+  } else if (depth >= 6) {
+    delta += 6;
+    reason = `Full of the ${word} dishes you chose`;
+  } else if (depth >= 4) {
+    delta += 3;
+    reason = `Plenty of ${word} dishes`;
+  } else {
+    reason = `Made with ${word} dishes`;
+  }
+
+  if (dietNameContradicts(diet.id, pref)) delta -= 8;
+
+  if (signatureDietFor(pref) === diet.id) {
+    const hasTherapeuticNeed = bio.medicalConditions.some(
+      (c) => c !== "none" && (CONDITION_INFO[c]?.recommend.length ?? 0) > 0,
+    );
+    delta += hasTherapeuticNeed ? 4 : 10;
+    reason = `Built on the ${word} kitchen you chose`;
+  }
+
+  return { delta, depth, reason, warning };
+}
+
+/** Would changing to this cuisine make the active diet's NAME contradict it? */
+export function dietConflictsWithCuisine(
+  dietId: string | null | undefined,
+  pref: UserBio["cuisinePreference"],
+): boolean {
+  return !!dietId && dietNameContradicts(dietId, pref);
 }
 
 /**
@@ -297,13 +415,14 @@ export function getAllAvailableDiets(bio: UserBio): DietMatchScore[] {
  * Scoring v2: Start at 75 (neutral), add/subtract based on fit.
  * - Goal alignment: +8 to +12
  * - Medical preference: +5 to +8
- * - Restriction compatibility: +5 (full) or -10 to -15 (incompatible)
+ * - Restriction: +13 (authored for it), +5 (compatible) or -5 to -12 (not)
  * - Allergy safety: -8 (soft) or block (hard)
  * - Activity/difficulty fit: +3 to -5
  * - Age appropriateness: +2 to -3
- * - Nigerian cuisine bonus for variety: +2
+ * - Cuisine fit: -20 to +16 (see {@link cuisineFit})
  *
- * Result clamped: Recommended [87,96], Safe [75,86]
+ * Result clamped: Recommended [87,96], Safe [75,86]. Ordering uses the
+ * unclamped `rank` (see {@link byBestMatch}).
  */
 function calculateSingleDietMatch(
   diet: DietData,
@@ -342,11 +461,15 @@ function calculateSingleDietMatch(
 
   // ── Dietary restriction compatibility ──────────────────────
   const compatibleDiets = RESTRICTION_COMPATIBLE_DIETS[bio.dietaryRestriction];
-  if (compatibleDiets.includes("*") || compatibleDiets.includes(diet.id)) {
+  if (RESTRICTION_HOME_DIETS[bio.dietaryRestriction]?.includes(diet.id)) {
+    // Authored for this restriction — nothing has to be filtered out of it.
+    score += 13;
+    reasons.push(`Written for ${restrictionWord(bio.dietaryRestriction)} eating`);
+  } else if (compatibleDiets.includes("*") || compatibleDiets.includes(diet.id)) {
     // Fully compatible - bonus
     if (bio.dietaryRestriction !== "none") {
       score += 5;
-      reasons.push(`Supports ${bio.dietaryRestriction} diet`);
+      reasons.push(`Supports ${restrictionWord(bio.dietaryRestriction)} eating`);
     }
   } else if (canAdaptDiet(diet.id, bio.dietaryRestriction)) {
     score -= 5;
@@ -407,22 +530,22 @@ function calculateSingleDietMatch(
     }
   }
 
-  // ── Nigerian cuisine variety bonus ─────────────────────────
-  const hasNigerianOptions = [
-    ...diet.breakfastOptions,
-    ...diet.lunchOptions,
-    ...diet.dinnerOptions,
-  ].some((m) => m.isNigerian);
-  if (hasNigerianOptions) {
-    score += 2;
-  }
+  // ── Cuisine fit ────────────────────────────────────────────
+  // Replaces a flat "+2 if any meal is Nigerian" that every diet in the catalog
+  // earned, whatever the user had asked for — so it ranked nothing and the
+  // cuisine the user chose played no part in which diet they were matched to.
+  const fit = cuisineFit(diet, bio);
+  score += fit.delta;
+  if (fit.warning) warnings.push(fit.warning);
 
   // ── Clamp score to valid range ────────────────────────────
+  const rank = score;
   score = Math.min(Math.max(score, 0), 96);
 
   return {
     dietId: diet.id,
     score,
+    rank,
     isRecommended: score >= 87 && !isBlocked,
     isSafeOption: score >= 75 && score < 87 && !isBlocked,
     isBlocked,

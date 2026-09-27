@@ -34,8 +34,10 @@ import Reanimated, {
   Easing,
   ReduceMotion,
   cancelAnimation,
+  runOnJS,
   useAnimatedReaction,
   useAnimatedStyle,
+  useFrameCallback,
   useSharedValue,
   withRepeat,
   withSpring,
@@ -87,6 +89,22 @@ const BOUNCE_SPRING = {
   mass: 1,
   reduceMotion: ReduceMotion.Never,
 } as const;
+
+/**
+ * Frame budget. The drift is decoration, so it only runs on a phone that can
+ * afford it. On new-architecture Android every animated frame commits the
+ * screen's shadow tree, so the orbs cost more the more the screen holds: on a
+ * 1 GB TECNO F1 the three of them alone kept the UI thread at 57–73 ms a frame
+ * behind the onboarding menu, and every tap queued behind them — the "freeze".
+ *
+ * So the field watches its own frames. When most of a window arrive late, the
+ * orbs park where they are and stay parked for the rest of the session (a
+ * module flag, so the next field — sign-in, the next onboarding — starts
+ * still). The touch bounce still plays: it is a moment, not a loop.
+ */
+const SLOW_FRAME_MS = 34; // two missed vsyncs at 60 Hz
+const PROBE_FRAMES = 30;
+let parked = false;
 
 /** Shared touch state read by every orb's UI-thread reaction. */
 export interface OrbTouch {
@@ -163,16 +181,20 @@ function Orb({
   color,
   opacityScale,
   touch,
+  still,
 }: {
   spec: (typeof ORBS)[number];
   color: string;
   opacityScale: number;
   touch?: OrbTouch;
+  /** 1 once the field has parked (see the frame budget). */
+  still: SharedValue<number>;
 }) {
   const { width, height } = useWindowDimensions();
   // Start at -1 and oscillate to +1 so the travel is centred on the seeded
-  // position rather than pushing every orb off in one direction.
-  const progress = useSharedValue(-1);
+  // position rather than pushing every orb off in one direction. A field that
+  // mounts already parked holds its orbs at the seeded centre.
+  const progress = useSharedValue(parked ? 0 : -1);
   // The elastic shove — displacement away from a touch inside this orb.
   const kickX = useSharedValue(0);
   const kickY = useSharedValue(0);
@@ -182,6 +204,7 @@ function Orb({
   const maxPush = spec.size * MAX_PUSH_FR;
 
   useEffect(() => {
+    if (parked) return;
     progress.value = withRepeat(
       withTiming(1, {
         duration: spec.duration,
@@ -197,6 +220,15 @@ function Orb({
     );
     return () => cancelAnimation(progress);
   }, [progress, spec.duration]);
+
+  // The field parked: the drift stops where it is. Only the loop — a bounce
+  // already in flight plays out.
+  useAnimatedReaction(
+    () => still.value,
+    (now, before) => {
+      if (now === 1 && before !== 1) cancelAnimation(progress);
+    },
+  );
 
   // Collision loop, fully on the UI thread: whenever the finger or the drift
   // moves, hit-test this orb and shove/release accordingly. Spring targets are
@@ -282,7 +314,7 @@ function Orb({
   );
 }
 
-export function OrbField({
+export const OrbField = React.memo(function OrbField({
   color,
   opacityScale = 1,
   touch,
@@ -296,15 +328,45 @@ export function OrbField({
   touch?: OrbTouch;
   style?: StyleProp<ViewStyle>;
 }) {
+  // The frame budget (see above): count late frames in windows of
+  // PROBE_FRAMES; a window that is mostly late parks the field for good.
+  const still = useSharedValue(parked ? 1 : 0);
+  const seen = useSharedValue(0);
+  const late = useSharedValue(0);
+  const park = () => {
+    parked = true;
+    probe.setActive(false);
+  };
+  const probe = useFrameCallback((frame) => {
+    const dt = frame.timeSincePreviousFrame;
+    if (dt === null || still.value === 1) return;
+    seen.value += 1;
+    if (dt > SLOW_FRAME_MS) late.value += 1;
+    if (seen.value < PROBE_FRAMES) return;
+    if (late.value * 2 > seen.value) {
+      still.value = 1;
+      runOnJS(park)();
+    }
+    seen.value = 0;
+    late.value = 0;
+  }, !parked);
+
   return (
     // Clipped so orbs seeded past the edges never bleed outside the canvas.
     <View style={[StyleSheet.absoluteFill, styles.field, style]} pointerEvents="none">
       {ORBS.map((spec, i) => (
-        <Orb key={i} spec={spec} color={color} opacityScale={opacityScale} touch={touch} />
+        <Orb
+          key={i}
+          spec={spec}
+          color={color}
+          opacityScale={opacityScale}
+          touch={touch}
+          still={still}
+        />
       ))}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   field: { overflow: "hidden" },

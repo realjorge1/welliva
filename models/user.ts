@@ -3,6 +3,7 @@
  * Core user data types for bio info and profile
  */
 
+import type { MeasurementUnits } from "./units";
 import type { Equipment } from "./workout";
 
 export type Sex = "male" | "female";
@@ -210,6 +211,12 @@ export interface UserBio {
   region?: string;
   mealsPerDay: 3 | 4;
   waterTargetMl?: number; // Default calculated if not set
+  /**
+   * The units the user entered their height and weight in. Presentation only:
+   * `heightCm` / `weightKg` stay the stored truth (see models/units). Absent =
+   * metric, which is what every bio before this field was typed in.
+   */
+  measurementUnits?: MeasurementUnits;
 
   // Training preferences (captured in onboarding; optional for back-compat)
   equipment?: Equipment[]; // Default ["none"] (bodyweight only)

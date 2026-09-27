@@ -608,7 +608,6 @@ const styles = StyleSheet.create({
   },
   slot: {
     borderWidth: 1,
-    borderStyle: "dashed",
     alignItems: "center",
     justifyContent: "center",
   },

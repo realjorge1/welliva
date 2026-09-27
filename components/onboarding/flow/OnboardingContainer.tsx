@@ -74,6 +74,8 @@ export interface StepScrollProps extends ScrollViewProps {
   children: React.ReactNode;
   /** Extra room under the content, on top of the standard tail. */
   tail?: number;
+  /** For a step whose beats replace each other in place and must each start at the top. */
+  scrollRef?: React.Ref<ScrollView>;
 }
 
 /**
@@ -81,9 +83,10 @@ export interface StepScrollProps extends ScrollViewProps {
  * onboarding's rhythm rather than the app's denser screen spacing, and taps
  * pass through to controls while the keyboard is up.
  */
-export function StepScroll({ children, tail = 0, style, ...rest }: StepScrollProps) {
+export function StepScroll({ children, tail = 0, style, scrollRef, ...rest }: StepScrollProps) {
   return (
     <ScrollView
+      ref={scrollRef}
       style={[styles.flex, style]}
       contentContainerStyle={[styles.scrollBody, { paddingBottom: Rhythm.tail + tail }]}
       showsVerticalScrollIndicator={false}

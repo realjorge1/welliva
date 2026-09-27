@@ -916,6 +916,58 @@ export async function getDietHistory(): Promise<DietHistoryEntry[]> {
 }
 
 /**
+ * Many dates' schedules at once, EXACTLY AS STORED — no ledger reconcile.
+ *
+ * For a projection that is about to rewrite those same days: reconciling each
+ * one on the way in would cost a store write per day before the real write.
+ * Nothing is lost by skipping it here, because every normal read still passes
+ * through `reconcileWithLedger`, which puts any tick back on the next look.
+ */
+export async function getStoredSchedules(
+  dates: string[],
+): Promise<Map<string, DaySchedule>> {
+  const wanted = new Set(dates);
+  const map = new Map<string, DaySchedule>();
+  for (const d of await getScheduledDiets()) {
+    if (wanted.has(d.date)) map.set(d.date, d.schedule);
+  }
+  return map;
+}
+
+/**
+ * Save and clear many days in ONE read-modify-write.
+ *
+ * `saveDaySchedule` is the right tool for a day; a month-long hand-picked menu
+ * written through it is thirty full reads and writes of this store, and the
+ * custom-menu repair pass repeats that on every app open. Same result, one
+ * round trip.
+ */
+export async function applyDaySchedules(changes: {
+  save: DaySchedule[];
+  clear: string[];
+}): Promise<void> {
+  if (changes.save.length === 0 && changes.clear.length === 0) return;
+  return withLock(async () => {
+    const touched = new Set([...changes.clear, ...changes.save.map((s) => s.date)]);
+    const kept = (await getScheduledDiets()).filter((d) => !touched.has(d.date));
+    const now = Date.now();
+    const createdAt = new Date(now).toISOString();
+    changes.save.forEach((schedule, i) => {
+      kept.push({
+        id: `diet_${now}_${i}`,
+        date: schedule.date,
+        dietId: schedule.dietId,
+        dietName: schedule.dietName,
+        scheduleType: "single_day",
+        schedule,
+        createdAt,
+      });
+    });
+    await writeJSON(STORAGE_KEYS.SCHEDULED_DIETS, kept);
+  });
+}
+
+/**
  * Clear a scheduled diet
  */
 export async function clearScheduledDiet(date: string): Promise<void> {

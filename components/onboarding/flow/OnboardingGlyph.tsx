@@ -41,7 +41,12 @@ export type GlyphName =
   | "globe"
   | "leaf"
   | "plate"
-  | "coast";
+  | "coast"
+  // Menu
+  | "sunrise"
+  | "moon"
+  | "calendar"
+  | "search";
 
 /**
  * Each glyph is a list of paths plus optional circles, all in a 0 0 24 24 box.
@@ -154,6 +159,34 @@ const GLYPHS: Record<GlyphName, { d?: string[]; c?: [number, number, number][] }
   coast: {
     d: ["M3.2 15.4 C 6.2 12.2, 9.2 18.2, 12.2 15.4 C 15.2 12.2, 18.2 18.2, 21 15.4"],
     c: [[16.6, 7.2, 2.7]],
+  },
+
+  // ── Menu ──
+  /** Breakfast: a sun half over the horizon. (Lunch borrows `spark`, the full sun.) */
+  sunrise: {
+    d: [
+      "M3.2 17.6 H20.8",
+      "M7.2 17.6 A 4.8 4.8 0 0 1 16.8 17.6",
+      "M12 8.2 V10.2",
+      "M6.6 12.2 L5.3 10.9",
+      "M17.4 12.2 L18.7 10.9",
+    ],
+  },
+  /** Dinner. */
+  moon: {
+    d: ["M19.4 14.8 A 7.9 7.9 0 1 1 9.2 4.6 A 6.3 6.3 0 0 0 19.4 14.8 Z"],
+  },
+  calendar: {
+    d: [
+      "M6.4 5.6 H17.6 A 2 2 0 0 1 19.6 7.6 V17.8 A 2 2 0 0 1 17.6 19.8 H6.4 A 2 2 0 0 1 4.4 17.8 V7.6 A 2 2 0 0 1 6.4 5.6 Z",
+      "M4.4 10 H19.6",
+      "M8.4 3.6 V7.2",
+      "M15.6 3.6 V7.2",
+    ],
+  },
+  search: {
+    d: ["M14.9 14.9 L19.8 19.8"],
+    c: [[10.6, 10.6, 5.8]],
   },
 };
 

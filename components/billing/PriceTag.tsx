@@ -15,7 +15,7 @@
  *    tap. The saving hangs off the Annual tile's top edge — "SAVE ₦5,100" — the
  *    offer while Monthly is chosen and the receipt once Annual is. The amount
  *    leads; the percentage never appears without it.
- *  · THE PERFORATION separates what the plan costs from what gets charged.
+ *  · THE RULE separates what the plan costs from what gets charged.
  *  · THE RECEIPT is the chosen tile's charge: "Billed yearly  ₦17,400.00
  *    ₦12,300.00", the saving shown as the two numbers it's the difference of;
  *    "Due today · Free for 7 days" only when a trial makes today's charge differ
@@ -59,8 +59,8 @@ export interface PriceTagProps {
   /** The store can sell here but hasn't answered yet. See the header note. */
   pending?: boolean;
   /**
-   * How far the perforation bleeds past the tag on each side — the padding of
-   * the card it sits in, so the tear line runs edge to edge.
+   * How far the rule bleeds past the tag on each side — the padding of
+   * the card it sits in, so the line runs edge to edge.
    */
   bleed?: number;
 }
@@ -106,7 +106,7 @@ export function PriceTag({
         />
       </View>
 
-      <Perforation color={alpha(colors.textTertiary, 0.45)} bleed={bleed} />
+      <Rule color={alpha(colors.textTertiary, 0.45)} bleed={bleed} />
 
       {/* ── Receipt for the chosen tile ─────────────────────────────────── */}
       {chosen.billedLabel ? (
@@ -269,17 +269,9 @@ function PeriodTile({
   );
 }
 
-/**
- * A dashed rule across the full width of the card, like the tear line on a
- * ticket. Drawn as the top edge of a dashed box clipped to one pixel: Android
- * will not dash a single-sided border, but it dashes a whole box.
- */
-function Perforation({ color, bleed }: { color: string; bleed: number }) {
-  return (
-    <View style={[styles.perfClip, { marginHorizontal: -bleed }]}>
-      <View style={[styles.perfBox, { borderColor: color }]} />
-    </View>
-  );
+/** A solid hairline across the full width of the card. */
+function Rule({ color, bleed }: { color: string; bleed: number }) {
+  return <View style={[styles.rule, { marginHorizontal: -bleed, backgroundColor: color }]} />;
 }
 
 function LedgerRow({ label, children }: { label: string; children: React.ReactNode }) {
@@ -350,8 +342,7 @@ const styles = StyleSheet.create({
   },
   tagText: { fontSize: 10, lineHeight: 14, fontWeight: "800", letterSpacing: 0.4 },
 
-  perfClip: { height: 1, overflow: "hidden", marginTop: Spacing.lg, marginBottom: Spacing.md },
-  perfBox: { height: 3, borderWidth: 1, borderStyle: "dashed", borderRadius: 1 },
+  rule: { height: 1, marginTop: Spacing.lg, marginBottom: Spacing.md },
 
   /* The value group pushes itself right, and stays right if a long localised
      pair of prices has to wrap under its label on a narrow phone. */

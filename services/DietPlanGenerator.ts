@@ -18,7 +18,7 @@ import {
     DietSnackOption,
     MealCuisine,
 } from "../constants/DietDatabase";
-import { DaySchedule, ScheduledMeal } from "../models/diet";
+import { DaySchedule, MealType, ScheduledMeal } from "../models/diet";
 import { NutritionTargets } from "../models/nutrition";
 import { CuisinePreference, UserBio } from "../models/user";
 import {
@@ -26,6 +26,8 @@ import {
     getRecommendedDiets,
     getSafeOptionDiets,
 } from "./DietMatchService";
+import { mealsForSlot } from "./nutrition/MealCatalog";
+import { breaksRestriction, hasAllergen, mealCuisine } from "./nutrition/mealRules";
 
 // ============================================================================
 // DETERMINISTIC SEED
@@ -103,13 +105,15 @@ export function generateDietPlan(
   // 4. Select meals deterministically
   const breakfast = selectBestMeal(
     diet.breakfastOptions,
+    "breakfast",
     mealSplit.breakfast,
     bio,
     rand,
   );
-  const lunch = selectBestMeal(diet.lunchOptions, mealSplit.lunch, bio, rand);
+  const lunch = selectBestMeal(diet.lunchOptions, "lunch", mealSplit.lunch, bio, rand);
   const dinner = selectBestMeal(
     diet.dinnerOptions,
+    "dinner",
     mealSplit.dinner,
     bio,
     rand,
@@ -178,7 +182,7 @@ function autoSelectDiet(bio: UserBio): DietData | undefined {
   );
 }
 
-function getMealCalorieSplit(
+export function getMealCalorieSplit(
   totalCalories: number,
   mealsPerDay: 3 | 4,
 ): { breakfast: number; lunch: number; dinner: number; snack: number } {
@@ -228,8 +232,7 @@ function applyCuisinePreference<
   const tiers = cuisineTiers(pref);
   if (!tiers || pool.length === 0) return pool;
 
-  const cuisineOf = (o: T): MealCuisine =>
-    o.cuisine ?? (o.isNigerian ? "Nigerian" : "Universal");
+  const cuisineOf = (o: T): MealCuisine => mealCuisine(o);
 
   const need = Math.min(minKeep, pool.length);
   for (const tier of tiers) {
@@ -240,18 +243,53 @@ function applyCuisinePreference<
   return pool;
 }
 
+/**
+ * The options in a slot this user can actually be served: nothing that breaks
+ * their dietary restriction, nothing they are allergic to.
+ *
+ * Unlike cuisine and dislikes, these do NOT relax when the pool runs thin. The
+ * old rule ("if every option conflicts, serve them anyway") meant a diet with
+ * no vegetarian dinner would put fish in front of a vegetarian. When the diet
+ * genuinely has nothing safe for a slot, the answer comes from the whole meal
+ * catalog instead — preferring the user's cuisine — and only if the catalog has
+ * nothing either does the diet's own list come back as a last resort.
+ */
+function safePool<T extends DietMealOption | DietSnackOption>(
+  options: T[],
+  slot: MealType,
+  bio: UserBio,
+): T[] {
+  const safe = (o: { name: string }) =>
+    !breaksRestriction(o.name, bio.dietaryRestriction) && !hasAllergen(o.name, bio.allergies);
+
+  const own = options.filter(safe);
+  if (own.length > 0) return own;
+
+  const borrowed = mealsForSlot(slot)
+    .filter((m) => m.origin === "diet" && safe(m))
+    .map(
+      (m) =>
+        ({
+          name: m.name,
+          calories: m.calories,
+          protein: m.protein,
+          carbs: m.carbs,
+          fat: m.fat,
+          ...(m.isNigerian ? { isNigerian: true } : {}),
+          ...(m.cuisine ? { cuisine: m.cuisine } : {}),
+        }) as T,
+    );
+  return borrowed.length > 0 ? borrowed : options;
+}
+
 function selectBestMeal(
   options: DietMealOption[],
+  slot: MealType,
   targetCalories: number,
   bio: UserBio,
   rand: () => number,
 ): DietMealOption {
-  // Filter out options that conflict with allergies
-  const filtered = options.filter(
-    (opt) => !hasAllergyConflict(opt, bio.allergies),
-  );
-
-  const allergySafe = filtered.length > 0 ? filtered : options;
+  const allergySafe = safePool(options, slot, bio);
 
   // Honor learned/declared food preferences (e.g. dairy-free), then prefer the
   // user's cuisine (each with safe fallback), then score by calorie fit.
@@ -281,12 +319,12 @@ function selectSnacks(
   rand: () => number,
 ): DietSnackOption[] {
   // Keep snacks allergy-safe and aligned to the cuisine preference too.
-  const allergySafe = options.filter(
-    (opt) => !hasAllergyConflict(opt, bio.allergies),
-  );
-  const base = allergySafe.length > 0 ? allergySafe : options;
-  const dislikeSafe = applyDislikes(base, bio.foodDislikes, 1);
-  const pool = [...applyCuisinePreference(dislikeSafe, bio.cuisinePreference, 1)];
+  const base = safePool(options, "snack", bio);
+  const dislikeSafe = applyDislikes(base, bio.foodDislikes, count);
+  // The cuisine narrowing must leave at least `count` snacks: with a floor of
+  // one, a cuisine holding a single snack left a 4-meal user with ONE snack
+  // where their plan promised two.
+  const pool = [...applyCuisinePreference(dislikeSafe, bio.cuisinePreference, count)];
   const selected: DietSnackOption[] = [];
 
   for (let i = 0; i < count && pool.length > 0; i++) {
@@ -296,15 +334,6 @@ function selectSnacks(
   }
 
   return selected;
-}
-
-function hasAllergyConflict(
-  meal: { name: string },
-  allergies: string[],
-): boolean {
-  if (allergies.length === 0) return false;
-  const name = meal.name.toLowerCase();
-  return allergies.some((a) => name.includes(a.toLowerCase()));
 }
 
 /**
@@ -353,7 +382,7 @@ function applyDislikes<T extends { name: string }>(
   return kept.length >= Math.min(minKeep, pool.length) ? kept : pool;
 }
 
-function mealOptionToScheduled(
+export function mealOptionToScheduled(
   option: DietMealOption,
   mealType: "breakfast" | "lunch" | "dinner",
 ): ScheduledMeal {

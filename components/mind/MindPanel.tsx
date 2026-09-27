@@ -199,9 +199,8 @@ const styles = StyleSheet.create({
   gap: {
     width: "100%",
     height: 0,
-    marginTop: HALF - 1,
-    borderTopWidth: 2,
-    borderStyle: "dashed",
+    marginTop: HALF - 0.5,
+    borderTopWidth: 1,
   },
   block: { gap: Spacing.sm },
   wrapRow: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.xs },

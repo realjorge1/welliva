@@ -448,6 +448,58 @@ export async function setCustomMeal(
   });
 }
 
+/** One pick in a bulk write — {@link setCustomMenuDays}. */
+export interface MenuDayPick {
+  slot: MealType;
+  meal: ScheduledMeal;
+  snackIndex?: number;
+}
+
+/**
+ * Write whole days of a menu at once, REPLACING whatever those dates held.
+ *
+ * `setCustomMeal` is one pick, one full read and write of the menu store. A
+ * menu planned for a month in one go (onboarding's "let me choose") is a
+ * hundred-odd picks, so it is written here in a single pass instead. Dates not
+ * named are left exactly as they were.
+ */
+export async function setCustomMenuDays(
+  periodId: string,
+  days: Record<string, MenuDayPick[]>,
+): Promise<number> {
+  return withLock(async () => {
+    const menus = await getAllMenus();
+    const now = new Date().toISOString();
+    const menu: CustomMenu = menus[periodId] ?? {
+      periodId,
+      entriesByDate: {},
+      updatedAt: now,
+    };
+
+    let written = 0;
+    for (const [date, picks] of Object.entries(days)) {
+      if (picks.length === 0) {
+        delete menu.entriesByDate[date];
+        continue;
+      }
+      menu.entriesByDate[date] = picks.map((p) => ({
+        id: newId("cm"),
+        date,
+        slot: p.slot,
+        ...(p.slot === "snack" && p.snackIndex !== undefined ? { snackIndex: p.snackIndex } : {}),
+        meal: { ...p.meal, mealType: p.slot, isConsumed: false },
+        createdAt: now,
+      }));
+      written++;
+    }
+
+    menu.updatedAt = now;
+    menus[periodId] = menu;
+    await saveAllMenus(menus);
+    return written;
+  });
+}
+
 /** Remove a single pick. Leaves the slot genuinely empty — custom never refills. */
 export async function removeCustomMeal(
   periodId: string,

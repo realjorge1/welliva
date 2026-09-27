@@ -42,12 +42,11 @@
 
 import type { DaySchedule, MealType, ScheduledMeal } from "../models/diet";
 import type { CustomMenuEntry, MealPlanPeriod } from "../models/mealPlan";
-import { getCustomEntriesForDate, getPlannedDates } from "./MealPlanService";
+import { getCustomMenu, getPlannedDates } from "./MealPlanService";
 import {
-  clearScheduledDiet,
-  getScheduleForDate,
+  applyDaySchedules,
   getScheduledDates,
-  saveDaySchedule,
+  getStoredSchedules,
 } from "./ScheduleService";
 
 /**
@@ -77,42 +76,60 @@ export async function syncCustomDay(
   date: string,
   today: string,
 ): Promise<boolean> {
-  const entries = await getCustomEntriesForDate(period.id, date);
-  const existing = await getScheduleForDate(date);
-
-  if (entries.length === 0) {
-    // Nothing planned. Remove only a day WE wrote — a generated day belongs to
-    // the generator, and deleting it here would silently erase a plan the user
-    // may already have eaten from.
-    if (!isCustomSchedule(existing)) return false;
-    // …and not even ours, if the user has since logged food onto it. An emptied
-    // menu means "I have no plan for this day", never "I ate nothing".
-    const strays = adHocSnacks(existing, []);
-    if (strays.length > 0) {
-      await saveDaySchedule({
-        ...emptyCustomDay(period, date, today),
-        snacks: strays,
-      });
-      return true;
-    }
-    await clearScheduledDiet(date);
-    return false;
-  }
-
-  await saveDaySchedule(buildDaySchedule(period, date, entries, existing, today));
-  return true;
+  return (await syncCustomDays(period, [date], today)) > 0;
 }
 
-/** Project several days. Sequential — each write reads the store back. */
+/**
+ * Project several days in ONE store write.
+ *
+ * Each day is decided exactly as it always was (below); only the I/O is
+ * batched. It used to be sequential per day — three full reads/writes of the
+ * schedule store each — which a month-long menu and the daily repair pass
+ * turned into hundreds of storage round trips on every app open.
+ */
 export async function syncCustomDays(
   period: MealPlanPeriod,
   dates: string[],
   today: string,
 ): Promise<number> {
+  const unique = [...new Set(dates)];
+  if (unique.length === 0) return 0;
+
+  const [menu, stored] = await Promise.all([
+    getCustomMenu(period.id),
+    getStoredSchedules(unique),
+  ]);
+
+  const save: DaySchedule[] = [];
+  const clear: string[] = [];
   let planned = 0;
-  for (const date of dates) {
-    if (await syncCustomDay(period, date, today)) planned++;
+
+  for (const date of unique) {
+    const entries = menu?.entriesByDate[date] ?? [];
+    const existing = stored.get(date) ?? null;
+
+    if (entries.length === 0) {
+      // Nothing planned. Remove only a day WE wrote — a generated day belongs to
+      // the generator, and deleting it here would silently erase a plan the user
+      // may already have eaten from.
+      if (!isCustomSchedule(existing)) continue;
+      // …and not even ours, if the user has since logged food onto it. An emptied
+      // menu means "I have no plan for this day", never "I ate nothing".
+      const strays = adHocSnacks(existing, []);
+      if (strays.length > 0) {
+        save.push({ ...emptyCustomDay(period, date, today), snacks: strays });
+        planned++;
+      } else {
+        clear.push(date);
+      }
+      continue;
+    }
+
+    save.push(buildDaySchedule(period, date, entries, existing, today));
+    planned++;
   }
+
+  await applyDaySchedules({ save, clear });
   return planned;
 }
 

@@ -54,6 +54,10 @@ import {
   HealthGroup,
   InputRow,
   MeasureMotif,
+  MeasureRow,
+  MenuPlanner,
+  type MenuMode,
+  type MenuSample,
   MicroReaction,
   MultiSelectGrid,
   NoteField,
@@ -80,16 +84,55 @@ import { DisclaimerNote } from "@/components/legal";
 import { AppText, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import * as Haptics from "@/utils/haptics";
-import { detectRegion } from "@/utils/region";
+import {
+  EMPTY_PARTS,
+  HEIGHT_UNITS,
+  WEIGHT_UNITS,
+  heightBounds,
+  heightFields,
+  heightFromParts,
+  heightToParts,
+  storedHeight,
+  storedWeight,
+  weightBounds,
+  weightFields,
+  weightFromParts,
+  weightToParts,
+  type HeightUnit,
+  type MeasureParts,
+  type WeightUnit,
+} from "@/models/units";
+import { detectRegion, detectUnits } from "@/utils/region";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, StyleSheet, View, useWindowDimensions } from "react-native";
+import { Alert, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
 import { hasSeenNotificationPrimer } from "@/services/notifications/primer";
 import { useProfile } from "../contexts/AppContext";
+import { useMealPlan } from "../contexts/MealPlanContext";
 import { ensureDietLibraryLoaded } from "../constants/DietDatabase";
+import type { DaySchedule, ScheduledMeal } from "../models/diet";
+import { addDays, dateRange } from "../models/mealPlan";
+import { generateDietPlan } from "../services/DietPlanGenerator";
 import { recommendDiets } from "../services/intelligence";
 import { calculateNutritionTargets } from "../services/NutritionService";
-import { currentWeekStart } from "../services/OfflineStorage";
+import { midpoint } from "../services/nutrition/MealCatalog";
+import { cuisineWord, dishTitle } from "../services/nutrition/mealRules";
+import {
+  MAIN_SLOTS,
+  MENU_LENGTHS,
+  buildMenuDays,
+  cycleDay,
+  dishesForSlot,
+  emptyDraft,
+  portionFor,
+  slotTargets,
+  withDish,
+  withoutDish,
+  type Dish,
+  type MainSlot,
+  type MenuDraft,
+} from "../services/nutrition/menuBuilder";
+import { currentWeekStart, todayDate } from "../services/OfflineStorage";
 import {
   ensureWorkoutExercisesLoaded,
   generateWorkoutPlan,
@@ -115,6 +158,7 @@ type Step =
   | "training"
   | "food"
   | "health"
+  | "menu"
   | "building"
   | "plan";
 
@@ -340,7 +384,16 @@ const STEP_KICKER: Partial<Record<Step, string>> = {
   training: "Training",
   food: "Food",
   health: "Health & safety",
+  menu: "Your menu",
 };
+
+/** Most dishes one meal can rotate through a week — more stops being a rotation. */
+const MAX_PICKS_PER_MEAL = 6;
+
+/** The menu step's beats: the choice, three meals, how long. */
+const MENU_LAST_PHASE = 4;
+
+const MENU_SLOT_OF_PHASE: Record<number, MainSlot> = { 1: "breakfast", 2: "lunch", 3: "dinner" };
 
 /**
  * The questions that hold the stage alone before their answers rise (see
@@ -351,12 +404,29 @@ const STEP_KICKER: Partial<Record<Step, string>> = {
  */
 const HELD_STEPS = new Set<Step>(["goal", "activity", "health"]);
 
-const BUILD_LINES = [
-  "Calculating your calorie target…",
-  "Matching you to the right diet…",
-  "Designing your plan…",
-  "Putting it all together…",
-];
+/** What the build says it is doing — in the user's own terms, because it is. */
+function buildLines(cuisine: string | null, chosen: boolean): string[] {
+  return [
+    "Calculating your calorie target…",
+    chosen
+      ? "Laying out the dishes you picked…"
+      : cuisine
+        ? `Gathering ${cuisine} dishes for you…`
+        : "Gathering dishes for you…",
+    "Portioning every meal to your targets…",
+    "Putting it all together…",
+  ];
+}
+
+/** "Today", "Tomorrow", then the weekday — for the preview of coming days. */
+function dayLabel(date: string, today: string): string {
+  if (date === today) return "Today";
+  if (date === addDays(today, 1)) return "Tomorrow";
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "long" });
+}
+
+const kcalOf = (meal: ScheduledMeal) => midpoint(meal.calories);
 
 /** The welcome's score. The line finishes drawing at ~1350ms; type follows. */
 const WELCOME = { title: 1350, support: 1500, chips: 1660, action: 2000 } as const;
@@ -378,6 +448,7 @@ const WELCOME_CHIPS = [
 export default function OnboardingScreen() {
   const router = useRouter();
   const { completeOnboarding } = useProfile();
+  const { startMenuPlan } = useMealPlan();
   const { colors } = useColors();
   const { width } = useWindowDimensions();
   /** Content width available to measured grids, inside the flow's gutters. */
@@ -411,8 +482,16 @@ export default function OnboardingScreen() {
   const [goals, setGoals] = useState<PrimaryGoal[]>([]);
   const [age, setAge] = useState("");
   const [sex, setSex] = useState<Sex | null>(null);
+  // Height and weight are STORED as cm / kg strings (what buildBio and the
+  // validation read). What the user typed, and in which units, is kept apart:
+  // switching units re-derives the display from the stored value, so a value
+  // never drifts by being converted back and forth.
   const [heightCm, setHeightCm] = useState("");
   const [weightKg, setWeightKg] = useState("");
+  const [heightUnit, setHeightUnit] = useState<HeightUnit>("cm");
+  const [weightUnit, setWeightUnit] = useState<WeightUnit>("kg");
+  const [heightParts, setHeightParts] = useState<MeasureParts>(EMPTY_PARTS);
+  const [weightParts, setWeightParts] = useState<MeasureParts>(EMPTY_PARTS);
   const [activityLevel, setActivityLevel] = useState<ActivityLevel | null>(null);
   const [exerciseLevel, setExerciseLevel] = useState<ExerciseLevel>("beginner");
   const [dietaryRestriction, setDietaryRestriction] = useState<DietaryRestriction>("none");
@@ -427,6 +506,12 @@ export default function OnboardingScreen() {
   const [medications, setMedications] = useState("");
   const [region, setRegion] = useState("");
   const [detectedRegion, setDetectedRegion] = useState<string | null>(null);
+  /** Who plans the meals: Gozlin from the chosen cuisine, or the user. */
+  const [mealMode, setMealMode] = useState<MenuMode>("auto");
+  /** The user's picks and which weekday each one lands on. */
+  const [menuDraft, setMenuDraft] = useState<MenuDraft>(emptyDraft);
+  /** How many days the picked menu runs. */
+  const [menuLength, setMenuLength] = useState<number>(14);
 
   /* ── Presentation-only state ──────────────────────────────────────────── */
 
@@ -436,6 +521,8 @@ export default function OnboardingScreen() {
   const [trainingRevealed, setTrainingRevealed] = useState(1);
   /** Which of the food step's three questions is on screen (0–2). */
   const [foodQuestion, setFoodQuestion] = useState(0);
+  /** The menu step's beat: 0 the choice, 1–3 breakfast/lunch/dinner, 4 how long. */
+  const [menuPhase, setMenuPhase] = useState(0);
   /** Which medical group is open. Only one at a time — five open groups is
    *  the wall of thirty again, in a different shape. */
   const [openGroup, setOpenGroup] = useState<string | null>(null);
@@ -472,6 +559,9 @@ export default function OnboardingScreen() {
       ...(trainingEnabled ? (["training"] as Step[]) : []),
       "food",
       "health",
+      // After health on purpose: allergies are known by now, so the dishes on
+      // offer are already the ones this user can safely be served.
+      "menu",
       "building",
       "plan",
     ],
@@ -490,7 +580,37 @@ export default function OnboardingScreen() {
       setDetectedRegion(d.region);
     }
     setCuisinePreference(d.cuisine);
+    // …and the units people there use for their own body. Only a starting
+    // point: the unit pill on each field changes it.
+    const units = detectUnits();
+    setHeightUnit(units.height);
+    setWeightUnit(units.weight);
   }, []);
+
+  /* ── Height & weight, in the user's units ─────────────────────────────── */
+
+  const onHeightParts = (parts: MeasureParts) => {
+    setHeightParts(parts);
+    const cm = heightFromParts(parts, heightUnit);
+    setHeightCm(cm === null ? "" : String(storedHeight(cm)));
+  };
+  const onHeightUnit = (unit: HeightUnit) => {
+    setHeightUnit(unit);
+    const cm = Number(heightCm);
+    setHeightParts(heightCm && Number.isFinite(cm) ? heightToParts(cm, unit) : EMPTY_PARTS);
+  };
+  const onWeightParts = (parts: MeasureParts) => {
+    setWeightParts(parts);
+    const kg = weightFromParts(parts, weightUnit);
+    setWeightKg(kg === null ? "" : String(storedWeight(kg)));
+  };
+  const onWeightUnit = (unit: WeightUnit) => {
+    setWeightUnit(unit);
+    const kg = Number(weightKg);
+    setWeightParts(weightKg && Number.isFinite(kg) ? weightToParts(kg, unit) : EMPTY_PARTS);
+  };
+  const heightGuide = heightBounds(HEIGHT_RANGE, heightUnit);
+  const weightGuide = weightBounds(WEIGHT_RANGE, weightUnit);
 
   /* ── Step machine ─────────────────────────────────────────────────────── */
 
@@ -553,7 +673,7 @@ export default function OnboardingScreen() {
         ) {
           Alert.alert(
             "Quick check",
-            `Enter a valid height (${HEIGHT_RANGE.min}–${HEIGHT_RANGE.max} cm).`,
+            `Enter a valid height (${heightGuide.min}–${heightGuide.max}).`,
           );
           return false;
         }
@@ -564,7 +684,7 @@ export default function OnboardingScreen() {
         ) {
           Alert.alert(
             "Quick check",
-            `Enter a valid weight (${WEIGHT_RANGE.min}–${WEIGHT_RANGE.max} kg).`,
+            `Enter a valid weight (${weightGuide.min}–${weightGuide.max}).`,
           );
           return false;
         }
@@ -610,6 +730,7 @@ export default function OnboardingScreen() {
       medications: medications ? medications.split(",").map((m) => m.trim()).filter(Boolean) : undefined,
       region: region.trim() || undefined,
       mealsPerDay,
+      measurementUnits: { height: heightUnit, weight: weightUnit },
     }),
     [
       age,
@@ -632,32 +753,142 @@ export default function OnboardingScreen() {
       medications,
       region,
       mealsPerDay,
+      heightUnit,
+      weightUnit,
     ],
   );
 
-  // The personalized plan, computed only on the reveal step. Same engines the
-  // app uses everywhere — no bespoke math here.
-  const planPreview = useMemo(() => {
-    if (currentStep !== "plan") return null;
+  // The plan's foundations — the bio, its targets and the eating style — for
+  // the menu step AND the reveal. One computation, so the dishes offered, the
+  // dishes previewed and the dishes saved all descend from the same numbers.
+  // Same engines the app uses everywhere — no bespoke math here.
+  const needsBasis = currentStep === "menu" || currentStep === "building" || currentStep === "plan";
+  const basis = useMemo(() => {
+    if (!needsBasis) return null;
     if (!sex || !activityLevel || !primaryGoal) return null;
     if (!age || !heightCm || !weightKg) return null;
     const bio = buildBio();
     const targets = calculateNutritionTargets(bio);
     const { recommended, safeOptions } = recommendDiets(bio, targets);
     const topDiet = recommended[0] ?? safeOptions[0] ?? null;
+    const cuisine = bio.cuisinePreference && bio.cuisinePreference !== "mixed"
+      ? cuisineWord(bio.cuisinePreference)
+      : null;
+    return { bio, targets, topDiet, dietId: topDiet?.dietId, cuisine };
+    // `plansReady` recomputes once the lazy catalogs have loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsBasis, age, sex, heightCm, weightKg, activityLevel, primaryGoal, buildBio, plansReady]);
+
+  /** Every dish the user may pick, per meal — their cuisine, safe for them. */
+  const menuSlots = useMemo(() => {
+    if (!basis) return null;
+    const filter = {
+      cuisinePreference: basis.bio.cuisinePreference,
+      dietaryRestriction: basis.bio.dietaryRestriction,
+      allergies: basis.bio.allergies,
+    };
+    const out = {} as Record<MainSlot, { dishes: Dish[]; staples: Dish[] }>;
+    for (const slot of MAIN_SLOTS) {
+      out[slot] = { dishes: dishesForSlot(slot, filter), staples: dishesForSlot(slot, filter, "staples") };
+    }
+    return out;
+  }, [basis]);
+
+  /** The coming days as "plan them for me" would serve them — the real dishes. */
+  const menuSamples = useMemo<MenuSample[]>(() => {
+    if (!basis) return [];
+    const start = todayDate();
+    return [0, 1, 2]
+      .map((i) => {
+        const date = addDays(start, i);
+        const day = generateDietPlan(basis.bio, basis.targets, date, basis.dietId)?.schedule;
+        const meals = day
+          ? [day.breakfast, day.lunch, day.dinner].flatMap((m) => (m ? [dishTitle(m.name)] : []))
+          : [];
+        return { label: dayLabel(date, start), meals };
+      })
+      .filter((s) => s.meals.length > 0);
+  }, [basis]);
+
+  /** Each main meal's share of the day, for sizing a picked dish. */
+  const perSlotKcal = useMemo(
+    () => (basis ? slotTargets(basis.targets, basis.bio.mealsPerDay) : null),
+    [basis],
+  );
+
+  const dishMeta = useCallback(
+    (dish: Dish) => {
+      if (!perSlotKcal) return "";
+      const portion = portionFor(dish, perSlotKcal[dish.slot]);
+      return `≈ ${midpoint(portion.calories)} kcal · ${midpoint(portion.protein)} g protein`;
+    },
+    [perSlotKcal],
+  );
+
+  // The reveal. Today's meals here are the EXACT day that gets saved: the
+  // generator's day for "plan them for me", the first day of the menu for
+  // "let me choose" — never a separate preview that could disagree with it.
+  const planPreview = useMemo(() => {
+    if (currentStep !== "plan" || !basis) return null;
+    const { bio, targets, topDiet, dietId, cuisine } = basis;
+    const today = todayDate();
+    const chosen = mealMode === "choose";
+
+    let firstDay: DaySchedule | null;
+    if (chosen) {
+      const picks = buildMenuDays({ draft: menuDraft, bio, targets, dates: [today], dietId })[today] ?? [];
+      const inSlot = (slot: MainSlot) => picks.find((p) => p.slot === slot)?.meal ?? null;
+      firstDay = {
+        date: today,
+        dietId: dietId ?? "",
+        dietName: topDiet?.diet.name ?? "",
+        breakfast: inSlot("breakfast"),
+        lunch: inSlot("lunch"),
+        dinner: inSlot("dinner"),
+        snacks: picks.filter((p) => p.slot === "snack").map((p) => p.meal),
+        status: "active",
+      };
+    } else {
+      firstDay = generateDietPlan(bio, targets, today, dietId)?.schedule ?? null;
+    }
+
     const wp = generateWorkoutPlan(bio, currentWeekStart(), {
       equipment: bio.equipment,
       daysPerWeek: bio.workoutDaysPerWeek,
     });
-    const trainingDays = wp.sessions.filter((s) => !s.isRestDay).length;
+    const sessions = wp.sessions.filter((s) => !s.isRestDay);
     const equipmentSummary =
       bio.equipment && bio.equipment.some((e) => e !== "none")
         ? bio.equipment.filter((e) => e !== "none").map((e) => EQUIPMENT_SHORT[e]).join(" · ")
         : "Bodyweight";
-    return { bio, targets, topDiet, splitType: wp.splitType, trainingDays, equipmentSummary };
-    // `plansReady` recomputes the preview once the lazy catalogs have loaded.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStep, age, sex, heightCm, weightKg, activityLevel, primaryGoal, buildBio, plansReady]);
+    const lengthLabel = MENU_LENGTHS.find((l) => l.days === menuLength)?.label ?? `${menuLength} days`;
+
+    return {
+      bio,
+      targets,
+      topDiet,
+      firstDay,
+      meals: {
+        kitchen: cuisine ? `${cuisine} kitchen` : "A bit of everything",
+        source: chosen ? `Your menu · ${lengthLabel}` : "Planned by Gozlin",
+        chosen,
+        today: firstDay
+          ? MAIN_SLOTS.flatMap((slot) => {
+              const meal = firstDay![slot];
+              return meal ? [{ slot, name: dishTitle(meal.name), kcal: kcalOf(meal) }] : [];
+            })
+          : [],
+        snacks: firstDay?.snacks.length ?? 0,
+      },
+      splitType: wp.splitType,
+      trainingDays: sessions.length,
+      trainingWeekdays: sessions
+        .map((s) => s.dayOfWeek)
+        .filter((d): d is number => typeof d === "number"),
+      sessionMinutes: sessions[0]?.totalDurationMinutes ?? null,
+      equipmentSummary,
+    };
+  }, [currentStep, basis, mealMode, menuDraft, menuLength]);
 
   /* ── Finishing ────────────────────────────────────────────────────────── */
 
@@ -704,7 +935,41 @@ export default function OnboardingScreen() {
     }
 
     try {
-      await completeOnboarding(buildBio());
+      const bio = buildBio();
+      if (mealMode === "choose" && basis) {
+        // Their menu, every day of it, written through the planner — so it is
+        // editable there tomorrow like any menu they plan by hand. Built BEFORE
+        // anything is saved: it is pure, and a menu that cannot be built should
+        // stop the save rather than leave a profile with no meals.
+        const start = todayDate();
+        const days = buildMenuDays({
+          draft: menuDraft,
+          bio,
+          targets: basis.targets,
+          dates: dateRange(start, addDays(start, menuLength - 1)),
+          dietId: basis.dietId,
+        });
+        await completeOnboarding(bio, { dietId: basis.dietId ?? null, menuPlanned: true });
+        await startMenuPlan({
+          label: basis.cuisine ? `My ${basis.cuisine} menu` : "My menu",
+          startDate: start,
+          lengthDays: menuLength,
+          days,
+          baseline: {
+            weightKg: bio.weightKg,
+            targetCalories: basis.targets.calories,
+            targetProteinG: basis.targets.proteinG,
+            targetCarbsG: basis.targets.carbsG,
+            targetFatG: basis.targets.fatG,
+          },
+        });
+      } else {
+        // The day the reveal showed is the day saved.
+        await completeOnboarding(bio, {
+          firstDay: planPreview?.firstDay ?? null,
+          dietId: basis?.dietId ?? null,
+        });
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       saved.current = "ok";
       land();
@@ -758,6 +1023,39 @@ export default function OnboardingScreen() {
       prev.includes(allergy) ? prev.filter((a) => a !== allergy) : [...prev, allergy],
     );
   };
+  /** Pick or un-pick a dish; the week re-balances around it (menuBuilder). */
+  const toggleDish = (dish: Dish) => {
+    setMenuDraft((prev) => {
+      const slot = dish.slot;
+      if (prev.dishes[dish.key]) {
+        const { [dish.key]: _gone, ...rest } = prev.dishes;
+        const remaining = Object.values(rest)
+          .filter((d) => d.slot === slot)
+          .map((d) => d.key);
+        return {
+          dishes: rest,
+          weeks: { ...prev.weeks, [slot]: withoutDish(prev.weeks[slot], dish.key, remaining) },
+        };
+      }
+      const count = Object.values(prev.dishes).filter((d) => d.slot === slot).length;
+      if (count >= MAX_PICKS_PER_MEAL) return prev;
+      return {
+        dishes: { ...prev.dishes, [dish.key]: dish },
+        weeks: { ...prev.weeks, [slot]: withDish(prev.weeks[slot], dish.key) },
+      };
+    });
+  };
+  /** A tapped weekday moves on to the next pick, then to Gozlin. */
+  const cycleMenuDay = (slot: MainSlot, day: number) => {
+    setMenuDraft((prev) => {
+      const picks = Object.values(prev.dishes)
+        .filter((d) => d.slot === slot)
+        .map((d) => d.key);
+      if (picks.length === 0) return prev;
+      return { ...prev, weeks: { ...prev.weeks, [slot]: cycleDay(prev.weeks[slot], day, picks) } };
+    });
+  };
+
   const toggleMedicalCondition = (condition: MedicalCondition) => {
     if (condition === "none") {
       // Un-tickable: tapping the row again clears it rather than locking the
@@ -797,6 +1095,11 @@ export default function OnboardingScreen() {
       setFoodQuestion((q) => q - 1);
       return;
     }
+    // Same for the menu's beats: back walks through them before leaving.
+    if (currentStep === "menu" && menuPhase > 0) {
+      setMenuPhase((p) => p - 1);
+      return;
+    }
     prevStep();
   };
 
@@ -809,8 +1112,31 @@ export default function OnboardingScreen() {
       setFoodQuestion((q) => q + 1);
       return;
     }
+    if (currentStep === "menu" && mealMode === "choose" && menuPhase < MENU_LAST_PHASE) {
+      setMenuPhase((p) => p + 1);
+      return;
+    }
     nextStep();
   };
+
+  /** What Continue means on the menu step — it names the next thing, or the skip. */
+  const menuActionLabel = (() => {
+    if (mealMode === "auto" || menuPhase === MENU_LAST_PHASE) return "Build my plan";
+    if (menuPhase === 0) return "Start with breakfast";
+    const slot = MENU_SLOT_OF_PHASE[menuPhase] ?? "breakfast";
+    const picked = Object.values(menuDraft.dishes).some((d) => d.slot === slot);
+    if (!picked) return `Let Gozlin pick ${slot}`;
+    return menuPhase === 1 ? "Continue to lunch" : menuPhase === 2 ? "Continue to dinner" : "Choose how long";
+  })();
+
+  // A new beat starts at its top — the list the user scrolled through on the
+  // previous one must not leave the next question above the fold.
+  const menuScroll = useRef<ScrollView>(null);
+  /** The last menu drawn — what the step shows while it is leaving (see "menu"). */
+  const lastMenu = useRef<React.ReactNode>(null);
+  useEffect(() => {
+    menuScroll.current?.scrollTo({ y: 0, animated: true });
+  }, [menuPhase]);
 
   const lastLabel = useRef("Let's go");
   const actionLabel = (() => {
@@ -820,6 +1146,7 @@ export default function OnboardingScreen() {
     if (currentStep === "building" || currentStep === "plan") return lastLabel.current;
     if (currentStep === "training" && trainingRevealed < 3) return "Continue";
     if (currentStep === "food" && foodQuestion < 2) return "Continue";
+    if (currentStep === "menu") return menuActionLabel;
     return isLastForm ? "Build my plan" : "Continue";
   })();
   lastLabel.current = actionLabel;
@@ -934,7 +1261,7 @@ export default function OnboardingScreen() {
           <StepScroll tail={Spacing.giant}>
             <AnimatedQuestion
               title="A little about you"
-              support="The essentials for accurate calorie and macro targets."
+              support="The essentials for accurate calorie and macro targets — in whichever units you use."
               motif={<MeasureMotif tone={colors.primary} />}
             />
             <View style={styles.fields}>
@@ -980,28 +1307,29 @@ export default function OnboardingScreen() {
                 </Recede>
               </Appear>
 
-              <InputRow
+              <MeasureRow
                 label="Height"
-                value={heightCm}
-                onChangeText={setHeightCm}
-                placeholder="—"
-                unit="cm"
-                range={HEIGHT_RANGE}
-                maxLength={3}
+                unit={heightUnit}
+                units={HEIGHT_UNITS}
+                onUnit={onHeightUnit}
+                fields={heightFields(heightUnit)}
+                parts={heightParts}
+                onParts={onHeightParts}
+                guide={heightGuide}
                 delay={OPTIONS_DELAY + 180}
                 dimmed={focusedField !== null && focusedField !== "height"}
                 onFocus={() => setFocusedField("height")}
                 onBlur={() => setFocusedField(null)}
               />
-              <InputRow
+              <MeasureRow
                 label="Weight"
-                value={weightKg}
-                onChangeText={setWeightKg}
-                placeholder="—"
-                unit="kg"
-                range={WEIGHT_RANGE}
-                keyboardType="decimal-pad"
-                maxLength={5}
+                unit={weightUnit}
+                units={WEIGHT_UNITS}
+                onUnit={onWeightUnit}
+                fields={weightFields(weightUnit)}
+                parts={weightParts}
+                onParts={onWeightParts}
+                guide={weightGuide}
                 delay={OPTIONS_DELAY + 270}
                 dimmed={focusedField !== null && focusedField !== "weight"}
                 onFocus={() => setFocusedField("weight")}
@@ -1190,11 +1518,51 @@ export default function OnboardingScreen() {
         );
       }
 
+      case "menu": {
+        // Stepping BACK to health clears the basis while this step is still
+        // playing its exit, so the leaving render keeps the last menu it drew
+        // rather than flashing a loading line on the way out.
+        const planner =
+          basis && menuSlots ? (
+            <MenuPlanner
+              phase={mealMode === "choose" ? menuPhase : 0}
+              onJump={setMenuPhase}
+              mode={mealMode}
+              onMode={setMealMode}
+              cuisine={basis.cuisine}
+              dailyKcal={basis.targets.calories}
+              samples={menuSamples}
+              slots={menuSlots}
+              draft={menuDraft}
+              onToggleDish={toggleDish}
+              onCycleDay={cycleMenuDay}
+              metaFor={dishMeta}
+              maxPicks={MAX_PICKS_PER_MEAL}
+              lengths={MENU_LENGTHS}
+              length={menuLength}
+              onLength={setMenuLength}
+              width={contentWidth}
+            />
+          ) : (
+            lastMenu.current
+          );
+        if (basis && menuSlots) lastMenu.current = planner;
+        return (
+          <StepScroll scrollRef={menuScroll}>
+            {planner ?? (
+              <AnimatedText variant="support" color="secondary" align="center">
+                Gathering your dishes…
+              </AnimatedText>
+            )}
+          </StepScroll>
+        );
+      }
+
       case "building":
         return (
           <StepCentre>
             <BuildingAnimation
-              lines={BUILD_LINES}
+              lines={buildLines(basis?.cuisine ?? null, mealMode === "choose")}
               minimumMs={2000}
               ready={plansReady}
               onComplete={() => goTo("plan", "forward")}
