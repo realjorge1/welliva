@@ -5,7 +5,7 @@
  * snapshot instead of re-deriving from raw state, so features stay consistent
  * and cheap. Pure & deterministic (inject `now` for tests).
  *
- * Composes the existing Welliva intelligence (computeConsistency) and the
+ * Composes the existing welliva intelligence (computeConsistency) and the
  * sibling RecoveryEngine — it introduces no new scoring of its own beyond
  * normalizing already-trusted numbers into flags + metrics.
  */
@@ -139,6 +139,7 @@ export function buildTwin(input: GozlinSnapshotInput): GozlinTwin {
     workoutLog: input.workoutLog,
     todaySession: plannedSession,
     wearable: input.wearable,
+    checkins: input.checkins,
     now,
   });
 

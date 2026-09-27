@@ -350,6 +350,44 @@ export async function maybeStartTrial(opts: {
 }
 
 /**
+ * Adopt the SERVER's window once there is an account to ask about.
+ *
+ * `maybeStartTrial` runs at hydration, and on a first launch that is before
+ * sign-in — the claim needs a token, so it fails and the window is granted
+ * LOCALLY. Once the backend enforces the window (requireCoachAccess), a local
+ * window it does not recognise is the exact mismatch the header warns about:
+ * the screen says Gozlin is open and the server refuses every turn. So when an
+ * account appears, a local (or absent) window is replaced by the server's
+ * answer — including an already-expired one, which is the anti-farming half.
+ *
+ * Silent on failure: no claimer, offline, or a server that cannot answer all
+ * leave the local window exactly as it was.
+ */
+export async function reconcileTrialWithServer(opts: {
+  isSubscriber: boolean;
+  gatingActive: boolean;
+}): Promise<void> {
+  if (!hydrated || !claimer || opts.isSubscriber || !opts.gatingActive) return;
+  if (state.hasEverStarted && state.source === "server") return;
+
+  let remote: RemoteTrialClaim | null = null;
+  try {
+    remote = await claimer();
+  } catch {
+    return;
+  }
+  if (!remote?.expiresAt) return;
+
+  state = {
+    hasEverStarted: true,
+    trial: { startedAt: remote.claimedAt, expiresAt: remote.expiresAt },
+    source: "server",
+  };
+  emit();
+  await persist();
+}
+
+/**
  * Drop the window on sign-out, so the next account on this device does not
  * inherit one it did not earn.
  *

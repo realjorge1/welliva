@@ -13,6 +13,8 @@ import { collectAllowedNumbers, validateNumbers } from "../grounding";
 import {
   collectWithProvenance,
   createLedger,
+  howSpoken,
+  sourceLabel,
   originLabel,
   pathLabel,
   receiptsFor,
@@ -115,7 +117,9 @@ describe("receipts for a reply", () => {
 describe("human phrasing", () => {
   it("names a tool the way a person would say it", () => {
     expect(originLabel("analyze_nutrition")).toBe("Your food log");
-    expect(originLabel("current-state")).toBe("Today's totals");
+    // Not "Today's totals": the block also carries the streak, recovery and
+    // latest weigh-in, and a weigh-in labelled "Today's totals" was wrong.
+    expect(originLabel("current-state")).toBe("Your logs, right now");
   });
 
   it("falls back to humanising an unknown tool rather than leaking snake_case", () => {
@@ -165,5 +169,54 @@ describe("the invariant: grounding and receipts must agree", () => {
 
     expect(validateNumbers(reply, allowed).ok).toBe(false);
     expect(receiptsFor(reply, ledger)).toEqual([]);
+  });
+});
+
+/**
+ * The labels users actually see. The table used to be keyed to this file's
+ * fixture shape, which the live twin never had, so every receipt in the app
+ * read "Consumed" or "Target" — target of what, it never said.
+ */
+describe("labels for the LIVE twin and tool results", () => {
+  it("names the real twin paths", () => {
+    expect(pathLabel("today.calories.consumed")).toBe("Calories eaten today");
+    expect(pathLabel("today.protein.target")).toBe("Daily protein target (g)");
+    expect(pathLabel("momentum.streak")).toBe("Current streak (days)");
+    expect(pathLabel("body.currentWeightKg")).toBe("Latest weigh-in (kg)");
+  });
+
+  it("names the derived gaps the loop registers", () => {
+    expect(pathLabel("today.calories.left")).toBe("Calories left today");
+  });
+
+  it("names common tool fields wherever they sit in the payload", () => {
+    expect(pathLabel("etaWeeks")).toBe("Weeks to goal");
+    expect(pathLabel("tracked[2].last30Pct")).toBe("Done in the last 30 days (%)");
+  });
+
+  it("says what a number is ABOUT when the payload names it", () => {
+    const l = createLedger();
+    collectWithProvenance(
+      { tracked: [{ name: "Reading", streak: 12 }, { name: "Vitamins", streak: 4 }] },
+      "habit-tracker",
+      l,
+    );
+    const [src] = sourcesFor(12, l);
+    expect(src.subject).toBe("Reading");
+    expect(sourceLabel(src)).toBe("Reading — Streak");
+    expect(originLabel("habit-tracker")).toBe("Your habit tracker");
+  });
+
+  it("describes how a figure was spoken honestly — not every difference is rounding", () => {
+    expect(howSpoken(72, 0.7156)).toBe("said as a percentage");
+    expect(howSpoken(0.4, -0.4083)).toBe("said without its sign");
+    expect(howSpoken(86, 86.4)).toBe("rounded for speech");
+  });
+
+  it("gives no receipt to an invented weigh-in near a real one", () => {
+    const l = createLedger();
+    collectWithProvenance({ body: { currentWeightKg: 82.6 } }, "current-state", l);
+    expect(receiptsFor("You're down to 81 kg.", l)).toEqual([]);
+    expect(receiptsFor("You're at 82.6 kg.", l)[0].sources[0].path).toBe("body.currentWeightKg");
   });
 });

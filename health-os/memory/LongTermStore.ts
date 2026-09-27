@@ -5,7 +5,7 @@
  * the user's motivation/"why", stated preferences & constraints, learned behavioral
  * patterns, and episodic milestones.
  *
- * This is a RE-HOME, not a rewrite: L3 already exists as Welliva's on-device Gozlin
+ * This is a RE-HOME, not a rewrite: L3 already exists as welliva's on-device Gozlin
  * memory (`@gozlin_identity` / `_behavioral` / `_episodic`). This module gives it a
  * domain home and a layer-framed API the Memory Center reads — storage and behavior
  * are unchanged (docs/architecture/03-memory-architecture.md §2). A later milestone

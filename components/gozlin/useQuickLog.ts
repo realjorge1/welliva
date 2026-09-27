@@ -23,24 +23,26 @@
  * difference between "check in" and "update your check-in".
  */
 
+import type { MindPayload } from "@/components/mind";
 import { useProfile, useSystem } from "@/contexts/AppContext";
 import { makeWeighIn } from "@/services/BodyLogService";
 import {
-  addCheckin,
   loadCheckins,
+  recordMindEntry,
   type GozlinCheckin,
 } from "@/services/gozlin";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CheckinPayload } from "./CheckinModal";
 import type { WeighInPayload } from "./WeighInModal";
 
 export interface UseQuickLog {
-  /** Today's self-reported check-in, or null. Prefills the sheet. */
+  /** Today's `daily` state-of-mind entry, or null. Prefills the sheet. */
   todayCheckin: GozlinCheckin | null;
+  /** How many entries today holds, of both kinds — the row caption reads this. */
+  todayCount: number;
   /** Latest recorded weight, falling back to the onboarding figure. */
   currentWeightKg: number | null;
   goalWeightKg: number | null;
-  saveCheckin: (data: CheckinPayload) => Promise<void>;
+  saveCheckin: (data: MindPayload) => Promise<void>;
   saveWeighIn: (data: WeighInPayload) => Promise<void>;
 }
 
@@ -60,8 +62,18 @@ export function useQuickLog(): UseQuickLog {
     };
   }, []);
 
+  // The day's DAILY entry — momentary entries are deliberately not prefilled,
+  // because a moment is a fresh reading and offering the last one as a starting
+  // point would bias it toward whatever was true an hour ago.
   const todayCheckin = useMemo(
-    () => checkins.find((c) => c.date === currentDate) ?? null,
+    () =>
+      checkins.find((c) => c.date === currentDate && (c.kind ?? "daily") === "daily") ??
+      null,
+    [checkins, currentDate],
+  );
+
+  const todayCount = useMemo(
+    () => checkins.filter((c) => c.date === currentDate).length,
     [checkins, currentDate],
   );
 
@@ -74,17 +86,22 @@ export function useQuickLog(): UseQuickLog {
 
   const goalWeightKg = userGoals?.targetWeightKg ?? null;
 
+  // Goes through recordMindEntry rather than addCheckin: that is the path that
+  // also mirrors the entry onto the health-os Timeline, which is what every
+  // check-in written since migration 001 committed was silently missing.
   const saveCheckin = useCallback(
-    async (data: CheckinPayload) => {
-      const checkin: GozlinCheckin = {
-        date: currentDate,
-        ...(data.mood != null ? { mood: data.mood } : {}),
-        ...(data.energy != null ? { energy: data.energy } : {}),
-        ...(data.stress != null ? { stress: data.stress } : {}),
-        ...(data.sleepHours != null ? { sleepHours: data.sleepHours } : {}),
-        createdAt: Date.now(),
-      };
-      setCheckins(await addCheckin(checkin));
+    async (data: MindPayload) => {
+      setCheckins(
+        await recordMindEntry({
+          date: currentDate,
+          kind: data.kind,
+          valence: data.valence,
+          labels: data.labels,
+          associations: data.associations,
+          sleepHours: data.sleepHours,
+          id: data.id,
+        }),
+      );
     },
     [currentDate],
   );
@@ -101,5 +118,12 @@ export function useQuickLog(): UseQuickLog {
     [logBodyMeasurement, setTargetWeight],
   );
 
-  return { todayCheckin, currentWeightKg, goalWeightKg, saveCheckin, saveWeighIn };
+  return {
+    todayCheckin,
+    todayCount,
+    currentWeightKg,
+    goalWeightKg,
+    saveCheckin,
+    saveWeighIn,
+  };
 }

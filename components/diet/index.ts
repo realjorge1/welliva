@@ -1,5 +1,5 @@
 /**
- * Welliva diet components — the premium meals list.
+ * welliva diet components — the premium meals list.
  *
  *   import { MealsList } from "@/components/diet";
  */

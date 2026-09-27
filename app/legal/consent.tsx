@@ -1,7 +1,7 @@
 /**
  * CONSENT GATE — the one screen between a successful sign-in and onboarding.
  *
- * Welliva asks for pregnancy status, medical conditions, medications, injuries
+ * welliva asks for pregnancy status, medical conditions, medications, injuries
  * and body photos on the very next screen. Asking for that before the user has
  * been told what happens to it is not defensible — legally or otherwise. So this
  * gate is a HARD stop: nothing advances until the box is ticked.
@@ -91,7 +91,7 @@ export default function ConsentScreen() {
   const onDecline = useCallback(() => {
     Alert.alert(
       "Decline and sign out?",
-      "Welliva needs your agreement to build a plan around your health details. You can sign back in and accept at any time.",
+      "welliva needs your agreement to build a plan around your health details. You can sign back in and accept at any time.",
       [
         { text: "Go back", style: "cancel" },
         {
@@ -130,7 +130,7 @@ export default function ConsentScreen() {
               align="center"
               style={styles.lede}
             >
-              Welliva is about to ask personal health questions so it can build
+              welliva is about to ask personal health questions so it can build
               your plan. Here&apos;s exactly what that means — the short version,
               in plain language.
             </AppText>

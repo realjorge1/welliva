@@ -95,14 +95,21 @@ import {
   type FeatureId,
   historyWindowDays,
   TIER_NAME,
-  TIER_SHORT_NAME,
   type Tier,
 } from "@/services/billing/tiers";
 
 export type PaidTier = Exclude<Tier, "free">;
 
-/** Card order, top to bottom. Free first — the ladder reads upward. */
-export const PLAN_CARD_ORDER: readonly Tier[] = ["free", "pro"] as const;
+/**
+ * Card order, top to bottom. PRO FIRST.
+ *
+ * It was Free first, "so the ladder reads upward" — a rule from three tiers.
+ * With one paid card holding the only price tag and the only buy button, Free
+ * first put the whole tracking-app card (a phone-height list) between the hero
+ * and the one price anyone opened this screen to read. Pro now follows the hero
+ * that pitches it; Free follows as the plan you keep either way.
+ */
+export const PLAN_CARD_ORDER: readonly Tier[] = ["pro", "free"] as const;
 
 /**
  * One line on a plan card.
@@ -183,7 +190,7 @@ export const PLAN_IDENTITY: Record<Tier, PlanIdentity> = {
         icon: "repeat-outline",
       },
       {
-        text: "Memory — everything Welliva has worked out about you, in your words",
+        text: "Memory — everything welliva has worked out about you, in your words",
         icon: "book-outline",
       },
       {
@@ -275,8 +282,25 @@ export interface PriceView {
   unit: string;
   /** The monthly price, struck through, when the annual plan beats it. */
   strikethrough: string | null;
-  /** The small line under the price: what is actually charged. */
+  /**
+   * The whole price as one sentence — what is charged, how often, and that it
+   * can be stopped. The tag renders the same facts as a ledger; this is what a
+   * screen reader hears in its place.
+   */
   detail: string;
+  /** The ledger row's label — "Billed yearly". Null on the free card. */
+  billedLabel: string | null;
+  /**
+   * Twelve months of the monthly plan, formatted — "$35.88". Struck through
+   * beside `billedTotal` on the tag, so the saving is visible as the two
+   * numbers it is the difference of. Annual only, and only with a saving.
+   */
+  compareTotal: string | null;
+  /**
+   * The quiet line at the foot of the tag. `lead` is the part worth inking
+   * (the discount); `rest` carries on in the muted weight after it.
+   */
+  footnote: { lead: string | null; rest: string };
   /**
    * THE SAVING, AS MONEY, ALREADY FORMATTED — "$10.00". Null when there is
    * nothing honest to claim (monthly selected, or a gap under 5%).
@@ -284,9 +308,9 @@ export interface PriceView {
    * This is a separate field rather than a phrase inside `detail` because the
    * saving is the single strongest number on the storefront and it was being
    * whispered: "…billed yearly · save $10.00" put it fourth in a grey footnote,
-   * behind a figure it has nothing to do with. The screen now renders it as its
-   * own block (see the SAVINGS BANNER note in app/(tabs)/upgrade.tsx), which it
-   * can only do if the amount arrives as a value instead of pre-baked prose.
+   * behind a figure it has nothing to do with. The tag hangs it on the Annual
+   * tile (components/billing/PriceTag.tsx), which it can only do if the amount
+   * arrives as a value instead of pre-baked prose.
    *
    * Formatted here, in the currency the LIVE PLAN came back in, because the
    * screen has no business knowing which currency a price was quoted in.
@@ -311,6 +335,9 @@ export const FREE_PRICE: PriceView = {
   unit: "forever",
   strikethrough: null,
   detail: "No card, no trial, no expiry",
+  billedLabel: null,
+  compareTotal: null,
+  footnote: { lead: null, rest: "No card, no trial, no expiry" },
   saveAmount: null,
   savePercent: null,
   billedTotal: null,
@@ -334,6 +361,79 @@ function amountFor(
   return { amount: { value: listed, text: formatMoney(listed, LIST_CURRENCY) }, plan: null };
 }
 
+/*
+ * ─── AMOUNTS WE WORK OUT OURSELVES, WRITTEN THE WAY THE STORE WRITES ITS OWN ───
+ *
+ * The store hands over finished strings for the two prices it charges, and
+ * those are always right: "₦1,450.00", "₦12,300.00". Three figures on the tag
+ * are ours — the annual plan per month, the saving, and twelve months of the
+ * monthly plan — and each used to go through a different formatter:
+ *
+ *  · RevenueCat's `pricePerMonthString` printed "NGN1,025.00";
+ *  · `Intl.NumberFormat` under Hermes printed "NGN5,100";
+ *  · beside the store's own "₦1,450.00".
+ *
+ * One card, one currency, two spellings of it — and "NGN" reads as a foreign
+ * price to the person it's supposed to be local for. So every figure we compute
+ * now borrows the store's own string as a TEMPLATE: its currency mark, which
+ * side of the number it sits on, its separators and its decimal places. Whatever
+ * the store writes for this user, our numbers are written the same way.
+ */
+
+/**
+ * `amount`, formatted like `template` (a store price string).
+ *
+ * `trimWholeCents` drops ".00" from a round amount — for a saving on a tag,
+ * where "SAVE ₦5,100" is the number and ".00" is noise. Prices are never
+ * trimmed: they must match the store's own strings beside them.
+ *
+ * Null when the template has no ASCII figure to learn from.
+ */
+export function formatLike(
+  template: string,
+  amount: number,
+  trimWholeCents = false,
+): string | null {
+  const m = /^(\D*?)(\d(?:[\d.,'\s]*\d)?)(\D*)$/.exec(template.trim());
+  if (!m) return null;
+  const [, lead, figure, trail] = m;
+
+  // A separator followed by one or two digits at the end is the decimal point;
+  // three digits after it ("12,300") means it was grouping all along.
+  const cents = /[.,](\d{1,2})$/.exec(figure);
+  const decimalMark = cents ? figure[figure.length - cents[1].length - 1] : ".";
+  const places = cents ? cents[1].length : 0;
+  const integerPart = cents ? figure.slice(0, figure.length - cents[1].length - 1) : figure;
+  // The template's own grouping mark if it has one; otherwise the conventional
+  // partner of its decimal mark.
+  const groupMark = /\D/.exec(integerPart)?.[0] ?? (decimalMark === "," ? "." : ",");
+
+  const round = trimWholeCents && Math.abs(amount - Math.round(amount)) < 0.005;
+  const [whole, fraction] = amount.toFixed(round ? 0 : places).split(".");
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, groupMark);
+  return `${lead}${fraction ? `${grouped}${decimalMark}${fraction}` : grouped}${trail}`;
+}
+
+/**
+ * The formatter for every figure on a tier's tag. The template is whichever of
+ * the tier's store strings has the most digits — the annual price usually shows
+ * a grouping mark ("12,300") that the monthly one ("950") never needed.
+ */
+function moneyFor(tier: PaidTier, plans: PlanOption[]) {
+  const template =
+    plans
+      .filter((p) => p.tier === tier)
+      .map((p) => p.priceString)
+      .sort((a, b) => b.replace(/\D/g, "").length - a.replace(/\D/g, "").length)[0] ?? null;
+  const currency = plans.find((p) => p.tier === tier)?.currency ?? LIST_CURRENCY;
+  return (amount: number, trimWholeCents = false): string => {
+    const store = template ? formatLike(template, amount, trimWholeCents) : null;
+    if (store) return store;
+    const round = trimWholeCents && Math.abs(amount - Math.round(amount)) < 0.005;
+    return formatMoney(round ? Math.round(amount) : amount, currency);
+  };
+}
+
 /**
  * Turn a tier + period into the price block on its card.
  *
@@ -352,15 +452,17 @@ export function priceView(
   const wanted = period === "annual" ? "annual" : "monthly";
   const monthly = amountFor(tier, "monthly", plans);
   const annual = amountFor(tier, "annual", plans);
-  const active = wanted === "annual" ? annual : monthly;
-  const currency = active.plan?.currency ?? LIST_CURRENCY;
+  const money = moneyFor(tier, plans);
 
   if (wanted === "monthly") {
     return {
       headline: monthly.amount.text,
       unit: "per month",
       strikethrough: null,
-      detail: "Billed monthly · cancel any time",
+      detail: `${monthly.amount.text} billed every month · cancel any time`,
+      billedLabel: "Billed monthly",
+      compareTotal: null,
+      footnote: { lead: null, rest: "Cancel any time" },
       saveAmount: null,
       savePercent: null,
       billedTotal: null,
@@ -373,14 +475,20 @@ export function priceView(
   const perMonth = perMonthOfAnnual(annual.amount.value);
 
   return {
-    headline: annual.plan?.pricePerMonthString ?? formatMoney(perMonth, currency),
+    // Computed, not the SDK's `pricePerMonthString`: that one spells the
+    // currency its own way ("NGN1,025.00" beside the store's "₦12,300.00").
+    headline: money(perMonth),
     unit: "per month",
     strikethrough: saving ? monthly.amount.text : null,
-    // The saving has moved OUT of this line and into its own block. What is left
-    // is the one fact the big per-month figure doesn't state: the amount that
+    // The one fact the big per-month figure doesn't state: the amount that
     // actually leaves the account, and when.
     detail: `${annual.amount.text} billed once a year · cancel any time`,
-    saveAmount: saving ? formatMoney(saving.amount, currency) : null,
+    billedLabel: "Billed yearly",
+    compareTotal: saving ? money(monthly.amount.value * 12) : null,
+    footnote: saving
+      ? { lead: `${saving.percent}% off`, rest: "paying month to month · cancel any time" }
+      : { lead: null, rest: "Cancel any time" },
+    saveAmount: saving ? money(saving.amount, true) : null,
     savePercent: saving?.percent ?? null,
     billedTotal: annual.amount.text,
     perMonthAmount: perMonth,
@@ -389,7 +497,17 @@ export function priceView(
 }
 
 /**
- * The best annual saving on offer, for the period switch's own badge.
+ * The free card's price in the reader's own currency — "₦0", not "$0", once the
+ * store has said which currency that is. Before it has, the published list
+ * currency, same as every other fallback on this screen.
+ */
+export function freePriceView(plans: PlanOption[]): PriceView {
+  if (plans.length === 0) return FREE_PRICE;
+  return { ...FREE_PRICE, headline: moneyFor(plans[0].tier, plans)(0, true) };
+}
+
+/**
+ * The best annual saving on offer, for the tag on the Annual tile.
  *
  * Returns the MONEY as well as the percent. A "SAVE 28%" badge asks the reader
  * to work out what 28% of a price they haven't read yet comes to; "SAVE $10.00"
@@ -441,61 +559,12 @@ export function bestAnnualSaving(
  */
 export const PRO_VALUE_NOTE = "Everything above is one thing: Gozlin, thinking about your data";
 
-/* ──────────────────────────── The personal line ─────────────────────────────
- * One true sentence about THIS user, shown above the plans.
- *
- * "See your whole story" is a promise about a feature. "You've logged 87 days —
- * Free shows you the last 30" is a statement about something they already did,
- * and the 57 hidden days are theirs. That is the difference between advertising
- * a benefit and pointing at one, and it is the only line on the storefront that
- * cannot be written in advance.
- *
- * Both functions are pure and both refuse to overstate: the line is null unless
- * the user genuinely has more history than their tier will show them. A brand
- * new account gets no line at all rather than "you've logged 2 days", which
- * would be an argument against paying.
+/*
+ * THE "YOU'VE LOGGED N DAYS" LINE IS GONE (owner's call, 2026-09-26). It sat
+ * above the plans as a bordered card counting the reader's logged days against
+ * the free window. Removed outright along with `countLoggedDays` and
+ * `historyReachLine`, which nothing else used.
  */
-
-/**
- * Distinct calendar days the user has logged ANYTHING on.
- *
- * Takes several date-carrying histories and unions them, because a day counts
- * as logged whether it was a meal, a weigh-in or a workout — counting only one
- * source would undersell the person who trains daily but tracks food loosely,
- * and undercounting here weakens the exact claim this number exists to make.
- * Malformed or empty dates are dropped rather than counted.
- */
-export function countLoggedDays(
-  ...sources: readonly (readonly { date?: string }[] | undefined)[]
-): number {
-  const days = new Set<string>();
-  for (const source of sources) {
-    for (const row of source ?? []) {
-      const d = row?.date;
-      if (typeof d === "string" && d.length >= 10) days.add(d.slice(0, 10));
-    }
-  }
-  return days.size;
-}
-
-/**
- * The personal line for the storefront hero, or `null` when there isn't an
- * honest one to write.
- *
- * Null in all three cases where the sentence would be a lie or an own goal:
- * a tier with no cutoff at all (nothing is hidden), a user whose history still
- * fits inside their window (nothing is hidden YET — saying so invites them to
- * notice how little they have), and a zero count.
- */
-export function historyReachLine(daysLogged: number, tier: Tier): string | null {
-  const window = historyWindowDays(tier);
-  if (window === null || daysLogged <= window) return null;
-  const hidden = daysLogged - window;
-  return (
-    `You've logged ${daysLogged} days. ${TIER_SHORT_NAME[tier]} shows you the last ${window} — ` +
-    `the other ${hidden} ${hidden === 1 ? "is" : "are"} still yours, just out of view.`
-  );
-}
 
 /**
  * Shown under the cards so free users know what never gets taken away.

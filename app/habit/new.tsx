@@ -15,10 +15,24 @@
  * element on the page. Both now measure their container and solve for a cell
  * width, so the columns line up with each other and the final row lands flush.
  * The icon set is a multiple of the column count for the same reason.
+ *
+ * THE LIBRARY IS BROWSED, NOT SCROLLED PAST. 138 glyphs (components/habits/
+ * habitTheme) in one grid is 23 rows — a wall you scroll THROUGH to reach the
+ * reminder below it, which makes a bigger set worse than a small one. The icon
+ * card shows one category at a time behind a chip row, so it stays two or three
+ * rows tall however far the library grows. Colour is short enough to show
+ * whole, and shows its two families under their own labels.
  */
-import { HABIT_COLORS, HABIT_ICONS } from "@/components/habits/habitTheme";
+import {
+  HABIT_COLORS,
+  HABIT_COLOR_GROUPS,
+  HABIT_ICONS,
+  HABIT_ICON_GROUPS,
+  habitIconGroupIndex,
+} from "@/components/habits/habitTheme";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Chip } from "@/components/ui/Chip";
 import { IconBadge } from "@/components/ui/IconBadge";
 import { Screen } from "@/components/ui/Screen";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
@@ -47,6 +61,7 @@ import {
   Alert,
   LayoutChangeEvent,
   Pressable,
+  ScrollView,
   StyleSheet,
   TextInput,
   View,
@@ -106,6 +121,11 @@ export default function NewHabitScreen() {
   );
   const [reminder, setReminder] = useState<HabitReminder | null>(
     editing?.reminder ?? null,
+  );
+  // Which icon category the grid is showing. Seeded from the habit being
+  // edited so its own icon is on screen, and selected, the moment it opens.
+  const [iconGroup, setIconGroup] = useState(() =>
+    habitIconGroupIndex(editing?.icon ?? HABIT_ICONS[0]),
   );
   const [reminderBlocked, setReminderBlocked] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -379,35 +399,52 @@ export default function NewHabitScreen() {
         Colour
       </AppText>
       <Card padding="lg">
-        <PickerGrid
-          cols={COLOR_COLS}
-          gap={Spacing.sm}
-          count={HABIT_COLORS.length}
-          height={40}
-          renderCell={(i) => {
-            const c = HABIT_COLORS[i];
-            const on = color === c;
-            return (
-              <Pressable
-                key={c}
-                onPress={() => {
-                  Haptics.selectionAsync().catch(() => {});
-                  setColor(c);
-                }}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: on }}
-                accessibilityLabel={`Colour ${i + 1}`}
-                style={[
-                  styles.cell,
-                  styles.swatch,
-                  { backgroundColor: c, borderColor: on ? colors.text : "transparent" },
-                ]}
-              >
-                {on && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
-              </Pressable>
-            );
-          }}
-        />
+        {HABIT_COLOR_GROUPS.map((group, g) => (
+          <View key={group.label}>
+            <AppText
+              variant="caption"
+              color="tertiary"
+              style={g === 0 ? styles.paletteLabel : styles.paletteLabelNext}
+            >
+              {group.label}
+            </AppText>
+            <PickerGrid
+              cols={COLOR_COLS}
+              gap={Spacing.sm}
+              count={group.colors.length}
+              height={40}
+              renderCell={(i) => {
+                const c = group.colors[i];
+                const on = color === c;
+                return (
+                  <Pressable
+                    key={c}
+                    onPress={() => {
+                      Haptics.selectionAsync().catch(() => {});
+                      setColor(c);
+                    }}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={`${group.label} colour ${i + 1}`}
+                    style={[
+                      styles.cell,
+                      styles.swatch,
+                      {
+                        backgroundColor: c,
+                        // A soft hue on a white card has almost no edge of its
+                        // own — the hairline is what keeps the muted row
+                        // reading as swatches rather than as a smudge.
+                        borderColor: on ? colors.text : alpha(colors.text, 0.12),
+                      },
+                    ]}
+                  >
+                    {on && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
+                  </Pressable>
+                );
+              }}
+            />
+          </View>
+        ))}
       </Card>
 
       {/* ── Icon ── */}
@@ -415,13 +452,37 @@ export default function NewHabitScreen() {
         Icon
       </AppText>
       <Card padding="lg">
+        {/* Categories. The row scrolls rather than wraps: eleven labels wrap to
+            three lines of chips, which is taller than the grid they filter. */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          // A bare horizontal ScrollView inherits `flexGrow: 1` and will take
+          // vertical space it has no use for. Pin it to its own height.
+          style={styles.catBar}
+          contentContainerStyle={styles.catRow}
+        >
+          {HABIT_ICON_GROUPS.map((group, g) => (
+            <Chip
+              key={group.label}
+              label={group.label}
+              size="sm"
+              active={g === iconGroup}
+              tone={color}
+              onPress={() => setIconGroup(g)}
+              style={styles.catChip}
+            />
+          ))}
+        </ScrollView>
+
         <PickerGrid
           cols={ICON_COLS}
           gap={Spacing.sm}
-          count={HABIT_ICONS.length}
+          count={HABIT_ICON_GROUPS[iconGroup].icons.length}
           square
+          style={styles.iconGrid}
           renderCell={(i, size) => {
-            const ic = HABIT_ICONS[i];
+            const ic = HABIT_ICON_GROUPS[iconGroup].icons[i];
             const on = icon === ic;
             return (
               <Pressable
@@ -512,7 +573,7 @@ export default function NewHabitScreen() {
         />
         {reminderBlocked && reminder && (
           <AppText variant="caption" color="tertiary" style={styles.reminderHint}>
-            Enable notifications for Welliva in your device settings to get this
+            Enable notifications for welliva in your device settings to get this
             reminder.
           </AppText>
         )}
@@ -666,6 +727,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   swatch: { borderRadius: Radius.pill, borderWidth: 2 },
+
+  /** Family labels inside the colour card ("Bright", "Soft"). */
+  paletteLabel: { marginBottom: Spacing.sm },
+  paletteLabelNext: { marginTop: Spacing.lg, marginBottom: Spacing.sm },
+
+  // No negative margin to bleed this to the card's edge: Card doesn't clip its
+  // children, and the chips sit level with its top corner radius — they'd
+  // scroll out over the rounded edge instead of under it.
+  catBar: { flexGrow: 0 },
+  catRow: { gap: Spacing.sm, paddingRight: Spacing.xs },
+  catChip: { flexShrink: 0 },
+  iconGrid: { marginTop: Spacing.lg },
 
   goalGrid: { marginTop: Spacing.lg },
   goalBlurb: { marginTop: Spacing.lg, lineHeight: 18 },

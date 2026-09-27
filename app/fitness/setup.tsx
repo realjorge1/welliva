@@ -272,7 +272,7 @@ export default function FitnessSetupScreen() {
     if (!granted) {
       Alert.alert(
         "Notifications are off",
-        "Turn notifications on for Welliva in your device settings, then switch training-day reminders back on here.",
+        "Turn notifications on for welliva in your device settings, then switch training-day reminders back on here.",
       );
       return;
     }
@@ -310,7 +310,7 @@ export default function FitnessSetupScreen() {
         result.status === "no-days" ? "No training days picked" : "Reminders couldn't be set",
         result.status === "no-days"
           ? "Pick at least one training day and we'll nudge you on those days."
-          : "Turn notifications on for Welliva in your device settings, then switch reminders on in Fitness Settings.",
+          : "Turn notifications on for welliva in your device settings, then switch reminders on in Fitness Settings.",
       );
     }
 

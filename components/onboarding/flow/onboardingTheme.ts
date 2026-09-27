@@ -1,7 +1,7 @@
 /**
  * ONBOARDING THEME — the editorial layer on top of the app's design system.
  *
- * This file adds NO new colours. Welliva's identity is already fixed in
+ * This file adds NO new colours. welliva's identity is already fixed in
  * `constants/theme` (an OLED-black canvas, a gold brand, a pale sky wash for
  * surfaces) and the onboarding is the user's first sight of it — inventing a
  * second palette here would make the app they land on look like a different

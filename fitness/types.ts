@@ -83,7 +83,7 @@ export interface WorkoutDefinition {
   focus: BodyFocus;
   difficulty: Difficulty;
   energy: EnergyLevel;
-  /** Original Welliva coach persona leading this session. */
+  /** Original welliva coach persona leading this session. */
   coachId: string;
   /** Free-form searchable tags ("no jumping", "quiet", "morning"…). */
   tags: string[];

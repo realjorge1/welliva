@@ -1,7 +1,7 @@
 /**
  * EmptyState — the screen a person actually sees on day one.
  *
- * Welliva had empty states before this, but each screen wrote its own: some had
+ * welliva had empty states before this, but each screen wrote its own: some had
  * an icon, some didn't; some explained, some just said "No habits yet"; and
  * NONE of them offered the next tap. That last part is the real defect. An
  * empty state without an action is a dead end wearing a friendly face — the

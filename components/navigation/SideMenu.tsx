@@ -2,7 +2,7 @@
  * SIDE MENU — the panel behind the app.
  *
  * Identity first (photo, name, the one line that says who this person is to
- * Welliva), then the destinations in the order they were specified, then the two
+ * welliva), then the destinations in the order they were specified, then the two
  * exploratory surfaces below a hairline, then Upgrade and Settings pinned to the
  * floor.
  *
@@ -76,6 +76,7 @@ import {
   PROFILE_ITEM,
   SECONDARY_ITEMS,
   SETTINGS_ITEM,
+  isRailItem,
   UPGRADE_ITEM,
   type MenuItem,
 } from "./menu";
@@ -439,6 +440,8 @@ function Row({
       ? colors.textTertiary
       : colors.textSecondary;
 
+  const railPinned = isRailItem(item);
+
   return (
     <Animated.View style={style}>
       <Pressable
@@ -476,13 +479,28 @@ function Row({
           // Two lines, not an ellipsis: a menu that truncates its own
           // destination is worse than one with a row a few points taller. No
           // label wraps today — the longest is "Settings" — but this used to be
-          // load-bearing for "What Welliva knows" (now "Memory"), and it still
+          // load-bearing for "What welliva knows" (now "Memory"), and it still
           // catches a long future label or a large OS font scale.
           numberOfLines={2}
           style={[styles.rowLabel, active && styles.rowLabelActive]}
         >
           {item.label}
         </AppText>
+
+        {/* PINNED TO THE RAIL. A dot, not a word and not a badge: it says these
+            four rows are also reachable from the bottom of every screen, which
+            is the one fact that stops the rail reading as a second, rival set
+            of destinations. It is faint by design — nobody needs to be told
+            this, but the person who notices it has understood the whole
+            relationship between the menu and the Deck. */}
+        {railPinned ? (
+          <View
+            style={[
+              styles.pin,
+              { backgroundColor: alpha(colors.primary, active ? 0.9 : 0.4) },
+            ]}
+          />
+        ) : null}
       </Pressable>
     </Animated.View>
   );
@@ -505,7 +523,7 @@ const styles = StyleSheet.create({
   },
 
   /* METRICS ARE TUNED TO A ~49%-WIDTH PANEL. The gutters were made this tight
-   * for a label that no longer exists ("What Welliva knows", now "Memory") —
+   * for a label that no longer exists ("What welliva knows", now "Memory") —
    * the longest is "Settings", which fits with room to spare. They're kept as
    * they are because the panel reads well; there's simply slack now, so nothing
    * here is load-bearing if you want to relax it. */
@@ -549,13 +567,15 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
   },
   markSlot: { width: MARK_ACTIVE + 1, alignItems: "center" },
+  /** The rail-pinned dot. Deliberately small enough to be found, not shown. */
+  pin: { width: 5, height: 5, borderRadius: 3, marginLeft: Spacing.xs },
   rowLabel: { flex: 1 },
   /**
    * The size half of "you are here" — 15pt body up to 21pt, a jump you read
    * before you read the word. `lineHeight` is set with it so a wrapped label
    * keeps its own rhythm instead of inheriting body's tighter leading.
    *
-   * 21pt WAS the ceiling at a 49%-wide panel, set by "What Welliva knows"
+   * 21pt WAS the ceiling at a 49%-wide panel, set by "What welliva knows"
    * (now "Memory") truncating on a 360dp phone past that size. With every label
    * short there's headroom to go bigger without widening the panel — this size
    * is now a design choice rather than a limit.

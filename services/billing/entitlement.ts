@@ -53,7 +53,12 @@ export interface Entitlement {
 }
 
 const STORAGE_KEY = "@welliva_entitlement";
-const DEV_OVERRIDE_KEY = "@welliva_entitlement_dev";
+/**
+ * Where the retired developer tier switch kept its override. Nothing reads it
+ * any more; hydration deletes it so a switch left on in a test build can never
+ * resurface if a reader is ever reintroduced.
+ */
+const RETIRED_DEV_OVERRIDE_KEY = "@welliva_entitlement_dev";
 
 export const FREE: Entitlement = {
   tier: "free",
@@ -64,20 +69,6 @@ export const FREE: Entitlement = {
 };
 
 let current: Entitlement = FREE;
-
-/**
- * DEV-ONLY tier switch. `null` = no override, use the real entitlement.
- *
- * Every lock in the app has to be exercisable before the RevenueCat account
- * exists — otherwise the paywall and the gated screens are written blind and
- * first get tested during store review, which is the worst possible time. This
- * lets the upgrade screen's developer row flip the whole app between free and
- * Pro instantly.
- *
- * Stripped in release: the setter no-ops and the getter is never consulted when
- * `__DEV__` is false, so a production bundle cannot be talked into granting Pro.
- */
-let devOverride: Tier | null = null;
 
 type Listener = (e: Entitlement) => void;
 const listeners = new Set<Listener>();
@@ -94,13 +85,6 @@ function stillValid(e: Entitlement): boolean {
  * returns something — `FREE` before hydration.
  */
 export function getEntitlement(): Entitlement {
-  if (__DEV__ && devOverride !== null) {
-    // Report the override through the same shape the UI already reads, so
-    // flipping the dev switch re-renders every gated screen. Without this the
-    // React tree and `currentTier()` would disagree — components would show one
-    // tier while services behaved as another.
-    return { ...current, tier: devOverride, expiresAt: null, source: "unknown" };
-  }
   return current;
 }
 
@@ -113,7 +97,6 @@ export function getEntitlement(): Entitlement {
  * which also honours the fail-open rule for builds that cannot sell anything.
  */
 export function currentTier(): Tier {
-  if (__DEV__ && devOverride !== null) return devOverride;
   return stillValid(current) ? current.tier : "free";
 }
 
@@ -132,27 +115,6 @@ export function isPro(): boolean {
  */
 export function isSubscriber(): boolean {
   return currentTier() !== "free";
-}
-
-/**
- * Force the tier in development. Pass `null` to go back to the real entitlement.
- * No-ops in release builds.
- */
-export async function setDevTierOverride(value: Tier | null): Promise<void> {
-  if (!__DEV__) return;
-  devOverride = value;
-  emit();
-  try {
-    if (value === null) await AsyncStorage.removeItem(DEV_OVERRIDE_KEY);
-    else await AsyncStorage.setItem(DEV_OVERRIDE_KEY, value);
-  } catch {
-    /* best-effort — the in-memory override still applies this session */
-  }
-}
-
-/** The active dev override, or `null` when the real entitlement is in force. */
-export function getDevTierOverride(): Tier | null {
-  return __DEV__ ? devOverride : null;
 }
 
 /**
@@ -175,8 +137,6 @@ export function subscribe(fn: Listener): () => void {
 }
 
 function emit() {
-  // Emit through getEntitlement() so subscribers see the dev override too —
-  // `current` alone would leak the real tier past the switch.
   const snapshot = getEntitlement();
   listeners.forEach((fn) => {
     try {
@@ -205,6 +165,24 @@ export async function setEntitlement(
   } catch (e) {
     console.warn("[billing] failed to persist entitlement:", e);
   }
+}
+
+/**
+ * Record that the subscription will NOT renew, without waiting for the store.
+ *
+ * Called the moment the server confirms a cancellation, so the storefront and
+ * Settings say "Ends <date>" on the very next frame rather than after
+ * RevenueCat's next read. The tier is untouched — a cancelled plan keeps Pro to
+ * the end of the paid period — and the store's own answer replaces this the
+ * next time it arrives.
+ */
+export async function markNotRenewing(expiresAt: string | null): Promise<void> {
+  if (current.tier === "free") return;
+  await setEntitlement({
+    tier: current.tier,
+    expiresAt: expiresAt ?? current.expiresAt,
+    willRenew: false,
+  });
 }
 
 /**
@@ -240,19 +218,11 @@ function parseStored(raw: string): Entitlement {
  * An expired cache is dropped rather than trusted.
  */
 export async function hydrateEntitlement(): Promise<Entitlement> {
-  if (__DEV__) {
-    // Restore the dev tier switch first, so a reload doesn't silently drop you
-    // back to the real tier mid-way through testing a lock.
-    try {
-      const flag = await AsyncStorage.getItem(DEV_OVERRIDE_KEY);
-      // A stored "plus" is read as "pro" by `toTier` — a developer who left the
-      // switch on the retired tier lands on the surviving one rather than on a
-      // value the app no longer has limits for.
-      if (flag === "pro" || flag === "plus") devOverride = "pro";
-      else if (flag === "free") devOverride = "free";
-    } catch {
-      /* best-effort */
-    }
+  // Sweep the retired dev switch's value off the device.
+  try {
+    await AsyncStorage.removeItem(RETIRED_DEV_OVERRIDE_KEY);
+  } catch {
+    /* best-effort */
   }
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
@@ -264,8 +234,7 @@ export async function hydrateEntitlement(): Promise<Entitlement> {
     console.warn("[billing] failed to hydrate entitlement:", e);
   }
   // Emit unconditionally: subscribers built their initial state before hydration
-  // ran, so they need the answer even when there was nothing cached to read (a
-  // dev override with no stored entitlement is exactly that case).
+  // ran, so they need the answer even when there was nothing cached to read.
   emit();
   return getEntitlement();
 }

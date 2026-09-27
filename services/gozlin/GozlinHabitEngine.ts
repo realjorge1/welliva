@@ -24,6 +24,7 @@ import type { DietHistoryEntry } from "../../models/diet";
 import type { GeneratedWorkoutPlan, WorkoutLogEntry } from "../../models/workout";
 import { parseLocalDate, toLocalDateString } from "../OfflineStorage";
 import { detectHabits } from "./GozlinProgressEngine";
+import { readEntryValence, STRESS_LABELS, valenceLabel } from "./mind";
 import type {
   BehaviorScore,
   BehaviorTrend,
@@ -58,6 +59,76 @@ const DOW_LABEL = [
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 
+/* ── reading a state-of-mind entry ──────────────────────────────────
+ *
+ * Entries come in two vintages and two kinds, and every read below goes through
+ * these three helpers rather than touching a field directly.
+ *
+ * VINTAGE. Since migration 004 the feeling is `valence` (−1…+1). Records written
+ * before it carry a 1–5 `mood`, and timeline events backfilled by migration 001
+ * still do — L1 is append-only, so those are never rewritten. `readValence`
+ * understands both, which is why the engine keeps working whether or not 004 has
+ * run yet.
+ *
+ * KIND. There can now be several `momentary` entries in a day alongside one
+ * `daily` one. Averaging the raw list would weight a talkative Tuesday six times
+ * as heavily as a quiet Wednesday and quietly turn every per-day read into a
+ * per-entry read, so `collapseByDate` reduces a day to one reading first.
+ */
+
+/**
+ * A day's feeling as −1…+1, from either vintage of record; null if it has none.
+ * The conversion itself lives in mind.ts so this engine and every screen read an
+ * old record identically.
+ */
+const readValence = (c: GozlinCheckin): number | null => readEntryValence(c);
+
+/**
+ * Was this a day under pressure? The old `stress` dial is gone; the labels the
+ * user actually chose say it better. A pre-004 record still answers from its
+ * stored dial, so history keeps its meaning.
+ */
+function readStressed(c: GozlinCheckin): boolean {
+  if (c.labels?.length) return c.labels.some((l) => STRESS_LABELS.has(l));
+  if (typeof c.stress === "number") return c.stress >= 4;
+  return false;
+}
+
+/**
+ * One reading per date. Valence is averaged across the day's entries, and the
+ * day counts as stressed if ANY entry in it was — a morning that fell apart is
+ * not cancelled out by a calm evening, and "was there pressure today" is the
+ * question detectMoodLink is actually asking.
+ */
+function collapseByDate(checkins: GozlinCheckin[]): Map<
+  string,
+  { valence: number | null; stressed: boolean; sleepHours: number | null }
+> {
+  const buckets = new Map<string, { vs: number[]; stressed: boolean; sleep: number | null }>();
+  for (const c of checkins) {
+    if (!c?.date) continue;
+    const b = buckets.get(c.date) ?? { vs: [], stressed: false, sleep: null };
+    const v = readValence(c);
+    if (v !== null) b.vs.push(v);
+    if (readStressed(c)) b.stressed = true;
+    // Sleep belongs to the day's daily entry; a momentary one never carries one.
+    if (typeof c.sleepHours === "number") b.sleep = c.sleepHours;
+    buckets.set(c.date, b);
+  }
+  const out = new Map<
+    string,
+    { valence: number | null; stressed: boolean; sleepHours: number | null }
+  >();
+  for (const [date, b] of buckets) {
+    out.set(date, {
+      valence: b.vs.length ? mean(b.vs) : null,
+      stressed: b.stressed,
+      sleepHours: b.sleep,
+    });
+  }
+  return out;
+}
+
 function adhPct(h: DietHistoryEntry): number {
   return h.totalMeals > 0 ? h.mealsConsumed / h.totalMeals : 0;
 }
@@ -85,7 +156,7 @@ function calendarBack(today: string, days: number): string[] {
   return out;
 }
 
-/** Monday-of-week key for a date (weeks are Monday-based, per Welliva). */
+/** Monday-of-week key for a date (weeks are Monday-based, per welliva). */
 function weekKey(dateStr: string): string {
   const d = parseLocalDate(dateStr);
   const offset = (d.getDay() + 6) % 7; // 0 for Monday
@@ -289,14 +360,21 @@ function detectMoodLink(
     if (h.totalMeals > 0) adhByDate.set(h.date, adhPct(h));
   }
 
-  const high: number[] = []; // high-stress / low-mood days
-  const calm: number[] = []; // calm / good-mood days
-  for (const c of checkins) {
-    if (!windowSet.has(c.date)) continue;
-    const adh = adhByDate.get(c.date);
+  const high: number[] = []; // days under pressure / clearly unpleasant
+  const calm: number[] = []; // calm, clearly pleasant days
+  // One reading per date first — several momentary entries in a day must not
+  // vote several times.
+  for (const [date, day] of collapseByDate(checkins)) {
+    if (!windowSet.has(date)) continue;
+    const adh = adhByDate.get(date);
     if (adh === undefined) continue;
-    const stressed = (c.stress ?? 0) >= 4 || (c.mood ?? 5) <= 2;
-    const easy = (c.stress ?? 5) <= 2 && (c.mood ?? 0) >= 4;
+    const v = day.valence;
+    // A day is "hard" if it was named with a pressure word OR its feeling sat
+    // at unpleasant or below. The ±0.33 cut is the boundary of the neutral
+    // stop, so the middle three stops count as neither and are left out of the
+    // comparison entirely — which is what keeps the gap meaningful.
+    const stressed = day.stressed || (v !== null && v <= -0.33);
+    const easy = !day.stressed && v !== null && v >= 0.33;
     if (stressed) high.push(adh);
     else if (easy) calm.push(adh);
   }
@@ -330,11 +408,14 @@ function detectSleepLink(
 
   const short: number[] = [];
   const rested: number[] = [];
-  for (const c of checkins) {
-    if (!windowSet.has(c.date) || c.sleepHours === undefined) continue;
-    const adh = adhByDate.get(c.date);
+  // Only a daily entry carries a sleep figure, so there is at most one per date
+  // — but this goes through the same collapse as the mood link so the "one
+  // reading per day" rule is enforced in one place rather than assumed here.
+  for (const [date, day] of collapseByDate(checkins)) {
+    if (!windowSet.has(date) || day.sleepHours === null) continue;
+    const adh = adhByDate.get(date);
     if (adh === undefined) continue;
-    (c.sleepHours < SLEEP_SHORT ? short : rested).push(adh);
+    (day.sleepHours < SLEEP_SHORT ? short : rested).push(adh);
   }
   if (short.length < 2 || rested.length < 2) return null;
 
@@ -467,9 +548,14 @@ export function scoreBehavior(input: HabitReportInput): BehaviorScore[] {
   }
 
   // ── Mood (self-reported) ──
-  const mood = scoreCheckinDomain(checkins, today, "mood");
+  //
+  // The driver line names the STOP the average lands on rather than printing a
+  // number. "avg 3.4/5" was a figure nobody could feel and that no screen
+  // collected in those terms; "Slightly Pleasant, 9 days" is the same reading
+  // said in the words the user was offered when they logged it.
+  const mood = scoreCheckinDomain(checkins, today, "valence");
   if (mood) {
-    const score = Math.round(clamp((mood.avg - 1) / 4, 0, 1) * 100);
+    const score = Math.round(clamp((mood.avg + 1) / 2, 0, 1) * 100);
     scores.push({
       domain: "mood",
       icon: "happy",
@@ -477,7 +563,9 @@ export function scoreBehavior(input: HabitReportInput): BehaviorScore[] {
       score,
       band: band(score),
       trend: mood.trend,
-      drivers: [`avg ${mood.avg.toFixed(1)}/5 over ${mood.n} day${mood.n === 1 ? "" : "s"}`],
+      drivers: [
+        `${valenceLabel(mood.avg).toLowerCase()} across ${mood.n} day${mood.n === 1 ? "" : "s"}`,
+      ],
     });
   }
 
@@ -501,11 +589,24 @@ function sleepHoursToScore(h: number): number {
   return 25;
 }
 
-/** Average a numeric check-in field over the window + a recent-vs-prior trend. */
+/**
+ * Average a check-in reading over the window + a recent-vs-prior trend.
+ *
+ * `field` names a READING, not a stored property: "valence" resolves through
+ * `readValence` so both vintages of record answer it, and "sleepHours" is taken
+ * off the collapsed day. Both go through `collapseByDate`, so `n` counts DAYS —
+ * which is what the driver line claims — rather than entries.
+ *
+ * The trend threshold is per-scale. Sleep is in hours, where 0.2 is a sensible
+ * "meaningfully different"; valence spans just 2.0 end to end, where 0.2 would
+ * be a tenth of the whole axis. Using one constant for both was going to make
+ * the mood trend either hair-trigger or immovable depending on which scale it
+ * was tuned for.
+ */
 function scoreCheckinDomain(
   checkins: GozlinCheckin[],
   today: string,
-  field: "sleepHours" | "mood",
+  field: "sleepHours" | "valence",
 ): { avg: number; n: number; trend: BehaviorTrend } | null {
   const recentSet = datesBack(today, CHECKIN_WINDOW);
   const recent: number[] = [];
@@ -517,14 +618,16 @@ function scoreCheckinDomain(
     d.setDate(end.getDate() - i);
     priorSet.add(toLocalDateString(d));
   }
-  for (const c of checkins) {
-    const v = c[field];
-    if (typeof v !== "number") continue;
-    if (recentSet.has(c.date)) recent.push(v);
-    else if (priorSet.has(c.date)) prior.push(v);
+  for (const [date, day] of collapseByDate(checkins)) {
+    const v = field === "valence" ? day.valence : day.sleepHours;
+    if (v === null) continue;
+    if (recentSet.has(date)) recent.push(v);
+    else if (priorSet.has(date)) prior.push(v);
   }
   if (recent.length < 2) return null;
-  const trend = prior.length >= 2 ? trendFromDelta(mean(recent), mean(prior), 0.2) : "steady";
+  const delta = field === "valence" ? 0.1 : 0.2;
+  const trend =
+    prior.length >= 2 ? trendFromDelta(mean(recent), mean(prior), delta) : "steady";
   return { avg: mean(recent), n: recent.length, trend };
 }
 

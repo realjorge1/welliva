@@ -1,7 +1,7 @@
 /**
  * HOME — the daily dashboard.
  * Hero nutrition ring, today's plan, a card-less streak strip, a redesigned
- * hydration hero and a coaching carousel — all on the Welliva design system.
+ * hydration hero and a coaching carousel — all on the welliva design system.
  */
 
 import WaterTracker from "@/components/WaterTracker";
@@ -26,9 +26,9 @@ import {
   useHabitReport,
   useRetiredBeat,
 } from "@/components/gozlin";
-import { ActionBar, ScreenTopBar } from "@/components/navigation";
+import { ScreenTopBar } from "@/components/navigation";
 import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
-import { CrashTrigger, ScreenErrorFallback } from "@/components/AppErrorBoundary";
+import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { CoachDeepDive } from "@/components/home/CoachDeepDive";
 import { NudgeCard } from "@/components/home/NudgeCard";
 import {
@@ -322,7 +322,7 @@ export default function HomeScreen() {
         title={
           <>
             <AppText variant="headline" color="brand" style={styles.brand} numberOfLines={1}>
-              Welliva
+              welliva
             </AppText>
             {/* Only ever visible when something hasn't reached the cloud. */}
             <SyncStatusPill style={styles.syncPill} />
@@ -335,21 +335,11 @@ export default function HomeScreen() {
 
   return (
     <>
-      {/* Dev-only: open with ?crash=1 or ?crash=tab:home to verify this
-          screen's ErrorBoundary catches without taking the app down. */}
-      {__DEV__ && <CrashTrigger surface="tab:home" />}
-      {/* `bottomInset` is the no-footer figure: the end of the content plus the
-          device's own inset, kept from when nothing floated here. The Action Bar
-          does float here now, and `Screen` raises the inset to NAV_CLEARANCE for
-          exactly as long as a footer is mounted — so this number stays honest
-          rather than being hand-tuned to whatever is currently docked. */}
-      <Screen
-        gutter={false}
-        header={header}
-        onScroll={onScroll}
-        bottomInset={Spacing.xxl}
-        footer={<ActionBar />}
-      >
+      {/* No `bottomInset` any more. It used to be hand-tuned down to the
+          no-footer figure and then raised again by `footer`; the Deck floats
+          over every destination now, so `Screen`'s own NAV_CLEARANCE default is
+          the honest number and there is nothing left for a screen to tune. */}
+      <Screen gutter={false} header={header} onScroll={onScroll}>
       {/* ── Hero: calories + macros ── */}
       <Reveal index={1}>
         <Card style={styles.gutter} padding="xxl">

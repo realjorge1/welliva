@@ -159,6 +159,8 @@ interface MealPlanContextValue {
     unit: string;
     slot: MealType | null;
     date?: string;
+    /** "gozlin" when the coach logged it; defaults to "catalog". */
+    origin?: FoodLogEntry["origin"];
   }) => Promise<FoodLogEntry | null>;
   removeLoggedFood: (entryId: string, date?: string) => Promise<void>;
   correctLoggedItem: (args: {
@@ -600,6 +602,7 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
       unit: string;
       slot: MealType | null;
       date?: string;
+      origin?: FoodLogEntry["origin"];
     }) => {
       const target = args.date ?? todayDate();
       const entry = await logCatalogFoodEntry({
@@ -608,6 +611,7 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
         food: args.food,
         quantity: args.quantity,
         unit: args.unit,
+        origin: args.origin,
       });
       if (entry) await refreshLog(target);
       return entry;

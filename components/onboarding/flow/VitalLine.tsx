@@ -2,7 +2,7 @@
  * VitalLine — the one drawn mark the onboarding is built around.
  *
  * A single continuous curve: a long calm run, one full breath, a smaller
- * second breath, then calm again. It is Welliva's through-line — it draws
+ * second breath, then calm again. It is welliva's through-line — it draws
  * itself on the welcome screen, and the same curve, compressed, is the progress
  * indicator in the header. Progress in this flow is therefore not a bar filling
  * up; it is one line being drawn a little further with every answer.

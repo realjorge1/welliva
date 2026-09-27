@@ -19,8 +19,10 @@
  *     5:17 PM and is actioned at 00:20 completes the day it was *for*, which is
  *     the only reading that keeps a streak honest.
  */
-import { computeStats, loadHabits, loadLogs, saveLogs } from "../HabitService";
+import { computeStats, loadHabits, updateLogs } from "../HabitService";
 import { toLocalDateString } from "../OfflineStorage";
+import { emitExternalWrite, subscribeExternalWrites } from "./externalWrites";
+import { fireDateOf } from "./fireTime";
 import { patchWidgetHabitDone, refreshWidgets } from "./widgets";
 
 export type MarkDoneResult =
@@ -39,30 +41,16 @@ export type MarkDoneResult =
 
 // ── change notification ─────────────────────────────────────────────
 
-type Listener = () => void;
-const listeners = new Set<Listener>();
-
 /**
  * Observe out-of-band habit-log writes. HabitsContext subscribes so a completion
  * that happened behind its back (lock screen, app backgrounded) reloads into the
  * live UI — streaks, progress bars and heatmaps all recompute from the reloaded
  * logs. Returns an unsubscribe.
  */
-export function subscribeHabitLogsChanged(fn: Listener): () => void {
-  listeners.add(fn);
-  return () => {
-    listeners.delete(fn);
-  };
-}
-
-function emitHabitLogsChanged(): void {
-  for (const fn of [...listeners]) {
-    try {
-      fn();
-    } catch {
-      // one bad listener must not stop the others
-    }
-  }
+export function subscribeHabitLogsChanged(fn: () => void): () => void {
+  return subscribeExternalWrites((w) => {
+    if (w.kind === "habit") fn();
+  });
 }
 
 // ── the action ──────────────────────────────────────────────────────
@@ -71,18 +59,15 @@ function emitHabitLogsChanged(): void {
  * Complete a habit from a notification action.
  *
  * @param habitId    from the notification's `data.habitId`
- * @param firedAtMs  `response.notification.date` — when the reminder fired
+ * @param firedAt  `response.notification.date` — when the reminder fired
+ *                 (seconds on iOS, milliseconds on Android; see ./fireTime)
  */
 export async function markHabitDoneFromNotification(
   habitId: string,
-  firedAtMs?: number,
+  firedAt?: number,
 ): Promise<MarkDoneResult> {
   try {
-    const fired =
-      typeof firedAtMs === "number" && Number.isFinite(firedAtMs)
-        ? new Date(firedAtMs)
-        : new Date();
-    const date = toLocalDateString(fired);
+    const date = toLocalDateString(fireDateOf(firedAt));
     const today = toLocalDateString(new Date());
 
     const habit = (await loadHabits()).find((h) => h.id === habitId);
@@ -91,21 +76,25 @@ export async function markHabitDoneFromNotification(
     // button must never be able to fake one.
     if (habit.source !== "manual") return { ok: false, reason: "not-manual" };
 
-    const logs = await loadLogs();
+    // Inside the log lock: the check and the write see the same blob, so a
+    // second delivery of this press — or an in-app tap landing at the same
+    // moment — can neither double-apply nor erase it.
+    let alreadyDone = false;
+    const logs = await updateLogs((current) => {
+      const set = new Set(current[habitId] ?? []);
+      alreadyDone = set.has(date);
+      if (alreadyDone) return null;
+      set.add(date);
+      return { ...current, [habitId]: [...set].sort() };
+    });
     const dates = new Set(logs[habitId] ?? []);
-    const alreadyDone = dates.has(date);
-
-    if (!alreadyDone) {
-      dates.add(date);
-      await saveLogs({ ...logs, [habitId]: [...dates].sort() });
-    }
 
     const { currentStreak } = computeStats(habit, dates, today);
 
     if (!alreadyDone) {
       await patchWidgetHabitDone(habitId, date, currentStreak);
       await refreshWidgets();
-      emitHabitLogsChanged();
+      emitExternalWrite({ kind: "habit", date });
     }
 
     return {

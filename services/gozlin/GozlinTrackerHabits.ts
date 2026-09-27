@@ -157,7 +157,7 @@ function daysBetween(from: string, to: string): number {
   );
 }
 
-/** Welliva weekday index for a date, 0=Mon…6=Sun. */
+/** welliva weekday index for a date, 0=Mon…6=Sun. */
 function weekdayIndex(date: string): number {
   return (parseLocalDate(date).getDay() + 6) % 7;
 }
@@ -218,6 +218,13 @@ function hash(input: string): number {
 }
 
 const sampled = (seed: string, oneIn: number): boolean => hash(seed) % oneIn === 0;
+
+/**
+ * The same hash, for every other "occasionally" in Gozlin (the novelty
+ * follow-ups sample with it too) — one sampler, so two features can never
+ * disagree about what a stable per-subject draw means.
+ */
+export const stableHash = hash;
 
 // ── Building the brief ──────────────────────────────────────────────
 

@@ -30,10 +30,10 @@ import {
   useElasticScroll,
 } from "@/components/ui";
 import { ActivityRings, type ActivityRingMetric } from "@/components/charts";
-import { GozlinButton } from "@/components/gozlin";
-import { ActionBar, ScreenTopBar } from "@/components/navigation";
+import { GozlinButton, useReadinessSignals } from "@/components/gozlin";
+import { ScreenTopBar, useDeck } from "@/components/navigation";
 import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
-import { CrashTrigger, ScreenErrorFallback } from "@/components/AppErrorBoundary";
+import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useProfile, useSystem, useWorkout } from "@/contexts/AppContext";
 import { ArtTile } from "@/fitness/components/ArtTile";
@@ -64,7 +64,13 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "@/utils/haptics";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
+import {
+  ScrollView,
+  StyleSheet,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const WEEK = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -148,9 +154,12 @@ export default function ExerciseScreen() {
 
   /* ── new intelligence layer ───────────────────────────────────────── */
 
+  // The same wearable + check-in inputs Gozlin's twin reads, so this card and
+  // the coach quote one readiness score for the same day.
+  const { wearable, checkins } = useReadinessSignals(currentDate);
   const recovery = useMemo(
-    () => computeRecovery({ workoutLog, todaySession }),
-    [workoutLog, todaySession],
+    () => computeRecovery({ workoutLog, todaySession, wearable, checkins }),
+    [workoutLog, todaySession, wearable, checkins],
   );
 
   const recommendation = useMemo(() => {
@@ -280,8 +289,18 @@ export default function ExerciseScreen() {
   /* ── render ───────────────────────────────────────────────────────── */
 
   // Fitness builds its own scaffold instead of using <Screen>, so it has to ask
-  // for the elastic ends the same way Screen does.
-  const elastic = useElasticScroll();
+  // for the elastic ends — AND report its scroll position to the Deck — the same
+  // way Screen does for everyone else. Without the second half the rail simply
+  // never folds here, which on one of the four rail destinations would read as
+  // the fold being broken rather than as this screen opting out.
+  const deck = useDeck();
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      deck.reportScroll(e.nativeEvent.contentOffset.y);
+    },
+    [deck],
+  );
+  const elastic = useElasticScroll({ onScroll });
 
   const recoveryTone =
     recovery.level === "green"
@@ -295,8 +314,6 @@ export default function ExerciseScreen() {
   return (
     <View style={[styles.flex, { backgroundColor: colors.background }]}>
       <AmbientCanvas />
-      {/* Dev-only: open with ?crash=1 or ?crash=tab:exercise — see AppErrorBoundary. */}
-      {__DEV__ && <CrashTrigger surface="tab:exercise" />}
       <SafeAreaView style={styles.flex} edges={["top"]}>
         {/* Header */}
         <ScreenTopBar
@@ -767,11 +784,10 @@ export default function ExerciseScreen() {
         )}
       </SafeAreaView>
 
-      {/* This screen paints its own canvas rather than using `Screen`, so the
-          bar is docked by hand — a sibling of the SafeAreaView, inside the same
-          root, which is what keeps it riding the drawer's transform. `content`
-          already reserves NAV_CLEARANCE, so nothing scrolls underneath it. */}
-      <ActionBar />
+      {/* The Deck used to be docked here by hand, because this screen paints
+          its own canvas rather than using `Screen`. It is mounted once in
+          AppDrawer now, so there is nothing to dock — but `content` must keep
+          reserving NAV_CLEARANCE, or the last card scrolls under the rail. */}
     </View>
   );
 }

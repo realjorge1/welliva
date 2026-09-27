@@ -57,6 +57,7 @@ import {
   type DrawerOpenIntent,
   type DrawerOpenSource,
 } from "./DrawerContext";
+import { DeckHost } from "./Deck";
 import { SideMenu } from "./SideMenu";
 import { SWIPEABLE_PATHS, type MenuItem } from "./menu";
 
@@ -304,7 +305,13 @@ export function AppDrawer({ children }: { children: React.ReactNode }) {
               accessibilityElementsHidden={isOpen}
               importantForAccessibility={isOpen ? "no-hide-descendants" : "auto"}
             >
-              {children}
+              {/* THE DECK MOUNTS HERE, ONCE, AND NOWHERE ELSE.
+                  Inside the transformed content, so the rail rides the drawer's
+                  slide and scale with the screen it belongs to rather than
+                  hanging in mid-air over the open menu — and inside this view,
+                  so it goes dead with everything else the moment the menu is
+                  out. It gates itself by route: see Deck.tsx. */}
+              <DeckHost>{children}</DeckHost>
             </View>
 
             {/* Inside the content, so it dims and travels with the app and

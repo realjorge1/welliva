@@ -1,5 +1,5 @@
 /**
- * Welliva billing UI — the storefront's copy, gates and lock markers.
+ * welliva billing UI — the storefront's copy, gates and lock markers.
  *
  *   import { PaywallGate, ProLockCard } from "@/components/billing";
  *
@@ -11,13 +11,13 @@ export { LOCK_COPY, toLockId, type LockCopy, type LockId } from "./lockCopy";
 export {
   ALWAYS_FREE_NOTE,
   bestAnnualSaving,
-  countLoggedDays,
   FREE_PRICE,
-  historyReachLine,
   PLAN_CARD_ORDER,
   PLAN_IDENTITY,
   periodLabel,
   periodName,
+  freePriceView,
+  formatLike,
   priceView,
   PRO_VALUE_NOTE,
   renewalDisclosure,
@@ -27,3 +27,4 @@ export {
   type PlanLine,
   type PriceView,
 } from "./planCopy";
+export { FreePriceTag, PriceTag } from "./PriceTag";

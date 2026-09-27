@@ -135,7 +135,7 @@ Dimmed-feature path:
      ▼
  ┌──────────────────────────────────────────────┐
  │  Your data stays on your phone.               │
- │  Welliva works fully offline.                 │
+ │  welliva works fully offline.                 │
  │                                               │
  │  Use AI in the cloud for richer coaching?     │
  │  Gozlin only sends a short summary —          │
@@ -157,7 +157,7 @@ Dimmed-feature path:
 ```
  Settings → Privacy → "Delete all my data"
      ▼
- confirm 1: "This permanently deletes everything Welliva remembers."
+ confirm 1: "This permanently deletes everything welliva remembers."
      ▼
  confirm 2 (type/hold): irreversible
      ▼

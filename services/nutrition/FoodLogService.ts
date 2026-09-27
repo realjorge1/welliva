@@ -167,17 +167,29 @@ export async function logCatalogFood(args: {
   food: FoodItem;
   quantity: number;
   unit: string;
+  /** Who wrote it — "gozlin" when the coach logged it on the user's say-so. */
+  origin?: FoodLogEntry["origin"];
 }): Promise<FoodLogEntry | null> {
   const item = resolveCatalogFood(args.food, args.quantity, args.unit);
   return logResolvedItem({
     date: args.date,
     slot: args.slot,
     item,
+    origin: args.origin,
     // The catalog's own name, always — the reference entry it matched may be
     // called something else ("Mackerel" for "Mackerel / Titus"), and the log
     // should read back as the thing the user actually tapped.
-    label: `${formatQuantity(args.quantity)} ${args.unit} ${args.food.name}`,
+    label: catalogLogLabel(args.food, args.quantity, args.unit),
   });
+}
+
+/**
+ * The exact line a catalog log entry reads back as — "0.5 medium Avocado".
+ * Exported so a confirmation that promises an entry (the coach's log_food) can
+ * quote the entry word for word rather than composing its own version of it.
+ */
+export function catalogLogLabel(food: FoodItem, quantity: number, unit: string): string {
+  return `${formatQuantity(quantity)} ${unit} ${food.name}`;
 }
 
 /** Trim trailing zeros so a half portion reads "0.5", not "0.50". */

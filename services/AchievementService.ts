@@ -1199,7 +1199,7 @@ const LEVEL_TITLES = [
   "Immortal",
   "Ascendant",
   "Transcendent",
-  "Welliva Icon",
+  "welliva Icon",
 ];
 
 export function getAchievementSummary(

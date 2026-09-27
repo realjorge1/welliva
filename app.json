@@ -55,33 +55,33 @@
       [
         "expo-calendar",
         {
-          "calendarPermission": "Welliva reads your upcoming events so your coach can plan around what's ahead — travel, exams, big days. Nothing leaves your device."
+          "calendarPermission": "welliva reads your upcoming events so your coach can plan around what's ahead — travel, exams, big days. Nothing leaves your device."
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Welliva uses your location only to fetch local weather, so your coach can suggest indoor or outdoor workouts."
+          "locationWhenInUsePermission": "welliva uses your location only to fetch local weather, so your coach can suggest indoor or outdoor workouts."
         }
       ],
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/welliva512.png",
+          "icon": "./assets/images/notification-icon.png",
           "color": "#E67E22"
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Welliva accesses your photos so you can log a meal from a picture, set a profile picture and add progress photos. A meal photo is read once to identify the foods and is never stored; the rest upload only to your private account storage.",
-          "cameraPermission": "Welliva uses your camera so you can log a meal by photographing it, and to scan a packaged food's barcode. The picture is read once and is never stored or uploaded."
+          "photosPermission": "welliva accesses your photos so you can log a meal from a picture, set a profile picture and add progress photos. A meal photo is read once to identify the foods and is never stored; the rest upload only to your private account storage.",
+          "cameraPermission": "welliva uses your camera so you can log a meal by photographing it, and to scan a packaged food's barcode. The picture is read once and is never stored or uploaded."
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Welliva uses your camera to scan a packaged food's barcode and to log a meal by photographing it. Nothing is recorded or uploaded — the frame is read on your device and discarded.",
+          "cameraPermission": "welliva uses your camera to scan a packaged food's barcode and to log a meal by photographing it. Nothing is recorded or uploaded — the frame is read on your device and discarded.",
           "microphonePermission": false,
           "recordAudioAndroidPermission": false
         }

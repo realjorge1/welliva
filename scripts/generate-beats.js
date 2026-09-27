@@ -399,7 +399,7 @@ function renderTrack(spec) {
 
 /* ───────────────────────────── track catalog ──────────────────────────────
  * 15 original compositions. Roots/keys, progressions and patterns are all
- * bespoke to Welliva — written note-by-note for this generator.
+ * bespoke to welliva — written note-by-note for this generator.
  */
 
 const FOUR_FLOOR = "x...x...x...x...";

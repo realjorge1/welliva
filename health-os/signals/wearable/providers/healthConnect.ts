@@ -61,7 +61,7 @@ function loadHealthConnect(): HealthConnectModule | null {
   }
 }
 
-/** Everything Welliva asks for. Read-only, always. */
+/** Everything welliva asks for. Read-only, always. */
 const READ_TYPES = [
   "SleepSession",
   "HeartRateVariabilityRmssd",

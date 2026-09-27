@@ -6,6 +6,10 @@
  * matrix or diagonal beams) and the workout's glyph. No imagery is copied
  * from anywhere — the art is generated from the design system, so it stays
  * sharp at any size and matches both themes.
+ *
+ * The ramps and the decor are exported so the list cards' full-height art
+ * panel (ArtPanel) draws the SAME composition — a workout's card and its
+ * detail hero are one piece of art at two sizes, not two lookalikes.
  */
 
 import { Radius } from "@/constants/theme";
@@ -16,7 +20,7 @@ import { StyleSheet, View } from "react-native";
 import type { ArtHue, ArtPattern } from "../types";
 
 /** Deep, saturated ramps that hold white glyphs in light AND dark themes. */
-const HUE_GRADIENTS: Record<ArtHue, readonly [string, string]> = {
+export const ART_GRADIENTS: Record<ArtHue, readonly [string, string]> = {
   brand: ["#0E9FC4", "#134E5F"],
   ember: ["#F2784B", "#9E2F23"],
   violet: ["#8B93E6", "#41448F"],
@@ -29,6 +33,16 @@ const HUE_GRADIENTS: Record<ArtHue, readonly [string, string]> = {
   midnight: ["#6B7BD6", "#1E2860"],
 };
 
+/**
+ * The hue as a TEXT colour: the light end of the ramp on a dark card, the deep
+ * end on a white one. Either end alone fails in the other theme — the light
+ * golds and skies wash out on white, the deep ends vanish into the dark glass.
+ */
+export function artAccent(hue: ArtHue, isDark: boolean): string {
+  const ramp = ART_GRADIENTS[hue] ?? ART_GRADIENTS.brand;
+  return isDark ? ramp[0] : ramp[1];
+}
+
 export interface ArtTileProps {
   icon: string;
   hue: ArtHue;
@@ -36,6 +50,13 @@ export interface ArtTileProps {
   size?: number;
   radius?: number;
 }
+
+/*
+ * Decor is laid out against the art's WIDTH (`size`), with vertical positions
+ * as percentages of its height. On a square tile the two are the same number,
+ * so the tile draws exactly as it always has; on the cards' taller panel the
+ * beams and the bar spread down the whole panel instead of bunching at the top.
+ */
 
 /** The signature orbit decoration (the module's original composition). */
 function OrbitDecor({ size }: { size: number }) {
@@ -68,7 +89,7 @@ function OrbitDecor({ size }: { size: number }) {
           },
         ]}
       />
-      <View style={[styles.bar, { width: size * 1.5, top: size * 0.72 }]} />
+      <View style={[styles.bar, { width: size * 1.5, top: "72%" }]} />
     </>
   );
 }
@@ -136,7 +157,7 @@ function DotsDecor({ size }: { size: number }) {
 function BeamsDecor({ size }: { size: number }) {
   return (
     <>
-      {[0.22, 0.5, 0.78].map((f, i) => (
+      {[22, 50, 78].map((pct, i) => (
         <View
           key={i}
           style={[
@@ -144,7 +165,7 @@ function BeamsDecor({ size }: { size: number }) {
             {
               width: size * 1.8,
               height: size * 0.09,
-              top: size * f,
+              top: `${pct}%`,
               left: -size * 0.4,
               opacity: 0.12 - i * 0.03,
             },
@@ -155,6 +176,17 @@ function BeamsDecor({ size }: { size: number }) {
   );
 }
 
+/**
+ * The pattern layer on its own, sized to the art's width. The caller owns the
+ * clip: decor deliberately runs past the edges and relies on it.
+ */
+export function ArtDecor({ pattern = "orbit", size }: { pattern?: ArtPattern; size: number }) {
+  if (pattern === "rings") return <RingsDecor size={size} />;
+  if (pattern === "dots") return <DotsDecor size={size} />;
+  if (pattern === "beams") return <BeamsDecor size={size} />;
+  return <OrbitDecor size={size} />;
+}
+
 export const ArtTile = React.memo(function ArtTile({
   icon,
   hue,
@@ -162,7 +194,7 @@ export const ArtTile = React.memo(function ArtTile({
   size = 64,
   radius = Radius.lg,
 }: ArtTileProps) {
-  const colors = HUE_GRADIENTS[hue] ?? HUE_GRADIENTS.brand;
+  const colors = ART_GRADIENTS[hue] ?? ART_GRADIENTS.brand;
   return (
     <View style={[styles.tile, { width: size, height: size, borderRadius: radius }]}>
       <LinearGradient
@@ -171,10 +203,7 @@ export const ArtTile = React.memo(function ArtTile({
         end={{ x: 0.95, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      {pattern === "orbit" && <OrbitDecor size={size} />}
-      {pattern === "rings" && <RingsDecor size={size} />}
-      {pattern === "dots" && <DotsDecor size={size} />}
-      {pattern === "beams" && <BeamsDecor size={size} />}
+      <ArtDecor pattern={pattern} size={size} />
       <Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={size * 0.44} color="#FFFFFF" />
     </View>
   );

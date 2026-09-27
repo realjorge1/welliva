@@ -18,7 +18,7 @@ gap is **time, senses, and out-of-app reach.**
 | Vision capability | Status | Where it already lives / what's missing |
 |---|---|---|
 | Proactive, ranked coach interventions | **Exists** | `GozlinMomentEngine.buildMoments` already ranks present-tense beats per surface ("Your body's asking for rest"). It is the anticipation engine — minus the clock. |
-| Daily / weekly / monthly briefings | **Exists** | `GozlinBriefingEngine` (daily), `GozlinProgressEngine.buildWeeklyReview` (weekly), `MonthlyRecapService` ("Welliva Wrapped"). Missing: **delivery** (they're pull-on-open, not pushed) and **yearly/5-year**. |
+| Daily / weekly / monthly briefings | **Exists** | `GozlinBriefingEngine` (daily), `GozlinProgressEngine.buildWeeklyReview` (weekly), `MonthlyRecapService` ("welliva Wrapped"). Missing: **delivery** (they're pull-on-open, not pushed) and **yearly/5-year**. |
 | Recovery intelligence | **Partial** | `GozlinRecoveryEngine` is a *training-load proxy* — "no wearables yet". Wearable signal makes it real. |
 | Long-term storytelling | **Partial** | `MonthlyRecapService` + `JourneyService` (chapters) prove the deterministic-narrative pattern. Missing: year / anniversary / 5-year horizons + documentaries. |
 | Predictive planning / goal-timeline changes | **Partial** | The *levers* exist (`applyWorkoutAdaptation`, `PlanSync`, `GOAL_CALORIE_MODIFIERS`, forecast `etaWeeks`). Missing: a **forward trigger** to pull them. |

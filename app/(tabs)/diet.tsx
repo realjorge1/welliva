@@ -48,9 +48,9 @@ import {
   isConditionDiet,
 } from "@/constants/DietDatabase";
 import { GozlinButton, GozlinToast, useToast } from "@/components/gozlin";
-import { ActionBar, ScreenTopBar } from "@/components/navigation";
+import { ScreenTopBar } from "@/components/navigation";
 import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
-import { CrashTrigger, ScreenErrorFallback } from "@/components/AppErrorBoundary";
+import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { DisclaimerNote } from "@/components/legal";
 import { useBilling } from "@/contexts/BillingContext";
 import { clampHistoryDays, isHistoryRangeLocked } from "@/services/billing";
@@ -741,7 +741,7 @@ export default function DietScreen() {
   // Daily adherence timeline for the scrollable consistency graph — today's live
   // day is appended so the newest point tracks real-time progress.
   const adherenceTrend = useMemo(() => {
-    // Bounded to the tier's window — free reads back 30 days, a paid tier all 90.
+    // Bounded to the tier's window — free reads back 10 days, a paid tier all 90.
     const pts = buildAdherenceTrend(dietHistory, currentDate, clampHistoryDays(90, tier));
     if (liveDay && liveDay.totalMeals > 0) {
       const v = Math.round((liveDay.mealsConsumed / liveDay.totalMeals) * 100);
@@ -1029,9 +1029,7 @@ export default function DietScreen() {
 
   return (
     <>
-      {/* Dev-only: open with ?crash=1 or ?crash=tab:diet — see AppErrorBoundary. */}
-      {__DEV__ && <CrashTrigger surface="tab:diet" />}
-      <Screen header={header} footer={<ActionBar />}>
+      <Screen header={header}>
         {/* Active plan period — what you committed to and how far through it
             you are. Without this the app can show today's meals but never says
             what they're part of. */}

@@ -57,7 +57,7 @@ data-dependency explicit and gives the user a reason to fill them in.
 | **food dislikes** | deepen | dislike-aware meal generation | yes (`foodDislikes` filter) |
 | **motivation / "why"** | deepen | personalized coach voice & briefings | yes (`@gozlin_identity.motivation`) |
 
-> The insight: Welliva is *already* a progressive system — features quietly light up
+> The insight: welliva is *already* a progressive system — features quietly light up
 > as data arrives. We are surfacing that ladder so the user can see and climb it,
 > turning hidden dependencies into a guided journey.
 

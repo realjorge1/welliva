@@ -29,12 +29,22 @@ import {
 } from "@/health-os";
 import type { UserBio, UserGoals } from "@/models/user";
 import {
+  associationLabel,
   loadConversation,
+  readEntryValence,
   saveConversation,
+  valenceLabel,
   type GozlinEpisode,
   type GozlinIdentityMemory,
   type HabitPattern,
 } from "@/services/gozlin";
+import {
+  forgetAllExperiences,
+  forgetExperience,
+  loadExperiences,
+  subscribeExperiences,
+} from "@/services/gozlin/ExperienceStore";
+import type { ExperienceRecord } from "@/services/gozlin/novelty";
 import { useCallback, useEffect, useState } from "react";
 
 // ── view-model types ──
@@ -76,6 +86,8 @@ export interface MemorySnapshot {
   patterns: HabitPattern[];
   episodes: GozlinEpisode[];
   conversationCount: number;
+  /** What they told Gozlin about things they tried, newest first (docs/gozlin/11). */
+  experiences: ExperienceRecord[];
 }
 
 // ── plain-language description per event type ──
@@ -175,13 +187,26 @@ function describe(e: HealthEvent): Described {
     }
     case "checkin.logged": {
       const p = e.payload as CheckinPayload;
+      // Two vintages of event land here. Ones the backfill produced carry the
+      // old 1–5 dials; ones written since the state-of-mind rebuild carry a
+      // valence, words and what it was about. Both have to read as a sentence,
+      // and neither may print a figure the user was never shown: "mood 3/5" was
+      // a scale nobody logged against once the slider replaced it.
+      const valence = readEntryValence(p);
       const parts = [
-        p.mood != null ? `mood ${p.mood}/5` : null,
-        p.energy != null ? `energy ${p.energy}/5` : null,
-        p.stress != null ? `stress ${p.stress}/5` : null,
+        valence !== null ? valenceLabel(valence) : null,
+        p.labels?.length ? p.labels.join(", ") : null,
+        p.associations?.length
+          ? `about ${p.associations.map(associationLabel).join(", ")}`
+          : null,
         p.sleepHours != null ? `${p.sleepHours}h sleep` : null,
       ].filter(Boolean);
-      return { icon: "happy-outline", accent: "mind", title: "Check-in", detail: parts.join(" · ") || undefined };
+      return {
+        icon: "partly-sunny-outline",
+        accent: "mind",
+        title: p.kind === "momentary" ? "How you felt" : "How the day felt",
+        detail: parts.join(" · ") || undefined,
+      };
     }
     case "coach.episode": {
       const p = e.payload as CoachEpisodePayload;
@@ -292,6 +317,10 @@ export interface UseMemoryCenter {
   removePreference: (pref: string) => Promise<void>;
   dismissPattern: (message: string) => Promise<void>;
   forgetEpisode: (id: string) => Promise<void>;
+  /** Forget one thing they told Gozlin about something they tried. */
+  forgetExperience: (id: string) => Promise<void>;
+  /** "Forget all of these". */
+  forgetAllExperiences: () => Promise<void>;
   clearConversations: () => Promise<void>;
   // nuke
   forgetEverything: () => Promise<void>;
@@ -313,15 +342,17 @@ export function useMemoryCenter(): UseMemoryCenter {
     patterns: [],
     episodes: [],
     conversationCount: 0,
+    experiences: [],
   });
 
   const reload = useCallback(async () => {
-    const [events, identity, patterns, episodes, convo] = await Promise.all([
+    const [events, identity, patterns, episodes, convo, experiences] = await Promise.all([
       timeline.query({}),
       LongTermStore.loadIdentity(),
       LongTermStore.loadBehavioral(),
       LongTermStore.loadEpisodes(),
       loadConversation(),
+      loadExperiences(),
     ]);
     setDays(groupByDay(events));
     setEventCount(events.length);
@@ -330,6 +361,7 @@ export function useMemoryCenter(): UseMemoryCenter {
       patterns,
       episodes,
       conversationCount: convo.length,
+      experiences,
     });
     setLoading(false);
   }, []);
@@ -337,6 +369,10 @@ export function useMemoryCenter(): UseMemoryCenter {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // A (tabs) screen stays mounted: a note the coach keeps, or a Forget from a
+  // receipt, must reach this list without waiting for the next focus.
+  useEffect(() => subscribeExperiences(() => void reload()), [reload]);
 
   const redactEvent = useCallback(
     async (id: string, date: string) => {
@@ -396,6 +432,19 @@ export function useMemoryCenter(): UseMemoryCenter {
     [reload],
   );
 
+  const forgetOneExperience = useCallback(
+    async (id: string) => {
+      await forgetExperience(id);
+      await reload();
+    },
+    [reload],
+  );
+
+  const forgetEveryExperience = useCallback(async () => {
+    await forgetAllExperiences();
+    await reload();
+  }, [reload]);
+
   const clearConversations = useCallback(async () => {
     await saveConversation([]);
     await reload();
@@ -423,6 +472,8 @@ export function useMemoryCenter(): UseMemoryCenter {
     removePreference,
     dismissPattern,
     forgetEpisode,
+    forgetExperience: forgetOneExperience,
+    forgetAllExperiences: forgetEveryExperience,
     clearConversations,
     forgetEverything,
   };

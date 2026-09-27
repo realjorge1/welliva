@@ -228,6 +228,41 @@ export function mealBody(
   return pool[Math.abs(i) % pool.length];
 }
 
+/**
+ * The body for a reminder on a day with NO planned meal in that slot.
+ *
+ * That reminder carries no "Ate it" button — there is nothing on the plan for
+ * the button to tick — so these lines must not promise one. Same register as
+ * the rest: an offer, and the tap opens the food log to record what was eaten.
+ */
+const MEAL_OPEN_BODIES: Record<MealSlotKey, readonly string[]> = {
+  breakfast: [
+    "Eaten yet? Tap to log what you had.",
+    "Tap to jot down breakfast — a few seconds.",
+    "Whatever it was, tap and I'll log it.",
+  ],
+  lunch: [
+    "Had lunch? Tap to log what it was.",
+    "Tap to add lunch — quick, then back to your day.",
+    "Whatever you ate, tap and it's counted.",
+  ],
+  dinner: [
+    "Had dinner? Tap to log what it was.",
+    "Tap to add dinner and close out the day.",
+    "Whatever's on the plate, tap to log it.",
+  ],
+  snack: [
+    "Had something? Tap to log it.",
+    "Tap to add a snack — takes a second.",
+    "A little something? Tap and it's in.",
+  ],
+};
+
+export function mealOpenBody(slot: MealSlotKey, date: string): string {
+  const pool = MEAL_OPEN_BODIES[slot];
+  return pool[Math.abs(dayIndexOf(date) + hash(slot)) % pool.length];
+}
+
 /** What the confirmation toast says after a meal is logged from the lock screen. */
 export const MEAL_LOGGED_LINES: readonly string[] = [
   "Logged. Nothing else needed.",

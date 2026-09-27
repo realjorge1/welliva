@@ -39,8 +39,9 @@ import {
   MEAL_REMINDER_CATEGORY,
   ensureNotificationCategories,
 } from "./categories";
-import { mealBody, mealTitle, type MealSlotKey } from "./copy";
+import { mealBody, mealOpenBody, mealTitle, type MealSlotKey } from "./copy";
 import { REMINDERS_CHANNEL_ID, ensureRemindersChannel } from "./init";
+import { ownerStamp } from "./owner";
 
 const SETTINGS_KEY = "@welliva_meal_reminders";
 /**
@@ -230,24 +231,47 @@ export async function syncMealReminders(
     // stall for a lookup that is the same document every time.
     const plans = await scheduleIndex();
 
+    const stamp = await ownerStamp();
     const ids: string[] = [];
     for (const plan of plannedReminders(config, now)) {
       // The meal's real name, when the plan for that day already exists. A
       // reminder six days out usually has nothing to read; the next top-up
       // fills it in once the day is generated.
       const name = mealNameIn(plans.get(plan.date), plan.slot);
+      // THE BUTTON ONLY WHEN THERE IS SOMETHING TO TICK. "Ate it" records the
+      // meal planned in that slot; on a day with no planned meal it could only
+      // fail. So an unplanned day gets the honest version — no button, and a
+      // tap that opens the food log to record what was actually eaten. If the
+      // plan appears before the reminder fires, the next top-up (every app
+      // open) upgrades it to the named, one-tap version.
       const id = await Notifications.scheduleNotificationAsync({
-        content: {
-          title: mealTitle(plan.slot, plan.date),
-          body: mealBody(plan.slot, plan.date, name),
-          categoryIdentifier: MEAL_REMINDER_CATEGORY,
-          data: {
-            type: "meal-reminder",
-            slot: plan.slot,
-            date: plan.date,
-            route: "/(tabs)/diet",
-          },
-        },
+        // Deterministic: re-laying the window replaces rather than duplicates,
+        // even if the stored id list was lost.
+        identifier: `welliva.meal.${plan.date}.${plan.slot}`,
+        content: name
+          ? {
+              title: mealTitle(plan.slot, plan.date),
+              body: mealBody(plan.slot, plan.date, name),
+              categoryIdentifier: MEAL_REMINDER_CATEGORY,
+              data: {
+                type: "meal-reminder",
+                slot: plan.slot,
+                date: plan.date,
+                route: "/(tabs)/diet",
+                ...stamp,
+              },
+            }
+          : {
+              title: mealTitle(plan.slot, plan.date),
+              body: mealOpenBody(plan.slot, plan.date),
+              data: {
+                type: "meal-reminder",
+                slot: plan.slot,
+                date: plan.date,
+                route: "/diet/log-food",
+                ...stamp,
+              },
+            },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DATE,
           channelId: REMINDERS_CHANNEL_ID,

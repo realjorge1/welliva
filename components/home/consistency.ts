@@ -33,7 +33,7 @@ export interface Consistency {
   totalDays: number;
 }
 
-/** Monday-of-week for a date string (weeks are Monday-based, per Welliva). */
+/** Monday-of-week for a date string (weeks are Monday-based, per welliva). */
 function mondayOf(dateStr: string): Date {
   const d = parseLocalDate(dateStr);
   const offset = (d.getDay() + 6) % 7; // 0 for Monday

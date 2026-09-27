@@ -1,8 +1,8 @@
 #!/bin/bash
-# Welliva Cache Clear Script
+# welliva Cache Clear Script
 # Run this script to clear all caches and ensure fresh code is loaded
 
-echo "🧹 Clearing all Welliva caches..."
+echo "🧹 Clearing all welliva caches..."
 
 # Clear Expo cache
 echo "📱 Clearing Expo cache..."

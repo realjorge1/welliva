@@ -41,7 +41,7 @@
  * for a lock in a build that cannot sell anything.
  */
 import { isBillingConfigured } from "./config";
-import { currentTier, getDevTierOverride } from "./entitlement";
+import { currentTier } from "./entitlement";
 import {
   coachDailyLimit,
   deepDiveLifetimeLimit,
@@ -55,15 +55,8 @@ import { trialGrants } from "./trial";
 import { checkQuota, recordUsage, type QuotaState } from "./usage";
 import { checkAllowance, spendAllowance } from "./allowance";
 
-/**
- * Whether the paid tiers are enforced at all in this session.
- *
- * The dev-override branch is what makes the locks testable before RevenueCat
- * exists: flipping the developer switch to "Free" turns gating on even with no
- * key, so a developer can walk the real free-tier experience.
- */
+/** Whether the paid tiers are enforced at all in this session. */
 export function isGatingActive(): boolean {
-  if (__DEV__ && getDevTierOverride() !== null) return true;
   return isBillingConfigured;
 }
 
@@ -74,24 +67,14 @@ export function isGatingActive(): boolean {
  */
 export function effectiveTier(): Tier {
   if (!isGatingActive()) return "pro";
-  // `currentTier()` already resolves the dev override, so this is the real tier
-  // in every build. The intro window is deliberately NOT folded in here — see
-  // the header, and use `featureTier()` when a feature could be inside it.
+  // The intro window is deliberately NOT folded in here — see the header, and
+  // use `featureTier()` when a feature could be inside it.
   return currentTier();
 }
 
-/**
- * Whether a live intro window should be honoured at all in this session.
- *
- * False under a dev override, and that is the point: flipping the developer
- * switch to "Free" is how the locks get walked, and a window silently opening
- * Gozlin would make the free experience untestable for the 30 hours during
- * which those locks are being written.
- */
+/** Whether a live intro window should be honoured at all in this session. */
 function trialApplies(): boolean {
-  if (!isGatingActive()) return false;
-  if (__DEV__ && getDevTierOverride() !== null) return false;
-  return true;
+  return isGatingActive();
 }
 
 /**

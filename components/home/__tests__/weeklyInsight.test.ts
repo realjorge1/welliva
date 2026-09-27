@@ -3,7 +3,7 @@
  * properties matter more than anything else it does:
  *
  *   1. It must be STABLE inside a week. If it changes between two opens on the
- *      same day, "this week Gozlin noticed" is visibly a lie and the whole card
+ *      same day, "worth knowing this week" is visibly a lie and the whole card
  *      reads as randomised filler.
  *   2. It must be SILENT when the engine has nothing. A card that invents
  *      encouragement for a three-day-old account is how a user learns the

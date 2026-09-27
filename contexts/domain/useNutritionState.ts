@@ -43,7 +43,16 @@ import {
   swapMealInSchedule,
   toggleMealConsumed,
 } from "../../services/ScheduleService";
-import { recordActivity, StreakData } from "../../services/StreakService";
+import {
+  addWaterToday,
+  drainWaterInbox,
+  readWaterCounter,
+} from "../../services/nutrition/waterStore";
+import {
+  loadStreakData,
+  recordActivity,
+  StreakData,
+} from "../../services/StreakService";
 
 interface Params {
   userBio: UserBio | null;
@@ -317,29 +326,74 @@ export function useNutritionState({
     [refreshTodayDiet],
   );
 
-  const addWater = useCallback(
-    (ml: number) => {
+  /**
+   * Credit a hydration-goal day the moment today's intake first crosses the
+   * goal (deduped per day inside creditWaterGoalDay). This is the one
+   * achievement signal not already captured elsewhere — and it has to fire for
+   * a glass logged from the lock screen too, which is why it takes the two
+   * values either side of a write rather than living inside one write path.
+   */
+  const creditIfGoalCrossed = useCallback(
+    (prev: number, next: number) => {
       const goal =
         userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500;
-      setWaterMl((prev) => {
-        const next = prev + ml;
-        writeJSON(KEYS.WATER_TODAY, next);
-        // Credit a hydration-goal day the moment today's intake first crosses
-        // the goal (deduped per day inside creditWaterGoalDay). This is the one
-        // achievement signal not already captured elsewhere.
-        if (prev < goal && next >= goal) {
-          const today = todayDate();
-          setAchievementRecord((rec) => {
-            const updated = creditWaterGoalDay(rec, today);
-            if (updated !== rec) saveAchievementRecord(updated);
-            return updated;
-          });
-        }
-        return next;
+      if (prev < goal && next >= goal) {
+        const today = todayDate();
+        setAchievementRecord((rec) => {
+          const updated = creditWaterGoalDay(rec, today);
+          if (updated !== rec) saveAchievementRecord(updated);
+          return updated;
+        });
+      }
+    },
+    [userGoals, nutritionTargets, setAchievementRecord],
+  );
+
+  /**
+   * Add water. Optimistic on screen, then a serialized read-modify-write of the
+   * stored counter (services/nutrition/waterStore) whose result the screen
+   * adopts. The write used to be computed from React's own `prev`, which was
+   * fine while React was the only writer; a glass logged from a lock-screen
+   * button is a second writer React can't see, and the next in-app tap would
+   * have quietly erased it.
+   */
+  const addWater = useCallback(
+    (ml: number) => {
+      setWaterMl((prev) => prev + ml);
+      void addWaterToday(ml).then(({ prev, next }) => {
+        setWaterMl(next);
+        creditIfGoalCrossed(prev, next);
       });
     },
-    [userGoals, nutritionTargets],
+    [creditIfGoalCrossed, setWaterMl],
   );
+
+  /**
+   * Re-read the counters a lock-screen button can move while React isn't
+   * looking: today's water (folding in any glass that was waiting for the day to
+   * turn — see waterStore's inbox) and the activity streak a lock-screen meal
+   * tick credits. Called on every out-of-band write, on every return to the
+   * foreground, and once the launch rollover has landed.
+   */
+  const syncLiveCounters = useCallback(async () => {
+    const goal = userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500;
+    try {
+      await drainWaterInbox(goal);
+      const counter = await readWaterCounter();
+      setWaterMl(counter.ml);
+      // Credit only when the counter is TODAY's (before the launch rollover it
+      // still holds yesterday). creditWaterGoalDay is deduped per day, so a
+      // goal met in-app and re-read here is credited once.
+      if (counter.date === todayDate()) creditIfGoalCrossed(0, counter.ml);
+    } catch {
+      // keep what's on screen — never show a zero we did not read
+    }
+    try {
+      setStreakData(await loadStreakData());
+    } catch {
+      // same
+    }
+  }, [userGoals, nutritionTargets, creditIfGoalCrossed, setWaterMl, setStreakData]);
 
   return {
     consumedNutrition,
@@ -352,5 +406,6 @@ export function useNutritionState({
     handleSwapMeal,
     addFoodAsSnack,
     addWater,
+    syncLiveCounters,
   };
 }

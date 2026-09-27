@@ -7,9 +7,9 @@
  * read and use everything around it.
  *
  * The button names the tier this particular lock opens, read from
- * `featureMinTier(lock)` rather than typed. Every lock resolves to "See Welliva
+ * `featureMinTier(lock)` rather than typed. Every lock resolves to "See welliva
  * Pro" now that Pro is the only paid tier — but deriving it is what let the
- * three-tier storefront say "See Welliva Plus" on a habit cap and "See Welliva
+ * three-tier storefront say "See welliva Plus" on a habit cap and "See welliva
  * Pro" on generated plans, and it is what will keep this honest if a second
  * tier ever comes back.
  *

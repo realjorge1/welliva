@@ -934,9 +934,12 @@ export default function FoodsScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           // Tuned for low-end Android: a small first paint, small batches, and a
-          // modest retained window. `removeClippedSubviews` is deliberately NOT
-          // set — it intermittently blanks rows on Android with layered children
-          // like these, and the row count here doesn't need it.
+          // modest retained window. Clipping is explicitly OFF — it blanks rows
+          // with layered children like these and detaches them mid-draw (NPE
+          // `mViewFlags`). Explicit, not omitted: SectionList happens to default
+          // it off, but FlatList defaults it ON for Android, so omission is not
+          // a pattern to copy.
+          removeClippedSubviews={false}
           initialNumToRender={12}
           maxToRenderPerBatch={8}
           windowSize={7}

@@ -10,7 +10,7 @@
  * unmatched list, the commit — is the text path, untouched.
  *
  * That is not laziness, it is the only version that keeps the app's central
- * promise. Welliva's rule is that a model may PARSE but never NUMBER: the vision
+ * promise. welliva's rule is that a model may PARSE but never NUMBER: the vision
  * endpoint is contractually forbidden from returning calories (see
  * `MealPhotoResponse` in services/api/WellivaApi.ts), because a plausible
  * invented number is indistinguishable from a measured one the moment it lands

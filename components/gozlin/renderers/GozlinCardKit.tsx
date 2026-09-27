@@ -3,7 +3,7 @@
  *
  * Small, on-brand building blocks used by every structured coach card so the
  * Gozlin outputs feel like one designed system (mirrors the AIActionsBar/shared
- * pattern from features/, rebuilt on Welliva's design tokens).
+ * pattern from features/, rebuilt on welliva's design tokens).
  */
 
 import { AppText, Mono, useColors } from "@/components/ui";

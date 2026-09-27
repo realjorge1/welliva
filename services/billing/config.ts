@@ -73,6 +73,18 @@ export const PRO_ENTITLEMENT = "pro";
  */
 export const LEGACY_PLUS_ENTITLEMENT = "plus";
 
+/**
+ * The Google Play subscription ids behind Pro's two packages (Play Console →
+ * Subscriptions). Used ONLY to read PRICES straight from Google Play when
+ * RevenueCat's servers can't be reached — see `getPlanOptions`. Never to sell:
+ * a purchase always goes through an offering package, because RevenueCat has to
+ * be reachable to record it.
+ */
+export const PLAY_SUBSCRIPTION_IDS: readonly string[] = [
+  "welliva_pro_monthly",
+  "welliva_pro_yearly",
+];
+
 /** The offering to display. `default` is the one marked current in RevenueCat. */
 export const DEFAULT_OFFERING = "default";
 

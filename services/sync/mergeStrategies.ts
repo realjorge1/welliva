@@ -210,6 +210,36 @@ export const MERGE_STRATEGIES: Record<string, MergeStrategy> = {
     order: "desc",
     cap: 300,
   },
+  // ExperienceRecord[] — what they told Gozlin about something they tried
+  // (services/gozlin/ExperienceStore.ts). A collision resolves to the later
+  // `updatedAt`, and that is load-bearing: forgetting a record leaves a
+  // scrubbed TOMBSTONE with a newer stamp, so the Forget beats the full copy
+  // still sitting on another phone instead of being merged back out of it.
+  "@gozlin_experiences": {
+    kind: "mergeById",
+    idField: "id",
+    tsField: "updatedAt",
+    order: "desc",
+    cap: 300,
+  },
+  // CuriosityEntry[] — the questions Gozlin opened. Merged so a question
+  // answered on one phone is not asked again on the other.
+  "@gozlin_curiosity": {
+    kind: "mergeById",
+    idField: "id",
+    tsField: "updatedAt",
+    order: "desc",
+    cap: 200,
+  },
+  // CareFlag[] — { kind, at }, no text. The instant IS the identity: two
+  // phones' flags union, and one flag never replaces another.
+  "@gozlin_care_flags": {
+    kind: "mergeById",
+    idField: "at",
+    tsField: "at",
+    order: "desc",
+    cap: 50,
+  },
 };
 
 export function strategyFor(key: string): MergeStrategy {

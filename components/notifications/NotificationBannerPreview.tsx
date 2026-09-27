@@ -1,5 +1,5 @@
 /**
- * NotificationBannerPreview — a faithful mock of a delivered Welliva reminder.
+ * NotificationBannerPreview — a faithful mock of a delivered welliva reminder.
  *
  * Same app icon, same title/body shape, same action button, in the same order
  * the OS draws them. It exists because the permission prompt can be shown once
@@ -86,7 +86,7 @@ export function NotificationBannerPreview({
       <View style={styles.head}>
         <Image source={APP_ICON} style={styles.icon} />
         <AppText variant="caption" color="tertiary" uppercase style={styles.app}>
-          Welliva
+          welliva
         </AppText>
         <AppText variant="caption" color="tertiary">
           now

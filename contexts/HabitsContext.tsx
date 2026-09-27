@@ -4,7 +4,7 @@
  * Manual habits complete by tap and persist to @welliva_habit_logs. Linked
  * habits (water / meals / workout) derive their done-dates from the histories
  * AppContext already maintains — marking a meal eaten or finishing a session
- * lights up the habit automatically, which is the whole Welliva adaptation.
+ * lights up the habit automatically, which is the whole welliva adaptation.
  *
  * Sits under AppProvider and subscribes only to the narrow slices it needs.
  *
@@ -40,9 +40,10 @@ import {
   loadRetiredHabits,
   retireHabit,
   saveHabits,
-  saveLogs,
+  reconcileHabitReminders,
   seedDefaultHabits,
   syncReminders,
+  updateLogs,
 } from "../services/HabitService";
 import { subscribeHabitLogsChanged } from "../services/notifications/habitActions";
 import { writeWidgetSnapshot } from "../services/notifications/widgets";
@@ -91,6 +92,13 @@ interface HabitsContextType {
    * user had just asked the app to forget — until the next day rollover.
    */
   refreshRetired: () => Promise<void>;
+  /**
+   * Re-lay any habit reminder the OS queue lost, and cancel ones still pending
+   * for habits that no longer want them. Never prompts for permission. `force`
+   * re-lays every reminder (a notification-format migration). Runs from the
+   * reminder sync runner on launch, on foreground and when permission is granted.
+   */
+  reconcileReminders: (options?: { force?: boolean }) => Promise<void>;
 }
 
 const HabitsContext = createContext<HabitsContextType | undefined>(undefined);
@@ -255,20 +263,23 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
     async (id: string) => {
       const habit = habits.find((h) => h.id === id);
       if (!habit || habit.source !== "manual") return;
-      const dates = new Set(logs[id] ?? []);
-      const completing = !dates.has(currentDate);
+      // Decide from what's on screen (that's what the user tapped), then apply
+      // it to the STORED blob inside the log lock — never write back the
+      // in-memory copy. A lock-screen "Mark as Done" may have written the blob
+      // since this screen last read it, and writing our copy back would erase it.
+      const completing = !(logs[id] ?? []).includes(currentDate);
       if (completing) {
-        dates.add(currentDate);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
           () => {},
         );
       } else {
-        dates.delete(currentDate);
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       }
-      const next = { ...logs, [id]: [...dates].sort() };
+      setLogs((prev) => applyToggle(prev, id, currentDate, completing));
+      const next = await updateLogs((stored) =>
+        applyToggle(stored, id, currentDate, completing),
+      );
       setLogs(next);
-      await saveLogs(next);
     },
     [habits, logs, currentDate],
   );
@@ -327,10 +338,13 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
       setHabits(next);
       await saveHabits(next);
       if (logs[id]) {
-        const nextLogs = { ...logs };
-        delete nextLogs[id];
+        const nextLogs = await updateLogs((stored) => {
+          if (!stored[id]) return null;
+          const copy = { ...stored };
+          delete copy[id];
+          return copy;
+        });
         setLogs(nextLogs);
-        await saveLogs(nextLogs);
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(
         () => {},
@@ -358,6 +372,19 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
     [habits],
   );
 
+  const reconcileReminders = useCallback(
+    async (options: { force?: boolean } = {}) => {
+      // Read the list from storage, not state: this runs on launch, possibly
+      // before the provider's own load has landed.
+      const stored = await loadHabits();
+      const repaired = await reconcileHabitReminders(stored, options);
+      if (!repaired) return;
+      await saveHabits(repaired);
+      setHabits(repaired);
+    },
+    [],
+  );
+
   const value = useMemo<HabitsContextType>(
     () => ({
       loading,
@@ -370,11 +397,25 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
       deleteHabit,
       reorderHabits,
       refreshRetired,
+      reconcileReminders,
     }),
-    [loading, views, retired, getView, toggleToday, createHabit, updateHabit, deleteHabit, reorderHabits, refreshRetired],
+    [loading, views, retired, getView, toggleToday, createHabit, updateHabit, deleteHabit, reorderHabits, refreshRetired, reconcileReminders],
   );
 
   return <HabitsContext.Provider value={value}>{children}</HabitsContext.Provider>;
+}
+
+/** One habit's completion for `date` set or cleared, in a copy of `logs`. */
+function applyToggle(
+  logs: HabitLogs,
+  id: string,
+  date: string,
+  completing: boolean,
+): HabitLogs {
+  const dates = new Set(logs[id] ?? []);
+  if (completing) dates.add(date);
+  else dates.delete(date);
+  return { ...logs, [id]: [...dates].sort() };
 }
 
 /**

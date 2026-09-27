@@ -39,6 +39,8 @@ export const Dur = {
   content: 720,
   /** Signature moments only: the plan ring drawing, the exit. */
   cinematic: 1100,
+  /** A held question being carried up by the answers arriving under it. */
+  rise: 900,
   /** Step hand-over — the outgoing half. */
   stepOut: 280,
   /** Step hand-over — the incoming half (starts before the outgoing ends). */
@@ -173,16 +175,22 @@ export function useMotion(): MotionProfile {
 /* ───────────────────────────────── Pacing ──────────────────────────────── */
 
 /**
- * How long the interface holds still after a selection before moving on.
- * Long enough that the acknowledgement is felt; short enough that it is never
- * a wait. The activity step's existing 380ms auto-continue lives here so the
- * rest of the flow can match it.
+ * How long the interface holds still — after a selection before moving on, and
+ * before a held question lets its answers in. Long enough that the moment is
+ * felt; short enough that it is never a wait.
  */
 export const Pace = {
   /** Selection → the interface reacts. */
   react: 260,
-  /** Selection → the flow advances (the established activity-step value). */
+  /** Selection → the flow advances (the activity step; training experience → equipment). */
   advance: 380,
   /** Selection → a sub-question inside a screen hands over. */
   handover: 420,
+  /**
+   * A held question alone on the stage, from its arrival to its answers rising
+   * (see QuestionStage). Its own layers have landed by ~930ms; the rest is the
+   * pause — long enough to read it twice, never long enough to wonder whether
+   * the screen is stuck. Any tap ends it.
+   */
+  hold: 1900,
 } as const;

@@ -1,20 +1,25 @@
 /**
  * LOGS — one record of everything you actually did.
  *
- * Welliva has always kept five separate ledgers: meals in `dietHistory`,
- * sessions in `workoutLog`, hydration in the archived water history, weight in
- * `bodyLogs`, and habit ticks in the habits store. Each was only ever readable
- * from inside its own feature — you could see your meal history from Diet and
- * your workouts from Fitness, but never your WEEK. This screen is that view:
- * every ledger, merged, newest first, grouped by day.
+ * welliva keeps six separate ledgers: meals in `dietHistory`, sessions in
+ * `workoutLog`, hydration in the archived water history, weight in `bodyLogs`,
+ * habit ticks in the habits store, and state-of-mind entries in the Gozlin
+ * store. Each was only ever readable from inside its own feature — you could see
+ * your meal history from Diet and your workouts from Fitness, but never your
+ * WEEK. This screen is that view: every ledger, merged, newest first, grouped by
+ * day.
  *
- * IT READS THE FIVE LEDGERS AND OWNS THE TWO HAND-ENTERED ONES. Meals,
- * workouts, water and habits are all logged where they happen, so this screen
- * only reports them; editing stays with Diet → History, which is one tap from
- * any meal row. But the check-in and the weigh-in have no home feature — they
- * were reachable only from the coach's overflow menu, which meant two ordinary
- * logging actions lived inside a chat screen while the screen named for the
- * record couldn't add to it. They're here now, behind the header's + button.
+ * IT READS ALL SIX. Meals, workouts, water, habits and mood are all logged where
+ * they happen, so this screen only reports them; editing stays with Diet →
+ * History, which is one tap from any meal row.
+ *
+ * MOOD WAS THE ONE THAT WASN'T HERE. Mind entries are entered from the Deck's
+ * quick-log — which sits at the bottom of THIS screen — and for a long time they
+ * went into the Gozlin store and appeared nowhere on it: no kind, no chip, no
+ * row. You logged how you felt from the screen named for the record, and the
+ * record never mentioned it. A mind entry is now a first-class kind, and it
+ * counts toward the entry total and the week spark like everything else, because
+ * it is a thing you actually did.
  *
  * TODAY IS LIVE. `dietHistory` only gains a row when a day closes, so today's
  * meals are read from the live schedule instead — otherwise the day you're
@@ -34,7 +39,7 @@
 
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { ProLockCard } from "@/components/billing";
-import { ActionBar, ScreenTopBar } from "@/components/navigation";
+import { ScreenTopBar } from "@/components/navigation";
 import {
   AppText,
   Card,
@@ -50,6 +55,14 @@ import { useHabits } from "@/contexts/HabitsContext";
 import type { IconName } from "@/components/navigation/menu";
 import { historyCutoffDate } from "@/services/billing";
 import {
+  associationLabel,
+  loadCheckins,
+  readEntryValence,
+  subscribeMindEntries,
+  valenceLabel,
+  type GozlinCheckin,
+} from "@/services/gozlin";
+import {
   getWaterHistory,
   parseLocalDate,
   toLocalDateString,
@@ -62,7 +75,7 @@ import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 
 /* ───────────────────────────────── Model ───────────────────────────────── */
 
-type Kind = "meal" | "workout" | "water" | "body" | "habit";
+type Kind = "meal" | "workout" | "water" | "body" | "habit" | "mind";
 
 interface LogEntry {
   id: string;
@@ -88,12 +101,14 @@ const FILTERS: Filter[] = [
   { key: "meal", label: "Meals", icon: "restaurant-outline" },
   { key: "workout", label: "Workouts", icon: "barbell-outline" },
   { key: "habit", label: "Habits", icon: "grid-outline" },
+  { key: "mind", label: "Mind", icon: "partly-sunny-outline" },
   { key: "water", label: "Water", icon: "water-outline" },
   { key: "body", label: "Body", icon: "body-outline" },
 ];
 
 /** How far back the timeline reaches for a Pro account. */
 const MAX_DAYS = 120;
+
 
 /* ───────────────────────────────── Screen ──────────────────────────────── */
 
@@ -111,6 +126,27 @@ export default function LogsScreen() {
   // Hydration is archived to storage at day-end rather than held in a context,
   // so it's the one ledger this screen has to go and fetch.
   const [water, setWater] = useState<WaterHistoryEntry[]>([]);
+  // State-of-mind entries live in the Gozlin store for the same reason — no
+  // context holds them. `currentDate` is in the deps so crossing midnight (or
+  // saving an entry, which bumps the day's state) re-reads rather than leaving
+  // the row you just wrote off the screen you wrote it from.
+  const [mind, setMind] = useState<GozlinCheckin[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void loadCheckins().then((c) => {
+      if (alive) setMind(c);
+    });
+    // The sheet that writes these lives in the Deck, which is mounted over this
+    // screen — so a save happens with /logs already focused and no effect would
+    // re-run. The write path announces instead.
+    const stop = subscribeMindEntries((next) => {
+      if (alive) setMind(next);
+    });
+    return () => {
+      alive = false;
+      stop();
+    };
+  }, [currentDate]);
   useEffect(() => {
     let alive = true;
     getWaterHistory().then((h) => {
@@ -128,6 +164,7 @@ export default function LogsScreen() {
       water: colors.water,
       body: colors.fat,
       habit: colors.success,
+      mind: colors.calories,
     }),
     [colors],
   );
@@ -148,8 +185,9 @@ export default function LogsScreen() {
         bodyLogs,
         water,
         habits: views,
+        mind,
       }),
-    [currentDate, dietHistory, todayDiet, workoutLog, bodyLogs, water, views],
+    [currentDate, dietHistory, todayDiet, workoutLog, bodyLogs, water, views, mind],
   );
 
   /** Anything older than the free-tier cutoff exists but isn't shown. */
@@ -272,7 +310,7 @@ export default function LogsScreen() {
   );
 
   return (
-    <Screen header={header} footer={<ActionBar />}>
+    <Screen header={header}>
       {/* Last seven days, at a glance. It sits above the ledger because the
           question people bring to a log screen is "how has my week gone", and
           a list of rows makes you do that arithmetic yourself. */}
@@ -480,6 +518,7 @@ function buildEntries(input: {
   bodyLogs: { date: string; weightKg: number; waistCm?: number }[];
   water: WaterHistoryEntry[];
   habits: { habit: { id: string; name: string; icon: string }; done: Set<string> }[];
+  mind: GozlinCheckin[];
 }): LogEntry[] {
   const out: LogEntry[] = [];
 
@@ -583,12 +622,46 @@ function buildEntries(input: {
     });
   }
 
+  // ── State of mind ──
+  //
+  // One row PER ENTRY, not per day — unlike habits. A day can hold several
+  // momentary entries, and collapsing them would destroy the only thing that
+  // makes momentary logging worth doing: that a rough morning and a decent
+  // evening are two different facts. The daily entry is titled as the day's
+  // overall read so the two kinds are never confused in the list.
+  for (const m of input.mind) {
+    const v = readEntryValence(m);
+    // An entry with no feeling at all is a sleep-only record from before the
+    // rebuild. It still belongs in the log, but it must not claim a mood.
+    const daily = (m.kind ?? "daily") === "daily";
+    const detail = [
+      m.labels?.length ? m.labels.join(" · ") : null,
+      m.associations?.length
+        ? m.associations.map(associationLabel).join(" · ")
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" — ");
+    out.push({
+      id: `mind-${m.id ?? `${m.date}:${m.kind ?? "daily"}`}`,
+      date: m.date,
+      kind: "mind",
+      icon: "partly-sunny",
+      title: daily ? "How the day felt" : "How you felt",
+      detail:
+        detail ||
+        (m.sleepHours != null ? `${m.sleepHours}h sleep recorded` : "Checked in"),
+      value: v !== null ? valenceLabel(v) : undefined,
+    });
+  }
+
   const ORDER: Record<Kind, number> = {
     meal: 0,
     workout: 1,
     habit: 2,
-    water: 3,
-    body: 4,
+    mind: 3,
+    water: 4,
+    body: 5,
   };
 
   return out.sort((a, b) =>

@@ -11,7 +11,7 @@
  * numbers, it is the single thing no competitor can copy. MyFitnessPal cannot
  * show you where a crowd-sourced entry came from; Cal AI cannot show you where
  * a vision model's calorie count came from, because there is no "where" — a
- * number a model computed has no provenance to display. Welliva forbade the
+ * number a model computed has no provenance to display. welliva forbade the
  * model from computing figures (services/gozlin/agent/receipts.ts,
  * services/nutrition/NutrientResolver.ts), and this screen is the receipt that
  * architecture was buying.
@@ -211,7 +211,7 @@ export default function ReceiptsScreen() {
             Why we can show you this
           </AppText>
           <AppText variant="footnote" color="secondary" style={styles.whyBody}>
-            Welliva&apos;s coach is not allowed to compute nutrition figures. It
+            welliva&apos;s coach is not allowed to compute nutrition figures. It
             can read your log and name a food, but every number comes from a food
             composition table — USDA, the FAO&apos;s West African tables, or a
             manufacturer&apos;s printed label — and carries that source with it

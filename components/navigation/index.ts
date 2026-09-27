@@ -1,5 +1,5 @@
 /**
- * Welliva navigation — the swipe menu shell.
+ * welliva navigation — the swipe menu shell.
  *
  *   import { AppDrawer, MenuButton, useDrawer } from "@/components/navigation";
  *
@@ -7,9 +7,18 @@
  * hamburger each root screen puts at the top-left of its header. Everything
  * else here is the model those two share.
  */
-export { ActionBar } from "./ActionBar";
-export type { ActionBarProps } from "./ActionBar";
 export { AppDrawer } from "./AppDrawer";
+export { DeckHost } from "./Deck";
+export {
+  DECK_BASE_GAP,
+  DECK_BLOCK,
+  DECK_GUTTER,
+  RAIL_CONDENSED,
+  RAIL_HEIGHT,
+  useDeck,
+  useDeckOptional,
+} from "./DeckContext";
+export type { DeckApi } from "./DeckContext";
 export { MenuButton } from "./MenuButton";
 export type { MenuButtonProps } from "./MenuButton";
 export { ScreenTopBar } from "./ScreenTopBar";
@@ -20,18 +29,25 @@ export {
   ALL_MENU_ITEMS,
   PRIMARY_ITEMS,
   PROFILE_ITEM,
+  RAIL_ITEMS,
+  RAIL_ROUTES,
   SECONDARY_ITEMS,
   SETTINGS_ITEM,
   SWIPEABLE_PATHS,
+  isRailItem,
 } from "./menu";
 export type { MenuItem } from "./menu";
 export {
   MEAL_WINDOWS,
+  finishedDayMove,
   mealDueAt,
   mealMissedBy,
+  resolveAgenda,
+  resolveDayProgress,
   resolveNextMove,
 } from "./nextMove";
 export type {
+  DayProgress,
   MealSlot,
   NextMove,
   NextMoveAction,

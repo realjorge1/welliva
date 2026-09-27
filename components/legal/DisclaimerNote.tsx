@@ -1,5 +1,5 @@
 /**
- * DISCLAIMER NOTE — the medical disclaimer, wherever Welliva hands out a number.
+ * DISCLAIMER NOTE — the medical disclaimer, wherever welliva hands out a number.
  *
  * The app computes calorie, protein and sodium targets for people who are
  * pregnant, diabetic or living with kidney disease. Wherever one of those

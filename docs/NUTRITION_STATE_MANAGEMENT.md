@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines the non-negotiable rules for meal consumption state persistence and nutrition progress tracking in the Welliva app.
+This document defines the non-negotiable rules for meal consumption state persistence and nutrition progress tracking in the welliva app.
 
 ## Core Principle: Planning vs Consumption
 

@@ -1,7 +1,7 @@
 /**
  * health-os/platform/clock.ts
  *
- * The single TIME authority for the Personal Health OS. Re-exports Welliva's
+ * The single TIME authority for the Personal Health OS. Re-exports welliva's
  * canonical LOCAL-time helpers (never UTC — see services/OfflineStorage) so every
  * domain has one import home, and adds the month-partition + offset-ISO helpers the
  * Timeline needs.

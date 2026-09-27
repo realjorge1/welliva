@@ -1,5 +1,5 @@
 /**
- * LIST PRICES — what Welliva charges, as published.
+ * LIST PRICES — what welliva charges, as published.
  *
  * READ THIS BEFORE USING ANY NUMBER IN HERE.
  *

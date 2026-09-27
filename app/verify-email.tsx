@@ -1,9 +1,11 @@
 import {
-  AuthBackground,
-  AuthBrand,
   AuthError,
   AuthFooter,
+  AuthFormBlock,
+  AuthLegalStrip,
   AuthPrimaryButton,
+  AuthScreen,
+  AuthSheetTitle,
   authStyles,
 } from "@/components/AuthKit";
 import { friendlyAuthError, isEmailRateLimited } from "@/components/auth/authErrors";
@@ -11,7 +13,7 @@ import { useAuth } from "@/components/SupabaseAuthProvider";
 import { supabase } from "@/lib/supabase";
 import { Link, useLocalSearchParams } from "expo-router";
 import React, { useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 /**
  * VERIFY EMAIL — the pending state when email confirmations are ON (B2).
@@ -27,6 +29,10 @@ import { Pressable, Text, View } from "react-native";
  * with an error and no session; `redirectError` carries the reason across, so
  * the screen can say "that link expired" next to the button that fixes it,
  * rather than leaving the user staring at an inbox that looks fine.
+ *
+ * It wears the same hero + sheet as sign-in on purpose. This is the one screen
+ * a user lands on twice — once after signing up, once after a link fails — and
+ * it should read as the same place both times.
  */
 export default function VerifyEmailScreen() {
   const { email } = useLocalSearchParams<{ email?: string }>();
@@ -60,34 +66,31 @@ export default function VerifyEmailScreen() {
   };
 
   return (
-    <AuthBackground>
-      <AuthBrand
+    <AuthScreen title="welliva">
+      <AuthSheetTitle
         title="Check your email"
         subtitle={
           email
-            ? `We sent a confirmation link to ${email}. Tap it to activate your account, then you'll be brought right back here.`
+            ? `We sent a confirmation link to ${email}. Tap it to activate your account and you'll come straight back here.`
             : "We sent you a confirmation link. Tap it to activate your account."
         }
       />
 
-      <AuthError message={error ?? redirectError} />
-      {sent && (
-        <View style={{ marginBottom: 12 }}>
-          <Text style={{ color: "#8FE3A6", fontSize: 13, fontWeight: "600", textAlign: "center" }}>
-            Sent! Check your inbox (and spam folder).
-          </Text>
-        </View>
-      )}
+      <AuthFormBlock>
+        <View style={styles.spacer} />
+        <AuthError message={error ?? redirectError} />
+        {sent && <Text style={styles.sent}>Sent — check your inbox, and your spam folder.</Text>}
 
-      <AuthPrimaryButton
-        label="Resend email"
-        onPress={onResend}
-        loading={loading}
-        disabled={loading || !email}
-      />
+        <AuthPrimaryButton
+          label="Resend email"
+          onPress={onResend}
+          loading={loading}
+          disabled={loading || !email}
+        />
+      </AuthFormBlock>
 
       <AuthFooter
-        prompt="Wrong email or already verified?"
+        prompt="Wrong email, or already verified?"
         actionSlot={
           <Link href="/sign-in" asChild>
             <Pressable hitSlop={8}>
@@ -96,6 +99,19 @@ export default function VerifyEmailScreen() {
           </Link>
         }
       />
-    </AuthBackground>
+
+      <AuthLegalStrip />
+    </AuthScreen>
   );
 }
+
+const styles = StyleSheet.create({
+  spacer: { height: 18 },
+  sent: {
+    color: "#8FE3A6",
+    fontSize: 12.5,
+    fontWeight: "600",
+    textAlign: "center",
+    marginBottom: 12,
+  },
+});

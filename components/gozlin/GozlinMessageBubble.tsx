@@ -34,7 +34,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { GozlinStructuredRenderer } from "./renderers";
 import { MessageActions, type MessageAction } from "./MessageActions";
 import { ReceiptText, ReceiptTrail } from "./ReceiptText";
-import type { Receipt } from "@/services/gozlin/agent";
+import type { RecallReceipt, Receipt } from "@/services/gozlin/agent";
 
 /** How long the copy tick stays before the icon returns. */
 const COPIED_MS = 1600;
@@ -42,6 +42,7 @@ const COPIED_MS = 1600;
 export function GozlinMessageBubble({
   message,
   onOpenReceipt,
+  onOpenRecall,
   expanded = false,
   onRegenerate,
   onFeedback,
@@ -57,6 +58,8 @@ export function GozlinMessageBubble({
    * bubble would mount hundreds of modals in a long history.
    */
   onOpenReceipt?: (receipt: Receipt) => void;
+  /** Raised when a YOU TOLD ME pill is tapped — one sheet for the thread, as above. */
+  onOpenRecall?: (recall: RecallReceipt) => void;
   /** Show the actions with no tap. The newest coach reply passes this. */
   expanded?: boolean;
   /** Answer this turn again from scratch. Coach messages only. */
@@ -225,7 +228,9 @@ export function GozlinMessageBubble({
             <ReceiptTrail
               content={message.content}
               receipts={message.receipts}
+              recalls={message.recalls}
               onOpenReceipt={onOpenReceipt}
+              onOpenRecall={onOpenRecall}
             />
           ) : null}
         </Pressable>

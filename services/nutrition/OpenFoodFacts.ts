@@ -458,7 +458,7 @@ const OFF_GROUP = "Your foods";
 // ============================================================================
 
 /** Open Food Facts asks every client to identify itself. This is that. */
-const USER_AGENT = "Welliva/1.0 (https://welliva.app)";
+const USER_AGENT = "welliva/1.0 (https://realjorge1.github.io/welliva/)";
 
 const OFF_BASE = "https://world.openfoodfacts.org/api/v2/product";
 

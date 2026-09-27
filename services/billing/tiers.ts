@@ -45,7 +45,7 @@
  *    section below for why this stopped being a paid boundary. Choosing one,
  *    scheduling it and tracking against it are all free, and so is the whole
  *    fitness side: activities, schedules and guided sessions.
- *  • MEMORY. Everything Welliva has worked out about this person from their own
+ *  • MEMORY. Everything welliva has worked out about this person from their own
  *    logs stays readable on Free (`/knows`). It is their data being reflected
  *    back, not generated intelligence, and locking it would make the free tier
  *    feel like surveillance rather than a tool.
@@ -114,10 +114,10 @@ export function toTier(value: unknown): Tier {
   return value === "pro" || value === "plus" ? "pro" : "free";
 }
 
-/** Full product name — "Welliva Pro". For headlines and store-facing copy. */
+/** Full product name — "welliva Pro". For headlines and store-facing copy. */
 export const TIER_NAME: Record<Tier, string> = {
-  free: "Welliva Free",
-  pro: "Welliva Pro",
+  free: "welliva Free",
+  pro: "welliva Pro",
 };
 
 /** One word — "Pro". For pills, badges and anywhere the brand is already implied. */
@@ -148,7 +148,7 @@ export const TIER_SHORT_NAME: Record<Tier, string> = {
  *    read as a paid add-on rather than as the product being for everyone.
  *  • IT IS CONTENT WE ALREADY HAVE. Serving one more diet costs nothing per
  *    user, so the revenue it protected was never worth the top-of-funnel it
- *    taxed. What Welliva actually sells is DEPTH over the user's own data
+ *    taxed. What welliva actually sells is DEPTH over the user's own data
  *    (history, backup, unlimited habits) and GENERATED INTELLIGENCE (plans
  *    written for this body, insights, uncapped coaching) — both below.
  *
@@ -217,7 +217,10 @@ export const FREE_TIER: TierLimits = {
    * render and they are the argument for opening one.
    */
   coachMessagesPerDay: 0,
-  historyDays: 30,
+  /** Ten days (owner's call, 2026-09-26; was 30). The one thing Free is
+   *  metered on. Must stay ≥ 7: Diet's shortest chart range is one week, and
+   *  that card has no always-free carve-out — see planCopy.test.ts. */
+  historyDays: 10,
   /** Zero MANUAL habits. The three auto-tracked ones — food, water, workouts —
    *  are not manual and are never counted, so a free user keeps a working habit
    *  screen; "Suggested for you" and custom habits are what Pro adds. */
@@ -293,7 +296,7 @@ export const FEATURE_MIN_TIER: Record<FeatureId, Tier> = {
   habits: "pro", // "Suggested for you" + custom; the linked three stay free
   foods: "pro", // the searchable whole-foods catalog
   sync: "pro",
-  history: "pro", // 30 days → no cutoff at all
+  history: "pro", // 10 days → no cutoff at all
 
   /** The unattributed ask. There is only one thing to offer. */
   generic: "pro",
@@ -390,7 +393,7 @@ export function isHistoryRangeLocked(rangeDays: number, tier: Tier): boolean {
  * The trend builders in components/charts/series.ts all take an explicit `days`,
  * so bounding a chart is just narrowing that number — no query rewriting and no
  * change to what is stored. A free user asking for a 90-day weight trend gets
- * the last 30 plotted; upgrading re-renders the same chart with all 90.
+ * the last 10 plotted; upgrading re-renders the same chart with all 90.
  */
 export function clampHistoryDays(requested: number, tier: Tier): number {
   const max = historyWindowDays(tier);

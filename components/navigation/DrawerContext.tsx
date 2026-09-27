@@ -80,7 +80,7 @@ export function useDrawerOptional(): DrawerApi | null {
  * It started at 84% (a full ChatGPT-width panel) and that read as the app being
  * shoved off-screen rather than slid aside. 55% → 52% → 49%, each step asked
  * for: the app keeps a visibly larger presence and the menu still has room for
- * every label. The ~48% floor was set by "What Welliva knows" (now "Memory")
+ * every label. The ~48% floor was set by "What welliva knows" (now "Memory")
  * wrapping on every phone below it; with the longest label now "Settings" that
  * floor is slack, so 49% is held for how it looks, not because it has to be.
  * The menu's row metrics are tuned to this width — see SideMenu's padding.

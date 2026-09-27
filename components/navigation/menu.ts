@@ -88,6 +88,43 @@ export const PRIMARY_ITEMS: MenuItem[] = [
   },
 ];
 
+/**
+ * THE FOUR ON THE RAIL — a pinned SUBSET of the list above, not a second list.
+ *
+ * This is the whole reason a bottom rail and a swipe menu can coexist instead
+ * of competing: the rail renders these entries out of `PRIMARY_ITEMS` by route
+ * name, lights them with the same gold, and reads its active state from the
+ * same navigator. One vocabulary, two altitudes. The drawer stays the map —
+ * eleven destinations — and the rail is the fast lane to four of them.
+ *
+ * THE TEST FOR A SLOT. A tab is a screen you open WITHOUT a reason: an ambient
+ * check, several times a day. Habits and Logs fail it — they are screens you
+ * open to answer a question, and a question is exactly what the drawer is for.
+ * Gozlin passes it twice over: it is the thing people come back to, and it is
+ * what Pro is, so one thumb-tap away on every screen is where it belongs.
+ *
+ * FOUR, AND NOT FIVE. The fifth slot at the base of the screen is the gold
+ * action, which is not a destination at all — see the Deck. A rail of five tabs
+ * plus an action is one object too many for a 393pt phone, and the labels start
+ * truncating, which is where a tab bar stops looking premium.
+ */
+export const RAIL_ROUTES: readonly string[] = ["index", "diet", "exercise", "gozlin"];
+
+export const RAIL_ITEMS: MenuItem[] = RAIL_ROUTES.map((route) => {
+  const item = PRIMARY_ITEMS.find((i) => i.route === route);
+  if (!item) {
+    // A rail that silently drops a slot would look like a rendering fault, and
+    // the cause (a renamed route in PRIMARY_ITEMS) would be nowhere near it.
+    throw new Error(`RAIL_ROUTES names "${route}", which PRIMARY_ITEMS does not have`);
+  }
+  return item;
+});
+
+/** True when the drawer should mark this row as also living on the rail. */
+export function isRailItem(item: MenuItem): boolean {
+  return RAIL_ROUTES.includes(item.route);
+}
+
 /*
  * WHERE TRUST WENT. `/privacy` (labelled "Trust") used to sit here as a primary
  * destination. It is excellent content and none of it changed — but it is read
@@ -181,4 +218,31 @@ export const ALL_MENU_ITEMS: MenuItem[] = [
  */
 export const SWIPEABLE_PATHS: ReadonlySet<string> = new Set(
   ALL_MENU_ITEMS.map((i) => i.href),
+);
+
+/**
+ * Destinations where the rail never shows its four tabs — only Home, the
+ * prompt and the gold action, whatever the scroll position.
+ *
+ * These are the screens you open to answer a question or change the app
+ * (the record, the storefront, your settings), not the ones you move between
+ * several times a day, and a full tab row under them reads as noise. Home is
+ * the one way back, and the prompt keeps the day in view.
+ */
+export const COMPACT_RAIL_ROUTES: readonly string[] = [
+  "habits",
+  "logs",
+  "upgrade",
+  "settings",
+  "profile",
+];
+
+export const COMPACT_RAIL_PATHS: ReadonlySet<string> = new Set(
+  COMPACT_RAIL_ROUTES.map((route) => {
+    const item = ALL_MENU_ITEMS.find((i) => i.route === route);
+    if (!item) {
+      throw new Error(`COMPACT_RAIL_ROUTES names "${route}", which the menu does not have`);
+    }
+    return item.href;
+  }),
 );

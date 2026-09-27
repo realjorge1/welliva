@@ -2,7 +2,7 @@
  * build-diet-dictionary.mjs — codegen: diet_dictionary (text) → constants/DietLibraryGenerated.ts
  *
  * `diet_dictionary` (repo root) is the HUMAN-EDITABLE source of truth for
- * Welliva's clinical diet library (105 special diets across 10 medical
+ * welliva's clinical diet library (105 special diets across 10 medical
  * families) AND a whole-foods dictionary (individual fruits, vegetables,
  * proteins, grains, etc. with per-serving macros). This script parses that text
  * file and emits typed `GENERATED_DIETS: DietData[]` and `FOOD_DICTIONARY:

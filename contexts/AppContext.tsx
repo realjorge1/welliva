@@ -149,6 +149,11 @@ interface AppContextType {
   nutritionTargets: NutritionTargets | null;
   consumedNutrition: ConsumedNutrition;
   addWater: (ml: number) => void;
+  /**
+   * Re-read the counters a lock-screen button can move behind React's back —
+   * today's water and the activity streak. See useNutritionState.
+   */
+  syncLiveCounters: () => Promise<void>;
 
   // Intelligence layer — adaptive coaching insights (derived)
   coachInsights: CoachInsight[];
@@ -302,6 +307,7 @@ type NutritionSlice = Pick<
   AppContextType,
   | "consumedNutrition"
   | "addWater"
+  | "syncLiveCounters"
   | "coachInsights"
   | "todayDiet"
   | "dietHistory"
@@ -421,6 +427,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     handleSwapMeal,
     addFoodAsSnack,
     addWater,
+    syncLiveCounters,
   } = useNutritionState({
     userBio,
     nutritionTargets,
@@ -746,6 +753,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const streak = await resetWeekIfNeeded(today);
       setStreakData(streak);
 
+      // Fold in anything a lock-screen button recorded while the app was closed
+      // — a glass pressed before this rollover waited in the water inbox until
+      // yesterday was archived. Last, so it reads the post-rollover counter.
+      await syncLiveCounters();
+
       // Load the achievement record (earned set + hydration counter) and the
       // journey/chapter record.
       setAchievementRecord(await loadAchievementRecord());
@@ -824,6 +836,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     refreshTodayDiet,
     refreshDietHistory,
     regenerateWorkoutPlan,
+    syncLiveCounters,
   });
 
   // Each domain gets its own memoized value so a change in one domain doesn't
@@ -864,6 +877,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     () => ({
       consumedNutrition,
       addWater,
+      syncLiveCounters,
       coachInsights,
       todayDiet,
       dietHistory,
@@ -879,6 +893,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [
       consumedNutrition,
       addWater,
+      syncLiveCounters,
       coachInsights,
       todayDiet,
       dietHistory,

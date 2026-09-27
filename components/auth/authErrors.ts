@@ -115,6 +115,14 @@ export function friendlyAuthError(err: Thrown): string {
   if (says(/provider is not enabled|unsupported provider/i)) {
     return "That sign-in method isn't available yet. Please use another way in.";
   }
+  // A Facebook account can exist with only a phone number, and Facebook's
+  // permission screen lets the user untick "email address". Either way GoTrue
+  // gets no address back and refuses to create the account — it arrives on the
+  // redirect as a bare message with no stable code. Also checked BEFORE the
+  // address branch: it mentions "email" but there is nothing to retype.
+  if (says(/email from external provider/i)) {
+    return "That account didn't share an email address, and we need one to set you up. Allow email access when asked (or add an email to the account), then try again.";
+  }
   if (
     code === "email_address_invalid" ||
     code === "validation_failed" ||

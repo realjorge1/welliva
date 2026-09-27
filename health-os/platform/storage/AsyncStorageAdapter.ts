@@ -1,7 +1,7 @@
 /**
  * health-os/platform/storage/AsyncStorageAdapter.ts
  *
- * The current KeyValueStore adapter. Reuses Welliva's existing JSON serialization
+ * The current KeyValueStore adapter. Reuses welliva's existing JSON serialization
  * (services/OfflineStorage) so there is one serialization path app-wide, and uses
  * AsyncStorage directly for the batch/list operations the port adds.
  *

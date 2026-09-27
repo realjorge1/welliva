@@ -71,7 +71,7 @@ export default function FitnessSettingsScreen() {
         if (!granted) {
           Alert.alert(
             "Notifications are off",
-            "Enable notifications for Welliva in your device settings to receive reminders.",
+            "Enable notifications for welliva in your device settings to receive reminders.",
           );
           return;
         }
@@ -87,7 +87,7 @@ export default function FitnessSettingsScreen() {
         await syncFitnessReminders(await loadFitnessProfile());
         Alert.alert(
           "Reminders couldn't be set",
-          "Enable notifications for Welliva in your device settings, then switch this back on.",
+          "Enable notifications for welliva in your device settings, then switch this back on.",
         );
       }
     },
@@ -97,7 +97,7 @@ export default function FitnessSettingsScreen() {
   const exportData = useCallback(async () => {
     const json = buildFitnessExport({ profile, workoutLog, sessionHistory });
     try {
-      await Share.share({ message: json, title: "Welliva fitness data" });
+      await Share.share({ message: json, title: "welliva fitness data" });
     } catch {
       // user dismissed the share sheet — nothing to do
     }

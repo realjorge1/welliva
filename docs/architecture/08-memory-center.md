@@ -88,7 +88,7 @@ buildExportBundle(opts: { categories?: Category[]; from?: string; to?: string })
 ```
 
 - **Formats:** machine-readable **JSON** (full fidelity: events + facts + summaries +
-  schema version) and a **human-readable Markdown** digest ("Your Welliva history").
+  schema version) and a **human-readable Markdown** digest ("Your welliva history").
 - **Scope:** everything, or a category/date range.
 - **Delivery:** written to a file and handed to the OS share sheet
   (`expo-file-system` + `expo-sharing`) — the data goes where the *user* sends it,

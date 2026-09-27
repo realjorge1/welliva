@@ -1,6 +1,6 @@
 # Fitness Module — Architecture
 
-The fitness module turns Welliva's exercise tab into a premium, AI-guided
+The fitness module turns welliva's exercise tab into a premium, AI-guided
 personal training platform: a recommendation-driven dashboard, a searchable
 workout library with original coach personas and generated artwork, a
 music-backed guided session with optional voice guidance, progress and
@@ -21,7 +21,7 @@ fitness/
   types.ts                  all shared types
   data/
     workouts.ts             24 authored workouts (warm-up / main / cool-down)
-    coaches.ts              5 original Welliva coach personas
+    coaches.ts              5 original welliva coach personas
     beatMeta.ts             15-beat catalog (pure metadata — Node-safe)
     beatSources.ts          id → require(".wav") map (Metro-only; never import in tests)
   services/

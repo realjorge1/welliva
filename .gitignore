@@ -49,3 +49,10 @@ app-example
 # generated native folders
 /ios
 /android
+
+# local Expo modules: Gradle output
+modules/*/android/build/
+modules/*/android/.gradle/
+
+# public legal pages build output (published to gh-pages by npm run legal:publish)
+.legal-site/

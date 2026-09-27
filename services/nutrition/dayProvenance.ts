@@ -17,7 +17,7 @@
  *
  * WHY THIS SHIPS AT ALL. No competitor tells you which of their numbers are
  * guesses. MyFitnessPal's crowd-sourced entries and Noom's estimates are shown
- * with exactly the same authority as a lab-measured figure. Welliva already
+ * with exactly the same authority as a lab-measured figure. welliva already
  * tracks the difference for its own correctness; surfacing it costs almost
  * nothing and is the honest version of a number everyone else fakes.
  */
@@ -126,7 +126,7 @@ export function dayProvenance(entries: FoodLogEntry[]): DayProvenance {
  *
  * They are the wrong rules for the thing the app is actually best at. No
  * shipping competitor can tell you where a number came from, because none of
- * them can — a figure a model computed has no provenance to display. Welliva
+ * them can — a figure a model computed has no provenance to display. welliva
  * forbade the model from computing figures, which is what makes the receipt
  * possible at all. That is worth showing on purpose, to someone who asked, on
  * every day including a perfect one.
@@ -143,7 +143,7 @@ export const SOURCE_KIND_LABEL: Record<SourceKind, string> = {
   wafct: "West African Food Composition Table",
   branded: "Manufacturer's label",
   recipe: "Calculated from ingredients",
-  app: "Welliva meal catalog",
+  app: "welliva meal catalog",
   user: "Entered by you",
   "ai-estimate": "AI estimate",
   none: "Not identified",

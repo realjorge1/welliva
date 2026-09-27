@@ -8,7 +8,7 @@
 
 ## Overview
 
-Successfully migrated Welliva from Clerk authentication + Convex backend to Supabase Auth + PostgreSQL, enabling full-stack control with Row Level Security, native OAuth support, and a robust relational database.
+Successfully migrated welliva from Clerk authentication + Convex backend to Supabase Auth + PostgreSQL, enabling full-stack control with Row Level Security, native OAuth support, and a robust relational database.
 
 ---
 
@@ -387,4 +387,4 @@ The migration from Clerk + Convex to Supabase is **complete and production-ready
 
 **Last Updated**: January 2025  
 **Migrated By**: Development Team  
-**Project**: Welliva - AI Wellness App
+**Project**: welliva - AI Wellness App

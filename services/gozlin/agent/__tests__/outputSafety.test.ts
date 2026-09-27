@@ -118,8 +118,49 @@ describe("does not fire on ordinary coaching", () => {
     "Drink a bit more water today — you're at 1.2 of 2.5 litres.",
     "Sleep's been short this week, so keep the intensity easy.",
     "Your deficit is running about 400 a day on average.",
+    // Added 2026-09-27 — each was REJECTED before, costing a regeneration and,
+    // on a second hit, the canned fallback in place of good advice.
+    "Don't skip breakfast on training days — it's where most of your protein lands.",
+    "Try not to skip lunch; that's when your afternoon slump starts.",
+    "You shouldn't skip meals on a heavy day.",
+    "Let's make up for the missed session with a short one tomorrow.",
+    "A 10-minute walk after dinner will help offset that stiffness.",
   ];
   for (const reply of SAFE) {
+    it(`allows: "${reply.slice(0, 46)}…"`, () => {
+      expect(screenOutput(reply)).toBeNull();
+    });
+  }
+});
+
+describe("catches one experience turned into a cause or a condition", () => {
+  // The risk the novelty follow-ups add (docs/gozlin/11 §8.5): a recalled
+  // "I was bloated after it" becoming an intolerance, one sore knee becoming a
+  // knee that "can't handle" lunges.
+  const CASES = [
+    "Sounds like you're probably sensitive to whey — worth swapping the bar.",
+    "Last time that shake gave you bloating, so let's leave it out.",
+    "The lunges clearly don't agree with you, so I've kept them off today.",
+    "Your knees can't handle jump squats yet, so we'll stick to box squats.",
+    "It looks like you can't tolerate dairy after training.",
+    "Those Nordics triggered your back pain last time.",
+  ];
+  for (const reply of CASES) {
+    it(`flags: "${reply.slice(0, 46)}…"`, () => {
+      expect(screenOutput(reply)?.kind).toBe("attribution");
+    });
+  }
+
+  const ALLOWED = [
+    // Their own report of ordinary soreness, quoted back with the date.
+    "On 12 Sep the Nordics left you very sore for two days — go easy on the first set.",
+    "Last time you said your hamstrings were wrecked, so start with three reps.",
+    // The coach declining to conclude — exactly what it should do.
+    "One time isn't enough to say you're sensitive to it either way.",
+    "That doesn't mean your knees can't handle lunges — let's see how today goes.",
+    "If you can't handle full push-ups yet, the incline version builds the same strength.",
+  ];
+  for (const reply of ALLOWED) {
     it(`allows: "${reply.slice(0, 46)}…"`, () => {
       expect(screenOutput(reply)).toBeNull();
     });
@@ -142,6 +183,7 @@ describe("the contract", () => {
       "diagnosis",
       "medication",
       "body_comment",
+      "attribution",
     ] as const;
     for (const k of kinds) {
       expect(OUTPUT_FALLBACK[k], k).toBeTruthy();
@@ -199,5 +241,22 @@ describe("recall on a realistic mixed batch", () => {
     ];
     const flagged = SAFE.filter((r) => screenOutput(r) !== null);
     expect(flagged, `false positives:\n${flagged.join("\n")}`).toHaveLength(0);
+  });
+});
+
+/**
+ * The exemptions are narrow on purpose: a negated or non-food phrase is let
+ * through, and a real one in the SAME reply is still caught.
+ */
+describe("exemptions never hide a real risk beside them", () => {
+  it("catches the restriction after a negated one", () => {
+    const risk = screenOutput("Don't skip breakfast — just skip dinner tonight instead.");
+    expect(risk?.kind).toBe("restriction");
+    expect(risk?.matched.toLowerCase()).toContain("dinner");
+  });
+
+  it("still flags a bare 'that' — it is the meal they just described", () => {
+    expect(screenOutput("A short run would offset that nicely.")?.kind).toBe("compensation");
+    expect(screenOutput("Make up for it with an extra session.")?.kind).toBe("compensation");
   });
 });

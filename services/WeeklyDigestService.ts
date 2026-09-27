@@ -13,7 +13,7 @@
  *
  * WEEKLY, NOT MONTHLY, AND SEPARATE FROM THE RECAP
  *
- * MonthlyRecapService is a narrative event — a "Welliva Wrapped" the user opens
+ * MonthlyRecapService is a narrative event — a "welliva Wrapped" the user opens
  * and reads through once. This is the opposite shape on purpose: three lines,
  * pushed, no ceremony, gone in ten seconds. Making the recap weekly would wear
  * out its one good trick, and making this monthly would leave three weeks of

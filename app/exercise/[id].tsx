@@ -1,5 +1,5 @@
 /**
- * EXERCISE DETAIL — rich single-exercise view. Rebuilt on the Welliva design
+ * EXERCISE DETAIL — rich single-exercise view. Rebuilt on the welliva design
  * system; routing (start session / back) preserved.
  *
  * Resolves the exercise from the local EXERCISE_DATABASE first, then falls back

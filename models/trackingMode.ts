@@ -163,12 +163,12 @@ export function untrackedCopy(domain: "diet" | "workout"): {
   return domain === "workout"
     ? {
         title: "Training isn't tracked",
-        body: "You set Welliva up for nutrition. You can still run a workout any time you feel like it — you'll get a summary at the end, and nothing gets logged.",
+        body: "You set welliva up for nutrition. You can still run a workout any time you feel like it — you'll get a summary at the end, and nothing gets logged.",
         cta: "Pick a workout",
       }
     : {
         title: "Nutrition isn't tracked",
-        body: "You set Welliva up for training. You can still look up any meal or food and see exactly what's in it — nothing gets logged or counted.",
+        body: "You set welliva up for training. You can still look up any meal or food and see exactly what's in it — nothing gets logged or counted.",
         cta: "Look up a food",
       };
 }

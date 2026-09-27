@@ -33,6 +33,7 @@ import { EVERY_DAY, type Habit } from "../../models/habit";
 import { ensureReminderPermission, syncReminders } from "../HabitService";
 import { HABIT_REMINDER_CATEGORY } from "../notifications/categories";
 import { REMINDER_LINES } from "../notifications/copy";
+import { REMINDERS_CHANNEL_ID } from "../notifications/init";
 
 function makeHabit(overrides: Partial<Habit> = {}): Habit {
   return {
@@ -68,11 +69,11 @@ describe("syncReminders", () => {
     expect(N.scheduleNotificationAsync).toHaveBeenCalledTimes(1);
     const arg = N.scheduleNotificationAsync.mock.calls[0][0];
     expect(arg.trigger.type).toBe("daily");
-    expect(arg.trigger.channelId).toBe("reminders");
+    expect(arg.trigger.channelId).toBe(REMINDERS_CHANNEL_ID);
     expect(arg.trigger).toMatchObject({ hour: 8, minute: 0 });
     // channel is (re)created before scheduling
     expect(N.setNotificationChannelAsync).toHaveBeenCalledWith(
-      "reminders",
+      REMINDERS_CHANNEL_ID,
       expect.objectContaining({ name: "Reminders" }),
     );
   });
@@ -87,7 +88,7 @@ describe("syncReminders", () => {
     expect(weekdays).toEqual([2, 4, 6]);
     for (const call of N.scheduleNotificationAsync.mock.calls) {
       expect(call[0].trigger.type).toBe("weekly");
-      expect(call[0].trigger.channelId).toBe("reminders");
+      expect(call[0].trigger.channelId).toBe(REMINDERS_CHANNEL_ID);
     }
   });
 
@@ -141,7 +142,13 @@ describe("syncReminders", () => {
 
     const { content } = N.scheduleNotificationAsync.mock.calls[0][0];
     expect(content.categoryIdentifier).toBe(HABIT_REMINDER_CATEGORY);
-    expect(content.data).toEqual({ type: "habit-reminder", habitId: "h1" });
+    // A tap opens the habit; no owner stamp here because no account has
+    // claimed this (test) device — see services/notifications/owner.
+    expect(content.data).toEqual({
+      type: "habit-reminder",
+      habitId: "h1",
+      route: "/habit/h1",
+    });
     expect(content.title).toBe("Read");
     expect(REMINDER_LINES).toContain(content.body);
   });

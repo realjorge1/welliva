@@ -58,15 +58,39 @@ export const DEVICE_LOCAL_KEYS: readonly string[] = [
   "@welliva_signals_weather",
   "@welliva_signals_wearable",
   "@gozlin_forecast_cache",
+  // the last store price quote (services/billing/priceMemory) — in THIS
+  // device's Play-account currency, and regenerated on the next price load
+  "@welliva_store_prices",
   // this device's notification delivery state (prefs DO sync; the sent-ledger
   // and local notification ids are per-device and must not)
   "@welliva_fitness_notification_ids",
   "@welliva_notifications_ledger",
+  // the ids of reminders pending in THIS device's OS queue — meaningless on
+  // another phone, whose queue holds different ids
+  "@welliva_meal_reminder_ids",
+  "@welliva_water_reminder_ids",
+  // which lock-screen presses THIS device has already applied, and the receipt
+  // of them. The writes they made sync on their own (habit logs, intake, water)
+  "@welliva_notif_handled",
+  "@welliva_notif_last_response",
+  "@welliva_notif_journal",
+  // the format THIS device's pending reminders were laid in, and whether THIS
+  // phone lets them fire as exact alarms
+  "@welliva_notif_format",
+  "@welliva_exact_alarm_state",
+  // glasses pressed on this phone's lock screen, waiting for its day to turn —
+  // folded into the synced water counter/history, never synced themselves
+  "@welliva_water_inbox",
   // this device's migration bookkeeping — load-bearing for the migration runner
   "@welliva_schema_version",
   "@welliva_migration_journal",
   // device UI rotation state
   "@welliva_home_greeting_rotation",
+  // the Deck's "not now" leases. Device-local on purpose: a dismissal is a
+  // decision about THIS moment on THIS phone, and every one of them expires
+  // within hours anyway — syncing them would push churn to the cloud to
+  // suppress a prompt that has already lapsed by the time it lands.
+  "@welliva_deck_dismissed_v1",
   // sync engine bookkeeping
   "@welliva_profile_synced_at",
   "@welliva_sync_telemetry",

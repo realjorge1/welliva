@@ -39,7 +39,8 @@ export type OutputRiskKind =
   | "compensation" // food framed as earned, owed, or burned off
   | "diagnosis" // asserts what a symptom or sign means
   | "medication" // advises on drugs or supplements-as-treatment
-  | "body_comment"; // judges the body rather than the behaviour
+  | "body_comment" // judges the body rather than the behaviour
+  | "attribution"; // treats one experience as a cause, or names an intolerance from it
 
 export interface OutputRisk {
   kind: OutputRiskKind;
@@ -53,6 +54,74 @@ interface Rule {
   kind: OutputRiskKind;
   pattern: RegExp;
   correction: string;
+  /**
+   * A match this returns true for is NOT a risk — the words are there, the
+   * instruction isn't. Checked per match, so one exempt phrase never hides a
+   * real one later in the same reply.
+   */
+  exempt?: (text: string, start: number, end: number) => boolean;
+}
+
+// ── Exemptions ─────────────────────────────────────────────────────────
+//
+// Both were found by running ordinary coaching replies through this screen:
+// "Don't skip breakfast on training days" was rejected as RESTRICTION advice —
+// the opposite of what it says — and "Let's make up for the missed session" and
+// "a walk will help offset that stiffness" were rejected as COMPENSATION. Each
+// cost a regeneration, and a second hit sent the canned fallback instead of a
+// good answer. The patterns match words; these check what the words are doing.
+
+/** The verb a restriction match turns on — negation is judged just before it. */
+const RESTRICT_VERB =
+  /\b(?:skip(?:ping)?|miss(?:ing)?|drop(?:ping)?|cut(?:ting)?|fast(?:ing)?|go without|starve|eat|stay)\b/i;
+
+/** A negation ending right where the verb begins: "don't", "try not to", "never". */
+const NEGATION_TAIL =
+  /\b(?:don'?t|do not|never|not|avoid(?:ing)?|no need to|shouldn'?t|stop|without)\s+(?:\w+\s+){0,2}$/i;
+
+/**
+ * "Don't skip breakfast", "try not to skip lunch", "you shouldn't skip meals" —
+ * advice AGAINST restricting. The negation can sit before the match or inside
+ * it ("you should try not to skip…"), so the text is read up to the verb.
+ */
+function negated(text: string, start: number, end: number): boolean {
+  const match = text.slice(start, end);
+  const verb = RESTRICT_VERB.exec(match);
+  const upToVerb = text.slice(Math.max(0, start - 40), start + (verb ? verb.index : 0));
+  return NEGATION_TAIL.test(upToVerb);
+}
+
+/**
+ * A non-food thing named right after the verb: "the missed SESSION", "that
+ * STIFFNESS". Only the object slot is read — never the wider reply — because a
+ * compensating reply usually points back at food the USER mentioned: "A short
+ * run would offset that nicely" says nothing about food itself and is exactly
+ * the reply this rule exists for.
+ */
+const NON_FOOD_OBJECT =
+  /^\s+(?:(?:missed|skipped|lost|last|easy|rest|that|this|the|a|your|yesterday'?s)\s+)?(?:sessions?|workouts?|runs?|training|class(?:es)?|gym|rest|sleep|stiffness|soreness|tightness|stress|tension|time|steps|walks?|lifts?|day off|days off)\b/i;
+
+/**
+ * Compensation is about FOOD as a debt. "Make up for the missed session" and
+ * "offset that stiffness" use the same verbs about training and a sore back —
+ * exempt when the thing being made up for is named, and is not food. A bare
+ * "that" or "it" stays flagged: in a coaching reply it is almost always the
+ * meal someone just described.
+ */
+function nonFoodObject(text: string, _start: number, end: number): boolean {
+  return NON_FOOD_OBJECT.test(text.slice(end));
+}
+
+/**
+ * "One time isn't enough to say you're sensitive to it", "that doesn't mean your
+ * knees can't handle lunges" — the coach declining to draw the conclusion, which
+ * is exactly what it is meant to do. Judged on the words just before the match.
+ */
+const DECLINES_TO_CONCLUDE =
+  /\b(?:doesn'?t mean|does not mean|(?:not|isn'?t|is not) enough to (?:say|tell)|too (?:early|soon) to (?:say|tell)|can'?t (?:say|tell)|no reason to (?:think|say)|not (?:necessarily|saying)|isn'?t proof)\b[^.!?]{0,30}$/i;
+
+function declined(text: string, start: number): boolean {
+  return DECLINES_TO_CONCLUDE.test(text.slice(Math.max(0, start - 60), start));
 }
 
 /**
@@ -70,6 +139,7 @@ const RULES: Rule[] = [
       "Your last reply told this person to eat less, skip a meal, or fast. Never do that: " +
       "their targets are already set from their body and goal, and advising below them is unsafe. " +
       "Rewrite it without any instruction to restrict, skip, or delay eating.",
+    exempt: negated,
   },
   {
     kind: "compensation",
@@ -80,6 +150,7 @@ const RULES: Rule[] = [
       "Your last reply framed food as something to earn, repay, or burn off. Never do that — " +
       "it is the core thought pattern in disordered eating, and it is wrong on its own terms: " +
       "eating is not a debt. Rewrite it without any earning, offsetting, or compensating framing.",
+    exempt: nonFoodObject,
   },
   {
     kind: "diagnosis",
@@ -115,6 +186,22 @@ const RULES: Rule[] = [
       "Your last reply commented on this person's body rather than on what they did. Never do " +
       "that, whatever their goal is. Rewrite it about the behaviour and the data only.",
   },
+  {
+    kind: "attribution",
+    // One experience turned into a cause or a condition — the risk the novelty
+    // follow-ups create (docs/gozlin/11 §8.5). "That left you very sore" is
+    // THEIR report of ordinary training soreness and stays allowed; naming an
+    // intolerance, an allergy, a body that "can't handle" something, or a
+    // symptom something "caused", is a conclusion one occasion cannot carry.
+    pattern:
+      /\b(?:you'?re|you are)\s+(?:probably|likely|possibly|maybe|clearly|obviously)?\s*(?:intolerant|allergic|sensitive)\s+to\b|\b(?:doesn'?t|does not|didn'?t|did not|don'?t|do not)\s+(?:seem to\s+)?agree\s+with\s+you\b|\byour\s+(?:body|system|stomach|gut|knees?|back|joints?|shoulders?|hips?|wrists?)\s+(?:can'?t|cannot|doesn'?t|does not|won'?t)\s+(?:handle|tolerate|take|cope with)\b|\byou\s+(?:can'?t|cannot)\s+tolerate\b|\b(?:caused|causes|triggered|triggers|gave you|gives you)\s+(?:your\s+|you\s+|the\s+|a\s+)?(?:\w+\s+)?(?:bloating|pain|headaches?|migraines?|rash(?:es)?|cramps?|cramping|nausea|reactions?|flare[- ]?ups?|inflammation|injur(?:y|ies))\b/i,
+    correction:
+      "Your last reply treated one experience as a cause, or drew a conclusion about their body " +
+      "from it — an intolerance, an allergy, something they can't handle, a symptom it caused. " +
+      "One occasion is one occasion. Rewrite it to say what they told you and when, without " +
+      "saying what caused it or what their body can or cannot take.",
+    exempt: (text, start) => declined(text, start),
+  },
 ];
 
 /**
@@ -128,8 +215,10 @@ export function screenOutput(reply: string): OutputRisk | null {
   if (!text) return null;
 
   for (const rule of RULES) {
-    const m = rule.pattern.exec(text);
-    if (m) {
+    const all = new RegExp(rule.pattern.source, rule.pattern.flags.replace("g", "") + "g");
+    for (const m of text.matchAll(all)) {
+      const start = m.index ?? 0;
+      if (rule.exempt?.(text, start, start + m[0].length)) continue;
       return { kind: rule.kind, matched: m[0], correction: rule.correction };
     }
   }
@@ -160,6 +249,9 @@ export const OUTPUT_FALLBACK: Record<OutputRiskKind, string> = {
   body_comment:
     "Let me stick to what you did rather than how you look — that's the part I can actually help with. " +
     "Ask me about your training or your intake and I'll show you where you are.",
+  attribution:
+    "That was one time, so I wouldn't read anything into it either way. If it keeps happening, " +
+    "it's worth mentioning to a professional — and I'll keep a note of how it goes.",
 };
 
 // ── Telemetry ──────────────────────────────────────────────────────────

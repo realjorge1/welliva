@@ -418,7 +418,14 @@ export default function ProfileScreen() {
   const adherenceTrend = useMemo<TrendSeries[]>(
     () => [
       { key: "2W", label: "2 wk", points: buildAdherenceTrend(history, currentDate, 14) },
-      { key: "1M", label: "1 mo", points: buildAdherenceTrend(history, currentDate, 30) },
+      // 2 wk is the card's shortest range, so it stays free even past the
+      // window (see isHistoryRangeLocked); 1 mo locks since the window is 10.
+      {
+        key: "1M",
+        label: "1 mo",
+        points: buildAdherenceTrend(history, currentDate, 30),
+        locked: isHistoryRangeLocked(30, tier),
+      },
       {
         key: "3M",
         label: "3 mo",

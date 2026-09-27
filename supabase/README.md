@@ -1,4 +1,4 @@
-# Welliva — Database (Supabase)
+# welliva — Database (Supabase)
 
 Source of truth for the app's Postgres schema. Managed with the **Supabase CLI +
 versioned migrations** in [`migrations/`](./migrations). Never edit tables by

@@ -23,6 +23,7 @@ import React, {
 import { supabase } from "../lib/supabase";
 import { parseAuthRedirect } from "./auth/authRedirect";
 import { deleteAccount as deleteAccountData } from "../services/account/AccountDeletion";
+import { clearAllAppNotifications } from "../services/notifications/send";
 import { clearSignedUrlCache } from "../services/sync/StorageSync";
 import { flush as flushSyncTelemetry } from "../services/sync/SyncTelemetry";
 import { fullPushSweep, hasPendingWrites } from "../services/sync/SyncEngine";
@@ -365,6 +366,12 @@ export function SupabaseAuthProvider({
 
         const { error } = await supabase.auth.signOut();
         if (error) throw error;
+        // Every pending reminder on this install belongs to the account that
+        // just left: a signed-out phone must stop nagging about their habits,
+        // and a leftover meal reminder names a SLOT that the next person's plan
+        // could answer. Their reminders are re-laid from stored settings the next
+        // time they sign in (ReminderSyncRunner).
+        await clearAllAppNotifications();
         // Drop this account's cached signed storage URLs. They're per-user
         // credentials held in memory, and they outlive the session — without
         // this, signing in as someone else on the same device could still
@@ -411,6 +418,8 @@ export function SupabaseAuthProvider({
         } catch (e) {
           console.warn("deleteAccount session teardown:", e);
         }
+        // The account's reminders must not outlive it.
+        await clearAllAppNotifications();
 
         // Belt and braces: if signOut failed above, onAuthStateChange never
         // fires and AuthWrapper would keep rendering the app for a deleted

@@ -26,6 +26,7 @@ import { detectFindings } from "./GozlinProgressEngine";
 import type {
   DetectiveMetric,
   FindingKind,
+  GozlinCheckin,
   GozlinDetectiveReport,
   GozlinTwin,
   ProgressFinding,
@@ -36,8 +37,24 @@ const RECENT_DAYS = 14; // "now" window for performance + weight
 const PRIOR_DAYS = 28; // outer edge of the comparison window
 const FLAT_RATE = 0.2; // |kg/week| below this is "the scale is flat"
 const RECOMP_PERF_GAIN = 0.08; // ≥8% more training volume → performance climbing
+const PERF_DROP = 0.08; // ≥8% less training volume → output falling
 const MIN_TRACKED = 4; // logged diet days needed to read nutrition
 const MIN_SESSIONS = 2; // sessions per window needed to read performance
+const MIN_SLEEP_NIGHTS = 3; // logged nights needed to call sleep a pattern
+const SHORT_SLEEP_AVG = 6.5; // average hours below this reads as short sleep
+const MIN_FATIGUE_ENTRIES = 3; // "Tired"/"Drained" check-ins needed to call it a pattern
+
+/** Labels that describe the body running low (mirrors GozlinRecoveryEngine). */
+const FATIGUE_LABELS = new Set(["Tired", "Drained"]);
+
+/**
+ * The outcome a question is about. investigate_progress has always taken one,
+ * and the report used to ignore it: "why isn't my bench going up?" came back
+ * with whichever candidate scored highest overall — often a weight plateau.
+ * Now every candidate says which outcomes it bears on, and a focused report
+ * picks its root cause from those alone, or says honestly that it found none.
+ */
+export type DetectiveFocus = "weight" | "strength" | "energy" | "adherence";
 
 // ── small numeric helpers ───────────────────────────────────────────
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
@@ -115,6 +132,10 @@ export interface DetectiveInput {
   bodyLogs: BodyLogEntry[];
   /** Sessions/week the user is aiming for (training-coverage read). */
   weeklyWorkoutTarget: number;
+  /** What the question is about. Absent = the strongest read overall. */
+  focus?: DetectiveFocus;
+  /** The state-of-mind log — the only sleep and energy signal most users give. */
+  checkins?: GozlinCheckin[] | null;
   now?: Date;
 }
 
@@ -122,6 +143,31 @@ interface Candidate {
   finding: ProgressFinding;
   /** Higher = stronger claim on being THE root cause. */
   priority: number;
+  /** Which outcomes this finding can explain. */
+  bears: DetectiveFocus[];
+}
+
+/** Sleep and fatigue over the recent window, read from the check-in log. */
+interface EnergyRead {
+  entries: number;
+  sleepNights: number;
+  sleepAvg: number | null;
+  nightsUnder6: number;
+  fatigueEntries: number;
+}
+
+function readEnergy(checkins: GozlinCheckin[], window: Set<string>): EnergyRead {
+  const recent = checkins.filter((c) => window.has(c.date));
+  const nights = recent
+    .map((c) => c.sleepHours)
+    .filter((h): h is number => typeof h === "number" && Number.isFinite(h) && h > 0);
+  return {
+    entries: recent.length,
+    sleepNights: nights.length,
+    sleepAvg: nights.length > 0 ? round1(mean(nights)) : null,
+    nightsUnder6: nights.filter((h) => h < 6).length,
+    fatigueEntries: recent.filter((c) => (c.labels ?? []).some((l) => FATIGUE_LABELS.has(l))).length,
+  };
 }
 
 export function buildDetectiveReport(input: DetectiveInput): GozlinDetectiveReport {
@@ -152,19 +198,32 @@ export function buildDetectiveReport(input: DetectiveInput): GozlinDetectiveRepo
   // ── Performance: training volume, recent vs prior ──
   const perf = readPerformance(sessionHistory, today);
 
-  const dataLimited = trackedDays < MIN_TRACKED && weighIns < 2 && perf.deltaPct === null;
+  // ── Energy: sleep and fatigue, from the check-in log ──
+  const focus = input.focus;
+  const energy = readEnergy(input.checkins ?? [], last14);
+
+  const dataLimited =
+    trackedDays < MIN_TRACKED &&
+    weighIns < 2 &&
+    perf.deltaPct === null &&
+    // An energy question can be read off the check-ins alone.
+    !(focus === "energy" && energy.entries > 0);
 
   // ── Metric strip (auditable evidence) ──
-  const metrics = buildMetrics({
-    adherence,
-    trend,
-    weighIns,
-    weightDeltaKg,
-    goalDir,
-    trainingLoad,
-    weeklyWorkoutTarget,
-    perf,
-  });
+  const metrics = orderMetrics(
+    buildMetrics({
+      adherence,
+      trend,
+      weighIns,
+      weightDeltaKg,
+      goalDir,
+      trainingLoad,
+      weeklyWorkoutTarget,
+      perf,
+      energy: focus === "energy" ? energy : null,
+    }),
+    focus,
+  );
 
   if (dataLimited) {
     return {
@@ -202,6 +261,7 @@ export function buildDetectiveReport(input: DetectiveInput): GozlinDetectiveRepo
   ) {
     candidates.push({
       priority: 100 + Math.round(perf.deltaPct * 100),
+      bears: ["weight", "strength"],
       finding: {
         kind: "root_cause",
         icon: "git-branch-outline",
@@ -229,6 +289,7 @@ export function buildDetectiveReport(input: DetectiveInput): GozlinDetectiveRepo
   ) {
     candidates.push({
       priority: 80,
+      bears: ["weight"],
       finding: {
         kind: "plateau",
         icon: "remove-circle-outline",
@@ -279,6 +340,7 @@ export function buildDetectiveReport(input: DetectiveInput): GozlinDetectiveRepo
     if (cv >= 0.5 && zeroDays >= 2 && strongDays >= 2) {
       candidates.push({
         priority: 55,
+        bears: ["adherence", "weight"],
         finding: {
           kind: "inconsistency",
           icon: "pulse-outline",
@@ -294,19 +356,109 @@ export function buildDetectiveReport(input: DetectiveInput): GozlinDetectiveRepo
     }
   }
 
-  // ── Pick the root cause; the rest become supporting findings ──
-  candidates.sort((a, b) => b.priority - a.priority);
-  const rootCause = candidates[0]?.finding ?? null;
+  // 6) Output falling — the read a strength question needs, and had none of.
+  if (perf.deltaPct !== null && perf.deltaPct <= -PERF_DROP) {
+    candidates.push({
+      priority: 75,
+      bears: ["strength", "energy"],
+      finding: {
+        kind: "blocker",
+        icon: "trending-down-outline",
+        title: "Your session output is down",
+        detail: `You're doing ${fmtPct(Math.abs(perf.deltaPct))} less work per session than the two weeks before. That's rarely the program — it's usually what's around the sessions: sleep, days in a row without rest, or eating under what training needs.`,
+        evidence: [
+          `training volume ${fmtPct(perf.deltaPct)} vs the prior 2 weeks`,
+          `${perf.recentN} sessions in the last 2 weeks`,
+        ],
+        lever: "Hold the load where it is for a week and protect sleep. If output doesn't come back, take a lighter week.",
+      },
+    });
+  }
 
-  const supporting: ProgressFinding[] = candidates.slice(1).map((c) => c.finding);
+  // 7) Energy — sleep, felt fatigue, and training past the plan. Read from the
+  //    check-in log; nothing else in the app sees sleep for a user without a watch.
+  if (energy.sleepNights >= MIN_SLEEP_NIGHTS && energy.sleepAvg !== null && energy.sleepAvg < SHORT_SLEEP_AVG) {
+    candidates.push({
+      priority: 85,
+      bears: ["energy", "strength"],
+      finding: {
+        kind: "blocker",
+        icon: "moon-outline",
+        title: "Short sleep is the likeliest drain",
+        detail: `Your logged nights average ${energy.sleepAvg} hours. Energy, recovery and appetite all run through sleep, and nothing else in your logs explains a slump as well.`,
+        evidence: [
+          `${energy.sleepNights} nights logged, averaging ${energy.sleepAvg}h`,
+          `${energy.nightsUnder6} under 6 hours`,
+        ],
+        lever: "Pick a fixed lights-out time for the next 7 nights. It's the cheapest energy there is.",
+      },
+    });
+  }
+  if (energy.fatigueEntries >= MIN_FATIGUE_ENTRIES) {
+    candidates.push({
+      priority: 68,
+      bears: ["energy"],
+      finding: {
+        kind: "inconsistency",
+        icon: "battery-dead-outline",
+        title: "You've been logging tired, again and again",
+        detail: "It isn't one bad day — you've named it repeatedly over the last two weeks. That's a pattern worth treating as real, not pushing through.",
+        evidence: [`${energy.fatigueEntries} of ${energy.entries} check-ins said tired or drained`],
+        lever: "Make one session this week easy on purpose, and see whether the next check-ins change.",
+      },
+    });
+  }
+  // Only when asked about energy or strength: in an open "how am I doing", a
+  // keen week is not a blocker, and it would outrank the accelerators.
+  if (
+    (focus === "energy" || focus === "strength") &&
+    weeklyWorkoutTarget > 0 &&
+    trainingLoad >= weeklyWorkoutTarget + 2
+  ) {
+    candidates.push({
+      priority: 62,
+      bears: ["energy", "strength"],
+      finding: {
+        kind: "blocker",
+        icon: "flame-outline",
+        title: "You're training more than your plan",
+        detail: "More sessions than the plan asks for means less recovery between them. Extra volume only helps when the body can absorb it.",
+        evidence: [`${trainingLoad} sessions this week against a plan of ${weeklyWorkoutTarget}`],
+        lever: "Swap one session for a walk this week and see whether energy comes back.",
+      },
+    });
+  }
+
+  // ── Pick the root cause; the rest become supporting findings ──
+  // A focused question takes its root cause only from what can explain THAT
+  // outcome. Off-focus candidates are dropped rather than demoted: a strength
+  // question answered with a weight plateau was the bug this fixes.
+  candidates.sort((a, b) => b.priority - a.priority);
+  const eligible = focus ? candidates.filter((c) => c.bears.includes(focus)) : candidates;
+  if (focus && eligible.length === 0) {
+    return {
+      __kind: "detective",
+      headline: FOCUS_EMPTY_HEADLINE[focus],
+      rootCause: null,
+      metrics,
+      findings: [nothingFound(focus, { perf, weighIns, trackedDays, adherence, energy })],
+      dataLimited: false,
+    };
+  }
+  const rootCause = eligible[0]?.finding ?? null;
+
+  const supporting: ProgressFinding[] = eligible.slice(1).map((c) => c.finding);
 
   // Fold in the lighter detective findings (hidden wins / correlations), deduped.
-  const extra = detectFindings({
-    twin,
-    dietHistory,
-    workoutLog: input.workoutLog,
-    now,
-  });
+  // Not for a focused question — they are about whatever they happen to be about.
+  const extra = focus
+    ? []
+    : detectFindings({
+        twin,
+        dietHistory,
+        workoutLog: input.workoutLog,
+        now,
+      });
   const seen = new Set<string>([rootCause?.title, ...supporting.map((f) => f.title)].filter(Boolean) as string[]);
   for (const f of extra) {
     if (seen.has(f.title)) continue;
@@ -346,6 +498,110 @@ function goalDirection(twin: GozlinTwin): number {
   }
 }
 
+const FOCUS_EMPTY_HEADLINE: Record<DetectiveFocus, string> = {
+  weight: "Nothing in your logs explains the scale right now.",
+  strength: "Nothing in your logs is holding your training back.",
+  energy: "Nothing in your logs points to what's draining you.",
+  adherence: "Nothing in your logs says your consistency is slipping.",
+};
+
+/**
+ * The honest answer when a focused question has no candidate: what the report
+ * did look at, and what it would need to say more. Never a borrowed finding
+ * about some other outcome.
+ */
+function nothingFound(
+  focus: DetectiveFocus,
+  a: {
+    perf: PerfRead;
+    weighIns: number;
+    trackedDays: number;
+    adherence: number;
+    energy: EnergyRead;
+  },
+): ProgressFinding {
+  const need = (title: string, detail: string, evidence: string[]): ProgressFinding => ({
+    kind: "inconsistency",
+    icon: "documents-outline",
+    title,
+    detail,
+    evidence,
+  });
+  switch (focus) {
+    case "strength":
+      return a.perf.deltaPct === null
+        ? need(
+            "Not enough sessions to compare yet",
+            "I read strength by comparing your session output across two fortnights, and I need at least two sessions in each.",
+            [`${a.perf.recentN} sessions in the last 2 weeks`, `${a.perf.priorN} in the 2 weeks before`],
+          )
+        : need(
+            "Your output is holding steady",
+            "Session output is within a few percent of two weeks ago — steady, not falling. There's no drag to find; progress from here comes from adding load, not fixing something.",
+            [`training volume ${fmtPct(a.perf.deltaPct)} vs the prior 2 weeks`],
+          );
+    case "energy":
+      return a.energy.entries === 0
+        ? need(
+            "Energy isn't in your logs",
+            "I can't see energy directly. A daily check-in with your sleep hours is what lets me read it — the training and eating side shows nothing draining you.",
+            ["0 check-ins in the last 2 weeks"],
+          )
+        : need(
+            "Sleep and check-ins look steady",
+            "Your logged sleep and how you've said you feel don't show a pattern that would explain a slump.",
+            [
+              `${a.energy.entries} check-ins in the last 2 weeks`,
+              ...(a.energy.sleepAvg !== null
+                ? [`${a.energy.sleepNights} nights logged, averaging ${a.energy.sleepAvg}h`]
+                : []),
+            ],
+          );
+    case "weight":
+      return a.weighIns < 2
+        ? need(
+            "Not enough weigh-ins to read a trend",
+            "I need at least two weigh-ins in the last two weeks to say what the scale is doing.",
+            [`${a.weighIns} weigh-ins in the last 2 weeks`],
+          )
+        : need(
+            "No clear cause in the logs",
+            "The scale, your eating and your training don't line up into a single explanation yet.",
+            [`${a.weighIns} weigh-ins in the last 2 weeks`, `${a.adherence}/100 adherence`],
+          );
+    case "adherence":
+      return a.trackedDays < MIN_TRACKED
+        ? need(
+            "Not enough days logged",
+            "I read consistency from logged meal days, and there aren't enough recent ones to see a pattern.",
+            [`${a.trackedDays} days of meals logged in the last 2 weeks`],
+          )
+        : need(
+            "Your consistency is holding",
+            "Your logged days don't show the swings or the drop-off that would explain slipping.",
+            [`${a.adherence}/100 adherence`, `${a.trackedDays} days of meals logged`],
+          );
+  }
+}
+
+/** The metric the question is about goes first; the rest keep their order. */
+const FOCUS_METRICS: Record<DetectiveFocus, string[]> = {
+  weight: ["Weight"],
+  strength: ["Performance", "Training"],
+  energy: ["Sleep", "Training"],
+  adherence: ["Adherence"],
+};
+
+function orderMetrics(metrics: DetectiveMetric[], focus?: DetectiveFocus): DetectiveMetric[] {
+  if (!focus) return metrics;
+  const lead = FOCUS_METRICS[focus];
+  const rank = (m: DetectiveMetric) => {
+    const i = lead.indexOf(m.label);
+    return i === -1 ? lead.length : i;
+  };
+  return [...metrics].sort((a, b) => rank(a) - rank(b));
+}
+
 function detectBlocker(a: {
   adherence: number;
   trackedDays: number;
@@ -361,6 +617,7 @@ function detectBlocker(a: {
   if (driftingWrong) {
     return {
       priority: 90,
+      bears: ["weight"],
       finding: {
         kind: "blocker",
         icon: "trending-down-outline",
@@ -377,6 +634,7 @@ function detectBlocker(a: {
   if (a.adherence < 55 && a.trackedDays >= MIN_TRACKED) {
     return {
       priority: 70,
+      bears: ["weight", "adherence"],
       finding: {
         kind: "blocker",
         icon: "restaurant-outline",
@@ -394,6 +652,7 @@ function detectBlocker(a: {
     const gap = Math.max(1, a.weeklyWorkoutTarget - a.trainingLoad);
     return {
       priority: 60,
+      bears: ["weight", "strength", "adherence"],
       finding: {
         kind: "blocker",
         icon: "barbell-outline",
@@ -422,6 +681,7 @@ function detectAccelerator(a: {
   if (a.perf.deltaPct !== null && a.perf.deltaPct >= 0.1) {
     return {
       priority: 50,
+      bears: ["strength"],
       finding: {
         kind: "accelerator",
         icon: "trending-up-outline",
@@ -437,6 +697,7 @@ function detectAccelerator(a: {
   if (movingRight && a.adherence >= 65) {
     return {
       priority: 45,
+      bears: ["weight", "adherence"],
       finding: {
         kind: "accelerator",
         icon: "rocket-outline",
@@ -461,8 +722,20 @@ function buildMetrics(a: {
   trainingLoad: number;
   weeklyWorkoutTarget: number;
   perf: PerfRead;
+  /** Present only for an energy question — the strip stays as it was otherwise. */
+  energy: EnergyRead | null;
 }): DetectiveMetric[] {
   const metrics: DetectiveMetric[] = [];
+
+  if (a.energy && a.energy.sleepAvg !== null) {
+    metrics.push({
+      icon: "moon-outline",
+      label: "Sleep",
+      value: `${a.energy.sleepAvg}h avg`,
+      delta: `${a.energy.sleepNights} nights`,
+      direction: a.energy.sleepAvg >= 7 ? "good" : a.energy.sleepAvg < 6 ? "bad" : "neutral",
+    });
+  }
 
   // Adherence
   metrics.push({

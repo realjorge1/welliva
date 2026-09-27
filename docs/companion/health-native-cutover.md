@@ -68,13 +68,13 @@ Then in `app.json`, inside `expo.plugins`:
   "react-native-health",
   {
     "isClinicalDataEnabled": false,
-    "healthSharePermission": "Welliva reads your sleep, heart-rate variability and resting heart rate to work out how recovered you are. This data is read on your device and never leaves it — only the recovery score is used.",
-    "healthUpdatePermission": "Welliva does not write to Apple Health."
+    "healthSharePermission": "welliva reads your sleep, heart-rate variability and resting heart rate to work out how recovered you are. This data is read on your device and never leaves it — only the recovery score is used.",
+    "healthUpdatePermission": "welliva does not write to Apple Health."
   }
 ]
 ```
 
-Welliva is **read-only**. `permissionSet()` in `providers/appleHealth.ts` requests
+welliva is **read-only**. `permissionSet()` in `providers/appleHealth.ts` requests
 an empty `write` array, and nothing in the codebase calls a HealthKit save method.
 Keep it that way — a write permission is a much harder review conversation, and
 buys nothing.

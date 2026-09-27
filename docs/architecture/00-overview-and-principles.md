@@ -9,7 +9,7 @@ every feature draw on that shared understanding?"* — for a decade, without a r
 Concretely, that means three structural commitments:
 
 1. **One memory, many features.** Every feature reads from and writes to a shared,
-   inspectable memory rather than its own private silo. Today Welliva has six
+   inspectable memory rather than its own private silo. Today welliva has six
    silos (`diet_history`, `workout_logs`, `session_history`, `body_logs`,
    `water_history`, Gozlin episodes). The OS unifies them behind a **Timeline** and
    a layered **Memory**.

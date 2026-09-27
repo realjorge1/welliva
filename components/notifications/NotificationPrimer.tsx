@@ -89,7 +89,7 @@ export function NotificationPrimer({
           </View>
         ) : perm.status === "denied" ? (
           <AppText variant="caption" color="tertiary" align="center" style={styles.note}>
-            Notifications are turned off for Welliva in your device settings.
+            Notifications are turned off for welliva in your device settings.
           </AppText>
         ) : perm.status === "unavailable" ? (
           <AppText variant="caption" color="tertiary" align="center" style={styles.note}>

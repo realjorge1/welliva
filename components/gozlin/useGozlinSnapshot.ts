@@ -1,7 +1,7 @@
 /**
  * useGozlinSnapshot — the shared AppContext → Twin bridge.
  *
- * One place that normalizes Welliva's live state into a GozlinSnapshotInput and
+ * One place that normalizes welliva's live state into a GozlinSnapshotInput and
  * the Twin read-model. Both the full coach (useGozlin) and the lightweight
  * surface presence (useGozlinMoments) consume this, so there's a single source
  * of truth for "what does Gozlin currently know" — no drift between the chat and
@@ -12,10 +12,10 @@
  */
 
 import { useApp } from "@/contexts/AppContext";
-import { wearableSource, type WearableSnapshot } from "@/health-os";
 import type { WorkoutSession } from "@/models/workout";
 import { buildTwin, type GozlinSnapshotInput, type GozlinTwin } from "@/services/gozlin";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useReadinessSignals } from "./useReadinessSignals";
 
 export interface GozlinSnapshot {
   snapshot: GozlinSnapshotInput;
@@ -39,12 +39,9 @@ export function useGozlinSnapshot(): GozlinSnapshot {
     [app.workoutLog, app.currentDate],
   );
 
-  // Real wearable metrics (cached, consent-gated upstream) make Recovery true, not a
-  // proxy. Loaded async — the first render uses the proxy, then folds wearable in.
-  const [wearable, setWearable] = useState<WearableSnapshot | null>(null);
-  useEffect(() => {
-    void wearableSource.lastKnown().then(setWearable);
-  }, [app.currentDate]);
+  // Real wearable metrics and the day's check-in make Recovery more than a
+  // training-load proxy. Shared with the Exercise screen so both show one score.
+  const { wearable, checkins } = useReadinessSignals(app.currentDate);
 
   const snapshot = useMemo<GozlinSnapshotInput>(
     () => ({
@@ -64,6 +61,7 @@ export function useGozlinSnapshot(): GozlinSnapshot {
       streak: app.streakData,
       goals: app.userGoals,
       wearable,
+      checkins,
     }),
     [
       app.userBio,
@@ -80,6 +78,7 @@ export function useGozlinSnapshot(): GozlinSnapshot {
       app.bodyLogs,
       app.streakData,
       wearable,
+      checkins,
     ],
   );
 

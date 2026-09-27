@@ -29,8 +29,8 @@ is still bracketed placeholder text, and CI is red because of it.**
 
 | Constant | State | Notes |
 |---|---|---|
-| `LEGAL_ENTITY` | `"Welliva"` | Passes the gate. Replace if the registered name differs from the trading name. |
-| `LEGAL_CONTACT_EMAIL` | `"privacy@welliva.app"` | Passes the gate. Must be a **monitored** mailbox — the policy commits to a 30-day response on rights requests. |
+| `LEGAL_ENTITY` | `"welliva"` | Passes the gate. Replace if the registered name differs from the trading name. |
+| `LEGAL_CONTACT_EMAIL` | `"mrjorgeobika@gmail.com"` | Passes the gate. Must be a **monitored** mailbox — the policy commits to a 30-day response on rights requests. Was `privacy@welliva.app` until the domain lapsed (September 2026). |
 | `LEGAL_JURISDICTION` | `"Nigeria"` | Filled 10 September 2026. Renders as "the laws of Nigeria" in the Terms' governing-law section. |
 | `LEGAL_POSTAL_ADDRESS` | **placeholder** | Blocking. Required by GDPR-style transparency rules. |
 
@@ -90,14 +90,17 @@ changes after release.
 ## 3. Host the same text publicly
 
 Both stores require a **publicly reachable URL** on the listing — in-app text is
-not enough. Publish the same content at:
+not enough. The same content is published (GitHub Pages, `gh-pages` branch) at:
 
-- `PRIVACY_POLICY_URL` → https://welliva.app/legal/privacy
-- `TERMS_URL` → https://welliva.app/legal/terms
+- `PRIVACY_POLICY_URL` → https://realjorge1.github.io/welliva/privacy/
+- `TERMS_URL` → https://realjorge1.github.io/welliva/terms/
+- `DATA_DELETION_URL` → https://realjorge1.github.io/welliva/data-deletion/
+  (Facebook Login's required data-deletion instructions page)
 
-Keep the hosted copy and `constants/legal.ts` in sync; a mismatch is exactly what
-reviewers look for. The document data is plain structured objects, so a small
-script can render the same sections to HTML.
+The pages are rendered from `constants/legal.ts` by `scripts/legal-site.mjs`, so
+they cannot be edited out of step with the app — but they can go STALE. After
+any change to the legal text, run `npm run legal:publish`; a hosted copy that
+differs from the one users accepted is exactly what reviewers look for.
 
 ## 4. Google Play — Data safety form
 
@@ -121,7 +124,7 @@ Answers implied by the current code. "Collected" = leaves the device;
 Also declare: data is encrypted in transit (yes); users can request deletion
 (yes); no data is sold.
 
-On the Play **Data deletion** question, give the in-app route — Settings → Data →
+On the Play **Data deletion** question, give the in-app route — Settings → Danger zone →
 **Delete account** — not only an email address. Play accepts an email-only route
 but flags apps that have an account system without an in-app path, and Apple
 rejects them outright (5.1.1(v)). Both are satisfied by the flow in
@@ -131,7 +134,7 @@ sits directly above it and is a DIFFERENT thing — device-local wipe, account
 intact — so don't cite it as the deletion route.
 
 Play additionally requires a **Health apps declaration** for apps handling health
-data — expect to state that Welliva is a general wellness app, not a medical
+data — expect to state that welliva is a general wellness app, not a medical
 device, and to point at the medical disclaimer.
 
 ## 5. Apple — privacy nutrition labels & review notes
@@ -146,7 +149,7 @@ Label mapping (App Store Connect → App Privacy):
 
 Review notes worth pasting into the submission:
 
-> Welliva is a general wellness and fitness app. It is not a medical device and
+> welliva is a general wellness and fitness app. It is not a medical device and
 > does not diagnose or treat any condition. A medical disclaimer is presented
 > before onboarding (users must accept it to proceed) and is repeated wherever
 > the app displays calorie or macronutrient targets, on the nutrition screen and
@@ -172,7 +175,7 @@ data), **5.1.2** (health data not used for advertising).
 
 ### Account deletion (App Store 5.1.1(v) — a hard rejection if missing)
 
-- [ ] Settings → Data → **Delete account** exists and is reachable without
+- [ ] Settings → Danger zone → **Delete account** exists and is reachable without
       contacting support
 - [ ] The confirm button stays disabled until `DELETE` is typed **and** the
       password field is non-empty

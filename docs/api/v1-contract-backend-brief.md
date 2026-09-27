@@ -1,6 +1,6 @@
 # `/v1` response contract — brief for the backend repo
 
-The Welliva app now **validates every `/v1` response at runtime** before using it
+The welliva app now **validates every `/v1` response at runtime** before using it
 (`services/api/contracts.ts`, enforced in `services/api/WellivaApi.ts`). A payload
 that doesn't match is rejected with a `ContractViolationError` and the app falls
 back to its on-device engine — so a drift no longer corrupts data, but it **does

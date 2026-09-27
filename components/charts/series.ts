@@ -87,9 +87,29 @@ function withinWindow<T extends { date: string }>(
 /* ─────────────────────────── nutrition ─────────────────────────── */
 
 /**
+ * Did this day record any intake at all?
+ *
+ * "Has a number" is not the test. Day-close writes consumed totals for EVERY day
+ * it closes, so a day the user logged nothing on is saved as 0 kcal / 0 g / 0 g /
+ * 0 g — which means "nothing was recorded", not "nothing was eaten". Plotted as
+ * a real zero it dragged every nutrition line to the floor on each unlogged day,
+ * and on the overlaid macro chart it did worse: 0 indexes to 0% for every macro,
+ * so all four lines were pinned to the same point, and a week with one logged
+ * day came out as four identical [0, 100, 0] series — one visible line.
+ *
+ * A day counts once any macro is positive. A zero macro on such a day (fat on a
+ * day of fruit) is a real zero and is kept.
+ */
+function hasRecordedIntake(e: DietHistoryEntry): boolean {
+  return [e.consumedCalories, e.consumedProteinG, e.consumedCarbsG, e.consumedFatG].some(
+    (v) => typeof v === "number" && Number.isFinite(v) && v > 0,
+  );
+}
+
+/**
  * Daily calories actually eaten, over the last `days`. Only days that recorded
- * a consumed total are plotted (a missing day is unknown, not zero) — so the
- * trend never dips to a misleading 0 on an untracked day.
+ * intake are plotted (an unlogged day is unknown, not zero — see
+ * {@link hasRecordedIntake}) — so the trend never dips to a misleading 0.
  */
 export function buildCaloriesTrend(
   history: DietHistoryEntry[],
@@ -97,7 +117,7 @@ export function buildCaloriesTrend(
   days: number,
 ): ChartPoint[] {
   return withinWindow(history, today, days)
-    .filter((e) => typeof e.consumedCalories === "number")
+    .filter((e) => hasRecordedIntake(e) && typeof e.consumedCalories === "number")
     .map((e) => ({
       value: Math.round(e.consumedCalories as number),
       label: shortDate(e.date),
@@ -112,7 +132,7 @@ export function buildProteinTrend(
   days: number,
 ): ChartPoint[] {
   return withinWindow(history, today, days)
-    .filter((e) => typeof e.consumedProteinG === "number")
+    .filter((e) => hasRecordedIntake(e) && typeof e.consumedProteinG === "number")
     .map((e) => ({
       value: Math.round(e.consumedProteinG as number),
       label: shortDate(e.date),
@@ -127,7 +147,7 @@ export function buildCarbsTrend(
   days: number,
 ): ChartPoint[] {
   return withinWindow(history, today, days)
-    .filter((e) => typeof e.consumedCarbsG === "number")
+    .filter((e) => hasRecordedIntake(e) && typeof e.consumedCarbsG === "number")
     .map((e) => ({
       value: Math.round(e.consumedCarbsG as number),
       label: shortDate(e.date),
@@ -142,7 +162,7 @@ export function buildFatTrend(
   days: number,
 ): ChartPoint[] {
   return withinWindow(history, today, days)
-    .filter((e) => typeof e.consumedFatG === "number")
+    .filter((e) => hasRecordedIntake(e) && typeof e.consumedFatG === "number")
     .map((e) => ({
       value: Math.round(e.consumedFatG as number),
       label: shortDate(e.date),
@@ -175,8 +195,10 @@ function numOrNull(v: number | undefined): number | null {
 /**
  * Every macro (calories / protein / carbs / fat) for each of the last `days`,
  * aligned into one row per day and returned oldest → newest. Only days that
- * recorded at least one consumed macro are kept (a fully-untracked day is a
- * gap, never a fake zero); within a kept day a missing macro stays `null`.
+ * recorded intake are kept — an unlogged day is a gap, never a fake zero (see
+ * {@link hasRecordedIntake}, which is also why "has a number" is not the test:
+ * an unlogged day arrives as all-zero, not as missing). Within a kept day a
+ * missing macro stays `null`.
  *
  * This is the single source the overlaid multi-macro chart reads: because every
  * series is drawn against the same rows, they line up sample-for-sample and can
@@ -188,6 +210,7 @@ export function buildMacroMatrix(
   days: number,
 ): MacroMatrixPoint[] {
   return withinWindow(history, today, days)
+    .filter(hasRecordedIntake)
     .map((e) => ({
       date: e.date,
       label: shortDate(e.date),
@@ -196,14 +219,7 @@ export function buildMacroMatrix(
       proteinG: numOrNull(e.consumedProteinG),
       carbsG: numOrNull(e.consumedCarbsG),
       fatG: numOrNull(e.consumedFatG),
-    }))
-    .filter(
-      (r) =>
-        r.calories != null ||
-        r.proteinG != null ||
-        r.carbsG != null ||
-        r.fatG != null,
-    );
+    }));
 }
 
 /**

@@ -56,6 +56,11 @@ interface Params {
   refreshTodayDiet: () => Promise<void>;
   refreshDietHistory: () => Promise<void>;
   regenerateWorkoutPlan: () => Promise<void>;
+  /**
+   * Re-read water + streak from storage, folding in any glass logged from the
+   * lock screen before the day turned over (see services/nutrition/waterStore).
+   */
+  syncLiveCounters: () => Promise<void>;
 }
 
 export function useDayChange({
@@ -71,6 +76,7 @@ export function useDayChange({
   refreshTodayDiet,
   refreshDietHistory,
   regenerateWorkoutPlan,
+  syncLiveCounters,
 }: Params): void {
   /**
    * Guards the sweep against running twice at once — the interval and a
@@ -196,6 +202,10 @@ export function useDayChange({
       try {
         if (todayDate() !== currentDate) await checkDayChange();
         else if (refreshOnly) await refreshTodayDiet();
+        // After, never before: a glass pressed on the lock screen for a day the
+        // counter wasn't holding yet waits in an inbox until the rollover has
+        // archived yesterday — folding it in first would hand it to yesterday.
+        await syncLiveCounters();
       } catch (e) {
         console.error("useDayChange: day check failed:", e);
       } finally {

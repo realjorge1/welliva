@@ -25,6 +25,7 @@ import { Appear } from "./Appear";
 import { CrossFade } from "./CrossFade";
 import { MultiSelectGrid, OptionRail, type GridOption } from "./MultiSelectGrid";
 import { IngredientMotif } from "./AmbientWellnessVisual";
+import { DayRhythm } from "./DayRhythm";
 import { Dur, Pace, Stagger } from "./onboardingMotion";
 import { HIT, MIN_TOUCH, Rhythm } from "./onboardingTheme";
 
@@ -167,16 +168,20 @@ export function FoodPreferenceSelector<D extends string, C extends string>({
         );
       default:
         return (
-          <MultiSelectGrid
-            key="meals"
-            options={mealOptions}
-            selected={[String(meals)]}
-            onToggle={(v) => onMeals(Number(v))}
-            width={width}
-            columns={2}
-            role="radio"
-            recedeUnselected
-          />
+          // The day the answer describes sits above the two answers, and
+          // redraws itself as the choice changes.
+          <View key="meals" style={styles.meals}>
+            <DayRhythm meals={meals} delay={Stagger.layer} />
+            <MultiSelectGrid
+              options={mealOptions}
+              selected={[String(meals)]}
+              onToggle={(v) => onMeals(Number(v))}
+              width={width}
+              columns={2}
+              role="radio"
+              recedeUnselected
+            />
+          </View>
         );
     }
   };
@@ -223,6 +228,7 @@ const styles = StyleSheet.create({
   motif: { alignItems: "center" },
   stage: { alignSelf: "stretch" },
   question: { gap: Rhythm.layer },
+  meals: { gap: Spacing.xl },
 
   region: {
     alignSelf: "center",

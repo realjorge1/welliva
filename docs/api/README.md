@@ -1,4 +1,4 @@
-# Welliva Backend API — contract & operations
+# welliva Backend API — contract & operations
 
 The backend holds the Anthropic key and runs **all** AI work (diet generation,
 workout generation, the Gozlin coach, food parsing). The app never calls

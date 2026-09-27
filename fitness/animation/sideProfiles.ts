@@ -247,10 +247,21 @@ export const SIDE_PROFILES: Record<FigureMotion, SideProfile> = {
 
   // ── Strength & floor work ───────────────────────────────────────────────
 
+  /*
+   * Hands AND toes on one floor line (y≈85–86), one straight body from head to
+   * heel. The old frames put the feet 14 units above the hands, which read as a
+   * decline push-up with the feet on a bench — and at the bottom the chest lay
+   * on the floor with the arms folded out of sight, so a still of it said
+   * "lying down", not "push-up". Segment lengths match across the two frames
+   * (the rig averages them), so nothing stretches mid-rep.
+   *   top:    arms locked under the shoulders, body inclined ~28°
+   *   bottom: chest a hand's width off the floor, elbows bent back past the
+   *           shoulders, body pivoting on the toes
+   */
   pushup: {
     frames: [
-      P([78, 56], [66, 60], [66, 74], [66, 86], [42, 64], [28, 68], [14, 72]),
-      P([78, 72], [66, 76], [55, 82], [66, 86], [42, 76], [28, 78], [14, 80]),
+      P([77, 54.5], [66, 60], [66, 73], [66, 86], [44.5, 71.4], [31.6, 78.2], [18.7, 85]),
+      P([84.2, 76.4], [71.7, 78], [59, 75], [66, 86], [47.6, 81.2], [33.2, 83.1], [18.7, 85]),
     ],
     loopMs: 2200,
   },
@@ -263,10 +274,12 @@ export const SIDE_PROFILES: Record<FigureMotion, SideProfile> = {
     loopMs: 2400,
   },
 
+  // The push-up's top position held, with a slow breath through the trunk.
+  // Same floor line as the push-up — hands and toes both down.
   plank: {
     frames: [
-      P([78, 58], [66, 62], [66, 74], [66, 86], [42, 66], [28, 70], [14, 74]),
-      P([78, 59], [66, 63], [66, 75], [66, 86], [42, 68], [28, 72], [14, 76]),
+      P([77, 54.5], [66, 60], [66, 73], [66, 86], [44.5, 71.4], [31.6, 78.2], [18.7, 85]),
+      P([77, 55.3], [66, 60.8], [66, 73.4], [66, 86], [44.5, 72.3], [31.6, 78.8], [18.7, 85]),
     ],
     loopMs: 4200,
   },

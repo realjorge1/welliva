@@ -199,11 +199,43 @@ export const migration001: Migration = {
       events.push(
         buildEvent<CheckinPayload>({
           type: "checkin.logged",
-          id: ulidFromSeed(`checkin:${c.date}`, localMidnightMs(c.date)),
+          // ── THE SEED HAS TO BE STABLE ACROSS THE WHOLE CHAIN ──
+          //
+          // A date used to hold exactly one check-in, so `checkin:${date}` was
+          // unique. A date can now hold several momentary entries, so the date
+          // alone would give them all one id — and `append` is idempotent on id,
+          // so every entry after the first would be silently dropped.
+          //
+          // But the seed must NOT simply become the entry id, because migration
+          // 004 is what adds that id: seeding on it would mean this migration
+          // produced one id before 004 had run and a different one after, so
+          // re-running the chain would duplicate every check-in event instead of
+          // deduping it. That is exactly what the idempotency test catches.
+          //
+          // So a DAILY entry keeps the original date seed — there is only ever
+          // one per date, and pre-004 records are all daily, which keeps every
+          // event id that already exists exactly where it was. Only a momentary
+          // entry needs more, and it has a stored id (and failing that, its own
+          // createdAt) that is stable from the moment it is written.
+          id: ulidFromSeed(
+            (c.kind ?? "daily") === "daily"
+              ? `checkin:${c.date}`
+              : `checkin:${c.id ?? `${c.date}:${c.createdAt ?? 0}`}`,
+            localMidnightMs(c.date),
+          ),
           localDate: c.date,
           ts: localMidnightISO(c.date),
           source: "import",
+          // Both vintages pass through. A store being backfilled is usually
+          // pre-valence, but it can hold new-format entries — a reinstall over
+          // restored data, or a device that reached version 4 and was then
+          // rolled back — and dropping the valence would turn a full reading
+          // into a legacy one for no reason. Readers understand either shape.
           payload: {
+            kind: c.kind,
+            valence: c.valence,
+            labels: c.labels,
+            associations: c.associations,
             mood: c.mood,
             energy: c.energy,
             stress: c.stress,

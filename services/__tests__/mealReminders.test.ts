@@ -160,12 +160,57 @@ describe("syncMealReminders", () => {
     expect(b).toBe(c);
   });
 
-  it("carries the meal category, so the banner arrives with its button", async () => {
+  it("carries the meal category only when there is a planned meal to tick", async () => {
+    // "Ate it" ticks the meal planned in that slot. On a day with nothing
+    // planned it could only fail, so that reminder carries no button and a tap
+    // opens the food log instead.
+    await writeJSON(KEYS.SCHEDULED_DIETS, [
+      {
+        date: "2026-09-01",
+        dietId: "d1",
+        schedule: {
+          date: "2026-09-01",
+          dietId: "d1",
+          dietName: "Balanced",
+          breakfast: null,
+          lunch: {
+            id: "m1",
+            mealType: "lunch",
+            name: "Grilled chicken salad",
+            calories: { min: 500, max: 500 },
+            proteinG: { min: 30, max: 30 },
+            carbsG: { min: 50, max: 50 },
+            fatG: { min: 15, max: 15 },
+            isConsumed: false,
+          },
+          dinner: null,
+          snacks: [],
+          status: "active",
+        },
+      },
+    ]);
     await syncMealReminders(settings(), AT(6));
-    const [{ content }] = N.scheduleNotificationAsync.mock.calls[0];
-    expect(content.categoryIdentifier).toBe(MEAL_REMINDER_CATEGORY);
-    expect(content.data.type).toBe("meal-reminder");
-    expect(["breakfast", "lunch"]).toContain(content.data.slot);
+    const requests = N.scheduleNotificationAsync.mock.calls.map(([req]) => req);
+
+    const planned = requests.find(
+      (r) => r.content.data.date === "2026-09-01" && r.content.data.slot === "lunch",
+    )!;
+    expect(planned.content.categoryIdentifier).toBe(MEAL_REMINDER_CATEGORY);
+    expect(planned.content.data.type).toBe("meal-reminder");
+    expect(planned.content.body).toContain("Grilled chicken salad");
+
+    const unplanned = requests.find(
+      (r) => r.content.data.date === "2026-09-01" && r.content.data.slot === "breakfast",
+    )!;
+    expect(unplanned.content.categoryIdentifier).toBeUndefined();
+    expect(unplanned.content.data.route).toBe("/diet/log-food");
+  });
+
+  it("uses a deterministic identifier per day and slot, so a re-lay replaces", async () => {
+    await syncMealReminders(settings(), AT(6));
+    const ids = N.scheduleNotificationAsync.mock.calls.map(([req]) => req.identifier);
+    expect(ids).toContain("welliva.meal.2026-09-01.lunch");
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("names the real meal in the body when the plan for that day exists", async () => {
@@ -352,15 +397,15 @@ describe("logMealFromNotification", () => {
 
   it("refuses when the day has no plan, rather than inventing one", async () => {
     await writeJSON(KEYS.SCHEDULED_DIETS, []);
-    expect(await logMealFromNotification("lunch", Date.now())).toEqual({
+    expect(await logMealFromNotification("lunch", Date.now())).toMatchObject({
       ok: false,
-      reason: "no-plan",
+      reason: "no-meal",
     });
   });
 
   it("refuses when the slot is empty", async () => {
     await givenPlan();
-    expect(await logMealFromNotification("dinner", Date.now())).toEqual({
+    expect(await logMealFromNotification("dinner", Date.now())).toMatchObject({
       ok: false,
       reason: "no-meal",
     });

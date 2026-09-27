@@ -10,7 +10,7 @@ Mission: the complete, production-grade architecture of the Gozlin Intelligence 
 
 ## 0. Architecture at a glance
 
-Gozlin does **not** re-implement scoring. Welliva already has a deterministic,
+Gozlin does **not** re-implement scoring. welliva already has a deterministic,
 offline-first intelligence layer (`services/intelligence/*`, `services/CoachEngine.ts`).
 Gozlin is the **orchestration + persona + memory** layer above it.
 
@@ -278,7 +278,7 @@ pick the lever with highest (impact × feasibility):
 
 A lightweight, transparent readiness signal — WHOOP-inspired, but honest about its inputs.
 
-> ⚠️ Without wearables, Welliva has **no HRV/sleep**. Recovery is therefore a *training-load
+> ⚠️ Without wearables, welliva has **no HRV/sleep**. Recovery is therefore a *training-load
 > & consistency* proxy, and Gozlin **says so**. (Wearable inputs are a clean future plug-in.)
 
 ### Scoring (0–100 → state)
@@ -406,4 +406,4 @@ a structured-renderer set, and the coach screen.
 `GozlinHabitEngine` + `CheckinModal` + `@gozlin_checkins` — see
 [07](./07-habit-awareness.md)); and the **Progress Detective** (Phase 8,
 `GozlinDetectiveEngine` — see [08](./08-progress-detective.md)). All compose the
-existing Welliva intelligence + the Twin and stay pure / deterministic / offline.
+existing welliva intelligence + the Twin and stay pure / deterministic / offline.

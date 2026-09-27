@@ -20,9 +20,12 @@
  * See services/legal/LegalAcceptance.ts.
  *
  * ⚠️ BEFORE STORE SUBMISSION: fill in `LEGAL_POSTAL_ADDRESS` below — the last
- * unfilled identity constant — and host the same text at PRIVACY_POLICY_URL /
- * TERMS_URL, because both stores require a publicly reachable policy URL on the
- * listing itself, not only in-app. See docs/legal/store-submission.md.
+ * unfilled identity constant. See docs/legal/store-submission.md.
+ *
+ * PUBLIC COPIES. Both stores and Facebook Login require the policy at a public
+ * URL, not only in-app. `npm run legal:publish` renders THIS file to the static
+ * site at LEGAL_SITE_URL (scripts/legal-site.mjs) — so after any change here,
+ * republish, or the public copy and the one users accepted drift apart.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,20 +45,28 @@
  * and do NOT loosen the guard's regex. Replace the string with the real
  * registered address and both assertions go green on their own.
  */
-export const LEGAL_ENTITY = "Welliva";
-export const LEGAL_CONTACT_EMAIL = "privacy@welliva.app";
+export const LEGAL_ENTITY = "welliva";
+export const LEGAL_CONTACT_EMAIL = "mrjorgeobika@gmail.com";
 export const LEGAL_POSTAL_ADDRESS = "[registered business address — to be completed]";
 export const LEGAL_JURISDICTION = "Nigeria";
 
-/** Public mirrors of these documents. Required on both store listings. */
-export const PRIVACY_POLICY_URL = "https://welliva.app/legal/privacy";
-export const TERMS_URL = "https://welliva.app/legal/terms";
+/**
+ * Public mirrors of these documents — GitHub Pages, published from the
+ * `gh-pages` branch by `npm run legal:publish`. Required on both store listings
+ * and in the Facebook app's Basic settings. (welliva.app was the original home;
+ * it lapsed in September 2026 and was let go.)
+ */
+export const LEGAL_SITE_URL = "https://realjorge1.github.io/welliva";
+export const PRIVACY_POLICY_URL = `${LEGAL_SITE_URL}/privacy/`;
+export const TERMS_URL = `${LEGAL_SITE_URL}/terms/`;
+/** Facebook Login's "User data deletion → Data deletion instructions URL". */
+export const DATA_DELETION_URL = `${LEGAL_SITE_URL}/data-deletion/`;
 
 /** Bump on any material change → every user re-accepts. */
-export const LEGAL_VERSION = 1;
+export const LEGAL_VERSION = 2;
 
 /** Shown in each document header. Update alongside LEGAL_VERSION. */
-export const LEGAL_LAST_UPDATED = "10 September 2026";
+export const LEGAL_LAST_UPDATED = "26 September 2026";
 
 /** Minimum age to hold an account (the onboarding age field enforces it too). */
 export const MINIMUM_AGE = 13;
@@ -88,9 +99,9 @@ export interface LegalDoc {
 // Short disclaimers — the inline reminders used across the app
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The one-liner shown wherever Welliva hands out a number or a plan. */
+/** The one-liner shown wherever welliva hands out a number or a plan. */
 export const SHORT_MEDICAL_DISCLAIMER =
-  "Welliva offers general wellness guidance, not medical advice. Talk to a qualified clinician before acting on it — especially during pregnancy or with a health condition.";
+  "welliva offers general wellness guidance, not medical advice. Talk to a qualified clinician before acting on it — especially during pregnancy or with a health condition.";
 
 /** Compact variant for tight surfaces (chat, card footers). */
 export const INLINE_MEDICAL_DISCLAIMER =
@@ -107,14 +118,14 @@ export const COACH_DISCLAIMER =
 const PRIVACY: LegalDoc = {
   id: "privacy",
   title: "Privacy Policy",
-  summary: "What Welliva collects, where it lives, and how to erase it.",
+  summary: "What welliva collects, where it lives, and how to erase it.",
   icon: "lock-closed",
   sections: [
     {
       heading: "The short version",
       body: [
         `${LEGAL_ENTITY} is a personal health and fitness app. To build your plan it needs health information about you — including sensitive information such as pregnancy status, medical conditions, medications and injuries.`,
-        "Welliva is built device-first: your detailed history (meals, workouts, check-ins, the coach's memory) is stored on your phone. What leaves the device is limited to what is needed to sign you in, to keep your account in sync across your devices, and — only if you switch it on — a short, minimised summary sent to the AI coach.",
+        "welliva is built device-first: your detailed history (meals, workouts, check-ins, the coach's memory) is stored on your phone. What leaves the device is limited to what is needed to sign you in, to keep your account in sync across your devices, and — only if you switch it on — a short, minimised summary sent to the AI coach.",
         "We do not sell your data, we do not run advertising, and we never share your health information with employers, insurers or data brokers.",
       ],
     },
@@ -128,7 +139,7 @@ const PRIVACY: LegalDoc = {
     {
       heading: "What we collect",
       body: [
-        "Account details. Your email address and an authentication credential when you sign up. If you sign in with Google, we receive your name, email address and profile picture from that provider — not your password.",
+        "Account details. Your email address and an authentication credential when you sign up. If you sign in with Google or Facebook, we receive your name, email address, profile picture and an account identifier from that provider — never your password, and nothing else from that account (no contacts, friends, posts or photos).",
         "Health and profile information you enter. This is the core of the app and you choose what to give us:",
       ],
       bullets: [
@@ -143,7 +154,7 @@ const PRIVACY: LegalDoc = {
     {
       heading: "Device signals — off unless you turn them on",
       body: [
-        "Welliva can read a small number of device signals to make coaching fit your real life. Every one of them is OFF by default and each has its own switch under More → Privacy. Turning one off stops the reads immediately.",
+        "welliva can read a small number of device signals to make coaching fit your real life. Every one of them is OFF by default and each has its own switch under More → Privacy. Turning one off stops the reads immediately.",
       ],
       bullets: [
         "Calendar: read-only, to spot travel and big days so the plan can bend around them",
@@ -185,6 +196,7 @@ const PRIVACY: LegalDoc = {
         "Supabase — authentication, database and file storage",
         "Anthropic — AI model inference for the coach and plan generation, called through our own backend",
         "Google — only if you choose to sign in with Google",
+        "Meta (Facebook) — only if you choose to sign in with Facebook",
         "Open-Meteo — weather lookup, if you enable it",
       ],
     },
@@ -214,6 +226,7 @@ const PRIVACY: LegalDoc = {
       ],
       body: [
         `Write to ${LEGAL_CONTACT_EMAIL} and we will respond within 30 days. We never charge for a request, and never require a reason.`,
+        `Step-by-step deletion instructions, including for accounts created with Google or Facebook, are at ${DATA_DELETION_URL}.`,
       ],
     },
     {
@@ -225,13 +238,13 @@ const PRIVACY: LegalDoc = {
     {
       heading: "Children",
       body: [
-        `Welliva is not for children under ${MINIMUM_AGE}, and accounts cannot be created below that age. Where local law sets a higher age for consenting to data processing (16 in parts of Europe), a parent or guardian must consent on the user's behalf. If you believe a child has given us data, contact ${LEGAL_CONTACT_EMAIL} and we will delete it.`,
+        `welliva is not for children under ${MINIMUM_AGE}, and accounts cannot be created below that age. Where local law sets a higher age for consenting to data processing (16 in parts of Europe), a parent or guardian must consent on the user's behalf. If you believe a child has given us data, contact ${LEGAL_CONTACT_EMAIL} and we will delete it.`,
       ],
     },
     {
       heading: "Analytics and tracking",
       body: [
-        "Welliva contains no advertising SDKs, no third-party analytics and no cross-app tracking. We do not use your data to build advertising profiles, and we do not ask for the advertising identifier.",
+        "welliva contains no advertising SDKs, no third-party analytics and no cross-app tracking. We do not use your data to build advertising profiles, and we do not ask for the advertising identifier.",
       ],
     },
     {
@@ -250,28 +263,28 @@ const PRIVACY: LegalDoc = {
 const TERMS: LegalDoc = {
   id: "terms",
   title: "Terms of Use",
-  summary: "The agreement between you and Welliva for using the app.",
+  summary: "The agreement between you and welliva for using the app.",
   icon: "document-text",
   sections: [
     {
       heading: "Agreement",
       body: [
-        `These Terms are a contract between you and ${LEGAL_ENTITY} covering your use of the Welliva app. By accepting them — or by continuing to use the app — you agree to them. If you do not agree, do not use Welliva.`,
+        `These Terms are a contract between you and ${LEGAL_ENTITY} covering your use of the welliva app. By accepting them — or by continuing to use the app — you agree to them. If you do not agree, do not use welliva.`,
         "The Privacy Policy and the Medical Disclaimer form part of these Terms.",
       ],
     },
     {
-      heading: "Who may use Welliva",
+      heading: "Who may use welliva",
       body: [
         `You must be at least ${MINIMUM_AGE} years old and able to enter a binding agreement. If you are under the age of digital consent where you live, a parent or guardian must agree on your behalf.`,
         "You are responsible for your account and for keeping your sign-in details secure. Tell us promptly if you believe someone else has access to it.",
       ],
     },
     {
-      heading: "What Welliva is — and is not",
+      heading: "What welliva is — and is not",
       body: [
-        "Welliva is a general wellness and fitness product. It generates suggested calorie and macronutrient targets, meal plans, workouts and coaching messages from the information you give it.",
-        "Welliva is not a medical device. It does not diagnose, treat, cure or prevent any disease, and it is not a substitute for professional medical, nutritional or psychological care. Read the Medical Disclaimer — it is short and it matters.",
+        "welliva is a general wellness and fitness product. It generates suggested calorie and macronutrient targets, meal plans, workouts and coaching messages from the information you give it.",
+        "welliva is not a medical device. It does not diagnose, treat, cure or prevent any disease, and it is not a substitute for professional medical, nutritional or psychological care. Read the Medical Disclaimer — it is short and it matters.",
       ],
     },
     {
@@ -294,7 +307,7 @@ const TERMS: LegalDoc = {
     {
       heading: "Acceptable use",
       bullets: [
-        "Do not use Welliva to support disordered eating or extreme restriction",
+        "Do not use welliva to support disordered eating or extreme restriction",
         "Do not use it to give health advice to other people",
         "Do not attempt to break, probe, overload or reverse-engineer the service, or to access another user's data",
         "Do not upload content you have no right to upload, or anything unlawful",
@@ -317,19 +330,19 @@ const TERMS: LegalDoc = {
     {
       heading: "Price",
       body: [
-        "Welliva is currently offered without charge. If paid features are introduced, the price and terms will be shown to you before you buy, and purchases will be handled by the app store you installed from, under its own refund rules.",
+        "welliva is currently offered without charge. If paid features are introduced, the price and terms will be shown to you before you buy, and purchases will be handled by the app store you installed from, under its own refund rules.",
       ],
     },
     {
       heading: "Ending your use",
       body: [
-        "You can stop using Welliva at any time and delete your account and data from Settings. We may suspend or end an account that breaks these Terms or puts other users or the service at risk.",
+        "You can stop using welliva at any time and delete your account and data from Settings. We may suspend or end an account that breaks these Terms or puts other users or the service at risk.",
       ],
     },
     {
       heading: "Disclaimer of warranties",
       body: [
-        "To the fullest extent permitted by law, Welliva is provided \"as is\" and \"as available\", without warranties of any kind, express or implied, including fitness for a particular purpose and the accuracy of any plan, target or coaching output.",
+        "To the fullest extent permitted by law, welliva is provided \"as is\" and \"as available\", without warranties of any kind, express or implied, including fitness for a particular purpose and the accuracy of any plan, target or coaching output.",
       ],
     },
     {
@@ -342,7 +355,7 @@ const TERMS: LegalDoc = {
     {
       heading: "Apple App Store terms",
       body: [
-        "If you obtained Welliva from the Apple App Store, the following apply: this agreement is between you and us only, not with Apple; Apple has no obligation to provide maintenance or support; Apple is not responsible for any claim relating to the app, including product liability, legal-compliance or intellectual-property claims; and Apple and its subsidiaries are third-party beneficiaries of these Terms and may enforce them against you.",
+        "If you obtained welliva from the Apple App Store, the following apply: this agreement is between you and us only, not with Apple; Apple has no obligation to provide maintenance or support; Apple is not responsible for any claim relating to the app, including product liability, legal-compliance or intellectual-property claims; and Apple and its subsidiaries are third-party beneficiaries of these Terms and may enforce them against you.",
       ],
     },
     {
@@ -365,14 +378,14 @@ const TERMS: LegalDoc = {
 const DISCLAIMER: LegalDoc = {
   id: "disclaimer",
   title: "Medical Disclaimer",
-  summary: "Welliva is a wellness app, not a clinician. Where the line sits.",
+  summary: "welliva is a wellness app, not a clinician. Where the line sits.",
   icon: "medkit",
   sections: [
     {
       heading: "Not medical advice",
       body: [
-        "Welliva provides general information about food, movement and habits for healthy adults. Nothing in the app — no calorie target, macro split, meal plan, workout, insight or message from the AI coach — is medical advice, a diagnosis, a treatment plan or a prescription.",
-        "Using Welliva does not create a doctor–patient, dietitian–client or therapist–client relationship. The app's plans are generated by software from the details you type in; no clinician reviews them.",
+        "welliva provides general information about food, movement and habits for healthy adults. Nothing in the app — no calorie target, macro split, meal plan, workout, insight or message from the AI coach — is medical advice, a diagnosis, a treatment plan or a prescription.",
+        "Using welliva does not create a doctor–patient, dietitian–client or therapist–client relationship. The app's plans are generated by software from the details you type in; no clinician reviews them.",
       ],
     },
     {
@@ -391,7 +404,7 @@ const DISCLAIMER: LegalDoc = {
       ],
     },
     {
-      heading: "About the numbers Welliva shows you",
+      heading: "About the numbers welliva shows you",
       body: [
         "Calorie, macronutrient, hydration and sodium targets are estimates produced by population-level formulas (Mifflin–St Jeor for energy, with WHO/AHA/ADA-informed adjustments). They are starting points for a typical adult, not a prescription calculated for your physiology.",
         "The app applies conservative safety limits — for example it will not put a pregnant or postpartum user into a calorie deficit, and it caps protein for users who report kidney issues. These limits exist so the default is cautious, not because they are correct for your case. If a clinician has given you targets, theirs are the ones to follow.",
@@ -400,7 +413,7 @@ const DISCLAIMER: LegalDoc = {
     {
       heading: "Allergies and food safety",
       body: [
-        "Welliva filters meals against the allergies and restrictions you enter, but ingredient data can be incomplete and recipes vary. Always read labels and check with whoever prepared the food. If you have a severe allergy, treat the app as a suggestion engine only, and carry your medication.",
+        "welliva filters meals against the allergies and restrictions you enter, but ingredient data can be incomplete and recipes vary. Always read labels and check with whoever prepared the food. If you have a severe allergy, treat the app as a suggestion engine only, and carry your medication.",
       ],
     },
     {
@@ -418,7 +431,7 @@ const DISCLAIMER: LegalDoc = {
     {
       heading: "In an emergency",
       body: [
-        "Do not use Welliva. Contact your local emergency number or go to the nearest emergency department. If you are thinking about harming yourself, please contact a crisis line or a mental-health professional right now — you deserve real support, and this app cannot provide it.",
+        "Do not use welliva. Contact your local emergency number or go to the nearest emergency department. If you are thinking about harming yourself, please contact a crisis line or a mental-health professional right now — you deserve real support, and this app cannot provide it.",
       ],
     },
   ],
@@ -441,6 +454,67 @@ export function getLegalDoc(id: string | undefined): LegalDoc | null {
   if (!id) return null;
   return LEGAL_DOCS[id as LegalDocId] ?? null;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Data deletion instructions — public page only
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The page behind DATA_DELETION_URL. Facebook Login refuses to go Live without
+ * one, and it is where Facebook sends someone who removes welliva from their
+ * Facebook settings and asks for their data back.
+ *
+ * Not in LEGAL_DOCS on purpose: it is instructions, not terms anyone accepts,
+ * so it must not join the consent gate or bump LEGAL_VERSION when edited. The
+ * in-app path it quotes is the real one — app/(tabs)/settings.tsx, the Danger
+ * zone's "Delete account", which requires typing DELETE (and a password only
+ * for email accounts; a social sign-in has none to re-enter).
+ */
+export const DATA_DELETION_INSTRUCTIONS: Omit<LegalDoc, "id" | "icon"> = {
+  title: "Delete your data",
+  summary: "How to erase your welliva account and everything in it — including what we received from Google or Facebook.",
+  sections: [
+    {
+      heading: "Delete it in the app",
+      body: [
+        "Open welliva and go to Settings → Danger zone → Delete account. Type DELETE to confirm (accounts created with an email and password are also asked for the password).",
+        "This permanently erases your account and everything in it, everywhere — not just on that phone:",
+      ],
+      bullets: [
+        "Your profile, goals and health details",
+        "Every meal, workout, weight and water log",
+        "Your streaks, achievements and habits",
+        "Progress photos and anything the Gozlin coach remembers",
+        "Your name, email address, profile picture and account identifier from Google or Facebook",
+      ],
+    },
+    {
+      heading: "Can't open the app?",
+      body: [
+        `Email ${LEGAL_CONTACT_EMAIL} with the subject "Delete my account", from the address you signed in with (or tell us which address your Google or Facebook account uses). We will delete the account and everything in it, and confirm to you, within 30 days.`,
+      ],
+    },
+    {
+      heading: "If you signed in with Facebook",
+      body: [
+        "From Facebook we received only your name, email address, profile picture and an account identifier — never your password, friends, posts or photos.",
+        "Removing welliva in Facebook (Settings & privacy → Settings → Apps and websites → welliva → Remove) stops Facebook sharing anything further with us, but it does not delete your welliva account. To erase what we already hold, delete the account as described above.",
+      ],
+    },
+    {
+      heading: "If you signed in with Google",
+      body: [
+        "From Google we received only your name, email address, profile picture and an account identifier. Removing welliva under your Google Account → Security → Your connections to third-party apps & services stops further access; deleting your welliva account erases what we hold.",
+      ],
+    },
+    {
+      heading: "How long it takes",
+      body: [
+        "Deletion in the app is immediate. Backup copies age out within 30 days. Nothing is kept for advertising or sold — we have never done either.",
+      ],
+    },
+  ],
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Consent gate — the summary the user actually reads
@@ -489,11 +563,10 @@ export const CONSENT_SUMMARY: ConsentSummaryCard[] = [
   },
   {
     icon: "medkit",
-    title: "Welliva is not a doctor",
+    title: "welliva is not a doctor",
     emphasis: true,
     lines: [
-      "Calorie targets, meal plans, workouts and coaching are general wellness guidance — not medical advice, diagnosis or treatment.",
-      "Check with a qualified clinician before you start, especially if you're pregnant, managing a condition or taking medication.",
+      "Calorie targets, meal plans, workouts and coaching are general wellness guidance — not diagnosis or treatment.",
       "In an emergency, contact your local emergency services — not the app.",
     ],
   },
@@ -509,4 +582,4 @@ export const CONSENT_SUMMARY: ConsentSummaryCard[] = [
 
 /** The checkbox label on the gate. Kept here so the wording is reviewable. */
 export const CONSENT_CHECKBOX_LABEL =
-  "I have read and accept the Privacy Policy, the Terms of Use and the Medical Disclaimer, and I understand Welliva does not provide medical advice.";
+  "I have read and accept the Privacy Policy, the Terms of Use and the Medical Disclaimer, and I understand welliva does not provide medical advice.";

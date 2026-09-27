@@ -503,7 +503,7 @@ export function describeSource(source: NutrientSource | null): string {
     case "recipe":
       return `Calculated from ${source.componentIds.length} reference ingredients`;
     case "app":
-      return "Welliva meal catalog (macros only)";
+      return "welliva meal catalog (macros only)";
     case "user":
       return "Entered by you";
     case "ai-estimate":

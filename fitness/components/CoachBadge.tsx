@@ -1,5 +1,5 @@
 /**
- * CoachBadge — monogram badge for a Welliva coach persona.
+ * CoachBadge — monogram badge for a welliva coach persona.
  * Coaches are original editorial characters; no likeness imagery is used.
  */
 

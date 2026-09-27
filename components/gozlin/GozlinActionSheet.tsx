@@ -36,6 +36,16 @@ export interface ActionSheetOption {
   navigates?: boolean;
   /** Right-aligned count or status, e.g. "12". */
   badge?: string;
+  /**
+   * Arrive already lit. For the one row the moment makes obvious — the meal
+   * whose window is open right now, the session that is due.
+   *
+   * IT LIGHTS A ROW, IT NEVER MOVES OR HIDES ONE. The list's order and its
+   * membership are fixed, because this sheet's second job is to BE the map of
+   * what the app can record, and a map that rearranges itself by the hour is
+   * not a map. All this does is save the eye a scan.
+   */
+  highlight?: boolean;
   onPress: () => void;
 }
 
@@ -115,6 +125,11 @@ export function GozlinActionSheet({
                 accessibilityLabel={opt.caption ? `${opt.label}. ${opt.caption}` : opt.label}
                 style={({ pressed }) => [
                   styles.option,
+                  opt.highlight && {
+                    backgroundColor: alpha(tint, 0.09),
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: alpha(tint, 0.42),
+                  },
                   pressed && { backgroundColor: alpha(colors.text, 0.06) },
                 ]}
               >

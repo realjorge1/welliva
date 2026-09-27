@@ -1,5 +1,5 @@
 /**
- * UPGRADE — the one place Welliva asks for money, and the one place a
+ * UPGRADE — the one place welliva asks for money, and the one place a
  * subscription can be read, changed or brought back.
  *
  * IT IS A MENU DESTINATION, NOT A MODAL. Subscription state used to be split
@@ -10,7 +10,7 @@
  * every lock in the app opens THIS route with its own `source`, and the menu
  * opens it cold — one surface, one set of prices, one place to cancel.
  *
- * THE PICKER: TWO CARDS AND A PERIOD SWITCH
+ * THE PICKER: TWO CARDS, PRO FIRST, ONE PRICE TAG
  *
  * Free and Pro are two cards of the same shape, each carrying its own price and
  * its own button — the shape Google's own plan pickers settled on, and for good
@@ -32,12 +32,17 @@
  * pretending to be guidance; and the line under the Pro button is now a fixed
  * value note rather than a computed price gap, since there is no cheaper paid
  * tier left to measure against.
- *  · ANNUAL IS ALWAYS QUOTED PER MONTH, with the monthly price struck through
- *    beside it and the real yearly charge spelled out underneath. Per-month is
+ *  · ANNUAL IS ALWAYS QUOTED PER MONTH, on a tile beside the Monthly one, with
+ *    the real yearly charge spelled out in the receipt underneath. Per-month is
  *    the only unit in which two plans can be compared at a glance — but quoting
  *    a year's price as though it were monthly, without saying what actually
- *    leaves the account today, is the dishonest version of this same layout and
- *    is what teaches people to distrust an annual toggle.
+ *    leaves the account, is the dishonest version of this same layout and is
+ *    what teaches people to distrust an annual toggle.
+ *  · THE PRICE LIVES ON THE PRO CARD, ONCE. Monthly and Annual are two tiles
+ *    inside it, above the receipt for whichever is chosen and the button that
+ *    buys it (components/billing/PriceTag). A period picker at the top of the
+ *    screen plus a price block on the card was the same price twice, a phone
+ *    height apart. Pro comes first so the tag sits right under the hero.
  *
  * EXACTLY ONE CARD IS EVER HIGHLIGHTED
  *
@@ -66,21 +71,24 @@
  *
  * THE SAVING IS STATED TWICE, IN MONEY, AND THAT IS DELIBERATE
  *
- * Annual saves exactly $10.00 a year — the price in services/billing/pricing.ts
- * is set backwards from that claim so the round number is literally true rather
- * than a rounded $9.89. It appears in two places, and they are not redundant
- * because they answer different questions at different scroll positions:
+ * Annual saves exactly $10.00 a year at list price — services/billing/pricing.ts
+ * sets it backwards from that claim so the round number is literally true rather
+ * than a rounded $9.89. (In other stores it is whatever Play's local prices
+ * make it — ₦5,100 in Nigeria — and every figure is written the way the store
+ * writes its own; see `formatLike`.) It appears in two places, and they are
+ * not redundant because they answer different questions:
  *
- *  1. UNDER THE PERIOD SWITCH (see PeriodSwitch) — the control that decides it.
- *     An offer while you're on monthly, a receipt once you're on annual.
- *  2. ON THE PRO CARD, under the price it applies to — because the card is a
- *     long scroll below the switch, and that is where the decision is made.
+ *  1. ON THE ANNUAL TILE — "SAVE $10" across its top edge, beside the Monthly
+ *     tile it beats. An offer while monthly is chosen, a receipt once annual is.
+ *  2. IN THE RECEIPT under the tiles — $35.88 struck beside $25.88, the saving
+ *     shown as the two numbers it is the difference of, with "28% off" inked in
+ *     the line beneath. The tag makes the claim; the receipt lets it be checked.
  *
- * Both lead with the AMOUNT and let the percentage trail. "28%" is a ratio
- * waiting for a number the reader hasn't reached yet; "$10.00" is the number.
- * Neither is ever the fourth clause of a grey footnote, which is where this used
- * to live ("$25.99 billed yearly · save $9.89") — that is where you put
- * something you are obliged to disclose, not something you want read.
+ * Both lead with the AMOUNT; the percentage only ever trails it. "28%" is a
+ * ratio waiting for a number the reader hasn't reached yet; "$10.00" is the
+ * number. Neither is ever the fourth clause of a grey footnote, which is where
+ * this used to live ("$25.99 billed yearly · save $9.89") — that is where you
+ * put something you are obliged to disclose, not something you want read.
  *
  * WHAT IS NON-NEGOTIABLE HERE — both stores reject storefronts that get this
  * wrong, and it is also simply the honest way to charge someone:
@@ -134,12 +142,12 @@ import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import {
   ALWAYS_FREE_NOTE,
   bestAnnualSaving,
-  countLoggedDays,
-  FREE_PRICE,
-  historyReachLine,
+  FreePriceTag,
+  freePriceView,
   LOCK_COPY,
   PLAN_CARD_ORDER,
   PLAN_IDENTITY,
+  PriceTag,
   priceView,
   PRO_VALUE_NOTE,
   renewalDisclosure,
@@ -153,22 +161,16 @@ import {
   AppText,
   Button,
   Card,
+  ConfirmSheet,
   Pill,
   Reveal,
   Screen,
-  SegmentedControl,
   useColors,
 } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
-import { useApp } from "@/contexts/AppContext";
 import { useBilling } from "@/contexts/BillingContext";
 import {
-  getDevTierOverride,
   LIST_CURRENCY,
-  MANAGE_SUBSCRIPTION_URL,
-  resetAllowances,
-  resetUsage,
-  setDevTierOverride,
   TIER_NAME,
   TIER_SHORT_NAME,
   tierAtLeast,
@@ -180,16 +182,7 @@ import * as Haptics from "@/utils/haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from "react-native";
-
-/**
- * The two periods the storefront sells. A package with any other cadence (a
- * weekly or lifetime SKU someone adds in the console) is deliberately NOT shown
- * here — it would need its own price line, its own renewal sentence and its own
- * saving maths, and a storefront that renders one it doesn't understand is worse
- * than one that ignores it.
- */
-const PERIODS: BillingPeriod[] = ["monthly", "annual"];
+import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 
 /** The tier the picker points at. Only one card may wear the badge. */
 const RECOMMENDED: PaidTier = "pro";
@@ -210,30 +203,16 @@ export default function UpgradeScreen() {
     isAvailable,
     isReady,
     plans,
+    plansProblem,
     isLoadingPlans,
     loadPlans,
     purchase,
     restore,
+    cancelSubscription,
+    manageSubscription,
   } = useBilling();
 
   const currentTier = entitlement.tier;
-
-  /**
-   * The one line on this screen that is about THIS person.
-   *
-   * `useApp()` rather than a narrower slice because the count spans three
-   * domains (diet, body, training) and this screen is not a hot path — it
-   * renders once, when someone is deciding whether to pay.
-   *
-   * Silent unless the user genuinely has history their tier is hiding; see
-   * `historyReachLine`. A storefront that invents a personal fact is worse than
-   * one that doesn't try.
-   */
-  const { dietHistory, bodyLogs, workoutLog } = useApp();
-  const personalLine = useMemo(
-    () => historyReachLine(countLoggedDays(dietHistory, bodyLogs, workoutLog), currentTier),
-    [dietHistory, bodyLogs, workoutLog, currentTier],
-  );
 
   // Annual leads: it is the plan with the margin, and at these prices it is also
   // genuinely the better deal — the switch opens on the answer we'd defend.
@@ -253,8 +232,61 @@ export default function UpgradeScreen() {
   );
 
   const [busy, setBusy] = useState<"restore" | Tier | null>(null);
+  /** Restore's outcome, under the footer link that ran it. */
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * A purchase's outcome, printed on the paid card directly under its button.
+   * It used to share the restore line below both cards — which put "This plan
+   * isn't available to buy on this device right now" a phone-height under the
+   * button that caused it, behind the Deck. From the button, the tap looked
+   * like it did nothing at all.
+   */
+  const [buyMessage, setBuyMessage] = useState<LineMessage | null>(null);
+
+  /** The "Cancel subscription?" sheet. */
+  const [cancelAsk, setCancelAsk] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelMessage, setLineMessage] = useState<LineMessage | null>(null);
+
+  const onCancelConfirmed = useCallback(async () => {
+    if (cancelling) return;
+    setCancelling(true);
+    setLineMessage(null);
+    try {
+      const outcome = await cancelSubscription();
+      switch (outcome.status) {
+        case "cancelled": {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+          const until = shortDate(outcome.expiresAt);
+          setLineMessage({
+            tone: "success",
+            text: outcome.already
+              ? `This was already cancelled${until ? ` — you keep Pro until ${until}` : ""}.`
+              : `Cancelled. Nothing more will be charged${until ? ` — you keep Pro until ${until}` : ""}.`,
+          });
+          return;
+        }
+        case "no_subscription":
+          setLineMessage({
+            tone: "secondary",
+            text: "There's no active subscription on this account to cancel.",
+          });
+          return;
+        case "handed_off":
+          setLineMessage({
+            tone: "secondary",
+            text: "Finish cancelling on the store page that just opened. This screen updates when you come back.",
+          });
+          return;
+        case "error":
+          setLineMessage({ tone: "error", text: outcome.message });
+          return;
+      }
+    } finally {
+      setCancelling(false);
+    }
+  }, [cancelling, cancelSubscription]);
 
   /*
    * Offerings are fetched on mount rather than at startup: it's a network call
@@ -278,10 +310,28 @@ export default function UpgradeScreen() {
     [plans],
   );
 
-  /** Nothing can be bought until the store has answered with real prices. */
-  const canBuy = isAvailable && plans.length > 0;
+  /**
+   * Nothing can be bought until RevenueCat has answered with live packages.
+   * Prices can be on screen before that — straight from Google Play, or
+   * remembered from last time — but those are `purchasable: false`.
+   */
+  const canBuy = isAvailable && plans.some((p) => p.purchasable);
 
   const bestSaving = useMemo(() => bestAnnualSaving(["pro"], plans), [plans]);
+  const proMonthly = useMemo(() => priceView("pro", "monthly", plans), [plans]);
+  const proAnnual = useMemo(() => priceView("pro", "annual", plans), [plans]);
+
+  const freePrice = useMemo(() => freePriceView(plans), [plans]);
+
+  /**
+   * The FIRST load is still in flight and there is no quote at all — not live,
+   * not from Google Play, not remembered. Only then do the figures show as bars,
+   * and only until that load settles: once it has, a tag always carries prices,
+   * falling back to the labelled USD list prices when nothing better exists.
+   * (Bars that never resolved were how "the price tags are gone" happened on a
+   * network that couldn't reach RevenueCat.)
+   */
+  const pricesPending = isAvailable && plans.length === 0 && plansProblem === null;
 
   /**
    * A free trial is a NEW-customer offer, but the store reports it on the
@@ -305,21 +355,34 @@ export default function UpgradeScreen() {
   const onPurchase = useCallback(
     async (tier: PaidTier) => {
       const plan = planFor(tier, period);
-      if (!plan || busy) return;
+      if (!plan || !plan.purchasable || busy) return;
       setBusy(tier);
       setError(null);
       setNotice(null);
+      setBuyMessage(null);
       try {
         const outcome = await purchase(plan);
         if (outcome.status === "purchased") {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
           // Deliberately stays on this screen: the cards re-render from the new
           // entitlement, so the receipt IS the screen.
-          setNotice(`You're on ${TIER_NAME[tier]}. Everything is unlocked.`);
+          setBuyMessage({
+            tone: "success",
+            text: `You're on ${TIER_NAME[tier]}. Everything is unlocked.`,
+          });
+          return;
+        }
+        // Pending is a notice, not an error: the money is on its way and the
+        // entitlement listener unlocks Pro by itself when Play confirms it.
+        if (outcome.status === "pending") {
+          setBuyMessage({ tone: "secondary", text: outcome.message });
           return;
         }
         // A cancellation is a normal outcome, not an error — say nothing at all.
-        if (outcome.status === "error") setError(outcome.message);
+        if (outcome.status === "error") {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+          setBuyMessage({ tone: "error", text: outcome.message });
+        }
       } finally {
         setBusy(null);
       }
@@ -332,6 +395,7 @@ export default function UpgradeScreen() {
     setBusy("restore");
     setError(null);
     setNotice(null);
+    setBuyMessage(null);
     try {
       const result = await restore();
       if (result.tier !== "free") {
@@ -362,8 +426,11 @@ export default function UpgradeScreen() {
     />
   );
 
+  // No `bottomInset`: the Deck floats over this destination like every other,
+  // so `Screen`'s NAV_CLEARANCE default is what keeps the last plan card off
+  // the rail.
   return (
-    <Screen header={header} bottomInset={Spacing.xxl}>
+    <Screen header={header}>
       {/* ── Where you are now ─────────────────────────────────────────────── */}
       <Reveal index={0}>
         {isSubscriber ? (
@@ -371,7 +438,13 @@ export default function UpgradeScreen() {
             tier={currentTier}
             expiresAt={entitlement.expiresAt}
             willRenew={entitlement.willRenew}
-            onManage={() => void Linking.openURL(MANAGE_SUBSCRIPTION_URL)}
+            cancelling={cancelling}
+            message={cancelMessage}
+            onManage={() => void manageSubscription()}
+            onCancel={() => {
+              Haptics.selectionAsync().catch(() => {});
+              setCancelAsk(true);
+            }}
           />
         ) : (
           /* NO ICON ABOVE THE HEADLINE. A badge floating over the title was
@@ -403,33 +476,12 @@ export default function UpgradeScreen() {
                 <AppText variant="footnote" style={styles.flex}>
                   {`Gozlin is open for another ${trialHoursLeft} ${
                     trialHoursLeft === 1 ? "hour" : "hours"
-                  }, free. Nothing will be charged and nothing renews — when the window closes, chat, insights, deep dives and AI plans lock unless you pick a plan.`}
-                </AppText>
-              </View>
-            ) : null}
-            {personalLine ? (
-              <View style={[styles.personal, { borderColor: alpha(colors.gold, 0.35) }]}>
-                <Ionicons name="calendar-outline" size={14} color={colors.gold} />
-                <AppText variant="footnote" style={styles.flex}>
-                  {personalLine}
+                  }, free. Nothing will be charged and nothing renews — when the window closes, chat, insights, deep dives and AI plans lock until you upgrade your plan.`}
                 </AppText>
               </View>
             ) : null}
           </View>
         )}
-      </Reveal>
-
-      {/* ── Period switch, and the saving it decides ─────────────────────── */}
-      <Reveal index={1}>
-        <PeriodSwitch
-          period={period}
-          onChange={setPeriod}
-          saving={bestSaving}
-          onTakeAnnual={() => {
-            Haptics.selectionAsync().catch(() => {});
-            setPeriod("annual");
-          }}
-        />
       </Reveal>
 
       {/* ── The store's own state, when it isn't ready to sell ───────────────
@@ -440,7 +492,7 @@ export default function UpgradeScreen() {
              in a store build that can't reach the store needs the sentence. */}
       {!isAvailable ? (
         gatingActive ? (
-          <Reveal index={2}>
+          <Reveal index={1}>
             <Card padding="lg" style={styles.block}>
               <AppText variant="callout">Subscriptions aren&apos;t available here</AppText>
               <AppText variant="footnote" color="secondary" style={styles.gapSm}>
@@ -449,21 +501,27 @@ export default function UpgradeScreen() {
             </Card>
           </Reveal>
         ) : null
-      ) : isLoadingPlans && plans.length === 0 ? (
-        <Reveal index={2}>
+      ) : !isReady || (isLoadingPlans && plans.length === 0) ? (
+        /* `!isReady` is the cold start: the SDK is still waiting on auth before
+           it can configure. That is "connecting", not "failed" — the fetch
+           effect above re-runs the moment it lands. */
+        <Reveal index={1}>
           <Card padding="lg" style={[styles.block, styles.loadingRow]}>
             <ActivityIndicator color={colors.primary} />
             <AppText variant="footnote" color="tertiary">
-              Loading live prices…
+              {isReady ? "Loading live prices…" : "Connecting to Google Play…"}
             </AppText>
           </Card>
         </Reveal>
       ) : plans.length === 0 ? (
-        <Reveal index={2}>
+        <Reveal index={1}>
           <Card padding="lg" style={styles.block}>
             <AppText variant="callout">Prices couldn&apos;t be loaded</AppText>
+            {/* The store's own reason, classified — a console problem must not
+                be dressed up as bad WiFi (services/billing/storeErrors.ts). */}
             <AppText variant="footnote" color="secondary" style={styles.gapSm}>
-              Check your connection and try again. Nothing has been charged.
+              {plansProblem?.message ??
+                "Check your connection and try again. Nothing has been charged."}
             </AppText>
             <Button
               label="Retry"
@@ -478,27 +536,36 @@ export default function UpgradeScreen() {
 
       {/* ── The two plans. Exactly one is highlighted: `selected`. ────────── */}
       {PLAN_CARD_ORDER.map((tier, i) => (
-        <Reveal key={tier} index={3 + i}>
+        <Reveal key={tier} index={2 + i}>
           <PlanCard
             tier={tier}
             period={period}
-            price={tier === "free" ? FREE_PRICE : priceView(tier, period, plans)}
+            price={tier === "free" ? freePrice : period === "annual" ? proAnnual : proMonthly}
             plan={tier === "free" ? null : planFor(tier, period)}
             currentTier={currentTier}
             canBuy={canBuy}
             trialOffered={trialOffered}
             selected={tier === selected}
             onSelect={() => onSelect(tier)}
+            onChangePeriod={setPeriod}
+            monthly={proMonthly}
+            annual={proAnnual}
+            saving={bestSaving}
+            pricesPending={pricesPending}
+            retrying={isLoadingPlans}
+            onRetry={() => void loadPlans()}
+            message={tier === "free" ? null : buyMessage}
             note={tier === RECOMMENDED ? PRO_VALUE_NOTE : null}
             busy={busy === tier}
             disabled={busy !== null}
             onBuy={() => void onPurchase(tier as PaidTier)}
-            onManage={() => void Linking.openURL(MANAGE_SUBSCRIPTION_URL)}
+            onManage={() => void manageSubscription()}
           />
         </Reveal>
       ))}
 
-      {/* Outcomes live directly under the buttons that caused them. */}
+      {/* Restore's outcome. A purchase's prints on its own card, under its
+          button; this line belongs to the footer link below. */}
       {notice ? (
         <AppText variant="footnote" color="success" align="center" style={styles.gapMd}>
           {notice}
@@ -537,7 +604,7 @@ export default function UpgradeScreen() {
           ·
         </AppText>
         <Pressable
-          onPress={() => void Linking.openURL(MANAGE_SUBSCRIPTION_URL)}
+          onPress={() => void manageSubscription()}
           hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel="Manage subscription"
@@ -554,7 +621,7 @@ export default function UpgradeScreen() {
           onPress={() => router.push("/legal/terms" as never)}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel="Terms of service"
+          accessibilityLabel="Terms of use"
         >
           <AppText variant="footnote" color="brand" style={styles.link}>
             Terms
@@ -575,118 +642,42 @@ export default function UpgradeScreen() {
         </Pressable>
       </View>
 
-      <DevTierSwitch />
+      {/* Names what stops (the renewal), when access ends, and what survives
+          (everything logged). "Keep Pro" is the reachable, reversible answer. */}
+      <ConfirmSheet
+        visible={cancelAsk}
+        icon="close-circle-outline"
+        title={`Cancel ${TIER_NAME[currentTier]}?`}
+        body={`Your subscription stops renewing now and nothing more is charged. You keep ${
+          TIER_SHORT_NAME[currentTier]
+        } ${
+          shortDate(entitlement.expiresAt)
+            ? `until ${shortDate(entitlement.expiresAt)}`
+            : "to the end of the period you've paid for"
+        }, then you're on Free.`}
+        reassurance="Everything you've logged stays — Free is the whole tracking app."
+        confirmLabel="Cancel subscription"
+        cancelLabel={`Keep ${TIER_SHORT_NAME[currentTier]}`}
+        onConfirm={() => void onCancelConfirmed()}
+        onClose={() => setCancelAsk(false)}
+      />
     </Screen>
   );
 }
 
 /* ─────────────────────────────── Sub-views ─────────────────────────────────*/
 
-/**
- * The billing-period control, and the saving that choosing annual is worth.
- *
- * WHAT THIS REPLACED, AND WHY IT WASN'T GOOD ENOUGH
- *
- * A small `Pill` reading "SAVE 28%" sat in a row beside the segmented control,
- * sharing the width with it. It failed in every way a component can:
- *
- *  · IT WAS SQUEEZED. Sharing a row with a two-option switch left it a sliver,
- *    so the one number the screen most wants read was rendered at caption size
- *    in the corner, and on a narrow phone it pushed the switch off its own
- *    natural width.
- *  · IT SAID THE WRONG QUANTITY. "28%" of what? The reader hasn't reached a
- *    price yet — the cards are below the fold. A percentage is a ratio waiting
- *    for a number; "$10.00" IS the number.
- *  · IT DID NOTHING. It described a benefit of the option NOT currently
- *    selected, sitting inches from the control that would select it, and was
- *    not itself tappable.
- *
- * So the switch now gets the full width on its own line, and the saving gets a
- * full-width band underneath it that changes state with the switch:
- *
- *  · ON MONTHLY it is an OFFER, and it is pressable: "Switch to annual and save
- *    $10.00 a year ›". One tap does the thing it describes.
- *  · ON ANNUAL it is a RECEIPT, not a button: "You're saving $10.00 a year",
- *    with the percentage trailing in a quieter weight for anyone who wants the
- *    ratio. Nothing to press, because it is already done.
- *
- * The amount leads in both states and the percent never appears without it.
- */
-function PeriodSwitch({
-  period,
-  onChange,
-  saving,
-  onTakeAnnual,
-}: {
-  period: BillingPeriod;
-  onChange: (p: BillingPeriod) => void;
-  /** Null when there is no saving worth claiming — the band renders nothing. */
-  saving: BestSaving | null;
-  onTakeAnnual: () => void;
-}) {
-  const { colors, isDark } = useColors();
-  const onAnnual = period === "annual";
+/** A date the way the rest of the screen prints one, or null when unknown. */
+function shortDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? null : new Date(t).toLocaleDateString();
+}
 
-  return (
-    <View style={styles.switchBlock}>
-      <SegmentedControl<BillingPeriod>
-        label="Billing period"
-        value={period}
-        onChange={onChange}
-        options={PERIODS.map((p) => ({
-          value: p,
-          label: p === "annual" ? "Annual" : "Monthly",
-        }))}
-      />
-
-      {saving ? (
-        <Pressable
-          // Pressable only when it has something to do. On annual this is a
-          // statement of fact, and a "button" that cannot act is worse than
-          // plain text — it invites a tap and answers with nothing.
-          onPress={onAnnual ? undefined : onTakeAnnual}
-          disabled={onAnnual}
-          accessibilityRole={onAnnual ? "text" : "button"}
-          accessibilityLabel={
-            onAnnual
-              ? `You are saving ${saving.amount} a year, ${saving.percent} percent off`
-              : `Switch to annual billing and save ${saving.amount} a year`
-          }
-          style={({ pressed }) => [
-            styles.saveBand,
-            {
-              backgroundColor: alpha(colors.gold, onAnnual ? (isDark ? 0.18 : 0.13) : 0.07),
-              borderColor: alpha(colors.gold, onAnnual ? 0.55 : 0.3),
-              opacity: pressed ? 0.7 : 1,
-            },
-          ]}
-        >
-          <View style={[styles.saveMark, { backgroundColor: alpha(colors.gold, 0.18) }]}>
-            <Ionicons name="pricetag" size={15} color={colors.gold} />
-          </View>
-
-          <View style={styles.flex}>
-            {/* The money is the headline, at headline size. Everything that
-                qualifies it is a size smaller and underneath. */}
-            <AppText variant="headline" style={{ color: colors.gold }}>
-              {onAnnual ? `You're saving ${saving.amount} a year` : `Save ${saving.amount} a year`}
-            </AppText>
-            <AppText variant="caption" color="tertiary" style={styles.gapXs}>
-              {onAnnual
-                ? `${saving.percent}% off paying month to month`
-                : "Tap to switch to annual billing"}
-            </AppText>
-          </View>
-
-          {onAnnual ? (
-            <Ionicons name="checkmark-circle" size={20} color={colors.gold} />
-          ) : (
-            <Ionicons name="chevron-forward" size={18} color={colors.gold} />
-          )}
-        </Pressable>
-      ) : null}
-    </View>
-  );
+/** A one-line outcome shown under the control that caused it. */
+interface LineMessage {
+  tone: "success" | "secondary" | "error";
+  text: string;
 }
 
 /**
@@ -695,20 +686,32 @@ function PeriodSwitch({
  * "Ends" vs "Renews" is not a detail — someone who has already cancelled and
  * still sees "Renews 12 March" will assume they've been charged again, and the
  * support ticket that follows is entirely our fault.
+ *
+ * CANCELLING IS ONE TAP AND A CONFIRMATION, RIGHT HERE. Buying took one tap on
+ * this screen; leaving must not take a trip through the Play Store's menus to
+ * find. The button is quiet (a ghost, not red) because it is a normal choice,
+ * not an alarm — the confirmation sheet is where the consequences are spelled
+ * out. Once cancelled, the same slot offers the way back.
  */
 function CurrentPlanCard({
   tier,
   expiresAt,
   willRenew,
+  cancelling,
+  message,
   onManage,
+  onCancel,
 }: {
   tier: Tier;
   expiresAt: string | null;
   willRenew: boolean;
+  cancelling: boolean;
+  message: LineMessage | null;
   onManage: () => void;
+  onCancel: () => void;
 }) {
   const { colors } = useColors();
-  const date = expiresAt ? new Date(expiresAt).toLocaleDateString() : null;
+  const date = shortDate(expiresAt);
 
   return (
     <Card padding="xl" style={styles.block}>
@@ -723,22 +726,50 @@ function CurrentPlanCard({
               ? willRenew
                 ? `Renews ${date}`
                 : `Ends ${date} — won't renew`
-              : "Active on this account"}
+              : willRenew
+                ? "Active on this account"
+                : "Cancelled — won't renew"}
           </AppText>
         </View>
       </View>
 
       <AppText variant="footnote" color="tertiary" style={styles.gapMd}>
-        Thank you — it&apos;s what pays for the AI behind your coaching and plans.
+        {willRenew
+          ? "Thank you — it's what pays for the AI behind your coaching and plans."
+          : `Your subscription is cancelled and nothing more will be charged. You keep ${TIER_SHORT_NAME[tier]} ${
+              date ? `until ${date}` : "to the end of the period you've paid for"
+            }, then you're on Free.`}
       </AppText>
 
       <Button
-        label="Manage subscription"
+        label={willRenew ? "Manage subscription" : "Resubscribe"}
         variant="tonal"
         icon="open-outline"
         style={styles.gapLg}
         onPress={onManage}
       />
+      {willRenew ? (
+        <Button
+          label="Cancel subscription"
+          variant="ghost"
+          loading={cancelling}
+          disabled={cancelling}
+          style={styles.gapSm}
+          onPress={onCancel}
+        />
+      ) : null}
+
+      {message ? (
+        <AppText
+          variant="footnote"
+          color={message.tone}
+          align="center"
+          style={styles.gapMd}
+          accessibilityLiveRegion="polite"
+        >
+          {message.text}
+        </AppText>
+      ) : null}
     </Card>
   );
 }
@@ -769,6 +800,14 @@ function PlanCard({
   trialOffered,
   selected,
   onSelect,
+  onChangePeriod,
+  monthly,
+  annual,
+  saving,
+  pricesPending,
+  retrying,
+  onRetry,
+  message,
   note,
   busy,
   disabled,
@@ -786,6 +825,19 @@ function PlanCard({
   /** The one highlighted card. Exactly one is true at a time. */
   selected: boolean;
   onSelect: () => void;
+  onChangePeriod: (period: BillingPeriod) => void;
+  /** The paid tier at each period, for its price tag. Ignored on Free. */
+  monthly: PriceView;
+  annual: PriceView;
+  /** The annual saving, tagged on the Annual tile. Null when none is worth claiming. */
+  saving: BestSaving | null;
+  /** The first price load is in flight with no quote at all: bars, briefly. */
+  pricesPending: boolean;
+  /** A price load is running (the "Try again" below says so). */
+  retrying: boolean;
+  onRetry: () => void;
+  /** This card's purchase outcome, printed under its button. */
+  message: LineMessage | null;
   /** A line under the button — what the money actually buys. */
   note: string | null;
   busy: boolean;
@@ -799,6 +851,8 @@ function PlanCard({
   const isCurrent = tier === currentTier;
   /** Already covered by a higher tier the user holds — nothing to sell. */
   const included = !isCurrent && tierAtLeast(currentTier, tier);
+  /** This card can still be bought here, rather than managed in the store. */
+  const forSale = tier !== "free" && !isCurrent && !included;
 
   return (
     <Pressable
@@ -853,51 +907,22 @@ function PlanCard({
         {identity.tagline}
       </AppText>
 
-      {/* Price. Annual is quoted per month, with the monthly price struck
-          through and the real yearly charge stated underneath. */}
-      <View style={styles.priceRow}>
-        <AppText variant="display">{price.headline}</AppText>
-        <View style={styles.priceSide}>
-          {price.strikethrough ? (
-            <AppText variant="footnote" color="tertiary" style={styles.struck}>
-              {price.strikethrough}
-            </AppText>
-          ) : null}
-          <AppText variant="footnote" color="secondary">
-            {price.unit}
-          </AppText>
-        </View>
-      </View>
-      <AppText variant="footnote" color="tertiary">
-        {price.detail}
-      </AppText>
-
-      {/* ── THE SAVING, IN MONEY ─────────────────────────────────────────────
-             Its own block, full width, gold, directly under the price it is
-             about. Previously the tail of the grey line above. The amount leads
-             and the percentage follows it in a lighter weight: "$9.89" is a
-             thing you can picture, "28%" is homework. */}
-      {price.saveAmount ? (
-        <View
-          style={[
-            styles.saveBanner,
-            {
-              backgroundColor: alpha(colors.gold, isDark ? 0.16 : 0.12),
-              borderColor: alpha(colors.gold, 0.4),
-            },
-          ]}
-        >
-          <Ionicons name="pricetag" size={15} color={colors.gold} />
-          <AppText variant="callout" weight="700" style={{ color: colors.gold }}>
-            {`Save ${price.saveAmount} a year`}
-          </AppText>
-          {price.savePercent ? (
-            <AppText variant="footnote" style={{ color: alpha(colors.gold, 0.85) }}>
-              {`· ${price.savePercent}% off`}
-            </AppText>
-          ) : null}
-        </View>
-      ) : null}
+      {/* The price, as ONE tag: Monthly and Annual side by side, then the
+          receipt for the one chosen. Free gets a single tile of the same make.
+          See components/billing/PriceTag. */}
+      {tier === "free" ? (
+        <FreePriceTag price={price} />
+      ) : (
+        <PriceTag
+          period={period}
+          onChangePeriod={onChangePeriod}
+          monthly={monthly}
+          annual={annual}
+          saving={saving}
+          trialDays={forSale && trialOffered ? (plan?.trialDays ?? null) : null}
+          pending={pricesPending}
+        />
+      )}
 
       {/* Action */}
       <View style={styles.planAction}>
@@ -921,10 +946,46 @@ function PlanCard({
             }
             variant={selected ? "primary" : "tonal"}
             loading={busy}
-            disabled={disabled || !canBuy || !plan}
+            disabled={disabled || !canBuy || !plan || !plan.purchasable}
             onPress={onBuy}
           />
         )}
+
+        {/* Prices are showing but can't be sold yet — Google Play's own, or the
+            last ones seen — because RevenueCat isn't answering. A disabled
+            button with no reason beside it reads as a broken one. */}
+        {forSale && plan && !plan.purchasable ? (
+          <View style={styles.unsellable}>
+            <AppText variant="footnote" color="secondary" align="center">
+              These are your Google Play prices. Buying opens as soon as welliva&apos;s
+              subscription service answers — it isn&apos;t reachable on this network right now.
+            </AppText>
+            <Pressable
+              onPress={onRetry}
+              disabled={retrying}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Try again"
+            >
+              <AppText variant="footnote" color="brand" style={styles.link}>
+                {retrying ? "Checking…" : "Try again"}
+              </AppText>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {/* The outcome of pressing it, right here — see `buyMessage`. */}
+        {message ? (
+          <AppText
+            variant="footnote"
+            color={message.tone}
+            align="center"
+            style={styles.gapMd}
+            accessibilityLiveRegion="polite"
+          >
+            {message.text}
+          </AppText>
+        ) : null}
 
         {note && !isCurrent && !included ? (
           <AppText variant="footnote" color="brand" align="center" style={styles.planNote}>
@@ -937,7 +998,7 @@ function PlanCard({
           <AppText variant="caption" color="tertiary" style={styles.terms}>
             {renewalDisclosure(plan, trialOffered)}
           </AppText>
-        ) : price.estimated && tier !== "free" ? (
+        ) : price.estimated && tier !== "free" && !pricesPending ? (
           <AppText variant="caption" color="tertiary" style={styles.terms}>
             {LIST_CURRENCY} list price. The store charges in your own currency, and every plan
             renews automatically until you cancel it there.
@@ -989,72 +1050,15 @@ function PlanCard({
       </View>
 
       {/* The period this card is quoting, said once more in plain words — the
-          switch is above the fold and cards are scrolled past it. */}
-      {tier !== "free" ? (
+          picker is above the fold and cards are scrolled past it. It says "a
+          year", not "today": with a free trial, today's charge is nothing. */}
+      {tier !== "free" && !pricesPending ? (
         <AppText variant="caption" color="tertiary" style={styles.planPeriodNote}>
           {period === "annual"
-            ? `Yearly billing${price.billedTotal ? ` · ${price.billedTotal} today` : ""}`
-            : "Monthly billing"}
+            ? `Yearly billing${price.billedTotal ? ` · ${price.billedTotal} a year` : ""}`
+            : `Monthly billing · ${price.headline} a month`}
         </AppText>
       ) : null}
-    </Pressable>
-  );
-}
-
-/**
- * DEV-ONLY tier switch: real → free → pro → real.
- *
- * Every lock has to be walkable before the RevenueCat account exists, otherwise
- * the free experience first gets tested during store review. It lives here
- * rather than in Settings because this is the screen that shows what each tier
- * is — flipping and watching which card claims "YOUR PLAN" and which buttons
- * fall back to "Included in…" is the fastest way to check a gate. Stripped from
- * release builds entirely.
- */
-function DevTierSwitch() {
-  const { colors } = useColors();
-  const { isHydrating } = useBilling();
-  const [override, setOverride] = useState<Tier | null>(() => getDevTierOverride());
-
-  // The override is restored from disk during billing hydration, which finishes
-  // after this first renders — re-read once it lands.
-  useEffect(() => {
-    if (__DEV__ && !isHydrating) setOverride(getDevTierOverride());
-  }, [isHydrating]);
-
-  if (!__DEV__) return null;
-
-  const cycle = async () => {
-    const next: Tier | null =
-      override === null ? "free" : override === "free" ? "pro" : null;
-    setOverride(next);
-    await setDevTierOverride(next);
-    // Clear the day's meters with the switch, so testing the free cap starts
-    // from 3 messages rather than whatever you'd already spent as Pro.
-    await Promise.all([resetUsage(), resetAllowances()]);
-  };
-
-  return (
-    <Pressable
-      onPress={cycle}
-      accessibilityRole="button"
-      accessibilityLabel="Force tier, developer only"
-      style={[styles.devRow, { borderColor: colors.border }]}
-    >
-      <Ionicons name="construct-outline" size={16} color={colors.warning} />
-      <View style={styles.flex}>
-        <AppText variant="footnote">Force tier (dev only)</AppText>
-        <AppText variant="caption" color="tertiary">
-          {override === null
-            ? "Using your real entitlement — tap to walk Free, then Pro"
-            : `Pretending you're ${TIER_SHORT_NAME[override]} — tap for the next tier`}
-        </AppText>
-      </View>
-      <Pill
-        label={override === null ? "REAL" : TIER_SHORT_NAME[override].toUpperCase()}
-        tone={override === null ? colors.textTertiary : colors.warning}
-        size="sm"
-      />
     </Pressable>
   );
 }
@@ -1089,8 +1093,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  /** The personal line. Bordered rather than filled: it is a fact about the
-   *  user, not another promotional block. */
+  /** The open-window notice. Bordered rather than filled: it is a fact about
+   *  the user's account, not another promotional block. */
   personal: {
     flexDirection: "row",
     alignItems: "center",
@@ -1104,26 +1108,6 @@ const styles = StyleSheet.create({
 
   /* Current plan */
   currentHead: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
-
-  /* Period switch. The control gets the full width to itself; the saving band
-     sits under it rather than fighting it for the same row. */
-  switchBlock: { gap: Spacing.sm, marginBottom: Spacing.lg },
-  saveBand: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.lg,
-  },
-  saveMark: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-  },
 
   loadingRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
 
@@ -1144,24 +1128,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   planTagline: { marginTop: Spacing.xs, marginBottom: Spacing.md },
-  priceRow: { flexDirection: "row", alignItems: "baseline", gap: Spacing.sm },
-  priceSide: { flexShrink: 1 },
-  struck: { textDecorationLine: "line-through" },
-
-  /** The saving. Full width and loud — the one number this screen is selling. */
-  saveBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: Spacing.xs,
-    marginTop: Spacing.md,
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.lg,
-  },
   planAction: { marginTop: Spacing.lg },
   planNote: { marginTop: Spacing.sm, fontWeight: "600" },
+  unsellable: { alignItems: "center", gap: Spacing.xs, marginTop: Spacing.md },
   terms: { marginTop: Spacing.sm },
 
   /** Ruled off: with the comparison table gone, this list is the card's case. */
@@ -1195,14 +1164,4 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xxl,
   },
   link: { fontWeight: "600" },
-
-  devRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-    marginTop: Spacing.xxl,
-    padding: Spacing.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.lg,
-  },
 });

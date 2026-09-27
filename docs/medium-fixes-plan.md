@@ -1,4 +1,4 @@
-# Welliva — Medium / Store-Submission Fixes Implementation Plan
+# welliva — Medium / Store-Submission Fixes Implementation Plan
 
 Execution plan for the **Medium** audit findings — a mix of hard store-submission blockers,
 quick hygiene wins, a dark-but-built feature, and one maintainability refactor. Same house

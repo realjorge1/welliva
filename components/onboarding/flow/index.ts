@@ -1,5 +1,5 @@
 /**
- * Welliva onboarding — the presentation layer.
+ * welliva onboarding — the presentation layer.
  *
  * Everything in this folder is PRESENTATION. There is no business logic here:
  * no validation bounds, no bio building, no engine calls, no persistence. The
@@ -14,6 +14,8 @@
  */
 export { BreathingPulse, FloatingElement } from "./Ambient";
 export { ActivityCard, ActivityDeck, IntensityNodes } from "./ActivityCard";
+export { DayRhythm } from "./DayRhythm";
+export { QuestionStage } from "./QuestionStage";
 export {
   Halo,
   IngredientMotif,

@@ -1,6 +1,6 @@
 /**
  * SESSION SUMMARY — post-workout review with completion ring, stat grid and
- * exercise breakdown. Rebuilt on the Welliva design system; logging + nav kept.
+ * exercise breakdown. Rebuilt on the welliva design system; logging + nav kept.
  */
 
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";

@@ -1,4 +1,4 @@
-# Auth Setup Guide for Welliva
+# Auth Setup Guide for welliva
 
 Everything needed to connect this app to Supabase and get all three ways in
 working: email/password, Google, and Facebook.
@@ -136,7 +136,7 @@ Any provider works. [Resend](https://resend.com) is the least work
 | Username | `resend` |
 | Password | your Resend API key |
 | Sender email | an address at a domain you verified with the provider |
-| Sender name | `Welliva` |
+| Sender name | `welliva` |
 
 Then raise **Authentication → Rate Limits → "Rate limit for sending emails"** from the default
 to something usable (100+).
@@ -159,7 +159,7 @@ it is what carries the PKCE code back to `welliva://auth-callback`.
 
 1. [Google Cloud Console](https://console.cloud.google.com/) → create or pick a
    project.
-2. **APIs & Services → OAuth consent screen**: External, app name `Welliva`,
+2. **APIs & Services → OAuth consent screen**: External, app name `welliva`,
    support + developer contact email, and a privacy policy URL.
 3. **APIs & Services → Credentials → Create Credentials → OAuth client ID**,
    application type **Web application**.
@@ -181,9 +181,19 @@ it is what carries the PKCE code back to `welliva://auth-callback`.
 ### Step 3 — Publish the consent screen
 
 While the consent screen is in **Testing**, only accounts listed under
-**Test users** can sign in; everyone else gets *"Access blocked: Welliva has not
+**Test users** can sign in; everyone else gets *"Access blocked: welliva has not
 completed the Google verification process"*. **Publish app** when you are ready
 for real users.
+
+The console now calls this area **Google Auth Platform**: the switch is
+*Audience → Publishing status → Publish app*. The app only asks for `email` and
+`profile`, which are non-sensitive scopes, so publishing takes effect
+immediately — no Google review — as long as you have not uploaded a logo (a logo
+triggers brand verification).
+
+`npm run auth:doctor` proves the Client ID and the redirect URI against Google
+itself. It cannot see the publishing status or the Client Secret; a wrong secret
+shows up only after an account is picked, as a failed sign-in in the app.
 
 ---
 
@@ -196,43 +206,85 @@ provider that would fail with *"provider is not enabled"* is never drawn. That
 also means enabling it below makes the button appear on the next app launch,
 with no rebuild and no release.
 
+No native Facebook SDK is involved. The button runs the same web round trip as
+Google (a Custom Tab to Facebook, back through Supabase, into the app), so none
+of the SDK's key hashes, `facebook_app_id` strings or `expo-facebook` plugins
+apply — ignore guides that ask for them.
+
+Meta's developer dashboard is organised around **use cases** now. Older guides
+that say *Add Product → Facebook Login* describe a menu that no longer exists.
+
 ### Step 1 — Create the Facebook app
 
-1. [developers.facebook.com](https://developers.facebook.com/) → **My Apps →
-   Create App**.
-2. Use case: **Authenticate and request data from users with Facebook Login**.
-3. App name `Welliva`, plus a contact email.
+1. [developers.facebook.com](https://developers.facebook.com/apps) → **Create
+   app**.
+2. App details: name `welliva`, and a contact email you read.
+3. Use case: **Authenticate and request data from users with Facebook Login**.
+4. Business: *I don't want to connect a business portfolio yet* is fine — it is
+   not needed for `email` + `public_profile`.
+5. Finish, then **Go to dashboard**.
 
-### Step 2 — Add Facebook Login
+### Step 2 — Configure the Login use case
 
-1. **Add Product → Facebook Login → Set Up**, platform **Web**.
-2. Site URL: `https://<your-project-ref>.supabase.co`
-3. **Facebook Login → Settings** → Valid OAuth Redirect URIs:
+Dashboard → **Use cases** → *Authenticate and request data from users with
+Facebook Login* → **Customize**.
+
+1. **Permissions** — `public_profile` is there already. Find **`email`** and
+   press **Add**. Skip this and every sign-in stops on Facebook's own page with
+   *"Invalid Scopes: email"*, because Supabase always asks for it — it is the
+   address the account is created under.
+2. **Settings** (Facebook Login settings) → **Valid OAuth Redirect URIs**:
 
    ```
    https://<your-project-ref>.supabase.co/auth/v1/callback
    ```
 
-   Same rule as Google: Supabase's callback, never the app's scheme.
-4. Keep **Client OAuth Login** and **Web OAuth Login** on.
+   Same rule as Google: Supabase's callback, never `welliva://`. Keep **Client
+   OAuth login**, **Web OAuth login** and **Enforce HTTPS** on. Save.
 
 ### Step 3 — Credentials
 
-**Settings → Basic**: copy the **App ID**, reveal and copy the **App Secret**,
-and set **App Domains** to `<your-project-ref>.supabase.co`.
+**App settings → Basic**:
+
+- Copy the **App ID** (all digits) and press **Show** to copy the **App
+  Secret**. Not the *Client Token* — that is a different, SDK-only value.
+- **App Domains**: `<your-project-ref>.supabase.co`
+- Save changes.
 
 ### Step 4 — Supabase
 
-**Authentication → Providers → Facebook** → enable, App ID as *Client ID*, App
-Secret as *Client Secret*, save. Confirm with `npm run auth:doctor` — the
-Facebook line turns from WARN to PASS.
+**Authentication → Sign In / Providers → Facebook**
+(`https://supabase.com/dashboard/project/<your-project-ref>/auth/providers`) →
+enable, **App ID** into *Facebook client ID*, **App Secret** into *Facebook
+secret*, save.
 
-### Step 5 — Go live
+Confirm with `npm run auth:doctor`: *Facebook provider enabled* turns from WARN
+to PASS, and *Facebook App ID looks like an App ID* appears. The button shows up
+the next time the app launches — no rebuild.
 
-A new Facebook app is in **Development Mode**: only developers, testers and
-admins can sign in. To open it up you need a **Privacy Policy URL**, a
-**1024×1024 app icon**, and a completed **Data Deletion** callback or
-instructions URL in *Settings → Basic*, then switch to **Live**.
+### Step 5 — Test in Development mode
+
+A new app is in **Development mode**: only people with a role on it can sign in.
+Your own Facebook account (the app's admin) works straight away. To let someone
+else try it first, **App roles → Roles → Add people → Tester**; they accept the
+invitation at developers.facebook.com before it works.
+
+### Step 6 — Go live
+
+**Publish** (left nav) switches the app to Live. Meta blocks it until **App
+settings → Basic** has:
+
+- **Privacy Policy URL** — `https://realjorge1.github.io/welliva/privacy/`
+- **Terms of Service URL** — `https://realjorge1.github.io/welliva/terms/`
+- **User data deletion** — choose *Data deletion instructions URL* →
+  `https://realjorge1.github.io/welliva/data-deletion/`
+- **App icon** — `assets/images/welliva1024.png` (already 1024×1024)
+- **Category** — Health & fitness
+
+Those pages are generated from `constants/legal.ts` by `npm run legal:site` and
+published to the repo's `gh-pages` branch by `npm run legal:publish`. After any
+edit to the legal text, republish — the public copy must match what users
+accepted in the app.
 
 `email` and `public_profile` are granted without App Review, and they are all
 this app requests.
@@ -335,17 +387,31 @@ adb shell run-as com.welliva.app cat /data/data/com.welliva.app/shared_prefs/Sec
 ### Google
 
 - **`redirect_uri_mismatch`** — the Google Console redirect URI is not exactly
-  `https://<ref>.supabase.co/auth/v1/callback`.
-- **`invalid_client`** — Client ID or Secret wrong in Supabase.
+  `https://<ref>.supabase.co/auth/v1/callback`. `npm run auth:doctor` reports
+  this without a device.
+- **`invalid_client`** — Client ID wrong in Supabase (the doctor catches this
+  too). A wrong *Secret* passes the doctor and fails only after an account is
+  picked.
 - **"Access blocked … verification process"** — the consent screen is still in
   Testing (§2 Step 3).
 
 ### Facebook
 
 - **Button doesn't appear** — the provider is off in Supabase. That is by
-  design; see §3.
-- **"URL Blocked"** — add `<ref>.supabase.co` to App Domains.
-- **Only admins can sign in** — still in Development Mode (§3 Step 5).
+  design; see §3. Also fully close and reopen the app: providers are asked for
+  once per launch.
+- **"Invalid Scopes: email"** on Facebook's page — the `email` permission was
+  never added to the Login use case (§3 Step 2).
+- **"URL Blocked"** — the Supabase callback is missing from Valid OAuth Redirect
+  URIs (§3 Step 2).
+- **"Can't load URL: the domain of this URL isn't included in the app's
+  domains"** — add `<ref>.supabase.co` to App Domains (§3 Step 3).
+- **"App not active" / only admins can sign in** — still in Development mode
+  (§3 Steps 5–6).
+- **"That account didn't share an email address"** in the app — the person
+  unticked email on Facebook's permission screen, or their Facebook account has
+  only a phone number. Supabase needs an address to create the account; they can
+  retry and allow it.
 
 ### Email
 

@@ -120,8 +120,8 @@ export async function spendAllowance(
 }
 
 /**
- * Wipe every lifetime allowance. Sign-out (the next account on this device gets
- * its own taste) and the dev tier switch.
+ * Wipe every lifetime allowance. Called on sign-out, so the next account on this
+ * device gets its own taste.
  */
 export async function resetAllowances(): Promise<void> {
   cache = { counts: {} };

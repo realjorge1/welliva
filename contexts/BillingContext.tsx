@@ -18,7 +18,7 @@
  *  3. logIn / logOut as the account changes.
  *  4. Listen for store-side changes (renewal, cancellation, refund).
  *  5. Re-check on foreground — catches a subscription bought or cancelled in
- *     the Play app while Welliva was backgrounded.
+ *     the Play app while welliva was backgrounded.
  */
 import React, {
   createContext,
@@ -29,7 +29,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { AppState, type AppStateStatus } from "react-native";
+import { AppState, Platform, type AppStateStatus } from "react-native";
 import { useRouter } from "expo-router";
 
 import { useAuth } from "@/components/SupabaseAuthProvider";
@@ -47,6 +47,8 @@ import {
   isBillingAvailable,
   isBillingReady,
   isGatingActive,
+  markNotRenewing,
+  openSubscriptionManagement,
   purchasePlan,
   refreshEntitlement,
   restorePurchases,
@@ -56,15 +58,39 @@ import {
   subscribeTrial,
   trialHoursLeft,
   maybeStartTrial,
+  reconcileTrialWithServer,
   type Entitlement,
   type FeatureId,
   type PlanOption,
   type PurchaseOutcome,
+  type StoreProblem,
   type Tier,
 } from "@/services/billing";
 import { setTrialClaimer } from "@/services/billing";
+import { recallPrices, rememberPrices } from "@/services/billing/priceMemory";
 import { setSyncPushGate } from "@/services/sync/SyncEngine";
 import { WellivaApi } from "@/services/api";
+
+/** What tapping "Cancel subscription" ended in. */
+export type CancelOutcome =
+  /**
+   * Auto-renew is off. `expiresAt` is when Pro ends; `already` is true when it
+   * had been switched off before this tap.
+   */
+  | { status: "cancelled"; expiresAt: string | null; already: boolean }
+  /** Nothing to cancel on this account. */
+  | { status: "no_subscription" }
+  /** The store's own page was opened — the customer finishes there. */
+  | { status: "handed_off" }
+  | { status: "error"; message: string };
+
+/**
+ * How long a foreground re-check waits before asking RevenueCat's servers again
+ * rather than reading the SDK's cache. Short enough that a cancellation made in
+ * the Play Store shows on return; long enough that flicking between apps does
+ * not turn into a request per flick.
+ */
+const FRESH_REFRESH_MIN_MS = 30_000;
 
 interface BillingContextType {
   /**
@@ -125,12 +151,27 @@ interface BillingContextType {
 
   /** Plus/Pro × monthly/annual, for the upgrade screen. Loaded by `loadPlans`. */
   plans: PlanOption[];
+  /**
+   * Why the last `loadPlans` came back empty or short a period — the store's
+   * own reason, classified (services/billing/storeErrors.ts). Null when the
+   * storefront is complete, and before the first load.
+   */
+  plansProblem: StoreProblem | null;
   isLoadingPlans: boolean;
   loadPlans: () => Promise<void>;
 
   purchase: (plan: PlanOption) => Promise<PurchaseOutcome>;
   restore: () => Promise<{ ok: boolean; tier: Tier; message?: string }>;
   refresh: () => Promise<void>;
+  /**
+   * Stop the subscription renewing. Pro stays on until the end of the paid
+   * period — the store's rule. On Android the backend cancels it with Google
+   * directly; on iOS, or when the backend can't be reached, the store's own
+   * page opens instead. See {@link CancelOutcome}.
+   */
+  cancelSubscription: () => Promise<CancelOutcome>;
+  /** Open the store's subscription page (resubscribe, payment method, …). */
+  manageSubscription: () => Promise<void>;
 
   /**
    * Open the upgrade screen. Pass the lock that sent the user, so the screen can
@@ -150,6 +191,7 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
   const [entitlement, setEntitlementState] = useState<Entitlement>(getEntitlement);
   const [isHydrating, setIsHydrating] = useState(true);
   const [plans, setPlans] = useState<PlanOption[]>([]);
+  const [plansProblem, setPlansProblem] = useState<StoreProblem | null>(null);
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
 
   const configuredFor = useRef<string | null | undefined>(undefined);
@@ -247,12 +289,26 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
 
     void (async () => {
       if (first) {
-        await configureBilling(uid);
+        // Readiness is published as soon as the SDK is configured, not after
+        // the entitlement refresh — see configureBilling. The line at the end
+        // of this block still publishes the final answer either way.
+        await configureBilling(uid, () => setIsReady(isBillingReady()));
       } else if (uid) {
         // Account switched after configure — transfer or detach.
         await identifyUser(uid);
       } else {
         await signOutBilling();
+      }
+      // With an account to ask about, take the SERVER's Gozlin window over any
+      // window granted on this device before sign-in. The backend enforces its
+      // own window on every coach turn, so the two must agree — see
+      // reconcileTrialWithServer. Runs after configure so a paying customer is
+      // recognised first and never handed a "trial" of what they bought.
+      if (uid) {
+        await reconcileTrialWithServer({
+          isSubscriber: hasPaidAccess(),
+          gatingActive: isGatingActive(),
+        });
       }
       // Publish readiness however this resolved. Configure can legitimately fail
       // (no key, dead network on the entitlement refresh), and the flag stays
@@ -268,19 +324,51 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
   }, [authLoading]);
 
   // 5 ── Re-check on foreground. Someone can subscribe or cancel in the Play
-  //      app without ever returning here through a purchase flow.
+  //      app without ever returning here through a purchase flow — and the
+  //      SDK's cache would keep saying "Renews" for minutes after, so this asks
+  //      RevenueCat's servers directly (throttled; see FRESH_REFRESH_MIN_MS).
+  const lastFreshRefresh = useRef(0);
   useEffect(() => {
     const onChange = (state: AppStateStatus) => {
-      if (state === "active") void refreshEntitlement();
+      if (state !== "active") return;
+      const now = Date.now();
+      const fresh = now - lastFreshRefresh.current >= FRESH_REFRESH_MIN_MS;
+      if (fresh) lastFreshRefresh.current = now;
+      void refreshEntitlement({ fresh });
     };
     const sub = AppState.addEventListener("change", onChange);
     return () => sub.remove();
   }, []);
 
+  /*
+   * The last real quote, so the price tag opens filled in the reader's own
+   * currency rather than blank or in dollars — and stays filled when a reload
+   * comes back empty. Display-only; see services/billing/priceMemory.
+   */
+  const recalledPlans = useRef<PlanOption[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void recallPrices().then((memory) => {
+      recalledPlans.current = memory;
+      if (alive && memory.length > 0) setPlans((cur) => (cur.length > 0 ? cur : memory));
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const loadPlans = useCallback(async () => {
     setIsLoadingPlans(true);
     try {
-      setPlans(await getPlanOptions());
+      const storefront = await getPlanOptions();
+      // Live packages, or Google Play's own prices when RevenueCat couldn't be
+      // reached — both are real quotes, so both are remembered.
+      if (storefront.plans.length > 0) {
+        recalledPlans.current = storefront.plans;
+        void rememberPrices(storefront.plans);
+      }
+      setPlans(storefront.plans.length > 0 ? storefront.plans : recalledPlans.current);
+      setPlansProblem(storefront.problem);
     } finally {
       setIsLoadingPlans(false);
     }
@@ -290,6 +378,57 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
 
   const restore = useCallback(async () => restorePurchases(), []);
   const refresh = useCallback(async () => refreshEntitlement(), []);
+  const manageSubscription = useCallback(async () => openSubscriptionManagement(), []);
+
+  const cancelSubscription = useCallback(async (): Promise<CancelOutcome> => {
+    // Apple has no cancel API — an App Store subscription is cancelled in
+    // Apple's own sheet, which the SDK opens inside the app.
+    if (Platform.OS === "ios" || !WellivaApi.isConfigured) {
+      await openSubscriptionManagement();
+      return { status: "handed_off" };
+    }
+
+    let result;
+    try {
+      result = await WellivaApi.cancelSubscription();
+    } catch (e) {
+      // The server couldn't do it (offline, not deployed yet, store error).
+      // Say so, and leave the store's own page one tap away on the screen.
+      // One sentence for every cause: the raw error can name an endpoint or a
+      // status code, and none of it tells the person anything they can act on.
+      console.warn("[billing] cancel failed:", e);
+      return {
+        status: "error",
+        message:
+          "Your subscription couldn't be cancelled from here. Nothing has changed — try again, or cancel it in Google Play.",
+      };
+    }
+
+    switch (result.status) {
+      case "manage_in_store":
+        await openSubscriptionManagement();
+        return { status: "handed_off" };
+      case "no_subscription":
+        await refreshEntitlement({ fresh: true });
+        return { status: "no_subscription" };
+      case "cancelled":
+      case "already_cancelled": {
+        // Say "Ends <date>" on the next frame, then let RevenueCat's own record
+        // — which the server just changed — replace the local one.
+        await markNotRenewing(result.expiresAt);
+        await refreshEntitlement({ fresh: true });
+        lastFreshRefresh.current = Date.now();
+        // A read that raced the store and still says "renews" must not undo a
+        // cancel the server has confirmed.
+        if (getEntitlement().willRenew) await markNotRenewing(result.expiresAt);
+        return {
+          status: "cancelled",
+          expiresAt: result.expiresAt ?? getEntitlement().expiresAt,
+          already: result.status === "already_cancelled",
+        };
+      }
+    }
+  }, []);
 
   const openUpgrade = useCallback(
     (source?: FeatureId) => {
@@ -303,9 +442,8 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<BillingContextType>(
     () => ({
-      // All recomputed from the same `entitlement` snapshot the dev override
-      // flows through (see entitlement.ts `emit()`), so flipping the developer
-      // tier switch re-renders every gated screen.
+      // All recomputed from the same `entitlement` snapshot (see
+      // entitlement.ts `emit()`), so a tier change re-renders every gated screen.
       tier: effectiveTier(),
       isPro: entitlement.tier === "pro",
       isSubscriber: entitlement.tier !== "free",
@@ -319,11 +457,14 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
       isAvailable: isBillingAvailable(),
       isReady,
       plans,
+      plansProblem,
       isLoadingPlans,
       loadPlans,
       purchase,
       restore,
       refresh,
+      cancelSubscription,
+      manageSubscription,
       openUpgrade,
     }),
     [
@@ -334,11 +475,14 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
       isHydrating,
       isReady,
       plans,
+      plansProblem,
       isLoadingPlans,
       loadPlans,
       purchase,
       restore,
       refresh,
+      cancelSubscription,
+      manageSubscription,
       openUpgrade,
     ],
   );

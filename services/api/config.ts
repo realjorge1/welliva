@@ -1,5 +1,5 @@
 /**
- * Welliva backend API — client config.
+ * welliva backend API — client config.
  *
  * The backend (see /backend-welliva) holds the Anthropic key and runs all AI. The app
  * only needs its URL. Set EXPO_PUBLIC_API_URL to enable the AI features; when it

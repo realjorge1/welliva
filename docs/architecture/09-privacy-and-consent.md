@@ -48,7 +48,7 @@ export interface ConsentRecord {
 
 ### Consent flow
 
-- **First run / post-onboarding:** a calm, plain-language consent sheet — *"Welliva
+- **First run / post-onboarding:** a calm, plain-language consent sheet — *"welliva
   works entirely on your phone. Want Gozlin to also use AI in the cloud for richer
   chat? It only ever sees a short summary, never your full history."* — with a clear
   default-off toggle for `ai_cloud`. Not a wall of legalese; one screen, real choices.

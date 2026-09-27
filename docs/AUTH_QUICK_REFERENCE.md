@@ -1,4 +1,4 @@
-# Welliva Authentication Quick Reference
+# welliva Authentication Quick Reference
 
 ## Auth Methods Available
 

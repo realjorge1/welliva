@@ -102,7 +102,7 @@ const FAILURE_COPY: Record<PhotoFailure, string | null> = {
   unavailable:
     "Photos need the latest app build — the picker isn't in this one yet. Update and try again.",
   permission:
-    "Welliva needs photo access to add one. You can turn it on in your device settings.",
+    "welliva needs photo access to add one. You can turn it on in your device settings.",
   failed: "That photo didn't upload. Check your connection and try again.",
 };
 

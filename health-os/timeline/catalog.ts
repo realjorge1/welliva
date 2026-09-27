@@ -70,9 +70,23 @@ export interface BodyMeasurementPayload {
   waistCm?: number;
   notes?: string;
 }
+/**
+ * A state-of-mind entry. `valence` (−1…+1) is the primary reading; the 1–5
+ * `mood`/`energy`/`stress` fields are pre-migration-004 legacy and are only
+ * present on events the backfill produced from old check-ins.
+ */
 export interface CheckinPayload {
+  /** "momentary" | "daily". Absent on pre-004 events, which were all daily. */
+  kind?: string;
+  /** −1 (very unpleasant) … +1 (very pleasant). */
+  valence?: number;
+  labels?: string[];
+  associations?: string[];
+  /** @deprecated legacy 1–5. */
   mood?: number;
+  /** @deprecated legacy 1–5. */
   energy?: number;
+  /** @deprecated legacy 1–5. */
   stress?: number;
   sleepHours?: number;
   note?: string;

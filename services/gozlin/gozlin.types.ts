@@ -1,7 +1,7 @@
 /**
  * GOZLIN — shared types for the AI health-coach intelligence layer.
  *
- * Gozlin is the persona + orchestration layer on top of Welliva's existing
+ * Gozlin is the persona + orchestration layer on top of welliva's existing
  * deterministic intelligence (services/intelligence/*). These types describe the
  * normalized read-model (the "Twin"), the structured outputs each feature emits,
  * the chat/session shapes, and the on-device memory model.
@@ -13,7 +13,7 @@
  * See docs/gozlin/02-intelligence-architecture.md for the full design.
  */
 
-import type { Receipt } from "./agent/receipts";
+import type { RecallReceipt, Receipt } from "./agent/receipts";
 import type { DietHistoryEntry, TodayDiet } from "../../models/diet";
 import type { NutritionTargets } from "../../models/nutrition";
 import type { SessionSummaryData } from "../../models/session";
@@ -83,6 +83,12 @@ export interface GozlinSnapshotInput {
    * Recovery so the readiness signal is true, not just a training-load proxy (P4).
    */
   wearable?: WearableSnapshot | null;
+  /**
+   * The state-of-mind log, for the same reason: today's hours slept and
+   * "Drained" are readiness signals, and most users have no watch to give us
+   * any other. Absent = Recovery reads training load (and any wearable) only.
+   */
+  checkins?: GozlinCheckin[] | null;
   /** Injectable for tests/determinism; defaults to now. */
   now?: Date;
 }
@@ -627,20 +633,45 @@ export interface HabitPattern {
 }
 
 /**
- * A self-reported daily check-in — how the user slept, felt, and their stress.
+ * A self-reported state-of-mind entry — how the user feels, and how they slept.
  * The only source of the "life habits" (sleep / mood) the app can't measure on
  * its own. Stored on-device via the Gozlin memory store; entirely optional, and
  * every habit read degrades gracefully when there are none.
+ *
+ * ── TWO SHAPES IN ONE TYPE ──────────────────────────────────────────────────
+ * Since the state-of-mind rebuild this carries `valence` + `labels` +
+ * `associations` (see services/gozlin/mind.ts) and is no longer one-per-day: a
+ * `momentary` entry is "how I feel right now" and there can be many in a day,
+ * while a `daily` entry is "how the day went overall" and there is one.
+ *
+ * The 1–5 `mood`/`energy`/`stress` fields are LEGACY and survive only so
+ * records written before migration 004 still parse. Nothing writes them any
+ * more, and readers must go through `readValence()` rather than touching
+ * `mood` — see GozlinHabitEngine. `sleepHours` is NOT legacy: sleep is not a
+ * feeling, and detectSleepLink plus the learning engine both still read it.
+ *
+ * `id` is optional for the same reason: pre-004 records never had one, and the
+ * store falls back to `${date}:${kind}` for them.
  */
 export interface GozlinCheckin {
   date: string; // YYYY-MM-DD (local)
-  /** 1 (rough) – 5 (great). */
+  /** Stable entry id. Absent on pre-migration-004 records. */
+  id?: string;
+  /** Absent on pre-004 records, which were all daily by definition. */
+  kind?: import("./mind").MindKind;
+  /** −1 (very unpleasant) … +1 (very pleasant). The primary reading. */
+  valence?: number;
+  /** Chosen emotion words, e.g. ["Calm", "Grateful"]. */
+  labels?: string[];
+  /** Life-domain keys this was attributed to, e.g. ["work", "family"]. */
+  associations?: string[];
+  /** @deprecated pre-004 1–5 mood. Read `valence` via readValence() instead. */
   mood?: number;
-  /** 1 (drained) – 5 (energized). */
+  /** @deprecated pre-004 1–5 energy. Never read; folded into valence + labels. */
   energy?: number;
-  /** 1 (calm) – 5 (very stressed). */
+  /** @deprecated pre-004 1–5 stress. Read via the STRESS_LABELS set instead. */
   stress?: number;
-  /** Hours slept last night. */
+  /** Hours slept last night. Daily entries only. Still live, not legacy. */
   sleepHours?: number;
   note?: string;
   createdAt: number;
@@ -810,6 +841,12 @@ export interface GozlinMessage {
    * receipts long after the tool results that backed it are gone.
    */
   receipts?: Receipt[];
+  /**
+   * The memories this reply used — "YOU TOLD ME · 12 SEP" (see RecallReceipt).
+   * Ids and dates only; the words are read from the live store, so a Forget
+   * empties these too.
+   */
+  recalls?: RecallReceipt[];
   /**
    * The reader's verdict on a coach reply, from the actions under the bubble.
    *

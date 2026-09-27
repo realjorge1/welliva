@@ -6,7 +6,7 @@
  * the phone rather than the server.
  */
 
-export { runAgentTurn } from "./GozlinAgent";
+export { COACH_LOCKED_CODE, runAgentTurn } from "./GozlinAgent";
 
 export { DEEP_DIVE_MODE, runDeepDive } from "./deepDive";
 export type {
@@ -22,13 +22,26 @@ export type {
   CoachTurnRequest,
   CoachTurnResponse,
   ContentBlock,
+  TurnCuriosity,
 } from "./GozlinAgent";
+
+export {
+  SORENESS_WORDS,
+  experienceEvidence,
+  isVerbatim,
+  resolveNoteSubject,
+  sayDay,
+} from "./experiences";
+export type { ExperienceEvidence, ResolvedNoteSubject } from "./experiences";
 
 export { GOZLIN_TOOLS, TOOL_SCHEMAS, findTool } from "./tools";
 export type {
   GozlinTool,
   GozlinToolActions,
   GozlinToolContext,
+  ExperienceNote,
+  FoodLogPreview,
+  MealSlot,
   ToolConfirmRequest,
 } from "./tools";
 
@@ -56,17 +69,21 @@ export type { OutputRisk, OutputRiskKind } from "./outputSafety";
 export {
   collectAllowedNumbers,
   groundingStats,
+  isRoundingOf,
+  numberSpans,
   resetGroundingStats,
   validateNumbers,
 } from "./grounding";
-export type { GroundingResult } from "./grounding";
+export type { GroundingResult, NumberSpan } from "./grounding";
 
 export {
   collectWithProvenance,
   createLedger,
+  howSpoken,
   originLabel,
   pathLabel,
   receiptsFor,
+  sourceLabel,
   sourcesFor,
 } from "./receipts";
-export type { NumberLedger, NumberSource, Receipt } from "./receipts";
+export type { NumberLedger, NumberSource, RecallReceipt, Receipt } from "./receipts";

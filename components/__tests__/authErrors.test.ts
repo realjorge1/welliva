@@ -70,6 +70,14 @@ describe("friendlyAuthError", () => {
     ).toMatch(/isn't available yet/i);
   });
 
+  it("explains a social account that shared no email address", () => {
+    // How it arrives: the redirect's error_description, thrown as a plain
+    // Error — there is no code to key off.
+    expect(
+      friendlyAuthError(new Error("Error getting user email from external provider")),
+    ).toMatch(/didn't share an email address/i);
+  });
+
   it("names the network when the network is the problem", () => {
     expect(friendlyAuthError(new Error("Network request failed"))).toMatch(
       /connection/i,

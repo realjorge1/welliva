@@ -140,6 +140,19 @@ const FIXTURES: Record<string, [string, string]> = {
     JSON.stringify([{ id: "p1", createdAt: "2026-06-01T00:00:00Z" }]),
     JSON.stringify([{ id: "p2", createdAt: "2026-07-01T00:00:00Z" }]),
   ],
+  // What they told Gozlin — each phone noted something the other never saw.
+  "@gozlin_experiences": [
+    JSON.stringify([{ id: "xp_a", updatedAt: "2026-07-01T08:00:00Z", quote: "legs wrecked" }]),
+    JSON.stringify([{ id: "xp_b", updatedAt: "2026-07-02T08:00:00Z", quote: "fine" }]),
+  ],
+  "@gozlin_curiosity": [
+    JSON.stringify([{ id: "cq_1", updatedAt: "2026-07-01T08:00:00Z", status: "answered" }]),
+    JSON.stringify([{ id: "cq_2", updatedAt: "2026-07-03T08:00:00Z", status: "open" }]),
+  ],
+  "@gozlin_care_flags": [
+    JSON.stringify([{ kind: "disordered_eating", at: "2026-07-01T08:00:00.000Z" }]),
+    JSON.stringify([{ kind: "disordered_eating", at: "2026-07-09T08:00:00.000Z" }]),
+  ],
   [KEYS.NUTRITION_HISTORY]: [
     JSON.stringify([{ date: "2026-07-01", calories: 2000, mealsLogged: 3 }]),
     JSON.stringify([{ date: "2026-07-02", calories: 2100, mealsLogged: 2 }]),
@@ -238,6 +251,26 @@ describe("a day the user ticked meals on", () => {
 
   it("used to be last-write-wins, which is how the ticks were lost", () => {
     expect(strategyFor(KEYS.SCHEDULED_DIETS).kind).not.toBe("lww");
+  });
+});
+
+describe("a memory forgotten on one phone", () => {
+  // The phone that forgot holds a scrubbed tombstone; the other still holds
+  // the full record. A union that let the older full copy win would put their
+  // words back — a Forget that un-forgets itself.
+  const full = JSON.stringify([
+    { id: "xp_a", updatedAt: "2026-07-01T08:00:00Z", quote: "hamstrings wrecked", label: "Nordic" },
+  ]);
+  const forgotten = JSON.stringify([
+    { id: "xp_a", updatedAt: "2026-07-05T08:00:00Z", quote: null, label: "", forgotten: true },
+  ]);
+
+  it("stays forgotten, whichever side the merge runs from", () => {
+    for (const merged of [merge("@gozlin_experiences", full, forgotten), merge("@gozlin_experiences", forgotten, full)]) {
+      const [row] = JSON.parse(merged!);
+      expect(row.forgotten).toBe(true);
+      expect(merged).not.toContain("hamstrings");
+    }
   });
 });
 

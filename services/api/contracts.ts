@@ -122,6 +122,12 @@ export const V1_ENDPOINTS = {
     auth: "bearer",
     timeoutMs: 8000,
   },
+  billingCancel: {
+    path: "/v1/billing/cancel",
+    method: "POST",
+    auth: "bearer",
+    timeoutMs: 20000,
+  },
 } as const satisfies Record<string, EndpointContract>;
 
 export type V1EndpointName = keyof typeof V1_ENDPOINTS;
@@ -381,6 +387,48 @@ export function isInsightTrialClaim(v: unknown): v is InsightTrialClaim {
     isNonEmptyString(v.claimedAt) &&
     !Number.isNaN(Date.parse(v.claimedAt)) &&
     typeof v.alreadyClaimed === "boolean"
+  );
+}
+
+export type CancelStatus =
+  /** Auto-renew was switched off just now. */
+  | "cancelled"
+  /** Nothing renews any more — cancelled earlier, or a non-renewing grant. */
+  | "already_cancelled"
+  /** No active subscription on this account. */
+  | "no_subscription"
+  /** Renewing, but in a store only the customer can cancel in (App Store). */
+  | "manage_in_store";
+
+const CANCEL_STATUSES: readonly CancelStatus[] = [
+  "cancelled",
+  "already_cancelled",
+  "no_subscription",
+  "manage_in_store",
+];
+
+export interface CancelSubscriptionResult {
+  status: CancelStatus;
+  /** When access ends (ISO 8601). Null when there is no subscription. */
+  expiresAt: string | null;
+  /** The store the subscription lives in, e.g. "play_store". */
+  store: string | null;
+}
+
+/**
+ * `/v1/billing/cancel`.
+ *
+ * `expiresAt` must be null or a real date: it is printed as "you keep Pro until
+ * …" on the one screen someone reads carefully before deciding to leave, and an
+ * unparseable one would print "Invalid Date" there.
+ */
+export function isCancelSubscriptionResult(v: unknown): v is CancelSubscriptionResult {
+  return (
+    isObject(v) &&
+    CANCEL_STATUSES.includes(v.status as CancelStatus) &&
+    (v.expiresAt === null ||
+      (isNonEmptyString(v.expiresAt) && !Number.isNaN(Date.parse(v.expiresAt)))) &&
+    (v.store === null || isNonEmptyString(v.store))
   );
 }
 

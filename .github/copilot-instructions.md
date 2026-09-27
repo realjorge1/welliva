@@ -1,4 +1,4 @@
-# Welliva — AI coding instructions
+# welliva — AI coding instructions
 
 > **Source of truth is [`README.md`](../README.md).** This file exists to stop an
 > assistant making the specific mistakes this codebase punishes. If the two ever

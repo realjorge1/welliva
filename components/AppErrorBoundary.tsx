@@ -34,7 +34,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router, useGlobalSearchParams } from "expo-router";
+import { router } from "expo-router";
 
 import {
   Colors,
@@ -260,17 +260,6 @@ export function DefaultErrorScreen({
             )
           ) : null}
         </View>
-
-        {__DEV__ ? (
-          <View style={[styles.devBox, { borderColor: colors.border }]}>
-            <Text style={[styles.devLabel, { color: colors.textTertiary }]}>
-              {surface} · retry {retries}
-            </Text>
-            <Text style={[styles.devText, { color: colors.textSecondary }]}>
-              {error?.message ?? String(error)}
-            </Text>
-          </View>
-        ) : null}
       </ScrollView>
     </View>
   );
@@ -352,30 +341,6 @@ function ActionButton({
   );
 }
 
-/**
- * __DEV__ crash trigger — how you verify the three levels catch independently.
- *
- * Render `{__DEV__ && <CrashTrigger surface="diet" />}` in a screen, then open
- * it with `?crash=1` (every trigger) or `?crash=diet` (that one) and confirm you
- * land on an error screen with the rest of the app still working.
- *
- * A COMPONENT, not a hook, deliberately: `{__DEV__ && …}` means the element is
- * never created in a release build, so `useGlobalSearchParams` — which
- * re-renders its caller on ANY global param change — never runs on Home or Diet
- * in production. A hook would have to be called unconditionally.
- */
-export function CrashTrigger({ surface }: { surface: string }): null {
-  const { crash } = useGlobalSearchParams<{ crash?: string }>();
-  const token = Array.isArray(crash) ? crash[0] : crash;
-  if (token && (token === "1" || token === surface)) {
-    throw new Error(
-      `Deliberate __DEV__ crash on "${surface}" (?crash=${token}) — ` +
-        `if you can read this on an error screen, the boundary works.`,
-    );
-  }
-  return null;
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1 },
   content: {
@@ -423,14 +388,4 @@ const styles = StyleSheet.create({
     height: 52,
   },
   hint: { ...Typography.subhead },
-  devBox: {
-    marginTop: Spacing.xxl,
-    padding: Spacing.md,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    width: "100%",
-    maxWidth: 340,
-  },
-  devLabel: { ...Typography.caption, marginBottom: Spacing.xs },
-  devText: { ...Typography.footnote, fontFamily: undefined },
 });

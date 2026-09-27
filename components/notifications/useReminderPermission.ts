@@ -35,6 +35,22 @@ export interface UseReminderPermission {
   openSystemSettings: () => void;
 }
 
+type GrantListener = () => void;
+const grantListeners = new Set<GrantListener>();
+
+/**
+ * Observe the moment permission is granted from inside the app. The reminder
+ * runner re-lays everything the user had switched on but the OS wasn't yet
+ * allowed to hold. (A grant made in OS Settings arrives as a foreground, which
+ * the runner already watches; an in-app dialog on Android may not.)
+ */
+export function onReminderPermissionGranted(fn: GrantListener): () => void {
+  grantListeners.add(fn);
+  return () => {
+    grantListeners.delete(fn);
+  };
+}
+
 function classify(perms: Notifications.NotificationPermissionsStatus): ReminderPermission {
   if (perms.granted) return "granted";
   if (perms.canAskAgain === false) return "denied";
@@ -78,6 +94,15 @@ export function useReminderPermission(): UseReminderPermission {
       if (result === "granted") {
         await ensureRemindersChannel();
         await ensureNotificationCategories();
+        if (!current.granted) {
+          for (const fn of [...grantListeners]) {
+            try {
+              fn();
+            } catch {
+              // one bad listener must not stop the others
+            }
+          }
+        }
       }
       return result;
     } catch {

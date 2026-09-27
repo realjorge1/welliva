@@ -9,7 +9,11 @@
  * (e.g. the auth canvas or the live guided session).
  */
 import { Spacing } from "@/constants/theme";
-import React from "react";
+// The FILE, not the navigation barrel: that barrel pulls in the Deck, which
+// pulls in sheets built on this very component. DeckContext imports nothing
+// but React, so reaching for it directly keeps the graph acyclic.
+import { useDeckOptional } from "@/components/navigation/DeckContext";
+import React, { useCallback, useEffect } from "react";
 import {
   RefreshControl,
   ScrollView,
@@ -28,13 +32,21 @@ import { useElasticScroll } from "./useElasticScroll";
 /**
  * Bottom clearance for the last card on a page.
  *
- * It was reserved for the floating tab bar. That bar is gone — navigation is the
- * swipe menu now — but the space still earns its keep: it's what the Gozlin FAB
- * floats in on Home, Diet and Fitness, and what keeps the final row off the home
- * indicator everywhere else.
+ * IT IS THE DECK'S ROOM, AND IT IS NO LONGER OPTIONAL. This number used to be
+ * reserved for a floating tab bar, then kept on as slack after that bar was
+ * deleted, then raised by hand on the four screens that mounted an Action Bar.
+ * The Deck floats over every menu destination now, mounted once in AppDrawer,
+ * so the clearance is owed everywhere and screens have stopped tuning it.
  *
- * A screen that floats nothing over its footer should pass its own, much
- * smaller `bottomInset` rather than inherit this — see the prop.
+ * WHAT IT HAS TO CLEAR. The rail's own height plus its gap from the home
+ * indicator (`DECK_BLOCK`, 74) on top of the device's bottom inset — 108 on an
+ * iPhone with a home indicator. 120 leaves that its breathing room on the worst
+ * case and more on a device without one. The dock is deliberately NOT in the
+ * figure: it is occasional, and sizing every page for a card that is usually
+ * absent would leave a permanent hole at the bottom of the app.
+ *
+ * A screen that genuinely owns its bottom edge (there is one — Gozlin) reads
+ * `DECK_BLOCK` directly instead.
  */
 export const NAV_CLEARANCE = 120;
 
@@ -115,9 +127,33 @@ export function Screen({
     ? Math.max(bottomInset ?? 0, NAV_CLEARANCE)
     : (bottomInset ?? NAV_CLEARANCE);
 
+  /**
+   * THE ONE THING A SCREEN TELLS THE DECK: where its list is.
+   *
+   * The rail folds while you read and opens when you reach back up, and it does
+   * that from this number alone — no gesture of its own, nothing to negotiate
+   * with the drawer's edge pan or the Android elastic pull, and nothing for a
+   * screen to remember to wire. Null outside the shell (auth, onboarding, the
+   * consent gate), where there is no Deck to tell.
+   */
+  const deck = useDeckOptional();
+  const handleScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      deck?.reportScroll(e.nativeEvent.contentOffset.y);
+      onScroll?.(e);
+    },
+    [deck, onScroll],
+  );
+
+  // A page that cannot scroll can never fold the rail, and must not inherit a
+  // fold from the page before it.
+  useEffect(() => {
+    if (!scroll) deck?.settle();
+  }, [scroll, deck]);
+
   // Pull-to-refresh already owns the drag-down-from-the-top gesture, so a
   // screen that has one can't also have the elastic pull.
-  const elastic = useElasticScroll({ enabled: !onRefresh, onScroll });
+  const elastic = useElasticScroll({ enabled: !onRefresh, onScroll: handleScroll });
 
   const stickyHeader = header ? <View style={padding}>{header}</View> : null;
 

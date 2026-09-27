@@ -1,5 +1,5 @@
 /**
- * Welliva charts — interactive, Skia-drawn trend lines you can scrub.
+ * welliva charts — interactive, Skia-drawn trend lines you can scrub.
  *
  *   import { TrendCard, buildCaloriesTrend } from "@/components/charts";
  *

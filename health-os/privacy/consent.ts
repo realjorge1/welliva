@@ -27,6 +27,8 @@ export type ConsentCategory =
   | "photo" // meal-photo analysis
   | "voice" // speech-to-text logging/chat
   | "proactive_notifications" // out-of-app briefings + anticipation alerts
+  // ── coaching behaviours — how Gozlin acts on what it already sees; ON by default ──
+  | "experience_followups" // ask how a new exercise went, remember the answer
   // ── declared-but-not-implemented (honest, future-proof UI) ──
   | "cloud_backup"
   | "crash_diagnostics";
@@ -47,7 +49,12 @@ export interface ConsentRecord {
 /** Bump when the consent copy/policy changes materially → triggers re-consent. */
 export const CONSENT_VERSION = 1;
 
-export type ConsentGroup = "core" | "integration" | "future";
+/**
+ * "coaching" is neither a sense nor a way out: it is how Gozlin behaves with
+ * what it can already see. It is the one group whose switch may default ON —
+ * see experience_followups below.
+ */
+export type ConsentGroup = "core" | "integration" | "coaching" | "future";
 
 export interface ConsentCategoryMeta {
   label: string;
@@ -55,7 +62,10 @@ export interface ConsentCategoryMeta {
   blurb: string;
   group: ConsentGroup;
   icon: string;
-  /** The default decision on a fresh install. Only `local_processing` is on. */
+  /**
+   * The default decision on a fresh install. Every sense and every way out is
+   * off; only `local_processing` and the coaching behaviours are on.
+   */
   defaultGranted: boolean;
   /** Native capability this gates (for the "what's connected" surface). */
   requiresNative?: boolean;
@@ -64,7 +74,7 @@ export interface ConsentCategoryMeta {
 export const CONSENT_CATEGORY_META: Record<ConsentCategory, ConsentCategoryMeta> = {
   local_processing: {
     label: "On-device processing",
-    blurb: "Welliva works entirely on your phone. Your raw history never leaves the device.",
+    blurb: "welliva works entirely on your phone. Your raw history never leaves the device.",
     group: "core",
     icon: "phone-portrait",
     defaultGranted: true,
@@ -132,6 +142,17 @@ export const CONSENT_CATEGORY_META: Record<ConsentCategory, ConsentCategoryMeta>
     defaultGranted: false,
     requiresNative: true,
   },
+  experience_followups: {
+    label: "Follow-ups on new things",
+    blurb:
+      "When you try an exercise for the first time, I may ask the next day how it went, and remember what you say. You can read or forget any of it in Memory.",
+    group: "coaching",
+    icon: "chatbubble-ellipses",
+    // ON by default — the owner's call (docs/gozlin/11, D1). It reads nothing
+    // new: only sessions the person already logged, and it leaves the phone
+    // only as one line of a chat they are already having.
+    defaultGranted: true,
+  },
   cloud_backup: {
     label: "Encrypted backup",
     blurb: "Not built yet — declared here so this screen stays honest about the future.",
@@ -183,7 +204,10 @@ export function reconcile(record: ConsentRecord, now: Date = new Date()): Consen
 /** Is a category granted in this record? `local_processing` is always effectively on. */
 export function isGrantedIn(record: ConsentRecord, cat: ConsentCategory): boolean {
   if (cat === "local_processing") return true;
-  return record.decisions[cat]?.granted ?? false;
+  // A record written before this category existed has no decision for it. Read
+  // that as the category's own default, never as a blanket "no": a default-on
+  // behaviour must not switch itself off for everyone who installed earlier.
+  return record.decisions[cat]?.granted ?? CONSENT_CATEGORY_META[cat]?.defaultGranted ?? false;
 }
 
 /** A new record with one decision flipped (pure — no mutation). */

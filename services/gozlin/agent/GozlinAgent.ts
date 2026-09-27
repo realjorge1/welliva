@@ -19,10 +19,20 @@
 import type { GozlinChatContext, GozlinChatResult } from "../GozlinChatEngine";
 import { respondDeterministic } from "../GozlinChatEngine";
 import type { GozlinMessage, GozlinTone } from "../gozlin.types";
-import { buildTurnMessages, habitEvidence, type WireMessage } from "./context";
-import { screenForClinicalRisk } from "./clinical";
+import {
+  buildTurnMessages,
+  habitEvidence,
+  identityEvidence,
+  type WireMessage,
+} from "./context";
+import { screenForClinicalRisk, type ClinicalRiskKind } from "./clinical";
+import { experienceEvidence } from "./experiences";
+import { askedInReply, recallsUsed } from "../novelty/recall";
+import type { ChatStage } from "../novelty/curiosity";
+import { toLocalDateString } from "../../OfflineStorage";
 import {
   addDerivedGaps,
+  addUserStatedNumbers,
   collectAllowedNumbers,
   recordGrounding,
   validateNumbers,
@@ -37,6 +47,7 @@ import {
   recordOutputScreen,
   screenOutput,
 } from "./outputSafety";
+import { safeDisplayLength } from "./streamGate";
 import { findTool, type GozlinToolContext } from "./tools";
 
 /**
@@ -100,8 +111,54 @@ export interface AgentTurnOptions {
 }
 
 export interface AgentTurnResult extends GozlinChatResult {
-  /** How the reply was produced — drives the fallback-rate release gate. */
-  source: "agent" | "deterministic" | "clinical";
+  /**
+   * How the reply was produced — drives the fallback-rate release gate.
+   *
+   * `locked`: the SERVER refused the turn because this account is not entitled
+   * to the coach. The message is the deterministic floor, but the caller must
+   * not present it as the coach's answer — the app believed the coach was open
+   * and the server disagreed, and saying so is the only honest reply.
+   */
+  source: "agent" | "deterministic" | "clinical" | "locked";
+  /** What this turn did with "trying something new". Agent replies only. */
+  curiosity?: TurnCuriosity;
+  /**
+   * Which clinical screen answered, when the model never ran. The caller needs
+   * it for one reason: a disordered-eating signal leaves a care flag (kind and
+   * time, no words — services/gozlin/careFlags.ts).
+   */
+  clinicalKind?: ClinicalRiskKind;
+}
+
+/**
+ * The question and the memories, after the reply: what the caller stores so
+ * the next turn knows (services/gozlin/novelty/curiosity.ts afterTurn).
+ */
+export interface TurnCuriosity {
+  /** The open question this turn carried, if it carried one. */
+  entryId: string | null;
+  stage: ChatStage | null;
+  /** The reply asked it. */
+  asked: boolean;
+  /** note_experience recorded an answer this turn. */
+  noted: boolean;
+  /** Memories the reply used — they start their recall rest. */
+  recalled: string[];
+}
+
+/**
+ * The transport raises an error carrying this code when the backend refuses a
+ * turn for entitlement (backend-welliva requireCoachAccess). Matched by shape,
+ * not by class: this package cannot import services/api without a cycle.
+ */
+export const COACH_LOCKED_CODE = "pro_required";
+
+function isLockedError(e: unknown): boolean {
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    (e as { code?: unknown }).code === COACH_LOCKED_CODE
+  );
 }
 
 // ── Activity labels ────────────────────────────────────────────────
@@ -119,6 +176,9 @@ const ACTIVITY: Record<string, string> = {
   get_recovery_status: "checking your recovery…",
   get_daily_briefing: "looking at today…",
   recall_memory: "remembering what you've told me…",
+  review_tracked_habits: "checking your habit tracker…",
+  review_mood_log: "reading how you've been feeling…",
+  note_experience: "noting that…",
   remember_fact: "saving that…",
   log_food: "logging that…",
 };
@@ -169,11 +229,13 @@ export async function runAgentTurn(
 
   // 1. Clinical screen — BEFORE any model call. A gate the model can be talked
   //    around isn't a gate.
-  const risk = screenForClinicalRisk(text);
+  //    The profile's height is what lets a stated goal weight be judged at all.
+  const risk = screenForClinicalRisk(text, ctx.snapshot?.bio);
   if (risk) {
     return {
       message: coachMsg(risk.reply, risk.kind === "emergency" ? "alert" : "gentle", now),
       source: "clinical",
+      clinicalKind: risk.kind,
     };
   }
 
@@ -186,33 +248,61 @@ export async function runAgentTurn(
     source: "deterministic",
   });
 
-  const messages = buildTurnMessages(text, ctx);
+  // This turn as the state block AND the tools see it: one clock, so the days
+  // the block says were "15 days ago" are the days grounding registered, and
+  // the text note_experience checks quotes against.
+  const turn = { text: text.trim(), notes: 0 };
+  const tctx: GozlinToolContext = { ...ctx, now, turn };
+  const messages = buildTurnMessages(text, tctx);
 
   // Everything the model is allowed to quote: the state block plus every tool
   // result it sees this turn. The habit tracker is part of that block, so its
   // streaks and percentages are citable — omit them here and grounding would
   // reject the model for repeating a number we handed it ourselves.
   const habitFacts = habitEvidence(text, ctx);
+  // What the block shows of their identity — the same capped lists, read from
+  // the same function, so a figure inside a constraint they gave ("30 minutes
+  // at lunch") is citable exactly when it was actually put in front of the model.
+  const identityFacts = identityEvidence(ctx.identity);
+  // Something new, and memories of things tried: exactly the figures the
+  // block shows — "23 sessions logged before it", "15 days ago", and any
+  // number inside their own quoted words.
+  const experience = experienceEvidence(text, tctx, now);
   const allowed = collectAllowedNumbers({
     twin: ctx.twin,
-    identity: ctx.identity,
+    identity: identityFacts,
     habits: habitFacts.habits,
     habitLink: habitFacts.link,
+    experiences: experience.facts,
   });
   // The same evidence, indexed by WHERE each figure came from. Built in
   // lockstep with the allowed-set above so that anything grounding lets
   // through has a receipt to show — the two must never disagree.
   const ledger = createLedger();
   collectWithProvenance(ctx.twin, "current-state", ledger);
+  collectWithProvenance(identityFacts, "recall_memory", ledger);
   if (habitFacts.habits) {
     collectWithProvenance(habitFacts.habits, "habit-tracker", ledger);
     collectWithProvenance(habitFacts.link, "habit-tracker", ledger);
   }
+  collectWithProvenance(experience.facts, "experience-log", ledger);
   addDerivedGaps(allowed, [
     ctx.twin.today.calories,
     ctx.twin.today.protein,
     ctx.twin.today.water,
   ]);
+  // …and the same gaps on the ledger, named, so "about 360 to go" — the line
+  // this product says most — opens a receipt instead of passing unexplained.
+  collectWithProvenance(gapEvidence(ctx), "current-state", ledger);
+  // The one deliberate exception to "every accepted figure has a receipt": a
+  // number the person typed may be said back to them, but it is not from their
+  // logs, so it never joins the ledger. See addUserStatedNumbers.
+  addUserStatedNumbers(
+    allowed,
+    messages
+      .filter((m) => m.role === "user" && typeof m.content === "string")
+      .map((m) => m.content as string),
+  );
 
   let regenerations = 0;
 
@@ -221,10 +311,31 @@ export async function runAgentTurn(
       if (opts.signal?.aborted) return fallback();
 
       opts.onTurnStart?.();
+
+      // THE STREAM GATE. Deltas used to go straight to the bubble, and the
+      // checks below ran only once the reply was complete — so a draft that
+      // grounding or output safety then threw away had already been READ: the
+      // invented "340 calories over" was on screen for a second before the
+      // regeneration wiped it. Now the bubble shows a draft only up to the
+      // first figure that isn't backed yet, or the first sentence that trips
+      // the output screen. Whatever the checks will reject never appears.
+      let draft = "";
+      let shown = 0;
+      const onDelta = opts.onDelta
+        ? (delta: string) => {
+            draft += delta;
+            const safe = safeDisplayLength(draft, allowed);
+            if (safe > shown) {
+              opts.onDelta!(draft.slice(shown, safe));
+              shown = safe;
+            }
+          }
+        : undefined;
+
       const res = await transport({
         messages,
         signal: opts.signal,
-        onDelta: opts.onDelta,
+        onDelta,
       });
 
       // Safety classifiers decline with HTTP 200 and stop_reason "refusal".
@@ -247,7 +358,7 @@ export async function runAgentTurn(
           messages.push({
             role: "system",
             content:
-              `Your last reply used ${check.violations.join(", ")}, which does not appear in ` +
+              `Your last reply used ${check.violations.join(", ")} (written in digits or in words), which does not appear in ` +
               "any tool result or the current-state block. Rewrite it using only figures you " +
               "were given, or with no figures at all. Do not mention this correction.",
           });
@@ -278,7 +389,31 @@ export async function runAgentTurn(
         // Only the agent path gets receipts: it is the only one whose figures
         // came from evidence rather than from copy we wrote ourselves.
         message.receipts = receiptsFor(reply, ledger);
-        return { message, source: "agent" };
+
+        // The memories the reply actually used get a YOU TOLD ME receipt — and
+        // only those: one handed to the model and left unused is not a claim.
+        const used = recallsUsed(reply, experience.recalls);
+        if (used.length > 0) {
+          message.recalls = used.map((p) => ({
+            recordId: p.record.id,
+            label: p.record.label,
+            on: p.record.triedOn ?? toLocalDateString(new Date(p.record.answeredAt)),
+          }));
+        }
+        const curiosity: TurnCuriosity | undefined =
+          experience.stage || used.length > 0 || turn.notes > 0
+            ? {
+                entryId: experience.due?.id ?? null,
+                stage: experience.stage,
+                asked:
+                  experience.stage === "ask" && experience.due
+                    ? askedInReply(reply, experience.due)
+                    : false,
+                noted: turn.notes > 0,
+                recalled: used.map((p) => p.record.id),
+              }
+            : undefined;
+        return { message, source: "agent", ...(curiosity ? { curiosity } : {}) };
       }
 
       // 4. Tool round. Execute every call, return ALL results in ONE user
@@ -304,7 +439,7 @@ export async function runAgentTurn(
             };
           }
           try {
-            const out = await tool.run(c.input ?? {}, ctx);
+            const out = await tool.run(c.input ?? {}, tctx);
             collectAllowedNumbers(out, allowed);
             collectWithProvenance(out, c.name ?? "tool", ledger);
             return {
@@ -329,8 +464,36 @@ export async function runAgentTurn(
 
     // Iteration cap — it's looping, not working.
     return fallback();
-  } catch {
+  } catch (e) {
+    // The server said this account may not use the coach. Say so, flagged, so
+    // the caller can show the full Pro message — never the offline coach's
+    // answer, which would pass a canned card off as the coach replying.
+    if (isLockedError(e)) {
+      return {
+        message: coachMsg("Talking this through is part of welliva Pro.", "gentle", now),
+        source: "locked",
+      };
+    }
     // Network, timeout, malformed payload — all land on the floor.
     return fallback();
   }
+}
+
+/**
+ * Today's gaps as named evidence — left to go, or over, per target. Only the
+ * non-zero side of each is registered: "0 over" is not a figure anyone says.
+ */
+function gapEvidence(ctx: GozlinChatContext) {
+  const side = (m: { consumed: number; target: number }) => {
+    if (!Number.isFinite(m.consumed) || !Number.isFinite(m.target) || m.target <= 0) return {};
+    const left = m.target - m.consumed;
+    return left >= 0 ? { left } : { over: -left };
+  };
+  return {
+    today: {
+      calories: side(ctx.twin.today.calories),
+      protein: side(ctx.twin.today.protein),
+      water: side(ctx.twin.today.water),
+    },
+  };
 }

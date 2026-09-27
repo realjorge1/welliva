@@ -4,7 +4,7 @@
  * The 4-tier, on-device memory that makes Gozlin a *persistent* coach rather than
  * a stateless bot: Identity, Episodic, Behavioral, Conversational. All local
  * (AsyncStorage via OfflineStorage helpers) — nothing leaves the device. Mirrors
- * Welliva's storage conventions (JSON, namespaced keys, graceful fallback).
+ * welliva's storage conventions (JSON, namespaced keys, graceful fallback).
  *
  * Memory rules enforced here: only what the user states or the app records is
  * stored; episodic memory rolls (capped + age-bounded); conversation is capped.
@@ -12,6 +12,7 @@
 
 import { parseLocalDate, readJSON, writeJSON, remove } from "../OfflineStorage";
 import { deriveConversationTitle } from "./conversationTitle";
+import { EXPERIENCE_KEYS, announceExperiences } from "./ExperienceStore";
 import type {
   GozlinCheckin,
   GozlinEpisode,
@@ -31,6 +32,10 @@ const G_KEYS = {
   LAST_BRIEFING: "@gozlin_last_briefing",
   LAST_WEEKLY_REVIEW: "@gozlin_last_weekly_review",
   FORECAST_CACHE: "@gozlin_forecast_cache",
+  // What they told Gozlin about things they tried, the questions it opened,
+  // and the care flags (./ExperienceStore). Listed here so "Clear memory"
+  // cannot leave them behind — it clears exactly what is in this table.
+  ...EXPERIENCE_KEYS,
 } as const;
 
 const EPISODE_CAP = 100;
@@ -40,7 +45,7 @@ const CONVERSATION_CAP = 60;
 const ARCHIVE_CAP = 40;
 /** Below this a thread is an opener nobody replied to — not worth keeping. */
 const ARCHIVE_MIN_MESSAGES = 2;
-const CHECKIN_CAP = 120;
+const CHECKIN_CAP = 500;
 const CHECKIN_MAX_AGE_DAYS = 90;
 
 const DEFAULT_IDENTITY: GozlinIdentityMemory = {
@@ -123,11 +128,33 @@ export async function saveBehavioral(patterns: HabitPattern[]): Promise<void> {
   await writeJSON(G_KEYS.BEHAVIORAL, patterns);
 }
 
-// ── Check-in tier (self-reported sleep / mood / stress) ──────────
+// ── State-of-mind tier (self-reported feeling / sleep) ───────────
 //
 // The only source of the "life habits" the app can't measure on its own
 // (Phase 7). Optional + on-device; every habit read degrades gracefully when
-// there are none. One entry per calendar day — re-logging a day overwrites it.
+// there are none.
+//
+// ── NO LONGER ONE PER DAY ───────────────────────────────────────────────────
+// This tier used to key on `date` and overwrite: one check-in per calendar day.
+// State-of-mind entries come in two kinds, and only one of them is a day.
+//
+//   daily      — "how the day went overall". One per date; re-logging replaces.
+//   momentary  — "how I feel right now". Many per date; each one is kept.
+//
+// So the identity of an entry is `id`, not `date`, and the replace rule is
+// explicit rather than a side effect of the key. A daily entry still replaces
+// the day's daily entry, because there is only ever one of those — but it no
+// longer wipes the momentary entries that share its date, which the old
+// filter-by-date did silently.
+//
+// The cap moved with it. 120 was ~90 days at one a day; momentary logging can
+// reasonably run several times a day, and a cap that quietly evicts this
+// morning because the week was talkative would make the record lie.
+
+/** Identity of an entry. Pre-004 records have no `id`; their date+kind is one. */
+function entryKey(c: GozlinCheckin): string {
+  return c.id ?? `${c.date}:${c.kind ?? "daily"}`;
+}
 
 function pruneCheckins(checkins: GozlinCheckin[]): GozlinCheckin[] {
   const cutoff = Date.now() - CHECKIN_MAX_AGE_DAYS * 86400_000;
@@ -135,24 +162,58 @@ function pruneCheckins(checkins: GozlinCheckin[]): GozlinCheckin[] {
     const t = parseLocalDate(c.date).getTime();
     return Number.isNaN(t) || t >= cutoff;
   });
-  return fresh.sort((a, b) => a.date.localeCompare(b.date)).slice(-CHECKIN_CAP);
+  // Sort by date, then by when it was written, so several entries in one day
+  // stay in the order they were actually felt.
+  return fresh
+    .sort((a, b) =>
+      a.date === b.date
+        ? (a.createdAt ?? 0) - (b.createdAt ?? 0)
+        : a.date.localeCompare(b.date),
+    )
+    .slice(-CHECKIN_CAP);
 }
 
 export async function loadCheckins(): Promise<GozlinCheckin[]> {
   return readJSON<GozlinCheckin[]>(G_KEYS.CHECKINS, []);
 }
 
-/** Today's check-in (by local date), or null. */
+/** The day's `daily` entry (by local date), or null. Momentary entries ignored. */
 export async function getTodayCheckin(date: string): Promise<GozlinCheckin | null> {
   const list = await loadCheckins();
-  return list.find((c) => c.date === date) ?? null;
+  return list.find((c) => c.date === date && (c.kind ?? "daily") === "daily") ?? null;
 }
 
-/** Add or replace a day's check-in. Returns the pruned, ascending list. */
+/** Every entry recorded on a local date, oldest first. */
+export async function getCheckinsOn(date: string): Promise<GozlinCheckin[]> {
+  const list = await loadCheckins();
+  return list.filter((c) => c.date === date);
+}
+
+/**
+ * Add or replace a state-of-mind entry. Returns the pruned, ascending list.
+ *
+ * A `daily` entry replaces that date's existing daily entry. A `momentary` one
+ * replaces only an entry with the same `id` — so re-saving an edit updates in
+ * place while a fresh moment is added alongside the rest of the day.
+ */
 export async function addCheckin(checkin: GozlinCheckin): Promise<GozlinCheckin[]> {
   const list = await loadCheckins();
-  const deduped = list.filter((c) => c.date !== checkin.date);
+  const kind = checkin.kind ?? "daily";
+  const key = entryKey(checkin);
+  const deduped = list.filter((c) =>
+    kind === "daily"
+      ? !(c.date === checkin.date && (c.kind ?? "daily") === "daily")
+      : entryKey(c) !== key,
+  );
   const next = pruneCheckins([...deduped, checkin]);
+  await writeJSON(G_KEYS.CHECKINS, next);
+  return next;
+}
+
+/** Remove one entry by id. Returns the surviving list. */
+export async function removeCheckin(id: string): Promise<GozlinCheckin[]> {
+  const list = await loadCheckins();
+  const next = list.filter((c) => entryKey(c) !== id);
   await writeJSON(G_KEYS.CHECKINS, next);
   return next;
 }
@@ -284,4 +345,6 @@ export async function loadMemorySnapshot(): Promise<GozlinMemorySnapshot> {
 /** Wipe everything Gozlin remembers (user-facing "forget me"). */
 export async function clearGozlinMemory(): Promise<void> {
   await Promise.all(Object.values(G_KEYS).map((k) => remove(k)));
+  // A coach screen still mounted holds the questions and memories just wiped.
+  announceExperiences();
 }

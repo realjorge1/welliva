@@ -30,7 +30,13 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
+import {
+  DEFAULT_GLASS_ML,
+  WATER_REMINDER_CATEGORY,
+  ensureNotificationCategories,
+} from "@/services/notifications/categories";
 import { REMINDERS_CHANNEL_ID, ensureRemindersChannel } from "@/services/notifications/init";
+import { ownerStamp } from "@/services/notifications/owner";
 import type { FitnessProfile } from "../types";
 import { loadFitnessProfile } from "./FitnessProfileStore";
 
@@ -162,14 +168,23 @@ export async function syncFitnessReminders(profile: FitnessProfile): Promise<Fit
 
   // Android drops notifications posted to a channel that doesn't exist yet.
   await ensureRemindersChannel();
+  // The hydration nudge carries the water button, which must be registered
+  // before delivery or the banner arrives without it.
+  await ensureNotificationCategories();
 
+  const stamp = await ownerStamp();
   const ids: string[] = [];
   const schedule = async (
     content: Notifications.NotificationContentInput,
     trigger: Notifications.NotificationTriggerInput,
   ) => {
     try {
-      ids.push(await Notifications.scheduleNotificationAsync({ content, trigger }));
+      ids.push(
+        await Notifications.scheduleNotificationAsync({
+          content: { ...content, data: { ...(content.data ?? {}), ...stamp } },
+          trigger,
+        }),
+      );
     } catch (e) {
       console.warn("FitnessNotifications.schedule:", e);
     }
@@ -198,8 +213,17 @@ export async function syncFitnessReminders(profile: FitnessProfile): Promise<Fit
     await schedule(
       {
         title: "Hydration check",
-        body: "Midday top-up — a glass of water keeps the engine cool.",
-        data: { type: "fitness-reminder", kind: "hydration", route: DASHBOARD_ROUTE },
+        body: "Midday top-up — a glass keeps the engine cool. One tap logs it.",
+        // The water button: a glass is a fact the user can state from a locked
+        // screen, so this nudge can finish itself (services/notifications/
+        // waterActions). The amount rides in data so the write matches the label.
+        categoryIdentifier: WATER_REMINDER_CATEGORY,
+        data: {
+          type: "fitness-reminder",
+          kind: "hydration",
+          ml: DEFAULT_GLASS_ML,
+          route: DASHBOARD_ROUTE,
+        },
       },
       {
         type: Notifications.SchedulableTriggerInputTypes.DAILY,

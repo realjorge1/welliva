@@ -1,6 +1,6 @@
-# Welliva — Personal Health OS Architecture
+# welliva — Personal Health OS Architecture
 
-> The architecture blueprint for evolving Welliva from a feature app into a modular,
+> The architecture blueprint for evolving welliva from a feature app into a modular,
 > long-lived **Personal Health Operating System**. This is design documentation:
 > reviewable before code moves. Implementation is sequenced in
 > [12-implementation-roadmap.md](./12-implementation-roadmap.md).
@@ -35,7 +35,7 @@ Read in order for the full picture; jump by concern using the table.
 
 ## The one-paragraph version
 
-Welliva already has most of the hard parts: an offline-first store, a 4-tier
+welliva already has most of the hard parts: an offline-first store, a 4-tier
 on-device memory inside Gozlin, a `GozlinTwin` read-model that hands the AI
 *summaries instead of raw logs*, and a deterministic intelligence layer. What it
 lacks is a **single canonical event log**, a **persisted summaries tier**, a

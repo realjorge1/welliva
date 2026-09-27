@@ -23,7 +23,7 @@ import { Radius, Spacing } from "@/constants/theme";
 import { useNutrition, useSystem } from "@/contexts/AppContext";
 import { useBilling } from "@/contexts/BillingContext";
 import { useMealPlan } from "@/contexts/MealPlanContext";
-import { historyCutoffDate } from "@/services/billing";
+import { historyCutoffDate, historyWindowDays } from "@/services/billing";
 import type { DietHistoryEntry, MealType, ScheduledMeal } from "@/models/diet";
 import { addDays, parseLocalDate, toLocalDate } from "@/models/mealPlan";
 import { getScheduledDietForDate } from "@/services/ScheduleService";
@@ -36,7 +36,7 @@ export default function DietHistoryScreen() {
   const { backlogPrompt, backlogMeal, permissionFor } = useMealPlan();
   const { tier } = useBilling();
 
-  // The free tier reads back 30 days. This bounds the VIEW, never the storage —
+  // The free tier reads back 10 days. This bounds the VIEW, never the storage —
   // the entries stay on device and reappear in full the moment they upgrade.
   // Older days are still drawn, just dimmed and unselectable: seeing the shape
   // of the history you already own is the whole argument for opening it.
@@ -217,7 +217,7 @@ export default function DietHistoryScreen() {
         <ProLockCard
           lock="history"
           compact
-          blurb="Free shows the last 30 days. The dimmed days above are still yours — Pro opens them, along with every chart and report back to day one."
+          blurb={`Free shows the last ${historyWindowDays("free")} days. The dimmed days above are still yours — Pro opens them, along with every chart and report back to day one.`}
         />
       )}
 
@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
   weekRow: { flexDirection: "row" },
   cell: { width: `${100 / 7}%` },
   dayCell: { aspectRatio: 1, alignItems: "center", justifyContent: "center" },
-  /** Beyond the free 30-day window — visible, but clearly not reachable. */
+  /** Beyond the free 10-day window — visible, but clearly not reachable. */
   dayLocked: { opacity: 0.35 },
   dayDot: {
     width: 34,

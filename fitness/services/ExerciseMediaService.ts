@@ -21,7 +21,7 @@ const NEGATIVE_TTL_MS = 60 * 60 * 1000;
 
 /**
  * Per-exercise search-term overrides (local exercise id → ExerciseDB search
- * term) for movements whose Welliva name doesn't fuzzy-match ExerciseDB's
+ * term) for movements whose welliva name doesn't fuzzy-match ExerciseDB's
  * catalog. Tests enforce that every key is a real EXERCISE_DATABASE id.
  */
 export const SEARCH_OVERRIDES: Record<string, string> = {};

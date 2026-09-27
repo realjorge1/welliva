@@ -34,6 +34,7 @@ import {
 } from "./notifications/categories";
 import { reminderBody } from "./notifications/copy";
 import { REMINDERS_CHANNEL_ID, ensureRemindersChannel } from "./notifications/init";
+import { ownerStamp } from "./notifications/owner";
 
 const HABITS_KEY = "@welliva_habits";
 const LOGS_KEY = "@welliva_habit_logs";
@@ -69,9 +70,35 @@ export async function saveLogs(logs: HabitLogs): Promise<void> {
   await writeJSON(LOGS_KEY, logs);
 }
 
+let logsChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * Read-modify-write the log blob, one writer at a time.
+ *
+ * The blob has two writers that can't see each other's state: the tracker
+ * (HabitsContext, in React) and the lock-screen "Mark as Done" button (no React
+ * at all). Each used to write back a copy it had read earlier, so whichever
+ * landed second quietly erased the other's completion. Every write now reads the
+ * blob fresh INSIDE this chain and applies its change to that. `mutate` returns
+ * null to leave the blob untouched.
+ */
+export function updateLogs(
+  mutate: (logs: HabitLogs) => HabitLogs | null,
+): Promise<HabitLogs> {
+  const run = logsChain.then(async () => {
+    const current = await loadLogs();
+    const next = mutate(current);
+    if (next === null) return current;
+    await saveLogs(next);
+    return next;
+  });
+  logsChain = run.catch(() => undefined);
+  return run;
+}
+
 /**
  * First-run seed: the three auto-tracked habits that adapt the tracker to
- * Welliva (hydration, nutrition logging, training). Runs once ever — deleting
+ * welliva (hydration, nutrition logging, training). Runs once ever — deleting
  * one is a user choice we respect on the next launch.
  */
 export async function seedDefaultHabits(
@@ -219,7 +246,7 @@ export async function forgetRetiredHabit(id: string): Promise<void> {
 
 // ── Pure engine ─────────────────────────────────────────────────────
 
-/** JS getDay() (0=Sun…6=Sat) → Welliva weekday index (0=Mon…6=Sun). */
+/** JS getDay() (0=Sun…6=Sat) → welliva weekday index (0=Mon…6=Sun). */
 function wellivaDay(dateStr: string): number {
   return (parseLocalDate(dateStr).getDay() + 6) % 7;
 }
@@ -493,25 +520,55 @@ export function monthLabels(weeks: HeatWeek[]): string[] {
 // ── Reminders (expo-notifications, local) ───────────────────────────
 
 /**
+ * The OS identifier of a habit's `n`th reminder.
+ *
+ * DETERMINISTIC, on purpose. Scheduling with an identifier that is already
+ * pending REPLACES it on both platforms, so a re-sync that runs twice, or a
+ * stored id list that went stale (a restore, a crash between schedule and save),
+ * can never leave two copies of one reminder firing side by side.
+ */
+export function habitReminderId(habitId: string, n: number): string {
+  return `welliva.habit.${habitId}.${n}`;
+}
+
+export interface SyncReminderOptions {
+  /**
+   * Show the OS permission dialog if it has never been answered. True for the
+   * user saving a habit (they just asked for a reminder); FALSE for any repair
+   * that runs on its own — a permission prompt appearing out of nowhere at
+   * launch is how an app earns a permanent "Don't Allow".
+   */
+  prompt?: boolean;
+}
+
+/**
  * Re-sync a habit's daily/weekly reminders. Cancels any previously scheduled
  * ones and schedules fresh per scheduled weekday. Returns the new ids (store
  * them on the habit). Fails soft — habits work fine without notifications.
  *
  * Every reminder carries the habit-reminder CATEGORY, so it arrives with a
  * "Mark as Done" button that completes the habit without opening the app, and a
- * `data.habitId` the action handler resolves it by. A habit scheduled on only
- * some weekdays gets a different nudge line per day (the `variant` index), since
- * a repeating trigger's body is fixed at schedule time.
+ * `data.habitId` the action handler resolves it by. It also carries the owner
+ * stamp (`data.uid`, services/notifications/owner) so a reminder that outlives
+ * its account can't write into the next one. A habit scheduled on only some
+ * weekdays gets a different nudge line per day (the `variant` index), since a
+ * repeating trigger's body is fixed at schedule time.
  */
-export async function syncReminders(habit: Habit): Promise<string[]> {
+export async function syncReminders(
+  habit: Habit,
+  options: SyncReminderOptions = {},
+): Promise<string[]> {
+  const { prompt = true } = options;
   try {
     for (const id of habit.reminderIds ?? []) {
       await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
     }
     if (!habit.reminder || habit.source !== "manual") return [];
 
-    const { status } = await Notifications.requestPermissionsAsync();
-    if (status !== "granted") return [];
+    const granted = prompt
+      ? (await Notifications.requestPermissionsAsync()).status === "granted"
+      : (await Notifications.getPermissionsAsync()).granted;
+    if (!granted) return [];
 
     // Android drops notifications posted to a channel that doesn't exist yet.
     await ensureRemindersChannel();
@@ -519,16 +576,23 @@ export async function syncReminders(habit: Habit): Promise<string[]> {
     // banner shows up without its action buttons.
     await ensureNotificationCategories();
 
+    const stamp = await ownerStamp();
     const { hour, minute } = habit.reminder;
     const contentFor = (variant: number) => ({
       title: habit.name,
       body: reminderBody(habit.id, variant),
       categoryIdentifier: HABIT_REMINDER_CATEGORY,
-      data: { type: "habit-reminder", habitId: habit.id },
+      data: {
+        type: "habit-reminder",
+        habitId: habit.id,
+        route: `/habit/${habit.id}`,
+        ...stamp,
+      },
     });
 
     if (habit.days.length >= 7) {
       const id = await Notifications.scheduleNotificationAsync({
+        identifier: habitReminderId(habit.id, 0),
         content: contentFor(0),
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DAILY,
@@ -546,6 +610,7 @@ export async function syncReminders(habit: Habit): Promise<string[]> {
       const day = habit.days[i];
       const weekday = day === 6 ? 1 : day + 2;
       const id = await Notifications.scheduleNotificationAsync({
+        identifier: habitReminderId(habit.id, i),
         content: contentFor(i),
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
@@ -560,6 +625,99 @@ export async function syncReminders(habit: Habit): Promise<string[]> {
     return ids;
   } catch {
     return [];
+  }
+}
+
+/** How many OS notifications a habit's reminder should occupy. */
+function expectedReminderCount(habit: Habit): number {
+  if (habit.source !== "manual" || !habit.reminder) return 0;
+  return habit.days.length >= 7 ? 1 : habit.days.length;
+}
+
+/**
+ * Bring the OS queue back in line with the habit list — the boot/foreground
+ * repair.
+ *
+ * Reminders are the one thing the app schedules and then has no copy of: the
+ * OS holds them. That queue gets emptied behind the app's back — a restore or
+ * reinstall brings storage back but not the schedule, permission granted later
+ * in OS Settings means nothing was ever laid, an older build's "turn off
+ * coaching" cancelled every notification in the app — and a habit whose
+ * reminder silently stopped firing looks exactly like a habit whose reminder
+ * works. So on every launch this compares, per habit, what SHOULD be pending
+ * with what IS, re-lays the difference, and cancels reminders still pending for
+ * habits that no longer want them.
+ *
+ * `force` re-lays every habit regardless (a notification-format migration).
+ * Returns the habits with their fresh `reminderIds` when anything changed (the
+ * caller persists), or null when the queue was already right. Never prompts.
+ */
+export async function reconcileHabitReminders(
+  habits: Habit[],
+  options: { force?: boolean } = {},
+): Promise<Habit[] | null> {
+  try {
+    const perms = await Notifications.getPermissionsAsync();
+    if (!perms.granted) return null;
+
+    const pending = await Notifications.getAllScheduledNotificationsAsync();
+    const owner = (await ownerStamp()).uid;
+    const byHabit = new Map<string, { id: string; uid?: unknown }[]>();
+    for (const p of pending) {
+      const data = (p.content?.data ?? {}) as Record<string, unknown>;
+      if (data.type !== "habit-reminder" || typeof data.habitId !== "string") continue;
+      const list = byHabit.get(data.habitId) ?? [];
+      list.push({ id: p.identifier, uid: data.uid });
+      byHabit.set(data.habitId, list);
+    }
+
+    // Orphans: pending for a habit that is gone, auto-tracked, or reminder-less.
+    const wanted = new Map(
+      habits.filter((h) => expectedReminderCount(h) > 0).map((h) => [h.id, h]),
+    );
+    for (const [habitId, list] of byHabit) {
+      if (wanted.has(habitId)) continue;
+      for (const { id } of list) {
+        await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
+      }
+    }
+
+    let changed = false;
+    const next: Habit[] = [];
+    for (const habit of habits) {
+      const expected = expectedReminderCount(habit);
+      if (expected === 0) {
+        next.push(habit);
+        continue;
+      }
+      const live = byHabit.get(habit.id) ?? [];
+      const liveIds = new Set(live.map((l) => l.id));
+      const intact =
+        !options.force &&
+        live.length === expected &&
+        (habit.reminderIds ?? []).length === expected &&
+        (habit.reminderIds ?? []).every((id) => liveIds.has(id)) &&
+        // Stamped for the account that owns this device's data — a reminder
+        // from before the stamp existed is re-laid once so it carries one.
+        (!owner || live.every((l) => l.uid === owner));
+      if (intact) {
+        next.push(habit);
+        continue;
+      }
+      // Clear whatever is pending for it (strays included), then lay it fresh.
+      for (const { id } of live) {
+        await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
+      }
+      const reminderIds = await syncReminders(
+        { ...habit, reminderIds: [] },
+        { prompt: false },
+      );
+      next.push({ ...habit, reminderIds });
+      changed = true;
+    }
+    return changed ? next : null;
+  } catch {
+    return null;
   }
 }
 

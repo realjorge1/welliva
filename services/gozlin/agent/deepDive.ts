@@ -46,7 +46,7 @@
 import type { GozlinChatContext } from "../GozlinChatEngine";
 import type { GozlinTwin } from "../gozlin.types";
 import { twinStateMessage, type WireMessage } from "./context";
-import type { CoachTransport, ContentBlock } from "./GozlinAgent";
+import { COACH_LOCKED_CODE, type CoachTransport, type ContentBlock } from "./GozlinAgent";
 import { recordOutputScreen, screenOutput } from "./outputSafety";
 
 /**
@@ -110,7 +110,9 @@ export type DeepDiveFailure =
   /** No backend configured, or the network died. Nothing was spent. */
   | "offline"
   /** The model declined, returned nothing, or failed output safety. */
-  | "unavailable";
+  | "unavailable"
+  /** The server refused: this account is not entitled to the coach. */
+  | "locked";
 
 export interface DeepDiveResult {
   ok: boolean;
@@ -187,7 +189,10 @@ export async function runDeepDive(
     if (risk) return { ok: false, reason: "unavailable" };
 
     return { ok: true, text };
-  } catch {
+  } catch (e) {
+    if ((e as { code?: unknown } | null)?.code === COACH_LOCKED_CODE) {
+      return { ok: false, reason: "locked" };
+    }
     return { ok: false, reason: "offline" };
   }
 }

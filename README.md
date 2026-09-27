@@ -1,8 +1,8 @@
-# Welliva
+# welliva
 
 A nutrition, training and habit app built around one rule: **a model may parse, but never number.**
 
-Every calorie, gram and milligram Welliva shows you came from a food composition
+Every calorie, gram and milligram welliva shows you came from a food composition
 table — USDA FoodData Central, the FAO's West African tables, or a
 manufacturer's printed label — and carries that source with it for the rest of
 its life. The AI coach can read your log, name a food, plan your week and argue

@@ -50,10 +50,8 @@ import { useTheme } from "@/components/ThemeContext";
 import { useAuth } from "@/components/SupabaseAuthProvider";
 import { useLegalGate } from "@/components/legal";
 import { LEGAL_CONTACT_EMAIL, LEGAL_VERSION } from "@/constants/legal";
-import {
-  useReminderPermission,
-  type ReminderPermission,
-} from "@/components/notifications/useReminderPermission";
+import { useNotificationSummary } from "@/components/notifications/center/useNotificationSummary";
+import { type ReminderPermission } from "@/components/notifications/useReminderPermission";
 import { sendTestNotification } from "@/services/notifications/send";
 import {
   accountHasPassword,
@@ -358,7 +356,7 @@ const REMINDER_STATUS: Record<
   ReminderPermission,
   { label: string; subtitle: string }
 > = {
-  granted: { label: "Allowed", subtitle: "Welliva can send you reminders" },
+  granted: { label: "Allowed", subtitle: "welliva can send you reminders" },
   denied: {
     label: "Blocked",
     subtitle: "Turned off in device settings — tap to open them",
@@ -423,7 +421,10 @@ export default function SettingsScreen() {
     weightKg: "",
   });
   const [isSaving, setIsSaving] = useState(false);
-  const reminders = useReminderPermission();
+  // One permission read for the whole screen: the Notifications row's live
+  // summary owns it, and the test row shares it.
+  const notifSummary = useNotificationSummary();
+  const reminders = notifSummary.permission;
   const [testState, setTestState] = useState<"idle" | "sending" | "sent">("idle");
   // Cleared on unmount: the reset is scheduled several seconds out (the test
   // notification is deliberately delayed so the phone can be locked), which is
@@ -445,7 +446,7 @@ export default function SettingsScreen() {
   // is mid-way through filling in.
   const [confirmError, setConfirmError] = useState<string | null>(null);
   // Billing is read, never managed, from here: the plan, its renewal date,
-  // "restore purchases" and the tier switch all live on /upgrade now. What
+  // and "restore purchases" live on /upgrade now. What
   // Settings still needs it for is the cloud-backup row below, which has to say
   // whether backup is on and, when it isn't, point at the one screen that can
   // change that.
@@ -638,7 +639,7 @@ export default function SettingsScreen() {
       Alert.alert(
         result.reason === "denied" ? "Reminders are off" : "Not available here",
         result.reason === "denied"
-          ? "Turn on notifications for Welliva in your device settings to receive reminders."
+          ? "Turn on notifications for welliva in your device settings to receive reminders."
           : "Notifications need the full app build — they don't run in Expo Go or on web.",
         result.reason === "denied"
           ? [
@@ -940,7 +941,7 @@ export default function SettingsScreen() {
               <View
                 style={styles.focusRow}
                 accessibilityRole="radiogroup"
-                accessibilityLabel="What Welliva plans and tracks for you"
+                accessibilityLabel="What welliva plans and tracks for you"
               >
                 {TRACKING_MODE_OPTIONS.map((opt) => (
                   <FocusTile
@@ -1183,25 +1184,26 @@ export default function SettingsScreen() {
           </Reveal>
         )}
 
-        {/* Reminders */}
+        {/* Notifications — ONE door. Habits, meals, water, coaching and
+            workouts all live on the Notifications screen, which also proves
+            they work (the live queue, the lock-screen receipts). The subtitle
+            here is counted off the OS queue, never off settings. */}
         <Reveal index={5} stagger={45}>
           <View style={styles.section}>
             <GroupLabel
-              label="Reminders"
-              hint="Nudges you can finish from the lock screen"
+              label="Notifications"
+              hint="Reminders you can finish from the lock screen"
             />
             <ListGroup>
               <ListRow
                 icon="notifications"
                 tone={colors.primary}
-                title="Permission"
-                subtitle={REMINDER_STATUS[reminders.status].subtitle}
+                title="Notifications"
+                subtitle={notifSummary.subtitle}
                 onPress={
-                  reminders.status === "granted"
-                    ? undefined
-                    : reminders.status === "denied"
-                      ? reminders.openSystemSettings
-                      : () => router.push("/notifications-setup" as never)
+                  reminders.status === "denied"
+                    ? reminders.openSystemSettings
+                    : () => router.push("/reminders" as never)
                 }
                 right={
                   reminders.loading ? undefined : (
@@ -1238,35 +1240,14 @@ export default function SettingsScreen() {
                   ) : undefined
                 }
               />
-              {/* The one row that actually SCHEDULES something, so it says
-                  what it does rather than what it is. Meal reminders arrive at
-                  times the user sets and carry an "Ate it" button that records
-                  the meal without the app ever opening. */}
-              <ListRow
-                icon="restaurant"
-                tone={colors.success}
-                title="Tap to log meals"
-                subtitle="Set your meal times and finish them from the lock screen"
-                onPress={() => router.push("/reminders" as never)}
-              />
-              {/* The times themselves live on each habit (create/edit), which is
-                  where a per-habit schedule belongs — so this points at the list
-                  and says so, rather than promising a picker that isn't here. */}
-              <ListRow
-                icon="repeat"
-                tone={colors.warning}
-                title="Habit reminders"
-                subtitle="Open a habit to set the time it nudges you"
-                onPress={() => router.push("/habits" as never)}
-              />
             </ListGroup>
           </View>
         </Reveal>
 
         {/* Account — the plan signpost, the backup state, your body details and
             the way out. The Plan row is a SIGNPOST, not a second storefront:
-            everything transactional (prices, restore, manage, cancel, the dev
-            tier switch) lives on /upgrade, which is a menu destination of its
+            everything transactional (prices, restore, manage, cancel) lives
+            on /upgrade, which is a menu destination of its
             own. Two places that can both sell you something is how prices and
             copy drift apart. */}
         <Reveal index={6} stagger={45}>
@@ -1276,7 +1257,7 @@ export default function SettingsScreen() {
               <ListRow
                 icon={billing.isSubscriber ? "diamond" : "diamond-outline"}
                 tone={colors.gold}
-                title={billing.isSubscriber ? TIER_NAME[billing.entitlement.tier] : "Welliva Free"}
+                title={billing.isSubscriber ? TIER_NAME[billing.entitlement.tier] : "welliva Free"}
                 subtitle={
                   billing.isSubscriber
                     ? billing.entitlement.expiresAt
@@ -1356,10 +1337,10 @@ export default function SettingsScreen() {
                 title="Trust"
                 subtitle={
                   acceptance
-                    ? `Policy, terms and what Welliva can see · accepted v${
+                    ? `Policy, terms and what welliva can see · accepted v${
                         acceptance.version
                       } on ${new Date(acceptance.acceptedAt).toLocaleDateString()}`
-                    : `Policy, terms and what Welliva can see · version ${LEGAL_VERSION}`
+                    : `Policy, terms and what welliva can see · version ${LEGAL_VERSION}`
                 }
                 onPress={() => router.push("/privacy" as never)}
               />
@@ -1373,30 +1354,6 @@ export default function SettingsScreen() {
           </View>
         </Reveal>
 
-        {/* Developer — dev builds only, and stripped from release entirely. */}
-        {__DEV__ ? (
-          <Reveal index={8} stagger={45}>
-            <View style={styles.section}>
-              <GroupLabel label="Developer" />
-              <ListGroup>
-                {/* TEMP dev entry — replays the onboarding flow in preview mode,
-                    which does NOT overwrite the real profile, so the onboarding
-                    screens can be edited and tested like a brand-new user. Remove
-                    before ship, with the `?preview=1` handling in onboarding.
-                    The tier switch that used to sit beside it now lives on
-                    /upgrade, under the cards that say what each tier gets. */}
-                <ListRow
-                  icon="albums"
-                  tone={colors.warning}
-                  title="Replay onboarding"
-                  subtitle="Walk the sign-up flow as a new user — your real profile is untouched"
-                  onPress={() => router.push("/onboarding?preview=1" as never)}
-                />
-              </ListGroup>
-            </View>
-          </Reveal>
-        ) : null}
-
         {/* Danger zone. Framed in the error colour and pulled out of "Data" for
             one reason: these are the only two rows on the page you can't undo by
             tapping again. Keeping them adjacent is what makes the difference
@@ -1404,7 +1361,7 @@ export default function SettingsScreen() {
             the account everywhere. Deleting in-app is required by App Store
             5.1.1(v) and promised in the privacy policy under "How long we keep
             it". */}
-        <Reveal index={9} stagger={45}>
+        <Reveal index={8} stagger={45}>
           <View style={styles.section}>
             <GroupLabel label="Danger zone" tone={colors.error} />
             {/* Rendered FROM the declaration, never hand-wired. `askDanger` is

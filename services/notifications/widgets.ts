@@ -3,7 +3,7 @@
  *
  * The home-screen widget's data contract.
  *
- * Welliva keeps ONE compact snapshot of "today's habits" in storage. The app
+ * welliva keeps ONE compact snapshot of "today's habits" in storage. The app
  * rewrites it whenever habit state changes (HabitsContext), and a notification
  * action patches it directly — so a habit completed from the lock screen, with
  * the app never opened, still leaves the widget's source of truth correct.

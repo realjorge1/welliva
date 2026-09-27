@@ -1,4 +1,4 @@
-# Welliva — Critical Fixes Implementation Plan
+# welliva — Critical Fixes Implementation Plan
 
 Execution plan for an engineering agent to close the four **Critical** audit findings.
 Each phase is independently shippable, ordered so nothing unsafe goes out first.

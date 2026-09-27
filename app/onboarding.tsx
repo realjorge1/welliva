@@ -23,10 +23,14 @@
  *    screen, experience+equipment+days on one screen.
  *  • Region is DETECTED silently from the device time-zone (no "what world are
  *    you in?" screen, no permission) — we only surface a tiny confirm chip.
- *  • Every question arrives before its options do. The ~300ms gap
+ *  • Every question arrives before its options do. The ~500ms gap
  *    (`OPTIONS_DELAY`) is the beat where the screen is still and the user is
  *    reading; it is what makes this read as a conversation rather than a form
  *    that rendered.
+ *  • …but not every question keeps that one tempo, or it is a quiz again. The
+ *    three that open a chapter (goals, daily activity, health) HOLD the stage
+ *    alone first, and their answers rise and push them up (`HELD_STEPS`,
+ *    `QuestionStage`).
  *  • Every selection is acknowledged — the card settles, the siblings recede,
  *    and where it matters the flow says something back (`goalReaction`).
  *
@@ -62,6 +66,7 @@ import {
   Pace,
   PlanReveal,
   ProgressiveText,
+  QuestionStage,
   Recede,
   SafetyMotif,
   SelectionCard,
@@ -337,6 +342,15 @@ const STEP_KICKER: Partial<Record<Step, string>> = {
   health: "Health & safety",
 };
 
+/**
+ * The questions that hold the stage alone before their answers rise (see
+ * `QuestionStage`). Deliberately not all of them — a pause on every screen is
+ * just a slower quiz. These three each open a chapter: what you want, how you
+ * live, what could make a plan unsafe. "About you" is typing, and training and
+ * food already unfold as sequences of their own.
+ */
+const HELD_STEPS = new Set<Step>(["goal", "activity", "health"]);
+
 const BUILD_LINES = [
   "Calculating your calorie target…",
   "Matching you to the right diet…",
@@ -427,6 +441,23 @@ export default function OnboardingScreen() {
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   /** The final transition is running; the save may still be in flight. */
   const [exiting, setExiting] = useState(false);
+  /**
+   * The held step whose answers have not risen yet (see `HELD_STEPS`). The
+   * action bar steps aside while a question has the stage to itself.
+   */
+  const [held, setHeld] = useState<Step | null>(null);
+  const release = useCallback(() => setHeld(null), []);
+  /** Steps already shown. A question holds the stage the first time only —
+   *  coming back to it must never cost the pause twice. */
+  const seen = useRef(new Set<Step>());
+  /** The activity step's pending advance: a re-pick restarts it, leaving cancels it. */
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    },
+    [],
+  );
 
   const primaryGoal = goals[0] ?? null;
   const trainingEnabled = useMemo(() => goals.some((g) => TRAINING_GOALS.has(g)), [goals]);
@@ -464,6 +495,15 @@ export default function OnboardingScreen() {
   /* ── Step machine ─────────────────────────────────────────────────────── */
 
   const goTo = (step: Step, dir: "forward" | "back") => {
+    // A pending activity advance belongs to the step being left. Without this,
+    // tapping back before it fires would fire it from the PREVIOUS step and
+    // skip the user two screens forward.
+    if (advanceTimer.current) {
+      clearTimeout(advanceTimer.current);
+      advanceTimer.current = null;
+    }
+    seen.current.add(currentStep);
+    setHeld(HELD_STEPS.has(step) && !seen.current.has(step) ? step : null);
     setDirection(dir);
     setCurrentStep(step);
   };
@@ -695,8 +735,13 @@ export default function OnboardingScreen() {
   const handleActivitySelect = (value: ActivityLevel) => {
     setActivityLevel(value);
     // The established beat: long enough to see the card open and its meter
-    // fill, short enough that it is never a wait.
-    setTimeout(() => advanceFrom("activity"), Pace.advance);
+    // fill, short enough that it is never a wait. A different pick restarts it
+    // rather than stacking a second advance.
+    if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    advanceTimer.current = setTimeout(() => {
+      advanceTimer.current = null;
+      advanceFrom("activity");
+    }, Pace.advance);
   };
   const toggleEquipment = (value: Equipment) => {
     setEquipment((prev) => {
@@ -818,7 +863,7 @@ export default function OnboardingScreen() {
               delay={WELCOME.title}
               duration={400}
             >
-              Welliva
+              welliva
             </AnimatedText>
             <AnimatedText variant="statement" align="center" delay={WELCOME.title + 60}>
               Let&apos;s build your plan
@@ -857,22 +902,31 @@ export default function OnboardingScreen() {
 
       case "goal":
         return (
-          <StepScroll>
-            <AnimatedQuestion
-              title="What brings you here?"
-              support="Pick everything that fits — the first one you choose leads your plan."
-            />
-            <MultiSelectGrid
-              options={GOAL_OPTIONS}
-              selected={goals}
-              onToggle={toggleGoal}
-              width={contentWidth}
-              columns={2}
-              delay={OPTIONS_DELAY}
-              primaryTag="Main focus"
-            />
-            <MicroReaction text={goalReaction} />
-          </StepScroll>
+          <QuestionStage
+            hold={held === "goal"}
+            onRise={release}
+            lead={
+              <AnimatedQuestion
+                title="What brings you here?"
+                support="Pick everything that fits — the first one you choose leads your plan."
+              />
+            }
+          >
+            {(delay) => (
+              <>
+                <MultiSelectGrid
+                  options={GOAL_OPTIONS}
+                  selected={goals}
+                  onToggle={toggleGoal}
+                  width={contentWidth}
+                  columns={2}
+                  delay={delay}
+                  primaryTag="Main focus"
+                />
+                <MicroReaction text={goalReaction} />
+              </>
+            )}
+          </QuestionStage>
         );
 
       case "about":
@@ -959,18 +1013,25 @@ export default function OnboardingScreen() {
 
       case "activity":
         return (
-          <StepScroll>
-            <AnimatedQuestion
-              title="How active is your day?"
-              support="Just everyday life — work, errands, getting around. Not your workouts."
-            />
-            <ActivityDeck
-              options={ACTIVITY_OPTIONS}
-              value={activityLevel}
-              onSelect={handleActivitySelect}
-              delay={OPTIONS_DELAY}
-            />
-          </StepScroll>
+          <QuestionStage
+            hold={held === "activity"}
+            onRise={release}
+            lead={
+              <AnimatedQuestion
+                title="How active is your day?"
+                support="Just everyday life — work, errands, getting around. Not your workouts."
+              />
+            }
+          >
+            {(delay) => (
+              <ActivityDeck
+                options={ACTIVITY_OPTIONS}
+                value={activityLevel}
+                onSelect={handleActivitySelect}
+                delay={delay}
+              />
+            )}
+          </QuestionStage>
         );
 
       case "training":
@@ -1024,97 +1085,108 @@ export default function OnboardingScreen() {
       case "health": {
         const noneSelected = medicalConditions.includes("none");
         return (
-          <StepScroll tail={Spacing.giant}>
-            <AnimatedQuestion
-              title="Anything I should know?"
-              support="All optional — it just helps me keep your plan safe. Skip if nothing applies."
-              motif={<SafetyMotif tone={colors.primary} />}
-            />
+          <QuestionStage
+            hold={held === "health"}
+            onRise={release}
+            tail={Spacing.giant}
+            lead={
+              // The safety circle closes during the hold — the pause is spent
+              // watching something protective complete itself.
+              <AnimatedQuestion
+                title="Anything I should know?"
+                support="All optional — it just helps me keep your plan safe. Skip if nothing applies."
+                motif={<SafetyMotif tone={colors.primary} />}
+              />
+            }
+          >
+            {(delay) => (
+              <>
+                {/* The most sensitive screen in the app. The reminder that this
+                    shapes a plan, not a treatment, belongs right here. */}
+                <Appear delay={delay}>
+                  <DisclaimerNote compact />
+                </Appear>
 
-            {/* The most sensitive screen in the app. The reminder that this
-                shapes a plan, not a treatment, belongs right here. */}
-            <Appear delay={OPTIONS_DELAY}>
-              <DisclaimerNote compact />
-            </Appear>
+                <View style={styles.section}>
+                  <AppText variant="caption" color="tertiary" uppercase>
+                    Medical conditions
+                  </AppText>
+                  {/* Lifted out of the groups: the fastest honest answer on this
+                      screen is "nothing", and it should be the first thing here. */}
+                  <NothingApplies
+                    selected={noneSelected}
+                    onPress={() => toggleMedicalCondition("none")}
+                    delay={delay + 80}
+                  />
+                  {MEDICAL_GROUPS.map((group, i) => {
+                    const chosen = group.items.filter((item) =>
+                      medicalConditions.includes(item.value),
+                    ).length;
+                    return (
+                      <HealthGroup
+                        key={group.title}
+                        title={group.title}
+                        count={group.items.length}
+                        selectedCount={chosen}
+                        open={openGroup === group.title}
+                        onToggle={() =>
+                          setOpenGroup((g) => (g === group.title ? null : group.title))
+                        }
+                        muted={noneSelected}
+                        delay={delay + 160 + i * 60}
+                      >
+                        <MultiSelectGrid
+                          options={group.items}
+                          selected={medicalConditions}
+                          onToggle={toggleMedicalCondition}
+                          width={contentWidth - Spacing.md * 2}
+                          columns={2}
+                          delay={0}
+                        />
+                      </HealthGroup>
+                    );
+                  })}
+                </View>
 
-            <View style={styles.section}>
-              <AppText variant="caption" color="tertiary" uppercase>
-                Medical conditions
-              </AppText>
-              {/* Lifted out of the groups: the fastest honest answer on this
-                  screen is "nothing", and it should be the first thing here. */}
-              <NothingApplies
-                selected={noneSelected}
-                onPress={() => toggleMedicalCondition("none")}
-                delay={OPTIONS_DELAY + 80}
-              />
-              {MEDICAL_GROUPS.map((group, i) => {
-                const chosen = group.items.filter((item) =>
-                  medicalConditions.includes(item.value),
-                ).length;
-                return (
-                  <HealthGroup
-                    key={group.title}
-                    title={group.title}
-                    count={group.items.length}
-                    selectedCount={chosen}
-                    open={openGroup === group.title}
-                    onToggle={() =>
-                      setOpenGroup((g) => (g === group.title ? null : group.title))
-                    }
-                    muted={noneSelected}
-                    delay={OPTIONS_DELAY + 160 + i * 60}
-                  >
-                    <MultiSelectGrid
-                      options={group.items}
-                      selected={medicalConditions}
-                      onToggle={toggleMedicalCondition}
-                      width={contentWidth - Spacing.md * 2}
-                      columns={2}
-                      delay={0}
-                    />
-                  </HealthGroup>
-                );
-              })}
-            </View>
+                <View style={styles.section}>
+                  <NoteField
+                    label="Injuries or pain"
+                    value={injuries}
+                    onChangeText={setInjuries}
+                    placeholder="e.g. Knee pain, lower back"
+                    delay={delay + 220}
+                  />
+                  <NoteField
+                    label="Medications"
+                    value={medications}
+                    onChangeText={setMedications}
+                    placeholder="e.g. Blood pressure medication"
+                    delay={delay + 280}
+                  />
+                </View>
 
-            <View style={styles.section}>
-              <NoteField
-                label="Injuries or pain"
-                value={injuries}
-                onChangeText={setInjuries}
-                placeholder="e.g. Knee pain, lower back"
-                delay={OPTIONS_DELAY + 220}
-              />
-              <NoteField
-                label="Medications"
-                value={medications}
-                onChangeText={setMedications}
-                placeholder="e.g. Blood pressure medication"
-                delay={OPTIONS_DELAY + 280}
-              />
-            </View>
-
-            <View style={styles.section}>
-              <AppText variant="caption" color="tertiary" uppercase>
-                Food allergies
-              </AppText>
-              <ChipField
-                options={ALLERGY_OPTIONS}
-                selected={allergies}
-                onToggle={toggleAllergy}
-                delay={OPTIONS_DELAY + 320}
-              />
-              <NoteField
-                label="Anything else"
-                value={customAllergy}
-                onChangeText={setCustomAllergy}
-                placeholder="Other allergies, comma-separated"
-                multiline={false}
-                delay={OPTIONS_DELAY + 400}
-              />
-            </View>
-          </StepScroll>
+                <View style={styles.section}>
+                  <AppText variant="caption" color="tertiary" uppercase>
+                    Food allergies
+                  </AppText>
+                  <ChipField
+                    options={ALLERGY_OPTIONS}
+                    selected={allergies}
+                    onToggle={toggleAllergy}
+                    delay={delay + 320}
+                  />
+                  <NoteField
+                    label="Anything else"
+                    value={customAllergy}
+                    onChangeText={setCustomAllergy}
+                    placeholder="Other allergies, comma-separated"
+                    multiline={false}
+                    delay={delay + 400}
+                  />
+                </View>
+              </>
+            )}
+          </QuestionStage>
         );
       }
 
@@ -1157,7 +1229,9 @@ export default function OnboardingScreen() {
 
   /* ── Frame ────────────────────────────────────────────────────────────── */
 
-  const showActions = currentStep !== "building" && currentStep !== "plan";
+  // A held question has the stage to itself; the bar comes back with its answers.
+  const showActions =
+    currentStep !== "building" && currentStep !== "plan" && held !== currentStep;
 
   return (
     <>

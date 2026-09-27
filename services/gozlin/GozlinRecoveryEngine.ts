@@ -1,10 +1,10 @@
 /**
  * GOZLIN — Recovery Intelligence (Phase 2 §8).
  *
- * A lightweight, transparent readiness signal. Welliva has no wearables, so this
- * is honestly a *training-load & density* proxy (not HRV/sleep) — and the output
- * says so in `basis`. Future sleep/HRV/soreness inputs slot in behind the same
- * RecoveryState interface as extra penalties/bonuses, with no downstream changes.
+ * A lightweight, transparent readiness signal. At its core a *training-load &
+ * density* proxy, with two folds on top: a wearable's sleep/HRV when one is
+ * connected, and the day's check-in (hours slept, "Tired"/"Drained") when one
+ * was logged. `basis` always says which of these the score actually used.
  *
  * Pure & deterministic: same inputs (with injected `now`) → same RecoveryState.
  */
@@ -14,7 +14,7 @@ import { parseLocalDate, todayDate, toLocalDateString } from "../OfflineStorage"
 // Type-only import from the substrate (erased at runtime — no cycle).
 import type { WearableSnapshot } from "@/health-os";
 import { recoveryAdjustment, wearableBasis } from "@/health-os";
-import type { RecoveryLevel, RecoveryState } from "./gozlin.types";
+import type { GozlinCheckin, RecoveryLevel, RecoveryState } from "./gozlin.types";
 
 export interface RecoveryInput {
   workoutLog: WorkoutLogEntry[];
@@ -25,7 +25,113 @@ export interface RecoveryInput {
    * adjustment into the score and says so in `basis`. Absent = unchanged proxy behaviour.
    */
   wearable?: WearableSnapshot | null;
+  /**
+   * The state-of-mind log. Today's entry says how long they slept and what
+   * they felt — "Drained", "Tired" — which is the one readiness signal most
+   * users without a watch actually give us. See checkinAdjustment.
+   */
+  checkins?: GozlinCheckin[] | null;
   now?: Date;
+}
+
+// ── Self-report fold ────────────────────────────────────────────────────────
+//
+// Recovery used to be training load alone for anyone without a watch. Someone
+// who logged "4 hours, Drained" at breakfast was told they had fresh legs,
+// because they hadn't trained in two days — the score contradicted the one
+// thing they had just told us. Self-report is noisier than a sensor, so it is
+// weighted a little below the wearable's bands and never overrides it.
+
+/** A feeling logged longer ago than this is yesterday's, not this morning's. */
+const FEELING_FRESH_MS = 18 * 3_600_000;
+
+/** Labels that describe the body running low, not a mood. */
+const FATIGUE_LABELS = new Set(["Tired", "Drained"]);
+/** Load-under-pressure labels. Stress costs recovery, but less than exhaustion. */
+const PRESSURE_LABELS = new Set(["Stressed", "Overwhelmed", "Anxious", "Worried"]);
+
+interface CheckinAdjustment {
+  delta: number;
+  /**
+   * A ceiling, not a penalty. Rested legs max the load score out — a rested
+   * user starts at 100 plus a rest bonus — so a subtraction alone left "4 hours,
+   * Drained" reading green. When they say they are running on empty, the level
+   * follows what they said, however fresh the training log looks.
+   */
+  cap?: number;
+  drivers: string[];
+  used: ("sleep" | "feeling")[];
+}
+
+/** Level ceilings (see levelFor): both land in amber, the two together lower. */
+const CAP_SHORT_NIGHT = 60;
+const CAP_FATIGUE = 65;
+const CAP_BOTH = 50;
+
+function fmtHours(h: number): string {
+  return Number.isInteger(h) ? String(h) : h.toFixed(1);
+}
+
+function checkinAdjustment(
+  checkins: GozlinCheckin[],
+  today: string,
+  nowMs: number,
+  wearableHasSleep: boolean,
+): CheckinAdjustment {
+  let delta = 0;
+  const drivers: string[] = [];
+  const used: CheckinAdjustment["used"] = [];
+
+  // Sleep: last night's, from TODAY's daily entry only — yesterday's entry is
+  // the night before. A measured night from a wearable wins outright.
+  const daily = checkins.find((c) => c.date === today && (c.kind ?? "daily") === "daily");
+  const h = daily?.sleepHours;
+  if (!wearableHasSleep && typeof h === "number" && Number.isFinite(h) && h > 0) {
+    used.push("sleep");
+    if (h < 5) {
+      delta -= 15;
+      drivers.push(`you logged ${fmtHours(h)}h sleep`);
+    } else if (h < 6) {
+      delta -= 8;
+      drivers.push(`you logged ${fmtHours(h)}h sleep (short)`);
+    } else if (h < 7) {
+      delta -= 3;
+      drivers.push(`you logged ${fmtHours(h)}h sleep`);
+    } else if (h >= 8) {
+      delta += 5;
+      drivers.push(`you logged ${fmtHours(h)}h sleep`);
+    }
+  }
+
+  // Feeling: the most recent entry of any kind, if it is still this morning's
+  // or last night's. Daily and momentary alike — "Drained" after work counts.
+  const fresh = checkins
+    .filter((c) => nowMs - c.createdAt >= 0 && nowMs - c.createdAt <= FEELING_FRESH_MS)
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+  const labels = fresh?.labels ?? [];
+  const fatigue = labels.find((l) => FATIGUE_LABELS.has(l));
+  const pressure = labels.find((l) => PRESSURE_LABELS.has(l));
+  if (fatigue) {
+    used.push("feeling");
+    delta -= 12;
+    drivers.push(`you said you felt ${fatigue.toLowerCase()}`);
+  } else if (pressure) {
+    used.push("feeling");
+    delta -= 6;
+    drivers.push(`you said you felt ${pressure.toLowerCase()}`);
+  }
+
+  const shortNight = used.includes("sleep") && typeof h === "number" && h < 5;
+  const cap =
+    shortNight && fatigue
+      ? CAP_BOTH
+      : shortNight
+        ? CAP_SHORT_NIGHT
+        : fatigue
+          ? CAP_FATIGUE
+          : undefined;
+
+  return { delta: clamp(delta, -24, 5), ...(cap !== undefined ? { cap } : {}), drivers, used };
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -92,13 +198,29 @@ export function computeRecovery(input: RecoveryInput): RecoveryState {
   const wearableAdj = input.wearable ? recoveryAdjustment(input.wearable) : null;
   const adjDelta = wearableAdj?.hasSignal ? wearableAdj.delta : 0;
 
-  const score = Math.round(clamp(100 - penalty + restBonus + adjDelta, 0, 100));
+  // ── Check-in fold: what they told us this morning. ──
+  const selfReport = input.checkins?.length
+    ? checkinAdjustment(
+        input.checkins,
+        today,
+        (input.now ?? new Date()).getTime(),
+        typeof input.wearable?.sleepHours === "number",
+      )
+    : null;
+  // Applied AFTER the load score is clamped: a rested user's load score sits at
+  // the 100 ceiling with bonus to spare, and folding the check-in in before the
+  // clamp let the spare bonus swallow it whole.
+  const loadScore = clamp(100 - penalty + restBonus + adjDelta, 0, 100);
+  let score = Math.round(clamp(loadScore + (selfReport?.delta ?? 0), 0, 100));
+  if (selfReport?.cap !== undefined) score = Math.min(score, selfReport.cap);
   const level = levelFor(score);
 
   // ── Drivers (explainability) ──
   const drivers: string[] = [];
   // Wearable drivers lead — they're the strongest, most personal signal.
   if (wearableAdj?.hasSignal) drivers.push(...wearableAdj.drivers);
+  // Then what they said themselves, ahead of the load arithmetic.
+  if (selfReport) drivers.push(...selfReport.drivers);
   if (recent.length > 0)
     drivers.push(
       `${recent.length} session${recent.length === 1 ? "" : "s"} in the last 3 days`,
@@ -123,13 +245,22 @@ export function computeRecovery(input: RecoveryInput): RecoveryState {
       : "Fresh legs. If you want a bonus session, your body can take it.";
   }
 
+  const loadBasis = wearableAdj?.hasSignal
+    ? wearableBasis(input.wearable!)
+    : "training-load proxy (no wearable data yet)";
+  const told = selfReport?.used.length
+    ? `your check-in (${selfReport.used.map((u) => (u === "sleep" ? "sleep" : "how you felt")).join(", ")})`
+    : null;
+
   return {
     score,
     level,
     drivers,
     recommendation,
-    basis: wearableAdj?.hasSignal
-      ? wearableBasis(input.wearable!)
-      : "training-load proxy (no wearable data yet)",
+    basis: !told
+      ? loadBasis
+      : wearableAdj?.hasSignal
+        ? `${loadBasis} + ${told}`
+        : `training load + ${told} (no wearable)`,
   };
 }

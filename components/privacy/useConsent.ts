@@ -52,7 +52,7 @@ function toRows(record: ConsentRecord): ConsentRow[] {
       granted:
         category === "local_processing"
           ? true
-          : (record.decisions[category]?.granted ?? false),
+          : (record.decisions[category]?.granted ?? meta.defaultGranted),
       disabled: meta.group === "future" || category === "local_processing",
     };
   });

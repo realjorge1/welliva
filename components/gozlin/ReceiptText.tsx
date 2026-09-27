@@ -40,7 +40,7 @@ import { AppText } from "@/components/ui";
 import { useColors } from "@/components/ui/useColors";
 import { Mono } from "@/components/ui/Mono";
 import { alpha, Radius, Spacing } from "@/constants/theme";
-import type { Receipt } from "@/services/gozlin/agent";
+import type { RecallReceipt, Receipt } from "@/services/gozlin/agent";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
@@ -134,16 +134,93 @@ export function ReceiptText({ content }: { content: string }) {
 export function ReceiptTrail({
   content,
   receipts,
+  recalls,
   onOpenReceipt,
+  onOpenRecall,
 }: {
   content: string;
   receipts?: Receipt[];
+  /** Memories the reply used — each gets a YOU TOLD ME pill (see RecallTrail). */
+  recalls?: RecallReceipt[];
+  onOpenReceipt: (receipt: Receipt) => void;
+  onOpenRecall?: (recall: RecallReceipt) => void;
+}) {
+  const trail = useMemo(() => figureTrail(content, receipts), [content, receipts]);
+  const quoted = onOpenRecall && recalls && recalls.length > 0 ? recalls : null;
+  if (trail.length === 0 && !quoted) return null;
+
+  return (
+    <>
+      {trail.length > 0 ? (
+        <FigureTrail trail={trail} onOpenReceipt={onOpenReceipt} />
+      ) : null}
+      {quoted ? <RecallTrail recalls={quoted} onOpenRecall={onOpenRecall!} /> : null}
+    </>
+  );
+}
+
+const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+/** "12 SEP" — the pill's own face, the same telemetry register as the figures. */
+function pillDate(date: string): string {
+  const [, m, d] = date.split("-").map(Number);
+  return m && d ? `${d} ${MONTHS[m - 1]}` : date;
+}
+
+/**
+ * The receipt for a QUOTE. A recall ("on 12 Sep you said your hamstrings were
+ * wrecked") has no figure in it, so the trail above would stay silent about the
+ * one claim in the reply most worth checking — that the person actually said
+ * it. The pill is the date; tapping it shows their words, read live from the
+ * store, and lets them forget it there and then.
+ */
+function RecallTrail({
+  recalls,
+  onOpenRecall,
+}: {
+  recalls: RecallReceipt[];
+  onOpenRecall: (recall: RecallReceipt) => void;
+}) {
+  const { colors } = useColors();
+  return (
+    <View style={styles.trail}>
+      <Ionicons name="chatbubble-ellipses-outline" size={12} color={colors.textTertiary} />
+      <AppText variant="caption" color="tertiary" style={styles.trailLabel}>
+        YOU TOLD ME
+      </AppText>
+      {recalls.map((r) => (
+        <Pressable
+          key={r.recordId}
+          onPress={() => onOpenRecall(r)}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={`What you told me about ${r.label}, ${pillDate(r.on)}`}
+          accessibilityHint="Shows your own words, and lets you forget them"
+          style={({ pressed }) => [
+            styles.pill,
+            {
+              backgroundColor: alpha(colors.primary, pressed ? 0.2 : 0.1),
+              borderColor: alpha(colors.primary, 0.24),
+            },
+          ]}
+        >
+          <Mono size={11} weight="700" color={colors.primary}>
+            {pillDate(r.on)}
+          </Mono>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+function FigureTrail({
+  trail,
+  onOpenReceipt,
+}: {
+  trail: { literal: string; receipt: Receipt }[];
   onOpenReceipt: (receipt: Receipt) => void;
 }) {
   const { colors } = useColors();
-  const trail = useMemo(() => figureTrail(content, receipts), [content, receipts]);
-  if (trail.length === 0) return null;
-
   return (
     <View style={styles.trail}>
       <Ionicons name="receipt-outline" size={12} color={colors.textTertiary} />

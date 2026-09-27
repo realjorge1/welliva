@@ -112,5 +112,9 @@ export function pickWeeklyInsight(
  * The card's eyebrow. Named after the cadence rather than the content, so it
  * reads as a recurring moment the user can expect to return to — "this week"
  * implies there will be a next week, which is the whole retention idea.
+ *
+ * It does not name Gozlin or say "noticed": every pattern message is already in
+ * Gozlin's first person ("I've noticed…"), so a third-person byline above it
+ * read like a system label narrating the coach, and doubled the verb.
  */
-export const WEEKLY_INSIGHT_EYEBROW = "This week Gozlin noticed";
+export const WEEKLY_INSIGHT_EYEBROW = "Worth knowing this week";

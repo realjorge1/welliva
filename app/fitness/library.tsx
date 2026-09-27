@@ -5,21 +5,22 @@
  * keep working.
  *
  * Two lenses on one screen:
- *   • Workouts — the authored Welliva sessions (search + stacked filters)
+ *   • Workouts — the authored welliva sessions (search + stacked filters)
  *   • Exercises — the full exercise database with personal suitability
  *     (this is the former Fitness-tab "Browse" mode, preserved verbatim in
  *     behaviour: same suitability model, same detail routing)
  */
 
-import { AmbientCanvas, AppText, Card, IconBadge, Pill, ThemedIcon, useColors } from "@/components/ui";
+import { AmbientCanvas, AppText, IconBadge, useColors } from "@/components/ui";
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
 import { Radius, Spacing } from "@/constants/theme";
 import { useProfile } from "@/contexts/AppContext";
-import { ArtTile } from "@/fitness/components/ArtTile";
+import { resolveFigureMotion } from "@/fitness/animation/movementProfiles";
+import { ExerciseCard, type ExerciseCardData } from "@/fitness/components/ExerciseCard";
 import { WorkoutCard } from "@/fitness/components/WorkoutCard";
 import { useFitnessProfile } from "@/fitness/hooks/useFitnessProfile";
 import { filterWorkouts } from "@/fitness/services/WorkoutCatalog";
-import type { ArtHue, ArtPattern, WorkoutFilter, WorkoutStyle } from "@/fitness/types";
+import type { WorkoutFilter, WorkoutStyle } from "@/fitness/types";
 import type { Difficulty } from "@/models/exercise";
 import { exerciseSuitability } from "@/services/WorkoutGenerator";
 import { Ionicons } from "@expo/vector-icons";
@@ -73,150 +74,6 @@ const EX_CATEGORIES = [
   { id: "cardio", name: "Cardio", icon: "heart-outline" },
 ];
 
-// ── Per-exercise art tiles ──
-// Exercises don't carry authored art the way workouts do, so we derive a
-// deterministic tile for each one: a category-signature hue + glyph, with the
-// decorative pattern varied by a hash of the id so tiles feel individual.
-const EX_HUE: Record<string, ArtHue> = {
-  push: "ember",
-  pull: "sky",
-  squat: "violet",
-  legs: "violet",
-  hinge: "gold",
-  core: "teal",
-  cardio: "rose",
-  flexibility: "forest",
-};
-
-const EX_GLYPH: Record<string, string> = {
-  push: "arrow-up",
-  pull: "arrow-down",
-  squat: "body",
-  legs: "body",
-  hinge: "barbell",
-  core: "fitness",
-  cardio: "heart",
-  flexibility: "leaf",
-};
-
-const EX_PATTERNS: ArtPattern[] = ["orbit", "rings", "dots", "beams"];
-
-function hashString(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h;
-}
-
-function exerciseArt(id: string, pattern: string): {
-  icon: string;
-  hue: ArtHue;
-  pattern: ArtPattern;
-} {
-  return {
-    icon: EX_GLYPH[pattern] ?? "barbell",
-    hue: EX_HUE[pattern] ?? "brand",
-    pattern: EX_PATTERNS[hashString(id) % EX_PATTERNS.length],
-  };
-}
-
-/** One row of the exercise browser, as projected by the `exercises` memo. */
-interface ExerciseRowData {
-  id: string;
-  name: string;
-  category: string;
-  muscle: string;
-  difficulty: string;
-  difficultyRaw: Difficulty;
-  equipment: string;
-  art: { icon: string; hue: ArtHue; pattern: ArtPattern };
-  match: number | null;
-  caution: string | null;
-}
-
-function toneForDifficulty(
-  difficulty: string,
-  colors: ReturnType<typeof useColors>["colors"],
-): string {
-  switch (difficulty.toLowerCase()) {
-    case "beginner":
-      return colors.success;
-    case "intermediate":
-      return colors.warning;
-    case "advanced":
-      return colors.error;
-    default:
-      return colors.textTertiary;
-  }
-}
-
-/**
- * Memoized exercise row.
- *
- * This list was already a FlatList, so it windowed correctly — but `renderItem`
- * was an inline arrow and the row was unmemoized, so every visible row rebuilt
- * on each parent render (a filter chip tap, a keystroke). Lifting the row out and
- * memoizing it is what makes the virtualization actually pay.
- */
-const ExerciseRow = React.memo(function ExerciseRow({
-  item,
-  onPress,
-}: {
-  item: ExerciseRowData;
-  onPress: (id: string) => void;
-}) {
-  const { colors } = useColors();
-  const tone = toneForDifficulty(item.difficulty, colors);
-
-  return (
-    <Card
-      onPress={() => onPress(item.id)}
-      style={styles.exerciseCard}
-      padding="md"
-      elevation="xs"
-      accessibilityLabel={`${item.name}. ${item.difficulty}. Targets ${item.muscle}.${
-        item.caution ? ` Caution: ${item.caution}.` : ""
-      }`}
-      accessibilityHint="Opens the exercise detail"
-    >
-      <View style={styles.exerciseCardRow}>
-        <ArtTile
-          icon={item.art.icon}
-          hue={item.art.hue}
-          pattern={item.art.pattern}
-          size={52}
-          radius={Radius.md}
-        />
-        <View style={styles.flex}>
-          <AppText variant="callout" numberOfLines={1}>
-            {item.name}
-          </AppText>
-          <AppText variant="footnote" color="tertiary" numberOfLines={1} style={styles.exMuscle}>
-            {item.muscle}
-          </AppText>
-          <View style={styles.exMeta}>
-            <Pill label={item.difficulty} tone={tone} size="sm" />
-            {item.match != null && !item.caution && (
-              <Pill label={`${item.match}% match`} tone={colors.success} size="sm" />
-            )}
-            <AppText variant="caption" color="tertiary" numberOfLines={1} style={styles.flex}>
-              {item.equipment}
-            </AppText>
-          </View>
-          {item.caution && (
-            <View style={styles.cautionRow}>
-              <Ionicons name="warning" size={13} color={colors.warning} />
-              <AppText variant="caption" color="warning" numberOfLines={1} style={styles.flex}>
-                {item.caution}
-              </AppText>
-            </View>
-          )}
-        </View>
-        <ThemedIcon name="chevron-forward" size={18} role="textTertiary" />
-      </View>
-    </Card>
-  );
-});
-
 export default function FitnessLibraryScreen() {
   const { colors } = useColors();
   const router = useRouter();
@@ -250,24 +107,23 @@ export default function FitnessLibraryScreen() {
     return filterWorkouts(filter, profile.favorites);
   }, [query, style, level, maxMinutes, ownedOnly, favoritesOnly, userBio?.equipment, profile.favorites]);
 
-  const exercises = useMemo(() => {
+  const exercises = useMemo<ExerciseCardData[]>(() => {
     let all = EXERCISE_DATABASE.map((e) => {
       const fit = userBio ? exerciseSuitability(e, userBio) : null;
       return {
         id: e.id,
         name: e.name,
-        category: e.movementPattern,
-        muscle: e.targetMuscles.join(", "),
-        difficulty: e.difficulty.charAt(0).toUpperCase() + e.difficulty.slice(1),
-        difficultyRaw: e.difficulty,
-        equipment: e.equipment.join(", ") || "None",
-        art: exerciseArt(e.id, e.movementPattern),
+        pattern: e.movementPattern,
+        muscles: e.targetMuscles,
+        difficulty: e.difficulty,
+        equipment: e.equipment,
+        motion: resolveFigureMotion(e.id),
         match: fit?.percent ?? null,
         caution: fit?.caution ?? null,
       };
     });
-    if (exCategory !== "all") all = all.filter((e) => e.category === exCategory);
-    if (exLevel !== "all") all = all.filter((e) => e.difficultyRaw === exLevel);
+    if (exCategory !== "all") all = all.filter((e) => e.pattern === exCategory);
+    if (exLevel !== "all") all = all.filter((e) => e.difficulty === exLevel);
     return all;
   }, [exCategory, exLevel, userBio]);
 
@@ -284,9 +140,11 @@ export default function FitnessLibraryScreen() {
   // Stable identities so the memoized rows aren't invalidated on every render.
   const keyExtractor = useCallback((item: { id: string }) => item.id, []);
 
+  // The card is memoized; a stable renderItem is what lets that pay — an inline
+  // arrow rebuilt every visible row on each chip tap or keystroke.
   const renderExercise = useCallback(
-    ({ item }: { item: ExerciseRowData }) => (
-      <ExerciseRow item={item} onPress={openExercise} />
+    ({ item }: { item: ExerciseCardData }) => (
+      <ExerciseCard item={item} onPress={openExercise} />
     ),
     [openExercise],
   );
@@ -445,9 +303,13 @@ export default function FitnessLibraryScreen() {
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
             renderItem={renderExercise}
-            // Tuned for low-end Android. `removeClippedSubviews` is deliberately
-            // omitted — these rows have layered Skia art tiles, exactly the kind
-            // of child that intermittently blanks on Android when clipped.
+            // Tuned for low-end Android. Clipping is explicitly OFF: FlatList
+            // defaults `removeClippedSubviews` to true on Android, so omitting it
+            // turns it on. Clipped rows detach mid-draw (NPE `mViewFlags` in
+            // ViewGroup.dispatchDraw), and these rows' layered Skia art tiles
+            // intermittently blank when clipped. Virtualization still unmounts
+            // rows outside `windowSize`.
+            removeClippedSubviews={false}
             initialNumToRender={8}
             maxToRenderPerBatch={8}
             windowSize={7}
@@ -545,6 +407,8 @@ export default function FitnessLibraryScreen() {
           keyExtractor={keyExtractor}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          // Explicitly off — see the exercise list above.
+          removeClippedSubviews={false}
           initialNumToRender={8}
           maxToRenderPerBatch={8}
           windowSize={7}
@@ -613,13 +477,6 @@ const styles = StyleSheet.create({
   listContent: { paddingHorizontal: Spacing.screen, paddingTop: Spacing.xs },
   count: { marginBottom: Spacing.sm },
   footerPad: { height: 40 },
-
-  // exercise browser
-  exerciseCard: { marginBottom: Spacing.md },
-  exerciseCardRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
-  exMuscle: { marginTop: 2 },
-  exMeta: { flexDirection: "row", alignItems: "center", gap: Spacing.sm, marginTop: 6 },
-  cautionRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 5 },
 
   listEmpty: { alignItems: "center", paddingTop: Spacing.huge, paddingHorizontal: Spacing.xl },
   listEmptyText: { marginTop: Spacing.lg },

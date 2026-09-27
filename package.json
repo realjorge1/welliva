@@ -1,6 +1,6 @@
 {
   "name": "welliva",
-  "main": "expo-router/entry",
+  "main": "index.js",
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
@@ -14,7 +14,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "clear-cache": "bash ./scripts/clear-cache.sh",
-    "auth:doctor": "node ./scripts/auth-doctor.mjs"
+    "auth:doctor": "node ./scripts/auth-doctor.mjs",
+    "billing:doctor": "node ./scripts/billing-doctor.mjs",
+    "legal:site": "node --experimental-strip-types --no-warnings ./scripts/legal-site.mjs",
+    "legal:publish": "node --experimental-strip-types --no-warnings ./scripts/legal-site.mjs --publish"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -43,6 +46,7 @@
     "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
     "expo-system-ui": "~6.0.9",
+    "expo-task-manager": "~14.0.9",
     "expo-web-browser": "~15.0.10",
     "lottie-react-native": "~7.3.1",
     "react": "19.1.0",

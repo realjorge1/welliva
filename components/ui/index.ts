@@ -1,5 +1,5 @@
 /**
- * Welliva UI — the component library. Import primitives from here.
+ * welliva UI — the component library. Import primitives from here.
  *
  *   import { Screen, Card, AppText, Button, Ring } from "@/components/ui";
  */

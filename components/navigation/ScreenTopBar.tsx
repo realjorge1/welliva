@@ -24,7 +24,7 @@
  *   · `greeting` — Home only. Every other screen leaves line 1 to the menu.
  *   · `title`    — the screen name, under the menu button. A string gets the
  *     house style (`title`, 22pt — matched to the greeting); pass a node when a
- *     screen needs a subtitle or its own treatment (Home's "Welliva" wordmark).
+ *     screen needs a subtitle or its own treatment (Home's "welliva" wordmark).
  *   · `right`    — screen actions (Diet's plan swap, Fitness's streak chip).
  *   · `trailing` — the far right of the menu's own line, after everything else.
  *     The Gozlin button's home. It's a separate slot from `right` precisely so

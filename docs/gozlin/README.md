@@ -1,6 +1,6 @@
 # Gozlin
 
-> **Gozlin is not a chatbot. Gozlin is a persistent AI health coach and transformation companion built into Welliva.**
+> **Gozlin is not a chatbot. Gozlin is a persistent AI health coach and transformation companion built into welliva.**
 
 This folder is the source-of-truth design + architecture for Gozlin. It pairs with
 the working code under `services/gozlin/`, `components/gozlin/`, and `app/gozlin.tsx`.
@@ -13,6 +13,7 @@ the working code under `services/gozlin/`, `components/gozlin/`, and `app/gozlin
 | [04 — Daily AI Briefings](./04-daily-briefings.md) | Phase 4 | Gozlin's morning sit-down: the briefing framework, section-by-section generation logic, the headline decision tree, the prompt/phrase templates, and the UI presentation. |
 | [07 — Habit Awareness System](./07-habit-awareness.md) | Phase 7 | How Gozlin understands *life* habits (workouts, nutrition, hydration, sleep, mood, consistency): pattern detection, behavior scoring, risk prediction, habit rescue, the daily check-in, and the accountability ladder. |
 | [08 — Progress Detective](./08-progress-detective.md) | Phase 8 | How Gozlin explains *why*: root-cause analysis over adherence, weight, training volume and workout performance — recomposition vs plateau vs blocker vs accelerator vs inconsistency, with an auditable metric strip. |
+| [11 — Trying Something New](./11-trying-something-new.md) | Phase 1 built (exercises) | Noticing the first time someone does something, asking once about how it went when the effect would be felt, and remembering their words: the novelty detector, the gates on asking, timing windows, the experience store, recall with receipts, and the open decisions. |
 
 ## Design lineage
 
@@ -22,7 +23,7 @@ assistant in [`features/`](../../features). The **domain is completely different
 assistant reads documents; **Gozlin coaches a human through a body/health transformation.**
 
 Gozlin does **not** introduce a parallel scoring stack. It is the *persona and
-orchestration layer* on top of Welliva's existing deterministic intelligence
+orchestration layer* on top of welliva's existing deterministic intelligence
 (`services/intelligence/*`, `services/CoachEngine.ts`). See `02` for the exact composition.
 
 ## The one success metric

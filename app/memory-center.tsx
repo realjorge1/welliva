@@ -153,7 +153,8 @@ export default function MemoryCenterScreen() {
           contentContainerStyle={styles.list}
           initialNumToRender={6}
           windowSize={9}
-          removeClippedSubviews
+          // Off: clipped rows detach mid-draw on Android (NPE `mViewFlags`).
+          removeClippedSubviews={false}
           ListEmptyComponent={
             m.loading ? null : (
               <Card padding="xxl" style={styles.empty}>

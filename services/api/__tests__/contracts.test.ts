@@ -38,6 +38,7 @@ import {
   V1_ENDPOINTS,
   carriesNutrition,
   isApiErrorBody,
+  isCancelSubscriptionResult,
   isCoachChatResponse,
   isCoachTurnFrame,
   isDietGenerateResponse,
@@ -333,6 +334,31 @@ describe("insight trial claim", () => {
         claimedAt: "2026-08-30T00:00:00.000Z",
         alreadyClaimed: false,
       }),
+    ).toBe(false);
+  });
+});
+
+describe("subscription cancel", () => {
+  it("accepts every status, with a real date or null", () => {
+    expect(
+      isCancelSubscriptionResult({
+        status: "cancelled",
+        expiresAt: "2026-10-26T12:00:00.000Z",
+        store: "play_store",
+      }),
+    ).toBe(true);
+    expect(
+      isCancelSubscriptionResult({ status: "no_subscription", expiresAt: null, store: null }),
+    ).toBe(true);
+  });
+
+  it("rejects an unreadable end date and an unknown status", () => {
+    // "You keep Pro until Invalid Date" is the line this guards.
+    expect(
+      isCancelSubscriptionResult({ status: "cancelled", expiresAt: "soon", store: "play_store" }),
+    ).toBe(false);
+    expect(
+      isCancelSubscriptionResult({ status: "revoked", expiresAt: null, store: null }),
     ).toBe(false);
   });
 });

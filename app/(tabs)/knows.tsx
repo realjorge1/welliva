@@ -1,7 +1,7 @@
 /**
  * WHAT WELLIVA KNOWS — the transparency surface, and the app's trust centrepiece.
  *
- * IT ANSWERS ONE QUESTION: *what does Welliva understand about me?* Not "what did
+ * IT ANSWERS ONE QUESTION: *what does welliva understand about me?* Not "what did
  * I do" — `/logs` already owns that, merging all five ledgers into a read-only
  * day-by-day record. This screen used to open on a health-os timeline of meals,
  * workouts, water and weigh-ins, which is the same list from a different source:
@@ -16,7 +16,7 @@
  * is coming, what you've achieved, and what's being kept.
  *
  * EVERY FACT IS REVERSIBLE. A row you can't remove isn't transparency, it's a
- * receipt — so anything Welliva inferred rather than was told carries an ✕, and
+ * receipt — so anything welliva inferred rather than was told carries an ✕, and
  * the two irreversible actions sit alone in a footer group instead of under every
  * tab like they used to.
  */
@@ -49,15 +49,18 @@ import {
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import type { IntelligenceSnapshot, ModelCard } from "@/health-os";
 import type { Anticipation } from "@/services/gozlin";
+import { SORENESS_WORDS } from "@/services/gozlin/agent";
+import type { ExperienceRecord } from "@/services/gozlin/novelty";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useMemo, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useMemo, useState } from "react";
+import { MindPanel, useMindLog } from "@/components/mind";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 
 /* ───────────────────────────────── Model ───────────────────────────────── */
 
 /**
- * One thing Welliva holds about you.
+ * One thing welliva holds about you.
  *
  * The `value`/`subtitle` split is a rule, not a preference: **numbers go right,
  * words go below**. A long value in the right slot has no flex, so it squeezes
@@ -103,16 +106,28 @@ export default function KnowsScreen() {
   const lc = useLifeContext();
   const ant = useAnticipation();
   const intel = useIntelligence();
+  const mindLog = useMindLog();
   const [addPreset, setAddPreset] = useState<AddPreset | null>(null);
 
-  const { identity, patterns, episodes, conversationCount } = m.memory;
+  // This is a (tabs) screen: it mounts once and is then shown and hidden, so a
+  // mount-only load would leave the mood panel frozen at whatever was true the
+  // first time the tab was opened. Entries are written from the Deck, which is
+  // usually a different screen, so re-reading on focus is the fix.
+  const reloadMind = mindLog.reload;
+  useFocusEffect(
+    useCallback(() => {
+      void reloadMind();
+    }, [reloadMind]),
+  );
+
+  const { identity, patterns, episodes, conversationCount, experiences } = m.memory;
   const bio = m.userBio;
   const goals = m.userGoals;
   // Pulled out so the fact-builders can depend on the stable callbacks rather
   // than on `m`, which the hook rebuilds every render.
   const { clearMotivation, removePreference } = m;
 
-  /** Who you are — the facts you told Welliva, plus what it's aiming at. */
+  /** Who you are — the facts you told welliva, plus what it's aiming at. */
   const you = useMemo<Fact[]>(() => {
     const out: Fact[] = [];
 
@@ -263,7 +278,7 @@ export default function KnowsScreen() {
           onPress={() => router.push("/privacy" as never)}
           hitSlop={10}
           accessibilityRole="button"
-          accessibilityLabel="Trust — what Welliva is allowed to see"
+          accessibilityLabel="Trust — what welliva is allowed to see"
           style={styles.iconBtn}
         >
           <Ionicons name="shield-checkmark-outline" size={20} color={colors.textSecondary} />
@@ -330,7 +345,7 @@ export default function KnowsScreen() {
         {/* ── Who you are ── */}
         <Reveal index={3}>
           <View style={styles.block}>
-            <SectionHeader title="Who you are" subtitle="What you've told Welliva, and what it's aiming at" />
+            <SectionHeader title="Who you are" subtitle="What you've told welliva, and what it's aiming at" />
             {you.length === 0 ? (
               <ListGroup>
                 <ListRow
@@ -407,8 +422,94 @@ export default function KnowsScreen() {
           </View>
         </Reveal>
 
-        {/* ── The horizon: what it's planning around ── */}
+        {/* ── How you've been feeling ──
+             Sits right after the patterns because it is the evidence under half
+             of them: the mood and sleep links Gozlin reports are read off these
+             entries, and "what I've noticed" is more believable directly above
+             the record it noticed it in. */}
         <Reveal index={6}>
+          <View style={styles.block}>
+            <SectionHeader
+              title="How you've been feeling"
+              subtitle="Your own words, and what they tend to be about"
+            />
+            <MindPanel
+              series={mindLog.series}
+              average={mindLog.average}
+              topLabels={mindLog.topLabels}
+              associations={mindLog.associations}
+            />
+          </View>
+        </Reveal>
+
+        {/* ── Things you tried (docs/gozlin/11) ──
+             Their words about something new, exactly as kept — the same thing
+             Gozlin quotes back with a YOU TOLD ME receipt. Every row forgets on
+             one tap, and forgetting here also empties those receipts. */}
+        <Reveal index={7}>
+          <View style={styles.block}>
+            <SectionHeader
+              title="Things you tried"
+              subtitle="What you told Gozlin after trying something new — forget any of it"
+            />
+            <ListGroup>
+              {experiences.length === 0 ? (
+                <ListRow
+                  icon="sparkles-outline"
+                  tone={colors.textTertiary}
+                  title="Nothing yet"
+                  subtitle="The morning after you try a new exercise, Gozlin may ask how it went. What you say is kept here."
+                />
+              ) : (
+                experiences.map((x) => (
+                  <ListRow
+                    key={x.id}
+                    icon="barbell-outline"
+                    tone={colors.primary}
+                    title={x.quote ? `“${x.quote}”` : experienceSummary(x) || "Answered with a tap"}
+                    subtitle={[
+                      x.label,
+                      x.triedOn ? humanDate(x.triedOn) : null,
+                      x.quote ? experienceSummary(x) : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                    right={
+                      <RemoveButton
+                        label={`Forget what you said about ${x.label}`}
+                        onPress={() => void m.forgetExperience(x.id)}
+                      />
+                    }
+                  />
+                ))
+              )}
+              {experiences.length > 1 ? (
+                <ListRow
+                  icon="trash-outline"
+                  destructive
+                  title="Forget all of these"
+                  onPress={() =>
+                    Alert.alert(
+                      "Forget all of these?",
+                      "Gozlin will no longer remember what you told it about the things you tried.",
+                      [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Forget",
+                          style: "destructive",
+                          onPress: () => void m.forgetAllExperiences(),
+                        },
+                      ],
+                    )
+                  }
+                />
+              ) : null}
+            </ListGroup>
+          </View>
+        </Reveal>
+
+        {/* ── The horizon: what it's planning around ── */}
+        <Reveal index={7}>
           <View style={styles.block}>
             <SectionHeader
               title="What's ahead"
@@ -462,9 +563,9 @@ export default function KnowsScreen() {
         </Reveal>
 
         {/* ── Milestones, with dates a human wrote ── */}
-        <Reveal index={7}>
+        <Reveal index={8}>
           <View style={styles.block}>
-            <SectionHeader title="Your story" subtitle="The moments Welliva keeps" />
+            <SectionHeader title="Your story" subtitle="The moments welliva keeps" />
             <ListGroup>
               {episodes.length === 0 ? (
                 <ListRow
@@ -497,7 +598,7 @@ export default function KnowsScreen() {
         </Reveal>
 
         {/* ── The raw record, one tap away instead of underfoot ── */}
-        <Reveal index={8}>
+        <Reveal index={9}>
           <View style={styles.block}>
             <SectionHeader title="What's kept" />
             <ListGroup>
@@ -524,7 +625,7 @@ export default function KnowsScreen() {
         </Reveal>
 
         {/* ── The two irreversible things, alone at the bottom ── */}
-        <Reveal index={9}>
+        <Reveal index={10}>
           <View style={styles.block}>
             <SectionHeader title="Erase" subtitle="Neither of these can be undone" />
             <ListGroup>
@@ -592,6 +693,19 @@ export default function KnowsScreen() {
 
 /* ─────────────────────────────── Sub-components ─────────────────────────── */
 
+const ENJOYED_WORDS = { yes: "liked it", mixed: "mixed about it", no: "not for you" } as const;
+
+/** "very sore · liked it · Proud" — the taps, in words. Empty when there were none. */
+function experienceSummary(x: ExperienceRecord): string {
+  return [
+    x.soreness != null ? SORENESS_WORDS[x.soreness] : null,
+    x.enjoyed ? ENJOYED_WORDS[x.enjoyed] : null,
+    ...x.feelings,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function FactRow({ fact }: { fact: Fact }) {
   return (
     <ListRow
@@ -610,7 +724,7 @@ function FactRow({ fact }: { fact: Fact }) {
 }
 
 /**
- * The ✕ on a fact Welliva inferred or was told in passing. It lives in the row's
+ * The ✕ on a fact welliva inferred or was told in passing. It lives in the row's
  * `right` slot, which also suppresses the chevron — correct, since these rows go
  * nowhere.
  */

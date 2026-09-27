@@ -4,6 +4,7 @@ import { K } from "../platform/storage/keys";
 import { ConsentRepository } from "../privacy/ConsentRepository";
 import {
   CONSENT_CATEGORIES,
+  CONSENT_CATEGORY_META,
   CONSENT_VERSION,
   defaultConsent,
   grantedIntegrations,
@@ -18,14 +19,28 @@ import { MemoryStore } from "./helpers/MemoryStore";
 const NOW = new Date("2026-06-29T09:00:00");
 
 describe("consent (pure)", () => {
-  it("defaults: only local_processing is granted", () => {
+  it("defaults: every sense and every way out is off; only on-device and coaching are on", () => {
     const rec = defaultConsent(NOW);
     expect(rec.version).toBe(CONSENT_VERSION);
     expect(isGrantedIn(rec, "local_processing")).toBe(true);
+    // Default-on is reserved for behaviours over data the app already holds
+    // (the owner's call for follow-ups, docs/gozlin/11 D1). Nothing that reads
+    // a new sense or sends anything out may ever default on.
+    expect(isGrantedIn(rec, "experience_followups")).toBe(true);
     for (const c of CONSENT_CATEGORIES) {
-      if (c === "local_processing") continue;
+      if (c === "local_processing" || CONSENT_CATEGORY_META[c].group === "coaching") continue;
       expect(isGrantedIn(rec, c)).toBe(false);
     }
+  });
+
+  it("reads a category the stored record predates as its default, not as off", () => {
+    const old = {
+      version: CONSENT_VERSION,
+      decisions: { local_processing: { granted: true, at: "x" }, calendar: { granted: false, at: "x" } },
+      updatedAt: "x",
+    } as unknown as ConsentRecord;
+    expect(isGrantedIn(old, "experience_followups")).toBe(true);
+    expect(isGrantedIn(old, "wearable")).toBe(false);
   });
 
   it("local_processing is always effectively granted, even if a record says otherwise", () => {

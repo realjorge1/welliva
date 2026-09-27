@@ -201,7 +201,7 @@ export function buildFitnessExport(input: {
   return JSON.stringify(
     {
       exportedAt: new Date().toISOString(),
-      app: "Welliva",
+      app: "welliva",
       kind: "fitness-data-export",
       version: 1,
       profile: input.profile,

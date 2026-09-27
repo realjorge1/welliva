@@ -3,7 +3,7 @@
  *
  * Shown once, right after onboarding completes (`?from=onboarding`), and
  * reachable any time from Settings → Reminders. Asking here rather than at cold
- * boot means the user has already seen what Welliva does before deciding whether
+ * boot means the user has already seen what welliva does before deciding whether
  * to let it speak.
  *
  * Marking it seen is what makes it once-only; the flag is set on the way out

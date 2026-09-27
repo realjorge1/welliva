@@ -1,5 +1,5 @@
 /**
- * WellivaApi — typed client for the Welliva backend (/backend-welliva).
+ * WellivaApi — typed client for the welliva backend (/backend-welliva).
  *
  * All AI work (diet, workout, coach) runs server-side on Claude Haiku. These
  * methods return shapes that drop straight into the app's existing models.
@@ -20,6 +20,7 @@ import type { GeneratedWorkoutPlan } from "@/models/workout";
 import { API_BASE_URL, isApiConfigured } from "./config";
 import {
   isApiErrorBody,
+  isCancelSubscriptionResult,
   isCoachChatResponse,
   isCoachTurnFrame,
   isDietGenerateResponse,
@@ -28,6 +29,7 @@ import {
   isMealPhotoResponse,
   isParseFoodResponse,
   isWorkoutGenerateResponse,
+  type CancelSubscriptionResult,
   type InsightTrialClaim,
 } from "./contracts";
 import { warmBackend } from "./warmup";
@@ -355,7 +357,25 @@ async function postStream(
       signal: controller.signal,
     });
 
-    if (!res.ok) throw new Error(`API error ${res.status}`);
+    if (!res.ok) {
+      // Carry the server's error CODE, not just a status. The agent loop tells
+      // "this account is not entitled to the coach" (403 pro_required) apart
+      // from a network failure by it — the first gets an honest "that's Pro"
+      // reply, the second the offline coach. A bare "API error 403" made both
+      // look like a dropped connection.
+      let message = `API error ${res.status}`;
+      let code: string | undefined;
+      try {
+        const j: unknown = JSON.parse(await res.text());
+        if (isApiErrorBody(j)) {
+          message = j.error.message;
+          code = j.error.code;
+        }
+      } catch {
+        // non-JSON error body — keep the status message
+      }
+      throw Object.assign(new Error(message), { status: res.status, code });
+    }
 
     if (res.body) {
       const reader = res.body.getReader();
@@ -471,6 +491,19 @@ export const WellivaApi = {
    */
   claimInsightTrial(): Promise<InsightTrialClaim> {
     return post("/v1/billing/trial/claim", {}, 8000, isInsightTrialClaim);
+  },
+
+  /**
+   * Cancel the signed-in user's subscription: auto-renew stops now, access
+   * runs to the end of the paid period.
+   *
+   * A server call because Google Play only lets a server cancel, with a key
+   * that must never ship in the app. The account is the one the access token
+   * names — there is no id to pass. The person is watching a spinner they
+   * asked for, so 20s, and the caller falls back to Play's own page on failure.
+   */
+  cancelSubscription(): Promise<CancelSubscriptionResult> {
+    return post("/v1/billing/cancel", {}, 20000, isCancelSubscriptionResult);
   },
 
   /**

@@ -703,7 +703,8 @@ export function MealPickerSheet({
               keyboardDismissMode="on-drag"
               initialNumToRender={14}
               windowSize={9}
-              removeClippedSubviews
+              // Off: clipped rows detach mid-draw on Android (NPE `mViewFlags`).
+              removeClippedSubviews={false}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={[
                 styles.list,

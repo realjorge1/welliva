@@ -19,6 +19,7 @@ import { buildDetectiveReport } from "./GozlinDetectiveEngine";
 import { buildForecast } from "./GozlinForecastEngine";
 import { buildHabitReport } from "./GozlinHabitEngine";
 import type { HabitTrackerBrief } from "./GozlinTrackerHabits";
+import type { ExperienceBrief } from "./novelty/types";
 import { closer } from "./GozlinPersona";
 import {
   buildWeeklyReview,
@@ -58,6 +59,13 @@ export interface GozlinChatContext {
    * a missing brief means "don't mention habits", never a fabricated one.
    */
   habits?: HabitTrackerBrief;
+  /**
+   * Things they tried for the first time: the one question that may be due,
+   * and what they said before about anything back today
+   * (docs/gozlin/11-trying-something-new.md). Optional for the same reason as
+   * `habits`: absent means "say nothing", never an invented memory.
+   */
+  experiences?: ExperienceBrief;
   weekStart: string;
   weeklyWorkoutTarget: number;
   /**
@@ -236,7 +244,7 @@ export function buildGroundingPrompt(ctx: GozlinChatContext): string {
     ctx.identity.motivation ? `their "why": ${ctx.identity.motivation}` : "",
   ].filter(Boolean).join("\n");
   return (
-    "You are Gozlin, a persistent, warm, observant health coach inside the Welliva app. " +
+    "You are Gozlin, a persistent, warm, observant health coach inside the welliva app. " +
     "Be brief (1–3 sentences), supportive, never robotic, never shaming, never guilt-tripping. " +
     "You are NOT a doctor: defer red-flag medical symptoms to a professional. " +
     "Use ONLY the facts below — never invent numbers. If you don't know, say so.\n\n" +

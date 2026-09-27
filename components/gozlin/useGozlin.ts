@@ -1,7 +1,7 @@
 /**
  * useGozlin — the bridge hook.
  *
- * Connects Welliva's AppContext state to the Gozlin engine package and the
+ * Connects welliva's AppContext state to the Gozlin engine package and the
  * on-device memory store, exposing exactly what the coach screen needs:
  * the Twin, the day's briefing, suggestion chips, the conversation, and a
  * `send()` that runs the (offline-first) chat engine and persists memory.
@@ -12,7 +12,6 @@
 import { useApp } from "@/contexts/AppContext";
 import { currentWeekStart } from "@/services/OfflineStorage";
 import {
-  addCheckin,
   addEpisode,
   archiveConversation,
   buildBriefing,
@@ -25,6 +24,7 @@ import {
   rememberMotivation,
   saveConversation,
   saveIdentity,
+  subscribeMindEntries,
   userMsg,
   type ArchivedConversation,
   type GozlinBriefing,
@@ -56,10 +56,15 @@ import type {
 } from "@/services/gozlin/agent";
 import {
   ensureFoodDictionaryLoaded,
+  getFoodById,
   searchFoods,
 } from "@/constants/FoodDictionary";
+import { useMealPlan } from "@/contexts/MealPlanContext";
+import { catalogLogLabel } from "@/services/nutrition/FoodLogService";
+import { linkCatalogFood, resolveCatalogFood } from "@/services/nutrition/NutrientResolver";
+import { recordCareFlag } from "@/services/gozlin/ExperienceStore";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CheckinPayload } from "./CheckinModal";
+import { useCuriosity, type UseCuriosity } from "./useCuriosity";
 import { useGozlinSnapshot } from "./useGozlinSnapshot";
 
 /**
@@ -153,10 +158,7 @@ function limitReply(quota: MeteredState): GozlinMessage {
    */
   const content =
     quota.limit === 0
-      ? `Talking things through is part of Welliva Pro — that's where I can read ` +
-        `your logs and answer properly. Everything you're already doing stays ` +
-        `free: your diet and its schedule, training, water, habits and Memory. ` +
-        `I'll keep watching all of it either way.`
+      ? PRO_ONLY_COPY
       : quota.tier === "pro"
         ? `We've covered a lot today — ${quota.limit} messages. Let's pick this up ` +
           `tomorrow; I'll still be tracking everything in the meantime.`
@@ -168,6 +170,33 @@ function limitReply(quota: MeteredState): GozlinMessage {
     id: `gz_limit_${Date.now()}`,
     role: "coach",
     content,
+    tone: "gentle",
+    createdAt: Date.now(),
+  };
+}
+
+/** What the coach says when talking is a Pro thing and this account isn't on it. */
+const PRO_ONLY_COPY =
+  `Talking things through is part of welliva Pro — that's where I can read ` +
+  `your logs and answer properly. Everything you're already doing stays ` +
+  `free: your diet and its schedule, training, water, habits and Memory. ` +
+  `I'll keep watching all of it either way.`;
+
+/**
+ * The reply when the SERVER refused the turn for entitlement.
+ *
+ * This device believed the coach was open — a local trial the server does not
+ * recognise, a stale cached entitlement — and the backend said otherwise. The
+ * agent loop falls back to the offline classifier in that case, and showing
+ * THAT as the answer would be the worst option: a canned card dressed as a
+ * reply, from a coach the user is quietly not being given. So it says what is
+ * true, in the coach's voice, the same words a free account sees.
+ */
+function lockedReply(): GozlinMessage {
+  return {
+    id: `gz_locked_${Date.now()}`,
+    role: "coach",
+    content: PRO_ONLY_COPY,
     tone: "gentle",
     createdAt: Date.now(),
   };
@@ -247,9 +276,21 @@ export interface UseGozlin {
   /** Set the goal weight the forecast aims at. */
   setGoalWeight: (kg: number) => Promise<void>;
   /** Today's self-reported check-in, or null (prefills the check-in sheet). */
-  todayCheckin: GozlinCheckin | null;
   /** Record/replace today's sleep / mood / stress check-in. */
-  logCheckin: (data: CheckinPayload) => Promise<void>;
+  /**
+   * "Trying something new" (docs/gozlin/11): the chip's question, and what the
+   * answer sheet does. `chip` is null whenever there is nothing to ask — which
+   * is most of the time, and always with the Trust switch off or without Pro.
+   */
+  curiosity: Pick<UseCuriosity, "chip" | "answer" | "dismiss" | "stopAsking">;
+  /**
+   * A note the coach just kept from the conversation (note_experience). The
+   * screen shows "Noted · Undo" for it — the consent that stands in for a
+   * confirmation sheet — then calls `clearNoted`.
+   */
+  noted: { id: string; label: string } | null;
+  undoNote: (id: string) => Promise<void>;
+  clearNoted: () => void;
 }
 
 export function useGozlin(): UseGozlin {
@@ -260,6 +301,7 @@ export function useGozlin(): UseGozlin {
     refreshRetired,
   } = useHabits();
   const { openUpgrade } = useBilling();
+  const { logCatalogFood } = useMealPlan();
   const [quota, setQuota] = useState<MeteredState | null>(null);
   const [identity, setIdentity] = useState<GozlinIdentityMemory>({
     preferences: [],
@@ -293,6 +335,21 @@ export function useGozlin(): UseGozlin {
 
   // ── Snapshot → Twin (shared bridge — one source of truth) ──
   const { snapshot, twin } = useGozlinSnapshot();
+
+  // Something new they did, and what they said about things they tried
+  // (docs/gozlin/11). Fed from the same snapshot the Twin reads, so today's
+  // planned session here is the one the state block already names.
+  const curiosity = useCuriosity({
+    sessionHistory: snapshot.sessionHistory,
+    plannedSession: snapshot.workoutSession,
+    currentDate: app.currentDate,
+    bio: snapshot.bio,
+  });
+  // The stable callbacks, pulled out: the hook's return object is new on every
+  // render, and depending on it would rebuild every callback below each time.
+  const { recordTurn: recordCuriosityTurn, saveNote: saveExperienceNote } = curiosity;
+  const [noted, setNoted] = useState<{ id: string; label: string } | null>(null);
+  const clearNoted = useCallback(() => setNoted(null), []);
 
   const briefing = useMemo(
     () =>
@@ -337,11 +394,22 @@ export function useGozlin(): UseGozlin {
       identity,
       checkins,
       habits: habitBrief,
+      experiences: curiosity.brief,
       conversation: messages,
       weekStart: currentWeekStart(),
       weeklyWorkoutTarget: app.userGoals?.weeklyWorkoutsTarget ?? 3,
     }),
-    [twin, snapshot, app.coachInsights, identity, checkins, habitBrief, messages, app.userGoals],
+    [
+      twin,
+      snapshot,
+      app.coachInsights,
+      identity,
+      checkins,
+      habitBrief,
+      curiosity.brief,
+      messages,
+      app.userGoals,
+    ],
   );
 
   // ── Confirmation gate for write tools ──
@@ -380,26 +448,69 @@ export function useGozlin(): UseGozlin {
         setIdentity(updated);
       },
 
-      logFood: async (name, servings) => {
+      // THE FOOD LOG, the same path the Foods screen writes through. The coach
+      // used to add a whole-serving snack to the meal PLAN (addFoodAsSnack):
+      // no half portions, no meal slot, the catalog's four macros rather than
+      // the measured panel, and a failure whenever no plan was scheduled.
+      //
+      // Resolution and the write are two steps so the confirmation sheet can
+      // quote the exact entry that will be written — see the log_food tool. The
+      // preview is measured by resolveCatalogFood, which is what
+      // logCatalogFood itself runs, at the food's default portion — the one a
+      // tap on the Foods screen logs.
+      resolveFood: async (name, portions) => {
         await ensureFoodDictionaryLoaded();
         const match = searchFoods(name)[0];
         if (!match) return { ok: false as const, reason: `No "${name}" in the food catalog.` };
-        // One call per serving keeps the logged macros exactly the catalog's —
-        // the coach must never cite a figure we scaled ourselves.
-        const rounds = Math.max(1, Math.min(10, Math.round(servings)));
-        for (let i = 0; i < rounds; i++) {
-          const ok = await app.addFoodAsSnack(match);
-          if (!ok) return { ok: false as const, reason: "No meal plan for today to log against." };
-        }
+        const unit = linkCatalogFood(match).defaultUnit;
+        const measured = resolveCatalogFood(match, portions, unit);
         return {
           ok: true as const,
-          name: match.name,
-          calories: match.calories * rounds,
-          proteinG: match.protein * rounds,
+          food: {
+            id: match.id,
+            name: match.name,
+            label: catalogLogLabel(match, portions, unit),
+            quantity: portions,
+            unit,
+            calories: measured.nutrients.calories ?? 0,
+            proteinG: measured.nutrients.protein ?? 0,
+          },
         };
       },
+
+      logFood: async (food, meal) => {
+        await ensureFoodDictionaryLoaded();
+        // By id, then by exact name: the catalog fills IN PLACE from the
+        // offline seed, whose ids don't always match the remote catalog's, and
+        // that can happen while the confirmation sheet is open.
+        const match =
+          getFoodById(food.id) ?? searchFoods(food.name).find((f) => f.name === food.name);
+        if (!match) return { ok: false as const, reason: `"${food.name}" is no longer in the food catalog.` };
+        const entry = await logCatalogFood({
+          food: match,
+          quantity: food.quantity,
+          unit: food.unit,
+          slot: meal,
+          origin: "gozlin",
+        });
+        if (!entry) return { ok: false as const, reason: "Today's food log is closed." };
+        return {
+          ok: true as const,
+          label: entry.label,
+          calories: Math.round(entry.totals.calories ?? 0),
+          proteinG: Math.round(entry.totals.protein ?? 0),
+        };
+      },
+
+      // What they said about something they tried. Kept without a sheet — the
+      // tool proved the words are theirs — and surfaced as "Noted · Undo".
+      noteExperience: async (note) => {
+        const r = await saveExperienceNote(note);
+        if (r.ok) setNoted({ id: r.id, label: note.subject.label });
+        return r;
+      },
     }),
-    [app],
+    [logCatalogFood, saveExperienceNote],
   );
 
   // ── Load memory + conversation + check-ins once ──
@@ -432,6 +543,10 @@ export function useGozlin(): UseGozlin {
       alive = false;
     };
   }, []);
+
+  // Read-once above, so a mood logged from the Deck after this screen mounted
+  // was invisible to review_mood_log until the next launch. Keep it live.
+  useEffect(() => subscribeMindEntries(setCheckins), []);
 
   // ── Read today's allowance once, so the composer can show what's left ──
   // Only meaningful when there's a backend to meter; without one nothing is
@@ -569,19 +684,29 @@ export function useGozlin(): UseGozlin {
           },
         );
 
+        const locked = result.source === "locked";
+        const reply = locked ? lockedReply() : result.message;
         setMessages((prev) => {
           const next = prev.map((m) =>
-            m.id === placeholderId ? { ...result.message, id: placeholderId } : m,
+            m.id === placeholderId ? { ...reply, id: placeholderId } : m,
           );
           saveConversation(next);
           return next;
         });
+        if (locked) openUpgrade("coach-limit");
 
         // Charge the allowance only for a turn that actually used the model.
         // A clinical-safety reply or a deterministic fallback (offline, refusal,
         // ungrounded number) cost us nothing, so they must not cost the user one
         // of three — otherwise a flaky connection eats their whole day's quota.
         if (result.source === "agent") setQuota(await spendCoachTurn());
+
+        // What the turn did with the open question and the memories it was
+        // shown — the next turn asks, captures, or stays quiet on that basis.
+        if (result.source === "agent") void recordCuriosityTurn(result.curiosity);
+        // A disordered-eating signal leaves a care flag: its kind and the time,
+        // never the words (services/gozlin/careFlags.ts, the owner's call D3).
+        if (result.clinicalKind === "disordered_eating") void recordCareFlag("disordered_eating");
 
         // Memory side-effects surfaced by the deterministic path (the agent's
         // own writes go through toolActions).
@@ -602,7 +727,7 @@ export function useGozlin(): UseGozlin {
         if (confirmResolverRef.current) respondToConfirm(false);
       }
     },
-    [chatContext, isThinking, toolActions, respondToConfirm, openUpgrade],
+    [chatContext, isThinking, toolActions, respondToConfirm, openUpgrade, recordCuriosityTurn],
   );
 
   // ── Send ──
@@ -740,6 +865,8 @@ export function useGozlin(): UseGozlin {
         { transport: coachTransport, onDelta },
       );
       if (!res.ok || !res.text) {
+        // The server's "not entitled" is the locked poster, not an error.
+        if (res.reason === "locked") return { status: "locked" };
         return { status: "error", offline: res.reason === "offline" };
       }
 
@@ -862,26 +989,21 @@ export function useGozlin(): UseGozlin {
     [app],
   );
 
-  const todayCheckin = useMemo(
-    () => checkins.find((c) => c.date === app.currentDate) ?? null,
-    [checkins, app.currentDate],
-  );
-
-  const logCheckin = useCallback(
-    async (data: CheckinPayload) => {
-      const checkin: GozlinCheckin = {
-        date: app.currentDate,
-        ...(data.mood != null ? { mood: data.mood } : {}),
-        ...(data.energy != null ? { energy: data.energy } : {}),
-        ...(data.stress != null ? { stress: data.stress } : {}),
-        ...(data.sleepHours != null ? { sleepHours: data.sleepHours } : {}),
-        createdAt: Date.now(),
-      };
-      const next = await addCheckin(checkin);
-      setCheckins(next);
-    },
-    [app.currentDate],
-  );
+  /*
+   * WHERE todayCheckin AND logCheckin WENT.
+   *
+   * Both were here from when the check-in was reached through the coach's
+   * overflow menu. It moved to the Deck's quick-log (see useQuickLog), and
+   * nothing has consumed either of these since — `logCheckin` in particular was
+   * a SECOND writer that went straight to `addCheckin` and therefore never
+   * mirrored the entry onto the Timeline, which is the bug MindService exists to
+   * close. A dead writer with the old behaviour is worse than no writer: the
+   * next person to want "log a mood from the coach" would have found it and
+   * reintroduced the gap.
+   *
+   * `checkins` stays — it is loaded here for the habit engine, which reads the
+   * whole window rather than one day.
+   */
 
   return {
     twin,
@@ -907,7 +1029,14 @@ export function useGozlin(): UseGozlin {
     forgetMe,
     logWeighIn,
     setGoalWeight,
-    todayCheckin,
-    logCheckin,
+    curiosity: {
+      chip: curiosity.chip,
+      answer: curiosity.answer,
+      dismiss: curiosity.dismiss,
+      stopAsking: curiosity.stopAsking,
+    },
+    noted,
+    undoNote: curiosity.undo,
+    clearNoted,
   };
 }

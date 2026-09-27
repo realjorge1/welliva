@@ -3,7 +3,7 @@
 The end-to-end runbook for turning on subscriptions. Follow it in order: each
 part depends on IDs produced by the one before it.
 
-Welliva sells **one paid tier, monthly or annual**: Pro — the whole app
+welliva sells **one paid tier, monthly or annual**: Pro — the whole app
 unlocked, plus generated plans, insights and uncapped coaching. (There was a
 cheaper Plus tier until it was merged into Pro; if you find `plus` in a console
 you already configured, see §3.5.) What Pro includes is defined once, in
@@ -66,6 +66,16 @@ exactly what `services/billing/tiers.ts` and the `/upgrade` screen expect:
 | RevenueCat entitlement | `pro` | Granted by both `welliva_pro` base plans |
 | RevenueCat offering | `pro` | The two Pro packages |
 
+> **What the live console actually has (verified 2026-09-26 by
+> `npm run billing:doctor`):** two Play subscriptions instead of one, each with
+> one base plan — `welliva_pro_monthly:monthly` and `welliva_pro_yearly:yearly`
+> — packaged as `$rc_monthly` / `$rc_annual` in the **current `default`
+> offering** (no named `pro` offering), both granting the `pro` entitlement.
+> The app supports that layout as-is (`getPlanOptions()` falls back to the
+> current offering). One consequence: a monthly → annual move is a switch
+> between two PRODUCTS, which on Android needs `googleProductChangeInfo` or Play
+> bills both — the storefront never offers it in-app (see `purchasePlan`).
+
 These exact amounts must be entered in the console: the app displays the store's
 localized `priceString`, never a hardcoded number. The same figures are mirrored
 in [services/billing/pricing.ts](../../services/billing/pricing.ts) **only** as
@@ -96,7 +106,7 @@ it in the console AND there.
 Probably yes — Google sign-in is already working, which means an OAuth client
 exists somewhere. Check [docs/OAUTH_SETUP.md](../OAUTH_SETUP.md) and
 [console.cloud.google.com](https://console.cloud.google.com) for an existing
-"Welliva" project. **Reuse it in Part 2** rather than creating a second one;
+"welliva" project. **Reuse it in Part 2** rather than creating a second one;
 two projects for one app is a lasting source of confusion.
 
 ---
@@ -124,7 +134,7 @@ Play Console → **All apps** → **Create app**.
 
 | Field | Value |
 | --- | --- |
-| App name | Welliva |
+| App name | welliva |
 | Default language | English (United States) |
 | App or game | App |
 | Free or paid | **Free** |
@@ -170,7 +180,7 @@ is green. Work through it — most of the answers are already prepared in
 - Content rating questionnaire
 - Target audience and content
 - **Data safety** → the table in [store-submission.md §4](../legal/store-submission.md)
-- Health apps declaration → Welliva handles health data, so expect this section
+- Health apps declaration → welliva handles health data, so expect this section
 - Government apps → No
 - Financial features → No
 
@@ -185,7 +195,7 @@ Play Console → **Monetize → Products → Subscriptions** → **Create subscr
 | Field | Value |
 | --- | --- |
 | Product ID | `welliva_pro` — **permanent, cannot be changed or reused after deletion** |
-| Name | Welliva Pro |
+| Name | welliva Pro |
 
 > If you already created `welliva_plus` before the tiers were merged: leave it
 > alone. A Play subscription cannot be deleted and its ID cannot be reused, so
@@ -243,7 +253,7 @@ status from Google's servers. This part produces one JSON key file.
 Play Console → **Setup → API access**.
 
 - If a project is already linked, note its name and skip to §2.2.
-- Otherwise choose **Link existing project** (pick your existing Welliva project
+- Otherwise choose **Link existing project** (pick your existing welliva project
   from §0.4) or **Create new project**.
 
 ### 2.2 Enable the Google Play Android Developer API
@@ -299,7 +309,7 @@ Then **Invite user** / **Apply**.
 ### 3.1 Create the account and project
 
 1. Sign up at [app.revenuecat.com](https://app.revenuecat.com).
-2. **Create new project** → name it `Welliva`.
+2. **Create new project** → name it `welliva`.
 
 ### 3.2 Add the Play Store app
 
@@ -307,7 +317,7 @@ Project → **Apps → + New** → **Google Play Store**.
 
 | Field | Value |
 | --- | --- |
-| App name | Welliva (Android) |
+| App name | welliva (Android) |
 | Google Play package | `com.welliva.app` |
 | Service account credentials JSON | paste the **entire contents** of the file from §2.4 |
 
@@ -344,7 +354,7 @@ have not propagated (§2.5).
 
 | Identifier | Description | Attach |
 | --- | --- | --- |
-| `pro` | Full Welliva Pro access | `welliva_pro:p1m`, `welliva_pro:p1y` |
+| `pro` | Full welliva Pro access | `welliva_pro:p1m`, `welliva_pro:p1y` |
 
 `pro` is the string the app checks (`PRO_ENTITLEMENT` in
 services/billing/config.ts).
@@ -409,6 +419,15 @@ EXPO_PUBLIC_REVENUECAT_IOS_KEY=
 
 Then add the same keys to each `env` block in [eas.json](../../eas.json), so
 builds carry them.
+
+> **BOTH places, not either.** eas.json only reaches builds that embed their
+> own JS bundle (EAS `preview` / `production`). Any build whose JS comes from
+> Metro — `npx expo run:android`, and the EAS `development` dev client —
+> inlines `EXPO_PUBLIC_*` from the local `.env` and never sees eas.json. With
+> the key only in eas.json, every dev build ran with billing OFF: no SDK call,
+> every lock open, nothing on screen saying so. After editing `.env`, restart
+> Metro with `npx expo start --clear` — the value is inlined at bundle time.
+> `npm run billing:doctor` checks both.
 
 **Mirror the fail-closed pattern from [services/api/config.ts](../../services/api/config.ts):**
 an unset key should mean "billing off, everyone is free tier," never a crash.
@@ -487,7 +506,13 @@ from it.
 
 ## Part 5 — Test before you ship
 
-1. Build a dev client: `npx eas build --platform android --profile development`.
+0. Run `npm run billing:doctor`. It checks the key in `.env` and every eas.json
+   profile, the SDK install, and — through RevenueCat's public API, with the
+   same key the app ships — that the offering has a Monthly and an Annual
+   package and both products grant `pro`. Read-only.
+1. Build a dev client: `npx eas build --platform android --profile development`
+   (or `npx expo run:android`; a license tester can buy from a sideloaded,
+   debug-signed build as long as the package name matches).
 2. Install it on a device signed in with a **license tester** account (§1.6).
 3. The app must be **downloaded from a Play track at least once** by that
    account, or Play returns "item unavailable." Add the tester to the internal
@@ -503,10 +528,17 @@ from it.
 5. Watch RevenueCat → **Customer history** — every event should appear there
    within seconds.
 
+In a `__DEV__` build the bottom of `/upgrade` has a **Store status** panel:
+key in bundle → SDK linked → SDK configured → plans priced, each ✓/✗, plus
+Play's own error text when a link breaks. Failures on the screen itself are
+classified by `services/billing/storeErrors.ts`, so a console problem no longer
+renders as "check your connection".
+
 Common failures:
 
 | Symptom | Cause |
 | --- | --- |
+| Nothing happens — no prices, no RevenueCat traffic, every lock open | The key is in eas.json but not `.env`, and the build loads JS from Metro (§4.2) |
 | "Product not found" / empty offerings | Base plan inactive, or you used `welliva_pro` instead of `welliva_pro:p1m` |
 | RevenueCat says credentials invalid | §2.5 propagation — wait up to 36h |
 | "Item unavailable for purchase" | Tester account never installed from a Play track |
@@ -554,7 +586,8 @@ Two safeguards worth adding at the same time:
 - [ ] Service account permissions granted and propagated
 - [ ] The `pro` entitlement contains both products, and the `pro` offering exists
       with one package per period
-- [ ] RevenueCat keys in all three [eas.json](../../eas.json) profiles
+- [ ] RevenueCat keys in all three [eas.json](../../eas.json) profiles AND `.env`
+      (`npm run billing:doctor` passes)
 - [ ] Purchase → upgrade → restore → cross-device → cancel all verified on a
       real device
 - [ ] Webhook live; `/v1` rejects free users server-side and holds `ai-plans` to Pro

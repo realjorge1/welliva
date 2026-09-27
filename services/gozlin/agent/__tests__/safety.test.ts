@@ -77,9 +77,27 @@ describe("numeric grounding", () => {
     expect(extractNumbers("On 2026-07-26 at 7:30am")).toEqual([]);
   });
 
+  it("reads a thousands separator as ONE figure, the way the coach writes it", () => {
+    // "1,840" used to extract as 1 and 840 — every reply citing a four-digit
+    // figure the ordinary way failed, and the correction blamed an "840".
+    expect(extractNumbers("You're at 1,840 of 2,200 calories.")).toEqual([1840, 2200]);
+    expect(extractNumbers("12,500 steps and 1,840.5 kcal")).toEqual([12500, 1840.5]);
+    expect(validateNumbers("You're at 1,840 of 2,200 calories.", allowed()).ok).toBe(true);
+    expect(validateNumbers("You're 1,340 over.", allowed()).ok).toBe(false);
+  });
+
+  it("leaves a bare comma list alone — only exact three-digit groups are separators", () => {
+    expect(extractNumbers("sets of 3,4,5")).toEqual([3, 4, 5]);
+  });
+
   it("tolerates rounding but not invention", () => {
-    // 1841 vs 1840 is rounding; 1900 is a different claim.
-    expect(validateNumbers("about 1841 calories", allowed()).ok).toBe(true);
+    // This used to accept 1841 for 1840 (±1 or ±2%, whichever was larger).
+    // Rounding never ADDS a digit, so it no longer does — and the same slack
+    // let an invented 81 kg pass for a real 82.6 kg. Rounding is now tested as
+    // rounding: within one unit at the precision written, or a round number no
+    // coarser than a tenth of itself.
+    expect(validateNumbers("about 1841 calories", allowed()).ok).toBe(false);
+    expect(validateNumbers("about 1,800 calories", allowed()).ok).toBe(true);
     expect(validateNumbers("about 1900 calories", allowed()).ok).toBe(false);
   });
 
@@ -195,9 +213,12 @@ describe("context architecture", () => {
     }
   });
 
-  it("marks exactly the two mutating tools as writes", () => {
+  it("marks exactly the three mutating tools as writes", () => {
+    // note_experience is the third, and the only one without a confirmation
+    // sheet — see its definition and docs/gozlin/11 §7.3. A fourth write tool
+    // appearing here should be a deliberate decision, not an accident.
     const writes = GOZLIN_TOOLS.filter((t) => !t.readOnly).map((t) => t.name).sort();
-    expect(writes).toEqual(["log_food", "remember_fact"]);
+    expect(writes).toEqual(["log_food", "note_experience", "remember_fact"]);
   });
 
   it("puts volatile state in a system message, not the cached prefix", () => {

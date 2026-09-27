@@ -1,7 +1,7 @@
 # Task: build `POST /v1/nutrition/lookup`
 
 You are working in **`backend-welliva`**, the standalone server that holds the
-Anthropic key and runs all AI for the Welliva mobile app.
+Anthropic key and runs all AI for the welliva mobile app.
 
 The mobile app side of this feature is **already built, tested and merged**. It
 calls an endpoint that does not exist yet. Your job is to build that endpoint so
@@ -11,7 +11,7 @@ it matches the contract below exactly. Nothing in the app needs to change.
 
 ## 1. What this feature is
 
-Welliva ships a catalog of 205 whole foods plus a reference table of 44 measured
+welliva ships a catalog of 205 whole foods plus a reference table of 44 measured
 entries. That covers staples well and the rest of the world badly. A user
 searching **"abacha"**, **"chin chin"**, or a specific branded cereal currently
 gets nothing.
@@ -26,7 +26,7 @@ about how confident it is.
 
 ## 2. The rule you must not break
 
-Welliva's nutrition layer has a documented, non-negotiable rule. From
+welliva's nutrition layer has a documented, non-negotiable rule. From
 `models/nutrients.ts` in the app:
 
 > A number in a NutrientPanel must trace back to a measured source. Nothing here

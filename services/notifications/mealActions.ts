@@ -3,22 +3,27 @@
  *
  * "Ate it" — the meal-logging path that runs WITHOUT the app.
  *
- * The sibling of habitActions, and it inherits the same three properties,
- * because a notification response gets replayed on cold start and can arrive
- * hours after it fired:
+ * The sibling of habitActions, and it inherits the same properties, because a
+ * notification response gets replayed on cold start, can be delivered to two
+ * handlers at once on Android, and can arrive hours after it fired:
  *
- *   • IDEMPOTENT. Completing an already-ticked meal is a no-op that still
- *     reports success. This one matters more than it does for habits: a habit
- *     completion is a date in a Set, so writing it twice is harmless, but a
+ *   • IDEMPOTENT — ATOMICALLY. Completing an already-ticked meal is a no-op that
+ *     still reports success. This one matters more than it does for habits: a
+ *     habit completion is a date in a Set, so writing it twice is harmless, but a
  *     meal tick appends an immutable line to the INTAKE LEDGER carrying that
- *     meal's macros. Applied twice, the day silently gains a second dinner.
- *     `markMealConsumed` has no guard of its own — it will happily record a
- *     meal that is already recorded — so the check has to live here, before it.
+ *     meal's macros. Applied twice, the day silently gains a second dinner. The
+ *     check and the tick run inside ONE schedule lock
+ *     (ScheduleService.markMealConsumedOnce), so two deliveries of the same press
+ *     cannot both pass it.
  *
  *   • DATED BY THE NOTIFICATION. A reminder that fired at 7pm and is pressed at
  *     00:20 logs the day it was FOR. The ledger is the source of every calorie
  *     figure in the app; letting a late tap land on tomorrow would move a meal
  *     between two days that both then read wrong.
+ *
+ *   • COUNTED LIKE AN IN-APP TICK. The app's own "eaten" tap also credits the
+ *     day to the activity streak; a lock-screen tick that didn't would leave a
+ *     user who logs everything from notifications with a streak of zero.
  *
  *   • FAIL-SOFT. Every failure is a returned reason, never a throw. There is no
  *     UI on this path to catch an exception, and a crash in a background
@@ -29,9 +34,12 @@
  * sets, load, duration and a completion percentage — a lock-screen button that
  * "logged" one would be inventing all four.
  */
-import type { MealType, ScheduledMeal } from "../../models/diet";
-import { getScheduledDietForDate, markMealConsumed } from "../ScheduleService";
+import type { MealType } from "../../models/diet";
+import { markMealConsumedOnce } from "../ScheduleService";
+import { recordActivity } from "../StreakService";
 import { toLocalDateString } from "../OfflineStorage";
+import { emitExternalWrite, subscribeExternalWrites } from "./externalWrites";
+import { fireDateOf } from "./fireTime";
 
 export type LogMealResult =
   | {
@@ -47,13 +55,12 @@ export type LogMealResult =
     }
   | {
       ok: false;
-      reason: "no-plan" | "no-meal" | "closed" | "error";
+      reason: "no-meal" | "closed" | "error";
+      /** Local date the press was for, when known. */
+      date?: string;
     };
 
 // ── change notification ─────────────────────────────────────────────
-
-type Listener = () => void;
-const listeners = new Set<Listener>();
 
 /**
  * Observe out-of-band meal ticks.
@@ -64,83 +71,62 @@ const listeners = new Set<Listener>();
  * the notification is actioned, where nothing would otherwise tell the diet
  * screen that a meal it is currently rendering has just been eaten.
  */
-export function subscribeMealLoggedFromNotification(fn: Listener): () => void {
-  listeners.add(fn);
-  return () => {
-    listeners.delete(fn);
-  };
-}
-
-function emitMealLogged(): void {
-  for (const fn of [...listeners]) {
-    try {
-      fn();
-    } catch {
-      // one bad listener must not stop the others
-    }
-  }
+export function subscribeMealLoggedFromNotification(fn: () => void): () => void {
+  return subscribeExternalWrites((w) => {
+    if (w.kind === "meal") fn();
+  });
 }
 
 // ── the action ──────────────────────────────────────────────────────
-
-/** The meal occupying a slot on a day's schedule, or null. */
-function mealInSlot(
-  schedule: {
-    breakfast: ScheduledMeal | null;
-    lunch: ScheduledMeal | null;
-    dinner: ScheduledMeal | null;
-    snacks: ScheduledMeal[];
-  },
-  slot: MealType,
-  snackIndex: number,
-): ScheduledMeal | null {
-  if (slot === "snack") return schedule.snacks[snackIndex] ?? null;
-  return schedule[slot] ?? null;
-}
 
 /**
  * Log a scheduled meal from a notification action.
  *
  * @param slot       from the notification's `data.slot`
- * @param firedAtMs  `response.notification.date` — when the reminder fired
+ * @param firedAt    `response.notification.date` — when the reminder fired
+ *                   (seconds on iOS, milliseconds on Android; see ./fireTime)
  * @param snackIndex which snack, when the slot is "snack"
  */
 export async function logMealFromNotification(
   slot: MealType,
-  firedAtMs?: number,
+  firedAt?: number,
   snackIndex = 0,
 ): Promise<LogMealResult> {
+  let date: string | undefined;
   try {
-    const fired =
-      typeof firedAtMs === "number" && Number.isFinite(firedAtMs)
-        ? new Date(firedAtMs)
-        : new Date();
-    const date = toLocalDateString(fired);
+    date = toLocalDateString(fireDateOf(firedAt));
 
-    const diet = await getScheduledDietForDate(date);
-    if (!diet?.schedule) return { ok: false, reason: "no-plan" };
-
-    const meal = mealInSlot(diet.schedule, slot, snackIndex);
-    if (!meal) return { ok: false, reason: "no-meal" };
-
-    // THE DUPLICATE GUARD. Without it a replayed cold-start response appends a
-    // second intake record and the day gains a meal nobody ate.
-    if (meal.isConsumed) {
-      return { ok: true, slot, mealName: meal.name, date, alreadyLogged: true };
-    }
-
-    const applied = await markMealConsumed(
+    const result = await markMealConsumedOnce(
       date,
       slot,
       slot === "snack" ? snackIndex : undefined,
     );
-    // The only way this fails now is the back-log window: a reminder that fired
-    // days ago on a phone that was off, pressed after the day has closed.
-    if (!applied) return { ok: false, reason: "closed" };
 
-    emitMealLogged();
-    return { ok: true, slot, mealName: meal.name, date, alreadyLogged: false };
+    switch (result.status) {
+      case "missing":
+        return { ok: false, reason: "no-meal", date };
+      // The back-log window: a reminder that fired days ago on a phone that was
+      // off, pressed after the day has closed.
+      case "closed":
+        return { ok: false, reason: "closed", date };
+      case "already":
+        return { ok: true, slot, mealName: result.mealName, date, alreadyLogged: true };
+      case "logged":
+        break;
+    }
+
+    // Streak credit, exactly as the in-app tick gives it — and only for TODAY.
+    // recordActivity models a run of consecutive days ending now; handing it a
+    // late press for yesterday after today is already recorded would rewind the
+    // run. A meal back-logged in the app doesn't credit a past day either.
+    if (date === toLocalDateString(new Date())) {
+      await recordActivity(date).catch(() => null);
+      emitExternalWrite({ kind: "streak", date });
+    }
+
+    emitExternalWrite({ kind: "meal", date });
+    return { ok: true, slot, mealName: result.mealName, date, alreadyLogged: false };
   } catch {
-    return { ok: false, reason: "error" };
+    return { ok: false, reason: "error", date };
   }
 }

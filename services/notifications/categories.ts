@@ -8,22 +8,23 @@
  * happens at boot (services/notifications/init) and again defensively before any
  * schedule.
  *
- * Both actions use `opensAppToForeground: false`: tapping "Mark as Done" from the
- * lock screen completes the habit and dismisses the banner without ever showing
- * the app. The write itself goes straight to storage (see habitActions.ts), so it
- * survives the app not being running.
+ * Every action uses `opensAppToForeground: false`: tapping "Mark as Done" from
+ * the lock screen completes the habit and dismisses the banner without ever
+ * showing the app. The write itself goes straight to storage (see
+ * ./pipeline and the *Actions modules), so it survives the app not running.
  *
- * There are TWO categories, not one, and the split is deliberate. A habit
- * reminder's button says "Mark as Done"; a meal reminder's says "Ate it". Same
- * mechanism, different sentence — and the sentence matters, because it is the
- * only text on the button and the user is deciding whether to press it from a
- * locked screen. One shared category would have forced one shared verb.
+ * There are THREE categories, not one, and the split is deliberate. A habit
+ * reminder's button says "Mark as Done"; a meal reminder's says "Ate it"; a
+ * water reminder's says how much it will add. Same mechanism, different
+ * sentence — and the sentence matters, because it is the only text on the button
+ * and the user is deciding whether to press it from a locked screen. One shared
+ * category would have forced one shared verb.
  *
- * WORKOUTS DELIBERATELY HAVE NO CATEGORY HERE. A meal or a habit is a yes/no
- * fact the user can answer from a lock screen; a session is a thing with sets,
- * weights, a duration and a completion percentage, and a button that claimed to
- * record one would be recording a fiction. The app will ask you to open it for
- * that, and it should.
+ * WORKOUTS DELIBERATELY HAVE NO CATEGORY HERE. A meal, a glass or a habit is a
+ * yes/no fact the user can answer from a lock screen; a session is a thing with
+ * sets, weights, a duration and a completion percentage, and a button that
+ * claimed to record one would be recording a fiction. The app will ask you to
+ * open it for that, and it should.
  *
  * Only `expo-notifications` is imported (no `react-native`), keeping this module
  * loadable under the Node test runner.
@@ -33,21 +34,42 @@ import * as Notifications from "expo-notifications";
 /** Category carried by every habit reminder. */
 export const HABIT_REMINDER_CATEGORY = "welliva.habit-reminder";
 
-/** Category carried by every meal reminder. */
+/** Category carried by every meal reminder that names a planned meal. */
 export const MEAL_REMINDER_CATEGORY = "welliva.meal-reminder";
+
+/** Category carried by every water reminder. */
+export const WATER_REMINDER_CATEGORY = "welliva.water-reminder";
 
 /** Action ids — matched against `response.actionIdentifier`. */
 export const ACTION_MARK_DONE = "MARK_DONE";
 export const ACTION_SNOOZE = "SNOOZE";
 export const ACTION_LOG_MEAL = "LOG_MEAL";
+export const ACTION_LOG_WATER = "LOG_WATER";
 
 /** How long "Later" pushes a reminder out. */
 export const SNOOZE_MINUTES = 60;
 
-let registration: Promise<void> | null = null;
-
 /** How long "Later" pushes a MEAL reminder out. Shorter — a meal is imminent. */
 export const MEAL_SNOOZE_MINUTES = 30;
+
+/** How long "Later" pushes a WATER reminder out. */
+export const WATER_SNOOZE_MINUTES = 45;
+
+/** The glass the water button adds when the user hasn't chosen one. */
+export const DEFAULT_GLASS_ML = 250;
+
+/**
+ * The glass size the water button currently names. Set before registration by
+ * whoever knows the user's choice (the water-reminder settings); a change
+ * re-registers the category so the button never promises a different amount
+ * than the one it records.
+ */
+let glassMl = DEFAULT_GLASS_ML;
+
+/** "Drank a glass · 250 ml" — the water button, word for word. */
+export function waterButtonTitle(ml: number): string {
+  return `Drank a glass · ${ml} ml`;
+}
 
 async function register(): Promise<void> {
   await Notifications.setNotificationCategoryAsync(HABIT_REMINDER_CATEGORY, [
@@ -78,7 +100,24 @@ async function register(): Promise<void> {
       options: { opensAppToForeground: false },
     },
   ]);
+
+  await Notifications.setNotificationCategoryAsync(WATER_REMINDER_CATEGORY, [
+    {
+      // The amount is IN the button. "Log water" would leave the user guessing
+      // what a tap adds; this says it before they press.
+      identifier: ACTION_LOG_WATER,
+      buttonTitle: waterButtonTitle(glassMl),
+      options: { opensAppToForeground: false },
+    },
+    {
+      identifier: ACTION_SNOOZE,
+      buttonTitle: `Later (${WATER_SNOOZE_MINUTES}m)`,
+      options: { opensAppToForeground: false },
+    },
+  ]);
 }
+
+let registration: Promise<void> | null = null;
 
 /**
  * Register the app's notification categories once. Idempotent and fail-soft: a
@@ -92,4 +131,18 @@ export function ensureNotificationCategories(): Promise<void> {
     });
   }
   return registration;
+}
+
+/**
+ * Point the water button at a new glass size and re-register. A no-op when the
+ * size is unchanged, so the water sync can call it on every run.
+ */
+export async function setWaterGlassMl(ml: number): Promise<void> {
+  if (!Number.isFinite(ml) || ml <= 0 || ml === glassMl) {
+    await ensureNotificationCategories();
+    return;
+  }
+  glassMl = Math.round(ml);
+  registration = null;
+  await ensureNotificationCategories();
 }

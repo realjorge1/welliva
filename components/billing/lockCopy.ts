@@ -29,7 +29,7 @@
  */
 import type { Ionicons } from "@expo/vector-icons";
 
-import { FEATURE_MIN_TIER, type FeatureId } from "@/services/billing";
+import { FEATURE_MIN_TIER, historyWindowDays, type FeatureId } from "@/services/billing";
 
 /** The lock vocabulary IS the feature vocabulary. See the header. */
 export type LockId = FeatureId;
@@ -71,8 +71,9 @@ export const LOCK_COPY: Record<LockId, LockCopy> = {
   },
   history: {
     title: "See your whole story",
-    blurb:
-      "Free shows the last 30 days. Pro goes back to day one — every chart, report and trend, and it's your data, getting more useful the longer you keep going.",
+    // The window is read from the tier, not typed: this said "30 days" for a
+    // while after it could have drifted.
+    blurb: `Free shows the last ${historyWindowDays("free")} days. Pro goes back to day one — every chart, report and trend, and it's your data, getting more useful the longer you keep going.`,
     icon: "trending-up-outline",
   },
   insights: {
@@ -108,9 +109,9 @@ export const LOCK_COPY: Record<LockId, LockCopy> = {
   generic: {
     title: "Meet Gozlin",
     blurb:
-      "Everything you track stays free. Pro adds Gozlin — the coach that's read all of it.",
+      "Everything you track stays free. Pro adds Gozlin — the coach that reads all of it.",
     // Not a star. A star is what every app in the store puts on its paid tier,
-    // which makes it read as "generic upsell" rather than as Welliva's own thing
+    // which makes it read as "generic upsell" rather than as welliva's own thing
     // — and it's the mark the menu's Upgrade row already uses.
     icon: "diamond-outline",
   },

@@ -47,6 +47,7 @@ import {
   toExpoWeekday,
 } from "@/fitness/services/FitnessNotifications";
 import type { FitnessProfile, ReminderPrefs } from "@/fitness/types";
+import { REMINDERS_CHANNEL_ID } from "@/services/notifications/init";
 
 function makeProfile(
   reminders: Partial<ReminderPrefs> = {},
@@ -106,12 +107,12 @@ describe("syncFitnessReminders", () => {
     // The channel is (re)created before scheduling — Android drops anything
     // posted to a channel that doesn't exist.
     expect(N.setNotificationChannelAsync).toHaveBeenCalledWith(
-      "reminders",
+      REMINDERS_CHANNEL_ID,
       expect.objectContaining({ name: "Reminders" }),
     );
     for (const call of N.scheduleNotificationAsync.mock.calls) {
       expect(call[0].trigger.type).toBe("weekly");
-      expect(call[0].trigger.channelId).toBe("reminders");
+      expect(call[0].trigger.channelId).toBe(REMINDERS_CHANNEL_ID);
       expect(call[0].trigger.hour).toBe(7);
       // A tapped reminder must land somewhere specific.
       expect(call[0].content.data.route).toBe("/exercise");

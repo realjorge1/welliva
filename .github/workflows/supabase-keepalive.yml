@@ -1,0 +1,94 @@
+name: Supabase keep-alive
+
+# Free-tier Supabase projects pause after ~7 days without activity, and pausing
+# removes the project's DNS record — the hostname stops resolving entirely. In the
+# app that surfaces as React Native's opaque `TypeError: Network request failed`
+# (the whatwg-fetch polyfill collapses DNS failures into it), so the symptom looks
+# like a connectivity bug and costs an hour to trace back to a sleeping database.
+# This ran into exactly that on 2026-09-24.
+#
+# A request resets the inactivity clock, so pinging the project keeps it awake.
+# Every 3 days gives two attempts before the 7-day deadline.
+#
+# Retire this once the project is on a paid tier, where pausing doesn't happen.
+#
+# Caveat worth knowing: GitHub disables scheduled workflows in repos with no
+# pushes for 60 days. If this repo goes quiet, this safety net goes with it.
+on:
+  schedule:
+    - cron: "0 6 */3 * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Keep the database awake
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Defaults come from the committed .env.example, which carries the real URL
+      # and anon key (both are public by design — the anon key is shipped in every
+      # client bundle). Reading them from the repo means this workflow protects the
+      # project the moment it's merged, with no secrets to configure: a keep-alive
+      # that silently does nothing because a secret was never set is worse than no
+      # keep-alive at all, because you believe you're covered. Secrets still win
+      # when present, for whoever wants them there.
+      - name: Resolve project credentials
+        id: creds
+        run: |
+          URL="${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}"
+          KEY="${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}"
+          [ -n "$URL" ] || URL=$(grep -E '^EXPO_PUBLIC_SUPABASE_URL=' .env.example | cut -d= -f2-)
+          [ -n "$KEY" ] || KEY=$(grep -E '^EXPO_PUBLIC_SUPABASE_ANON_KEY=' .env.example | cut -d= -f2-)
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "::error::No Supabase URL/anon key in secrets or .env.example — cannot ping."
+            exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "::add-mask::$KEY"
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+          echo "Pinging ${URL}"
+
+      # Two probes, because the layers wake independently: a restore brings DNS and
+      # the Cloudflare edge up first, then the containers behind them minutes later.
+      # Hitting only the edge would report a healthy project that can't serve a query.
+      #
+      # `nutrition_logs` is a real table, so this reaches Postgres rather than
+      # stopping at the gateway — that's what counts as activity. The pass condition
+      # is deliberately "any non-5xx": a 401 or 404 from a future RLS or schema
+      # change still proves the project is awake and still resets the clock, and a
+      # false alarm every 3 days would train us to ignore this workflow. Only a 5xx
+      # or an outright connection failure is real news.
+      - name: Ping Postgres via PostgREST
+        env:
+          URL: ${{ steps.creds.outputs.url }}
+          KEY: ${{ steps.creds.outputs.key }}
+        run: |
+          code=$(curl -sS -o /tmp/rest.out -w '%{http_code}' --max-time 30 --retry 3 --retry-delay 10 \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            "$URL/rest/v1/nutrition_logs?select=id&limit=1") || {
+              echo "::error::Could not reach $URL at all — project is probably paused or deleted. Restore it at https://supabase.com/dashboard"
+              exit 1
+            }
+          echo "HTTP $code — $(head -c 200 /tmp/rest.out)"
+          case "$code" in
+            5*) echo "::error::PostgREST returned $code. The project is reachable but not serving; if it was just restored, the containers may still be booting."; exit 1 ;;
+            *)  echo "Database responded — inactivity clock reset." ;;
+          esac
+
+      # Auth is the service the app leans on hardest at cold start (autoRefreshToken
+      # retries the stored session every 30s), and it was the last one to come back
+      # after the 2026-09-24 restore — worth its own check rather than assuming a
+      # healthy database means a healthy GoTrue.
+      - name: Check auth is serving
+        env:
+          URL: ${{ steps.creds.outputs.url }}
+          KEY: ${{ steps.creds.outputs.key }}
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 --retry 3 --retry-delay 10 \
+            -H "apikey: $KEY" "$URL/auth/v1/health") || {
+              echo "::error::Auth endpoint unreachable."; exit 1; }
+          echo "auth/v1/health → HTTP $code"
+          [ "$code" = "200" ] || { echo "::error::Auth unhealthy ($code)."; exit 1; }

@@ -350,13 +350,13 @@ export function buildYearStory(input: StoryInput, year: number, now: Date = new 
   const stats = aggregate(input, start, end);
   const range = { start, end };
   if (!stats.hasActivity) {
-    return emptyArtifact(`year:${year}`, "year", `${year}, wrapped`, "Your year on Welliva", range, now);
+    return emptyArtifact(`year:${year}`, "year", `${year}, wrapped`, "Your year on welliva", range, now);
   }
   return {
     id: `year:${year}`,
     horizon: "year",
     title: withEmoji(`${year}, wrapped`, "year"),
-    subtitle: "Your year on Welliva",
+    subtitle: "Your year on welliva",
     headline: yearHeadline(stats, year),
     hero: { value: num(stats.activeDays), label: "active days this year" },
     sections: commonSections(stats),
@@ -391,7 +391,7 @@ export function buildAnniversaryStory(
     return emptyArtifact(
       `anniversary:${years}`,
       "anniversary",
-      withEmoji(`${ordinal} with Welliva`, "anniversary"),
+      withEmoji(`${ordinal} with welliva`, "anniversary"),
       "Happy anniversary",
       range,
       now,
@@ -400,7 +400,7 @@ export function buildAnniversaryStory(
   return {
     id: `anniversary:${years}`,
     horizon: "anniversary",
-    title: withEmoji(`${ordinal} with Welliva`, "anniversary"),
+    title: withEmoji(`${ordinal} with welliva`, "anniversary"),
     subtitle: "Look how far you've come",
     headline:
       years === 1 ? "One year in — and it shows" : `${years} years of showing up for yourself`,
@@ -583,7 +583,7 @@ export async function ensureJourneyAnniversary(
       {
         id: `anniversary:${n}`,
         kind: "anniversary",
-        title: n === 1 ? "One year with Welliva" : `${n} years with Welliva`,
+        title: n === 1 ? "One year with welliva" : `${n} years with welliva`,
         window: { start: nextAnniv },
         source: "inferred",
         confidence: 1,

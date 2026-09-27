@@ -1,6 +1,6 @@
 /**
  * LOADING OVERLAY COMPONENT
- * A professional, animated loading indicator for the Welliva app
+ * A professional, animated loading indicator for the welliva app
  *
  * Features:
  * - Beautiful gradient circle animation

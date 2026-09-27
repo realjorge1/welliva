@@ -1,5 +1,5 @@
 /**
- * Welliva billing — subscriptions via RevenueCat.
+ * welliva billing — subscriptions via RevenueCat.
  *
  *   import { allows, effectiveTier, coachDailyLimit } from "@/services/billing";
  *
@@ -20,12 +20,11 @@ export {
   clearEntitlement,
   currentTier,
   FREE,
-  getDevTierOverride,
   getEntitlement,
   hydrateEntitlement,
   isPro,
   isSubscriber,
-  setDevTierOverride,
+  markNotRenewing,
   setEntitlement,
   subscribe,
   type Entitlement,
@@ -38,6 +37,7 @@ export {
   installEntitlementListener,
   isBillingAvailable,
   isBillingReady,
+  openSubscriptionManagement,
   purchasePlan,
   refreshEntitlement,
   restorePurchases,
@@ -45,7 +45,14 @@ export {
   type BillingPeriod,
   type PlanOption,
   type PurchaseOutcome,
+  type Storefront,
 } from "./Billing";
+
+export {
+  describeStoreError,
+  type StoreProblem,
+  type StoreProblemKind,
+} from "./storeErrors";
 
 export {
   canCreateHabit,
@@ -123,6 +130,7 @@ export {
   hasUsedTrial,
   hydrateTrial,
   maybeStartTrial,
+  reconcileTrialWithServer,
   setTrialClaimer,
   subscribeTrial,
   trialGrants,

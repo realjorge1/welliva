@@ -166,6 +166,44 @@ export interface NextMove {
    * ask for. A finished day should look finished, not like an unpressed button.
    */
   tone: "primary" | "calm";
+  /**
+   * The screen this move would ONLY navigate to. The cue skips a move whose
+   * `suppressOn` is the screen you are standing on; the agenda never does — see
+   * `resolveAgenda`. Absent on every move that writes rather than travels,
+   * which is why water stands on Diet and a meal row does not.
+   */
+  suppressOn?: string;
+  /**
+   * Already in flight rather than something the day is asking for. The dock
+   * gives these its top slot, draws them as a controller rather than a prompt,
+   * and refuses to dismiss them.
+   */
+  live?: boolean;
+  /**
+   * Whether "not now" is a thing a person may say to this. False for the two
+   * moves that ARE the app working at all (a half-finished session, an account
+   * with nothing set up): dismissing those would leave a screen with no way
+   * forward and call it restraint.
+   */
+  dismissible: boolean;
+  /**
+   * Minute-of-day after which this move is stale, so a dismissal of it can
+   * expire on its own. Only the meal rungs set it — their windows are already
+   * narrow, which is what lets "not now" mean exactly "not in this window"
+   * instead of needing a seen-it flag that outlives the day.
+   */
+  staleAfterMinute?: number;
+  /**
+   * Whose voice this is. `gozlin` wears the coach's mark instead of an Ionicon,
+   * the same rule the menu row follows: the coach has an identity and a generic
+   * glyph throws it away.
+   */
+  voice?: "gozlin";
+  /**
+   * Progress through a live thing, for the controller's segment bar. Set only
+   * on `live` moves, where the numbers are a real position in a real session.
+   */
+  segments?: { at: number; of: number };
 }
 
 /** The meal whose window contains `minutesOfDay`, or null between windows. */
@@ -212,11 +250,84 @@ function litres(ml: number): string {
   return (Math.max(0, ml) / 1000).toFixed(1);
 }
 
+/* ───────────────────────────── the agenda ─────────────────────────────── */
+
 /**
- * Resolve the single next move. Total — the final rung is unconditional, so the
- * bar always has something true to say.
+ * Today's scheduled commitments, done against total.
+ *
+ * THIS IS THE NUMBER THE HOME TAB'S RING DRAWS, so it has to survive the
+ * standing rule that anything claiming to count must count exactly that. Its
+ * scope is stated in one place and read in two: the ring and the agenda's own
+ * header ("3 of 6 done today") come from this function, so they cannot drift.
+ *
+ * WHAT COUNTS. Only commitments the day actually made:
+ *   · each meal the day's schedule holds — not "three meals", the ones planned
+ *   · today's training session, and only when the plan asked for one
+ *   · the evening check-in, and only once the evening can be reported on
+ *
+ * WHAT DOESN'T. Water (a target, not a commitment, and continuous), the
+ * weigh-in (weekly, so it would make most days open at 5 of 6 for no reason)
+ * and anything the coach suggests. A ring that fills from things nobody
+ * scheduled is a progress bar for being alive.
  */
-export function resolveNextMove(input: NextMoveInput): NextMove {
+export interface DayProgress {
+  done: number;
+  total: number;
+}
+
+export function resolveDayProgress(input: NextMoveInput): DayProgress {
+  const {
+    meals,
+    todaySession,
+    hasPlan,
+    isRestDay,
+    workoutDoneToday,
+    minutesOfDay,
+    checkedInToday,
+  } = input;
+
+  let done = 0;
+  let total = 0;
+
+  for (const m of meals) {
+    total += 1;
+    if (m.consumed) done += 1;
+  }
+
+  if (hasPlan && todaySession && !isRestDay) {
+    total += 1;
+    if (workoutDoneToday) done += 1;
+  }
+
+  if (minutesOfDay >= CHECKIN_FROM_MINUTE) {
+    total += 1;
+    if (checkedInToday) done += 1;
+  }
+
+  return { done, total };
+}
+
+/**
+ * EVERY open move, in ladder order, with nothing suppressed.
+ *
+ * WHY THIS EXISTS SEPARATELY FROM `resolveNextMove`. The ladder always knew
+ * there were four things open and only ever said one of them, which is what
+ * made a perfectly correct suggestion read as bossy: there was no way to see
+ * that it had reasons, and no way to pick the other thing. The dock's agenda
+ * shows this list; the cue shows `resolveNextMove`, which is this list filtered
+ * and topped. One computation, two altitudes — they cannot disagree.
+ *
+ * IT DOES NOT SUPPRESS BY ROUTE. `suppressOn` travels ON each move and is
+ * applied by the cue, not here: an agenda that hid lunch because you happen to
+ * be standing on Diet would report "2 open" while three things were open, and
+ * the count is the whole reason anyone would trust the list.
+ *
+ * THERE IS NO TERMINAL RUNG HERE. An empty list means the day is genuinely
+ * clear, and the dock answers that with nothing at all rather than with a card
+ * saying so — see `finishedDayMove` for the sentence a finished day still owes
+ * the one surface that must never be empty.
+ */
+export function resolveAgenda(input: NextMoveInput): NextMove[] {
   const {
     minutesOfDay,
     savedSession,
@@ -225,98 +336,110 @@ export function resolveNextMove(input: NextMoveInput): NextMove {
     todaySession,
     hasPlan,
     workoutDoneToday,
-    isRestDay,
     setupComplete,
     checkedInToday,
     daysSinceWeighIn,
     openConversation = null,
     waterMl,
     waterGoalMl,
-    tomorrowFocus,
-    currentHref = null,
   } = input;
 
-  /** True when a rung would only navigate to the screen already on show. */
-  const here = (href: string) => currentHref !== null && href === currentHref;
+  const moves: NextMove[] = [];
 
-  // 1. An abandoned session. Nothing else matters while a workout is half done —
-  //    it's the only state in the app that decays if you walk away from it.
+  // 1. An abandoned session. Nothing else matters while a workout is half done
+  //    — it is the only state in the app that decays if you walk away from it,
+  //    and the only one the dock treats as LIVE: it is already happening, so it
+  //    gets the controller card and can never be dismissed.
   if (savedSession) {
-    return {
+    moves.push({
       id: "resume",
       label: `Resume ${savedSession.label}`,
       caption: `Exercise ${savedSession.index + 1} of ${savedSession.total}`,
       icon: "play",
       action: { kind: "resume" },
       tone: "primary",
-    };
+      live: true,
+      dismissible: false,
+      segments: { at: savedSession.index, of: savedSession.total },
+    });
   }
 
-  // 2. Nothing set up at all — the cold-start case this bar was built for. A
-  //    person here has no meals to log and no session to start, so every rung
-  //    below would be a lie. Send them to the one screen that ends the state.
+  // 2. Nothing set up at all — the cold-start case. A person here has no meals
+  //    to log and no session to start, so every rung below would be a lie. This
+  //    is the one place the list stops early rather than ranking.
   if (!hasPlan && !hasScheduledDiet) {
-    return {
+    moves.push({
       id: "build-plan",
       label: "Build your plan",
       caption: "2 min",
       icon: "sparkles",
       action: { kind: "push", href: "/fitness/setup" },
       tone: "primary",
-    };
+      dismissible: false,
+    });
+    return moves;
   }
 
-  // 3. Inside a real eating window, with that meal still unlogged. Skipped on
-  //    Diet itself, where the meal list is already the thing on screen.
+  // 3. Inside a real eating window, with that meal still unlogged. A dismissal
+  //    of this one expires when the window does — the narrowest suppression in
+  //    the app, and the reason "not now" never needs a memory that outlives it.
   const due = mealDueAt(minutesOfDay, meals);
-  if (due && !due.consumed && !here("/diet")) {
-    return {
+  if (due && !due.consumed) {
+    moves.push({
       id: `log-${due.type}`,
       label: `Log ${due.type}`,
       caption: due.name,
       icon: "restaurant",
       action: { kind: "route", href: "/diet" },
       tone: "primary",
-    };
+      suppressOn: "/diet",
+      dismissible: true,
+      staleAfterMinute: MEAL_WINDOWS[due.type][1],
+    });
   }
 
   // 4. A day with no meals on it. The Home plan tile calls this "Add today's
-  //    meals"; the bar uses the same words so the two can never disagree.
-  if (!hasScheduledDiet && !here("/diet")) {
-    return {
+  //    meals"; the ladder uses the same words so the two can never disagree.
+  if (!hasScheduledDiet) {
+    moves.push({
       id: "plan-meals",
       label: "Add today's meals",
       caption: "No diet scheduled",
       icon: "add-circle",
       action: { kind: "route", href: "/diet" },
       tone: "primary",
-    };
+      suppressOn: "/diet",
+      dismissible: true,
+    });
   }
 
-  // 5. Today's training, if the plan asked for it and it hasn't happened.
+  // 5. Today's training, if the plan asked for it and it has not happened.
   if (todaySession && !workoutDoneToday) {
-    return {
+    moves.push({
       id: "start-session",
       label: `Start ${todaySession.focus}`,
       caption: `~${todaySession.minutes} min`,
       icon: "barbell",
       action: { kind: "startSession" },
       tone: "primary",
-    };
+      dismissible: true,
+    });
   }
 
   // 6. A meal whose hour has been and gone with nothing logged. Below training
   //    on purpose: the session is time-sensitive, the record can be caught up.
   const missed = mealMissedBy(minutesOfDay, meals);
-  if (missed && !here("/diet")) {
-    return {
+  if (missed) {
+    moves.push({
       id: `catchup-${missed.type}`,
       label: `Log ${missed.type}`,
       caption: "Earlier today",
       icon: "restaurant-outline",
       action: { kind: "route", href: "/diet" },
       tone: "primary",
-    };
+      suppressOn: "/diet",
+      dismissible: true,
+    });
   }
 
   // 7. A conversation with the coach that nobody finished — you asked and no
@@ -324,64 +447,66 @@ export function resolveNextMove(input: NextMoveInput): NextMove {
   //
   //    WHY IT SITS HERE AND NOT AT THE TOP. It is the only rung that is about
   //    something you were doing rather than something the day needs, so it must
-  //    never displace a meal in its window or the session that's due — those
+  //    never displace a meal in its window or the session that is due — those
   //    have hours attached and this does not. But it belongs above the setup
   //    and self-report rungs, because those are preparation and admin and this
-  //    is a live thread with a question sitting in it. In practice that puts it
-  //    exactly where it should be: in the gaps of a day that is otherwise on
-  //    top of itself.
+  //    is a live thread with a question sitting in it.
   //
-  //    The label rotates (see NextMoveInput.openConversation) and the caption is
-  //    the thread's own topic, so the bar names the thing you'd be going back to
-  //    rather than offering a generic trip to the chat screen.
-  if (openConversation && !here("/gozlin")) {
+  //    It is the one move that carries Gozlin's own voice into the dock, so the
+  //    card wears the coach's mark rather than a generic glyph.
+  if (openConversation) {
     const nudge =
       CONTINUE_NUDGES[
         Math.abs(Math.trunc(openConversation.nudgeSeed)) % CONTINUE_NUDGES.length
       ];
-    return {
+    moves.push({
       id: "continue-chat",
       label: nudge,
       caption: openConversation.topic,
       icon: "chatbubble-ellipses",
       action: { kind: "route", href: "/gozlin" },
       tone: "primary",
-    };
+      suppressOn: "/gozlin",
+      dismissible: true,
+      voice: "gozlin",
+    });
   }
 
   // 8. The questionnaire that makes tomorrow's recommendation better. It sits
   //    below the day's actual work because it is preparation, not the thing.
   if (!setupComplete) {
-    return {
+    moves.push({
       id: "personalize",
       label: "Personalize training",
       caption: "2 min",
       icon: "options",
       action: { kind: "push", href: "/fitness/setup" },
       tone: "primary",
-    };
+      dismissible: false,
+    });
   }
 
   // 9. The evening self-report. Gated to the evening because mood, energy and
-  //    sleep are a report ON a day — asked at nine in the morning it's a guess.
+  //    sleep are a report ON a day — asked at nine in the morning it is a guess.
   if (!checkedInToday && minutesOfDay >= CHECKIN_FROM_MINUTE) {
-    return {
+    moves.push({
       id: "checkin",
       label: "Check in",
       caption: "Mood, energy & sleep",
       icon: "sunny-outline",
       action: { kind: "checkin" },
       tone: "primary",
-    };
+      dismissible: true,
+    });
   }
 
   // 10. A weekly weigh-in. Interval-gated rather than daily: asking every
-  //    morning trains people to ignore it, and daily noise is not a trend.
+  //     morning trains people to ignore it, and daily noise is not a trend.
   const weighInDue =
     minutesOfDay >= QUIET_UNTIL_MINUTE &&
     (daysSinceWeighIn === null || daysSinceWeighIn >= WEIGH_IN_INTERVAL_DAYS);
   if (weighInDue) {
-    return {
+    moves.push({
       id: "weighin",
       label: "Log your weight",
       caption:
@@ -391,44 +516,77 @@ export function resolveNextMove(input: NextMoveInput): NextMove {
       icon: "scale-outline",
       action: { kind: "weighin" },
       tone: "primary",
-    };
+      dismissible: true,
+    });
   }
 
   // 11. Hydration — the one target with no hour attached, so it fills the gaps.
-  //     It acts IN PLACE: tapping writes a glass and the bar re-derives beneath
-  //     the finger, which is the whole reason it isn't a link to somewhere.
+  //     It acts IN PLACE: tapping writes a glass and the cue re-derives beneath
+  //     the finger, which is the whole reason it is not a link to somewhere.
   if (waterGoalMl > 0 && waterMl < waterGoalMl) {
-    return {
+    moves.push({
       id: "water",
       label: "Log water",
       caption: `${litres(waterGoalMl - waterMl)} L to go`,
       icon: "water",
       action: { kind: "water", ml: WATER_TAP_ML },
       tone: "primary",
-    };
+      dismissible: true,
+    });
   }
 
-  // 12. Done. It says so, and it points at tomorrow rather than at nothing — a
-  //     dead-end control on a finished day teaches people to stop looking at it.
-  //     On Logs itself the record is already open, so it points home instead.
-  //
-  //     A rest day gets its own words: "Day complete" on a day the plan asked
-  //     for nothing reads as though the app didn't notice, and recovery being
-  //     part of the plan is the single thing people most need telling.
-  const recordHref = here("/logs") ? "/" : "/logs";
-  const caption = isRestDay
-    ? "Rest day — recovery counts"
-    : tomorrowFocus
-      ? `Tomorrow: ${tomorrowFocus}`
-      : here("/logs")
-        ? "Back to today"
-        : "See your record";
+  return moves;
+}
+
+/**
+ * The sentence a day with nothing open still owes. Unconditional, so the ladder
+ * as a whole stays total.
+ *
+ * It points at tomorrow rather than at nothing — a dead-end control on a
+ * finished day teaches people to stop looking at it. On Logs itself the record
+ * is already open, so it points home instead. A rest day gets its own words:
+ * "Day complete" on a day the plan asked for nothing reads as though the app
+ * did not notice, and recovery being part of the plan is the single thing
+ * people most need telling.
+ */
+export function finishedDayMove(input: NextMoveInput): NextMove {
+  const { isRestDay, tomorrowFocus, currentHref = null } = input;
+  const onLogs = currentHref === "/logs";
   return {
     id: isRestDay ? "rest" : "complete",
     label: isRestDay ? "All done for today" : "Day complete",
-    caption,
+    caption: isRestDay
+      ? "Rest day — recovery counts"
+      : tomorrowFocus
+        ? `Tomorrow: ${tomorrowFocus}`
+        : onLogs
+          ? "Back to today"
+          : "See your record",
     icon: isRestDay ? "moon" : "checkmark-circle",
-    action: { kind: "route", href: recordHref },
+    action: { kind: "route", href: onLogs ? "/" : "/logs" },
     tone: "calm",
+    // Dismissible, unlike the other two undismissible rungs, because this one
+    // asks for nothing: it is the app saying the day is done, and a person who
+    // has read that once is entitled to have the dock go quiet for the night.
+    dismissible: true,
   };
+}
+
+/**
+ * Resolve the single next move: the first open one this screen can actually act
+ * on, or the finished-day sentence. Total — it always has something true to say.
+ *
+ * WHY THE LADDER CARES ABOUT ROUTING. On the Diet screen the top rung is
+ * usually "Log breakfast", whose action is "go to Diet" — a button that does
+ * nothing, on the one screen where the user is most likely to press it. The
+ * honest fix is not to disable the tap, it is to say something else: you are
+ * already where that move happens, so it should offer what THIS screen cannot
+ * do. Pass no `currentHref` to disable the check.
+ */
+export function resolveNextMove(input: NextMoveInput): NextMove {
+  const here = input.currentHref ?? null;
+  const actionable = resolveAgenda(input).find(
+    (m) => m.suppressOn === undefined || here === null || m.suppressOn !== here,
+  );
+  return actionable ?? finishedDayMove(input);
 }

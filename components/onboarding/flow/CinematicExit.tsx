@@ -3,7 +3,7 @@
  *
  * Tapping "Start my journey" does not cut to Home. The plan recedes, the ring's
  * circle grows out of the middle of the screen until it has swallowed it, the
- * Welliva mark appears in the dark for a beat, and the app is underneath when
+ * welliva mark appears in the dark for a beat, and the app is underneath when
  * it clears.
  *
  * WHY THE COVER IS OPAQUE. The overlay lives inside the onboarding route, so it

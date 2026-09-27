@@ -16,19 +16,14 @@
  * so healthy users see no change at all.
  */
 import React, { useState } from "react";
-import { LayoutAnimation, Platform, Pressable, StyleSheet, UIManager, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
+import Animated from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 
+import { enterFade, exitFade } from "@/components/motion";
 import { AppText, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import type { NutritionGuidance } from "@/models/nutrition";
-
-if (
-  Platform.OS === "android" &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 export interface TargetGuidanceNoteProps {
   guidance?: NutritionGuidance;
@@ -45,10 +40,9 @@ export function TargetGuidanceNote({ guidance, style }: TargetGuidanceNoteProps)
     return null;
   }
 
-  const toggle = () => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setExpanded((v) => !v);
-  };
+  // Reanimated fades, not LayoutAnimation — it's unreliable under the New
+  // Architecture (same call as the auth sheet's disclosure).
+  const toggle = () => setExpanded((v) => !v);
 
   return (
     <View style={style}>
@@ -103,7 +97,7 @@ export function TargetGuidanceNote({ guidance, style }: TargetGuidanceNoteProps)
       )}
 
       {expanded && (
-        <View style={styles.list}>
+        <Animated.View entering={enterFade()} exiting={exitFade()} style={styles.list}>
           {potassiumMgMax != null && (
             <Bullet
               color={colors.textTertiary}
@@ -119,7 +113,7 @@ export function TargetGuidanceNote({ guidance, style }: TargetGuidanceNoteProps)
           {unmodeled.map((item) => (
             <Bullet key={item} color={colors.textTertiary} text={item} />
           ))}
-        </View>
+        </Animated.View>
       )}
     </View>
   );

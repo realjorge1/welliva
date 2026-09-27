@@ -1,4 +1,4 @@
-# Welliva — High-Severity Fixes Implementation Plan
+# welliva — High-Severity Fixes Implementation Plan
 
 Execution plan for the four **High-severity** audit findings. Same house rules as
 `critical-fixes-plan.md`: **offline-first, fail-soft, device is the source of truth,

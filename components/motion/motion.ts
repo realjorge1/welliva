@@ -1,5 +1,5 @@
 /**
- * MOTION LANGUAGE — the one grammar for how Welliva moves.
+ * MOTION LANGUAGE — the one grammar for how welliva moves.
  *
  * Screens never hand-roll easing curves or durations: they compose these
  * factories, which all derive from the `Motion` tokens in constants/theme.

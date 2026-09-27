@@ -21,7 +21,7 @@
 import { AppText, Sheet } from "@/components/ui";
 import { useColors } from "@/components/ui/useColors";
 import { Radius, Spacing } from "@/constants/theme";
-import { originLabel, pathLabel, type Receipt } from "@/services/gozlin/agent";
+import { howSpoken, originLabel, sourceLabel, type Receipt } from "@/services/gozlin/agent";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { StyleSheet, View } from "react-native";
@@ -75,14 +75,14 @@ export function ReceiptSheet({
                 </View>
                 <View style={styles.rowText}>
                   <AppText variant="subhead" weight="600">
-                    {pathLabel(s.path)}
+                    {sourceLabel(s)}
                   </AppText>
                   <AppText variant="caption" color="secondary">
                     {originLabel(s.origin)}
                   </AppText>
                   {spokenDiffers ? (
                     <AppText variant="caption" color="secondary" style={styles.raw}>
-                      Logged as {formatRaw(s.value)} · rounded for speech
+                      Logged as {formatRaw(s.value)} · {howSpoken(receipt.shown, s.value)}
                     </AppText>
                   ) : null}
                 </View>

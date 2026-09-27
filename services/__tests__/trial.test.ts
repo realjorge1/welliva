@@ -37,6 +37,7 @@ import {
   hasUsedTrial,
   hydrateTrial,
   maybeStartTrial,
+  reconcileTrialWithServer,
   TRIAL_FEATURES,
   TRIAL_HOURS,
   trialGrants,
@@ -262,6 +263,53 @@ describe("falling back when the backend cannot answer", () => {
     });
     expect(await maybeStartTrial({ ...GRANTABLE, isSubscriber: true })).toBe(false);
     expect(asked).toBe(false);
+    setTrialClaimer(null);
+  });
+});
+
+/**
+ * Once there is an account, the SERVER's window wins. The backend now enforces
+ * it on every coach turn, so a window granted on the phone before sign-in (the
+ * claim needs a token, so first launch always falls back locally) must give
+ * way to the account's own — or the screen says "open" while every turn is
+ * refused.
+ */
+describe("reconciling with the server after sign-in", () => {
+  const SERVER = {
+    claimedAt: "2026-09-20T10:00:00.000Z",
+    expiresAt: "2026-09-21T16:00:00.000Z",
+    alreadyClaimed: true,
+  };
+
+  it("replaces a local window with the account's, even an expired one", async () => {
+    setTrialClaimer(null);
+    await maybeStartTrial(GRANTABLE); // signed out: granted locally
+    expect(trialSource()).toBe("local");
+
+    setTrialClaimer(async () => SERVER);
+    await reconcileTrialWithServer(GRANTABLE);
+    expect(trialSource()).toBe("server");
+    expect(activeTrial(new Date("2026-09-27T12:00:00Z"))).toBeNull();
+    setTrialClaimer(null);
+  });
+
+  it("leaves the local window alone when the server cannot answer", async () => {
+    setTrialClaimer(null);
+    await maybeStartTrial(GRANTABLE);
+    setTrialClaimer(async () => {
+      throw new Error("offline");
+    });
+    await reconcileTrialWithServer(GRANTABLE);
+    expect(trialSource()).toBe("local");
+    expect(activeTrial()).not.toBeNull();
+    setTrialClaimer(null);
+  });
+
+  it("never asks on behalf of a paying customer", async () => {
+    const claimer = vi.fn(async () => SERVER);
+    setTrialClaimer(claimer);
+    await reconcileTrialWithServer({ isSubscriber: true, gatingActive: true });
+    expect(claimer).not.toHaveBeenCalled();
     setTrialClaimer(null);
   });
 });

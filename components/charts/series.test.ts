@@ -27,6 +27,16 @@ function diet(date: string, extra: Partial<DietHistoryEntry> = {}): DietHistoryE
   };
 }
 
+/** How day-close saves a day the user logged nothing on: numbers, all zero. */
+const NOTHING_LOGGED = {
+  mealsConsumed: 0,
+  status: "skipped",
+  consumedCalories: 0,
+  consumedProteinG: 0,
+  consumedCarbsG: 0,
+  consumedFatG: 0,
+} as const satisfies Partial<DietHistoryEntry>;
+
 function workout(date: string, minutes: number): WorkoutLogEntry {
   return {
     id: `w_${date}`,
@@ -81,6 +91,15 @@ describe("buildCaloriesTrend", () => {
     expect(points).toHaveLength(1);
     expect(points[0].value).toBe(2222);
   });
+
+  it("skips a day that closed with nothing logged instead of plotting a 0", () => {
+    const history = [
+      diet("2026-07-04", { consumedCalories: 2100 }),
+      diet("2026-07-05", { ...NOTHING_LOGGED }),
+      diet("2026-07-06", { consumedCalories: 1950 }),
+    ];
+    expect(buildCaloriesTrend(history, TODAY, 7).map((p) => p.value)).toEqual([2100, 1950]);
+  });
 });
 
 describe("buildMacroMatrix", () => {
@@ -126,6 +145,72 @@ describe("buildMacroMatrix", () => {
     const rows = buildMacroMatrix(history, TODAY, 7);
     expect(rows).toHaveLength(1);
     expect(rows[0].calories).toBe(2000);
+  });
+
+  // The "only one line is showing" bug. Day-close saves an unlogged day as all
+  // zeros, and a zero indexes to 0% for EVERY macro — so each such day pinned
+  // all four lines to the same point. This is the week that was on the phone:
+  // nothing logged, one logged day, nothing logged.
+  it("drops a day that closed with nothing logged — all zeros is a gap, not a meal", () => {
+    const history = [
+      diet("2026-07-04", { ...NOTHING_LOGGED }),
+      diet("2026-07-05", {
+        consumedCalories: 865,
+        consumedProteinG: 39,
+        consumedCarbsG: 90,
+        consumedFatG: 38,
+      }),
+      diet("2026-07-06", { ...NOTHING_LOGGED }),
+    ];
+    const rows = buildMacroMatrix(history, TODAY, 7);
+    expect(rows.map((r) => r.date)).toEqual(["2026-07-05"]);
+
+    // What the chart used to draw from those three rows: four identical lines.
+    const zeroDaysKept = [0, 1, 0];
+    expect(indexToStart(zeroDaysKept.map((k) => k * 865))).toEqual(
+      indexToStart(zeroDaysKept.map((k) => k * 38)),
+    );
+  });
+
+  it("lets the four lines separate once unlogged days stop pinning them together", () => {
+    const history = [
+      diet("2026-07-01", {
+        consumedCalories: 1200,
+        consumedProteinG: 63,
+        consumedCarbsG: 136,
+        consumedFatG: 40,
+      }),
+      diet("2026-07-02", { ...NOTHING_LOGGED }),
+      diet("2026-07-03", {
+        consumedCalories: 630,
+        consumedProteinG: 18,
+        consumedCarbsG: 93,
+        consumedFatG: 15,
+      }),
+    ];
+    const rows = buildMacroMatrix(history, TODAY, 7);
+    expect(rows).toHaveLength(2);
+    const last = (key: "calories" | "proteinG" | "carbsG" | "fatG") =>
+      indexToStart(rows.map((r) => r[key]))[1];
+    // A lighter, carb-heavier day: every macro fell, by visibly different amounts.
+    expect(new Set([last("calories"), last("proteinG"), last("carbsG"), last("fatG")]).size).toBe(4);
+  });
+
+  it("keeps a real zero macro on a day that did log food", () => {
+    const history = [
+      diet("2026-07-06", {
+        consumedCalories: 150,
+        consumedProteinG: 0,
+        consumedCarbsG: 38,
+        consumedFatG: 0,
+      }),
+    ];
+    expect(buildMacroMatrix(history, TODAY, 7)[0]).toMatchObject({
+      calories: 150,
+      proteinG: 0,
+      carbsG: 38,
+      fatG: 0,
+    });
   });
 });
 

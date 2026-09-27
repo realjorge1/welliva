@@ -1,7 +1,7 @@
 /**
  * GOZLIN — engine package barrel.
  *
- * The persona + orchestration + memory layer on top of Welliva's deterministic
+ * The persona + orchestration + memory layer on top of welliva's deterministic
  * intelligence (services/intelligence/*). Everything here is offline-first and
  * deterministic; the optional LLM provider only ever rephrases open-ended chat.
  *
@@ -145,6 +145,7 @@ export {
   deleteArchivedConversation,
   getLastBriefing,
   getLastWeeklyReview,
+  getCheckinsOn,
   getTodayCheckin,
   loadArchive,
   loadBehavioral,
@@ -155,6 +156,7 @@ export {
   loadMemorySnapshot,
   rememberMotivation,
   rememberPreference,
+  removeCheckin,
   removeEpisode,
   saveBehavioral,
   saveConversation,
@@ -163,6 +165,18 @@ export {
   setLastWeeklyReview,
 } from "./GozlinMemoryStore";
 export type { ArchivedConversation, LastBriefingMeta } from "./GozlinMemoryStore";
+
+// State-of-mind logging — the vocabulary and valence arithmetic, plus the one
+// write path that also mirrors an entry onto the health-os Timeline.
+export * from "./mind";
+export {
+  deleteMindEntry,
+  mindEntryId,
+  recordMindEntry,
+  toMindEntry,
+} from "./MindService";
+export { subscribeMindEntries } from "./MindService";
+export type { MindEntryInput } from "./MindService";
 
 // What a conversation is about, and whether it was ever finished
 export {

@@ -27,12 +27,16 @@ import type { GozlinChatContext } from "../GozlinChatEngine";
 import { buildNutritionAdaptations } from "../GozlinAdaptiveNutritionEngine";
 import { buildWorkoutAdaptations } from "../GozlinAdaptiveWorkoutEngine";
 import { buildBriefing, type BriefingInput } from "../GozlinBriefingEngine";
-import { buildDetectiveReport } from "../GozlinDetectiveEngine";
+import { buildDetectiveReport, type DetectiveFocus } from "../GozlinDetectiveEngine";
 import { buildForecast } from "../GozlinForecastEngine";
 import { buildHabitReport } from "../GozlinHabitEngine";
 import { buildWeeklyReview } from "../GozlinProgressEngine";
 import { computeRecovery } from "../GozlinRecoveryEngine";
 import { loadMemorySnapshot } from "../GozlinMemoryStore";
+import { clampMoodDays, MOOD_DAYS_DEFAULT, summarizeMood } from "./moodLog";
+import { isVerbatim, resolveNoteSubject } from "./experiences";
+import type { ExerciseSubject } from "../novelty/subjects";
+import type { Enjoyed, ExperienceSource, Soreness } from "../novelty/types";
 
 // ── Injected side-effects ──────────────────────────────────────────
 //
@@ -43,21 +47,67 @@ import { loadMemorySnapshot } from "../GozlinMemoryStore";
 /** What a write tool is asking permission to do, for the confirmation UI. */
 export interface ToolConfirmRequest {
   tool: string;
-  /** One-line, user-facing: "Log 1 banana as a snack?" */
+  /** One-line, user-facing: "Log 1 × Banana (1 medium) as a snack?" */
   summary: string;
+  /**
+   * What the summary can't hold: the figures the write will record, and any
+   * way it differs from what was asked for. Shown above the reassurance line.
+   */
+  detail?: string;
   input: Record<string, unknown>;
 }
 
+export type MealSlot = "breakfast" | "lunch" | "dinner" | "snack";
+
+/**
+ * A catalog food, resolved AND measured at the amount that will be logged,
+ * BEFORE anyone is asked to confirm it — so the sheet names the item and the
+ * figures that will actually be written, not the words the model used.
+ */
+export interface FoodLogPreview {
+  /** The host's handle for the catalog row; passed back to `logFood` as-is. */
+  id: string;
+  /** The catalog's own name. */
+  name: string;
+  /** Exactly the line the food log will record, e.g. "0.5 medium Avocado". */
+  label: string;
+  quantity: number;
+  unit: string;
+  calories: number;
+  proteinG: number;
+}
+
+/**
+ * Portions move in quarters — "half an avocado" is 0.5, "a quarter" 0.25. The
+ * food log takes any amount; the step only stops a model's "0.33" from being
+ * written as a figure nobody said.
+ */
+const PORTION_STEP = 0.25;
+const MAX_LOGGED_PORTIONS = 10;
+
+const MEAL_SLOTS: readonly MealSlot[] = ["breakfast", "lunch", "dinner", "snack"];
+
+/** investigate_progress's enum. An unknown value reads as no focus, not a guess. */
+const DETECTIVE_FOCI: readonly DetectiveFocus[] = ["weight", "strength", "energy", "adherence"];
+
 export interface GozlinToolActions {
   /**
-   * Resolve `name` against the whole-foods catalog and log it as a consumed
-   * snack. Returns what was actually logged so the model can cite real macros.
+   * Find the catalog food `name` refers to and measure `portions` of it, the
+   * same way the food log will. Nothing is written.
+   */
+  resolveFood?: (
+    name: string,
+    portions: number,
+  ) => Promise<{ ok: true; food: FoodLogPreview } | { ok: false; reason: string }>;
+  /**
+   * Write a previewed food to today's food log under `meal`. Returns what was
+   * actually logged so the model can cite real figures.
    */
   logFood?: (
-    name: string,
-    servings: number,
+    food: FoodLogPreview,
+    meal: MealSlot,
   ) => Promise<
-    | { ok: true; name: string; calories: number; proteinG: number }
+    | { ok: true; label: string; calories: number; proteinG: number }
     | { ok: false; reason: string }
   >;
   /** Persist an identity fact (motivation / preference / constraint). */
@@ -66,14 +116,37 @@ export interface GozlinToolActions {
     value: string,
   ) => Promise<void>;
   /**
+   * Record what they said about something they tried (note_experience). No
+   * confirmation sheet — the caller shows a "Noted · Undo" toast instead; see
+   * the tool for why. Absent means the feature is off: the tool fails closed.
+   */
+  noteExperience?: (note: ExperienceNote) => Promise<{ ok: true; id: string } | { ok: false; reason: string }>;
+  /**
    * Confirmation gate for write tools. When absent, every write is DECLINED —
    * fail closed. The model must never mutate user data unprompted.
    */
   confirm?: (request: ToolConfirmRequest) => Promise<boolean>;
 }
 
+/** What note_experience hands the caller to store. Already resolved and checked. */
+export interface ExperienceNote {
+  subject: ExerciseSubject;
+  triedOn: string | null;
+  /** Their words, verbatim — checked against what they typed. */
+  quote: string;
+  soreness: Soreness | null;
+  enjoyed: Enjoyed | null;
+  source: ExperienceSource;
+}
+
 export interface GozlinToolContext extends GozlinChatContext {
   actions?: GozlinToolActions;
+  /**
+   * This turn, as the tools may need it: what the person just typed (the
+   * verbatim check reads it) and how many notes have been taken (one a turn).
+   * Set by the agent loop; absent in a context built anywhere else.
+   */
+  turn?: { text: string; notes: number };
 }
 
 export interface GozlinTool {
@@ -145,6 +218,10 @@ function slimFinding(f: {
   };
 }
 
+/** note_experience's enums → the stored answers. "unsaid" maps to nothing. */
+const SORENESS_INPUT: Record<string, Soreness> = { none: 0, mild: 1, moderate: 2, severe: 3 };
+const ENJOYED_INPUT: Record<string, Enjoyed> = { yes: "yes", mixed: "mixed", no: "no" };
+
 // ── The surface ────────────────────────────────────────────────────
 
 export const GOZLIN_TOOLS: GozlinTool[] = [
@@ -168,6 +245,7 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
     ),
     readOnly: true,
     run: (input: { focus: string }, ctx) => {
+      const focus = DETECTIVE_FOCI.find((f) => f === input.focus);
       const r = buildDetectiveReport({
         twin: ctx.twin,
         dietHistory: ctx.snapshot.dietHistory,
@@ -175,10 +253,14 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
         sessionHistory: ctx.snapshot.sessionHistory,
         bodyLogs: ctx.snapshot.bodyLogs,
         weeklyWorkoutTarget: ctx.weeklyWorkoutTarget,
+        // The argument used to be echoed back and otherwise ignored, so a
+        // strength question could get a weight plateau as its root cause.
+        focus,
+        checkins: ctx.snapshot.checkins ?? ctx.checkins ?? null,
         now: nowOf(ctx),
       });
       return {
-        focus: input.focus,
+        focus: focus ?? "overall",
         headline: r.headline,
         rootCause: r.rootCause ? slimFinding(r.rootCause) : null,
         metrics: r.metrics.map((m) => ({
@@ -391,6 +473,29 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
   },
 
   {
+    name: "review_mood_log",
+    description:
+      "Read the state-of-mind entries the user logged: how pleasant or unpleasant they " +
+      "have felt, the feelings they named, what they tied them to (work, sleep, family…), " +
+      "and hours slept. Call this when they ask how they have been feeling, mention " +
+      "stress, low mood or low energy, or wonder whether something — work, sleep, " +
+      "training — affects how they feel. Valence runs from -1 (very unpleasant) to +1 " +
+      "(very pleasant). It is self-report, not a clinical measure: never diagnose from it.",
+    input_schema: obj(
+      {
+        days: {
+          type: "integer",
+          description: `How many days back to read, 7 to 60. Use ${MOOD_DAYS_DEFAULT} when they don't say.`,
+        },
+      },
+      ["days"],
+    ),
+    readOnly: true,
+    run: (input: { days: number }, ctx) =>
+      summarizeMood(ctx.checkins ?? [], clampMoodDays(input.days), nowOf(ctx)),
+  },
+
+  {
     name: "review_tracked_habits",
     description:
       "Read the user's own HABIT TRACKER: the habits they created themselves, how each " +
@@ -456,6 +561,9 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
         workoutLog: ctx.snapshot.workoutLog,
         todaySession: ctx.snapshot.workoutSession,
         wearable: ctx.snapshot.wearable ?? null,
+        // The snapshot's copy first — it is what the twin's state-block score
+        // was computed from, and the tool must never disagree with that line.
+        checkins: ctx.snapshot.checkins ?? ctx.checkins ?? null,
         now: nowOf(ctx),
       });
       return {
@@ -579,10 +687,11 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
   {
     name: "log_food",
     description:
-      "Log a whole food onto today's plan as a consumed snack. Call this ONLY when the " +
-      "user clearly states they ate or drank something and wants it recorded — never " +
-      "to answer a question about a food, and never speculatively. Requires the user's " +
-      "confirmation. Returns the macros actually logged; cite those, never your own " +
+      "Log a food the user ate onto today's food log, under the meal it belongs to. Call " +
+      "this ONLY when the user clearly states they ate or drank something and wants it " +
+      "recorded — never to answer a question about a food, and never speculatively. " +
+      "Portions can be fractional: 'half an avocado' is 0.5. Requires the user's " +
+      "confirmation. Returns what was actually logged; cite those figures, never your own " +
       "estimate.",
     input_schema: obj(
       {
@@ -592,26 +701,62 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
         },
         servings: {
           type: "number",
-          description: "How many standard servings. Default 1 when unstated.",
+          description:
+            "How many standard portions, fractions allowed (0.5 for half). Default 1 when unstated.",
+        },
+        meal: {
+          type: "string",
+          enum: ["breakfast", "lunch", "dinner", "snack"],
+          description:
+            "The meal it belongs to — as they said it, or by the time of day on their clock. " +
+            "'snack' for something between meals.",
         },
       },
-      ["food", "servings"],
+      ["food", "servings", "meal"],
     ),
     readOnly: false,
-    run: async (input: { food: string; servings: number }, ctx) => {
+    run: async (input: { food: string; servings: number; meal: MealSlot }, ctx) => {
       const food = (input.food ?? "").trim();
       if (!food) return { status: "rejected", reason: "No food named." };
-      const servings =
+      const requested =
         Number.isFinite(input.servings) && input.servings > 0 ? input.servings : 1;
+      const meal: MealSlot = MEAL_SLOTS.includes(input.meal) ? input.meal : "snack";
 
       const actions = ctx.actions;
-      if (!actions?.logFood || !actions.confirm) {
+      if (!actions?.resolveFood || !actions.logFood || !actions.confirm) {
         return { status: "unavailable", reason: "Logging is not available right now." };
       }
+
+      // The amount that will ACTUALLY be written, settled before the question
+      // is asked. It once was rounded to a whole serving after the user had
+      // approved "0.5 ×", so they agreed to half an avocado and got a whole one.
+      const portions = Math.min(
+        MAX_LOGGED_PORTIONS,
+        Math.max(PORTION_STEP, Math.round(requested / PORTION_STEP) * PORTION_STEP),
+      );
+      const adjusted = Math.abs(portions - requested) > 1e-9;
+
+      // Resolve and MEASURE first. The sheet used to quote the model's words
+      // ("jollof rice") while the write took the catalog's first search hit,
+      // which could be a different food — consent to one thing, a write of
+      // another. Now the sheet shows the exact line the log will hold.
+      const resolved = await actions.resolveFood(food, portions);
+      if (!resolved.ok) return { status: "not_found", reason: resolved.reason };
+      const item = resolved.food;
+
       const approved = await actions.confirm({
         tool: "log_food",
-        summary: `Log ${servings} × ${food} as a snack?`,
-        input: { food, servings },
+        summary:
+          meal === "snack" ? `Log ${item.label} as a snack?` : `Log ${item.label} to ${meal}?`,
+        detail: [
+          `${Math.round(item.calories)} kcal · ${Math.round(item.proteinG)} g protein`,
+          adjusted
+            ? `You mentioned ${requested}. Portions go in quarters, so this logs ${portions}.`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        input: { food: item.name, portions, meal },
       });
       if (!approved) {
         return {
@@ -619,15 +764,109 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
           reason: "The user declined. Do not log it, and do not ask again this turn.",
         };
       }
-      const result = await actions.logFood(food, servings);
+      const result = await actions.logFood(item, meal);
       return result.ok
         ? {
             status: "logged",
-            food: result.name,
+            logged: result.label,
+            meal,
+            ...(adjusted ? { requestedPortions: requested } : {}),
             calories: result.calories,
             proteinG: result.proteinG,
           }
         : { status: "failed", reason: result.reason };
+    },
+  },
+
+  {
+    // THE ONE WRITE WITHOUT A CONFIRMATION SHEET, and the reasons are specific
+    // to it (docs/gozlin/11 §7.3). It stores only the person's own words, and
+    // the check below proves they ARE their words; the record is visible and
+    // forgettable in Memory; and a sheet in front of every "yeah, legs were
+    // wrecked" is exactly the friction that would make nobody answer. The
+    // consent is a "Noted · Undo" toast the caller shows. It still fails
+    // closed: no action, no switch, no write.
+    name: "note_experience",
+    description:
+      "Record how an exercise they did went for them, in their own words, so you can remember it the next time it " +
+      "comes up. Call it when they answer a question the current-state block told you to ask, or when they tell you " +
+      "unprompted how a specific exercise they did felt during or afterwards. Exercises only — never food, drink, " +
+      "supplements or anything else. `quote` must be copied exactly from their message: never paraphrase, never " +
+      "summarise, never record what they did not say. Do not call it for plans or for opinions about exercise in " +
+      "general. It saves without a confirmation step — they see a note with an undo, so you need not say you saved it.",
+    input_schema: obj(
+      {
+        exercise: {
+          type: "string",
+          description: "The exercise, as they or the current-state block named it. e.g. 'Nordic curls'.",
+        },
+        quote: {
+          type: "string",
+          description: "The part of their message about how it went, copied exactly.",
+        },
+        soreness: {
+          type: "string",
+          enum: ["none", "mild", "moderate", "severe", "unsaid"],
+          description: "How sore they said it left them. 'unsaid' when they did not say.",
+        },
+        enjoyed: {
+          type: "string",
+          enum: ["yes", "mixed", "no", "unsaid"],
+          description: "Whether they said they liked it. 'unsaid' when they did not say.",
+        },
+      },
+      ["exercise", "quote", "soreness", "enjoyed"],
+    ),
+    readOnly: false,
+    run: async (
+      input: { exercise: string; quote: string; soreness: string; enjoyed: string },
+      ctx,
+    ) => {
+      const actions = ctx.actions;
+      if (!ctx.experiences?.enabled || !actions?.noteExperience) {
+        return { status: "unavailable", reason: "Noting this is switched off. Do not mention it." };
+      }
+      const turn = ctx.turn;
+      if (turn && turn.notes >= 1) {
+        return { status: "rejected", reason: "One note per reply. Do not record another this turn." };
+      }
+
+      // Their words, or nothing. Checked against what they typed this turn and
+      // the two user turns before it — an answer can arrive a message late.
+      const quote = (input.quote ?? "").trim();
+      const typed = [
+        ...(turn?.text ? [turn.text] : []),
+        ...(ctx.conversation ?? [])
+          .filter((m) => m.role === "user")
+          .slice(-2)
+          .map((m) => m.content),
+      ];
+      if (!isVerbatim(quote, typed)) {
+        return {
+          status: "rejected",
+          reason: "quote must be copied exactly from their message. Nothing was saved.",
+        };
+      }
+
+      const resolved = resolveNoteSubject(input.exercise ?? "", ctx, nowOf(ctx));
+      if (!resolved) {
+        return {
+          status: "not_recorded",
+          reason: "Only exercises are noted, and this does not match one. Nothing was saved; do not mention it.",
+        };
+      }
+
+      const result = await actions.noteExperience({
+        subject: resolved.subject,
+        triedOn: resolved.triedOn,
+        quote,
+        soreness: SORENESS_INPUT[input.soreness] ?? null,
+        enjoyed: ENJOYED_INPUT[input.enjoyed] ?? null,
+        source: resolved.answersDue ? "asked-chat" : "volunteered",
+      });
+      if (!result.ok) return { status: "failed", reason: result.reason };
+      if (turn) turn.notes += 1;
+      return { status: "noted", exercise: resolved.subject.label, triedOn: resolved.triedOn };
     },
   },
 ];

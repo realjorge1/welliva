@@ -1,7 +1,7 @@
 /**
  * TRUST — the consent boundary, made visible and revocable.
  *
- * It answers one question: *what is Welliva allowed to see, and what is it allowed
+ * It answers one question: *what is welliva allowed to see, and what is it allowed
  * to do about it?* Every external sense and every route out of the phone is listed
  * with a plain-language blurb and a switch the user owns. Turning one off makes its
  * native reads a no-op end-to-end — the Signal adapters are consent-gated, so these
@@ -55,12 +55,19 @@ export default function PrivacyScreen() {
     (r) => r.group === "integration" && r.category !== "proactive_notifications",
   );
   const future = c.rows.filter((r) => r.group === "future");
+  /** How Gozlin acts on what it already sees — the one group that starts on. */
+  const coaching = c.rows.filter((r) => r.group === "coaching");
 
   return (
     <Screen header={header}>
+      {/* "Everything below is off" stopped being true the day a coaching
+        behaviour defaulted on (docs/gozlin/11, D1). The promise that matters is
+        narrower and still whole: nothing NEW is read and nothing goes OUT
+        until you say so. The coaching card says plainly that it starts on. */}
       <AppText variant="subhead" color="secondary" style={styles.intro}>
-        You decide what I can see, and what I can do about it. Everything below is off
-        until you switch it on, and switching it back off stops it the same second.
+        You decide what I can see, and what I can do about it. Every sense and every way
+        out below is off until you switch it on, and switching anything off stops it the
+        same second.
       </AppText>
 
       {/* The guarantee that isn't a setting. */}
@@ -130,6 +137,16 @@ export default function PrivacyScreen() {
       {/* What goes out — cloud chat and out-of-app reach are the same question. */}
       <ReachCard notif={notif} cloudAi={cloudAi} onToggle={c.toggle} />
 
+      {/* What Gozlin does with what it already has. On until you say otherwise,
+        and the note under it says so — a default-on switch that doesn't admit
+        it is the kind of thing this screen exists to prevent. */}
+      <ConsentGroupCard
+        title="Coaching"
+        rows={coaching}
+        onToggle={c.toggle}
+        footnote="On from the start. It only reads what you have already logged."
+      />
+
       {/* One line, not a card of switches nobody can move. */}
       {future.length > 0 ? (
         <AppText variant="footnote" color="tertiary" style={styles.futureLine}>
@@ -195,10 +212,12 @@ function ConsentGroupCard({
   title,
   rows,
   onToggle,
+  footnote,
 }: {
   title: string;
   rows: ConsentRow[];
   onToggle: (category: ConsentRow["category"], granted: boolean) => Promise<void>;
+  footnote?: string;
 }) {
   const { colors } = useColors();
   if (rows.length === 0) return null;
@@ -229,6 +248,11 @@ function ConsentGroupCard({
           </View>
         </View>
       ))}
+      {footnote ? (
+        <AppText variant="caption" color="tertiary" style={styles.cardFootnote}>
+          {footnote}
+        </AppText>
+      ) : null}
     </Card>
   );
 }
@@ -369,6 +393,7 @@ const styles = StyleSheet.create({
   linkLabel: { fontWeight: "700" },
   consentRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md, paddingVertical: Spacing.sm },
   consentBlurb: { marginTop: 2 },
+  cardFootnote: { marginTop: Spacing.sm },
   docRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md, padding: Spacing.lg },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: Spacing.xs },
   prefRow: {

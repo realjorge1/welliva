@@ -1,5 +1,5 @@
 /**
- * Welliva motion — the shared motion language + animated primitives.
+ * welliva motion — the shared motion language + animated primitives.
  *
  *   import { enterFade, enterRise, RollingNumber } from "@/components/motion";
  *

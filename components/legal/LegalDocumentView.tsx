@@ -3,7 +3,7 @@
  *
  * The policies live as structured data in constants/legal.ts; this draws them
  * with the app's own type scale and surfaces so a policy screen looks like part
- * of Welliva rather than a pasted web page. Because there is exactly one
+ * of welliva rather than a pasted web page. Because there is exactly one
  * renderer, the three documents can never drift apart visually.
  */
 import { AppText, Card, IconBadge, useColors } from "@/components/ui";

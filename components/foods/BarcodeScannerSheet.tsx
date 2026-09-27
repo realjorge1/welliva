@@ -400,7 +400,7 @@ function CameraStage({
         <Ionicons name="camera-outline" size={34} color={colors.textTertiary} />
         <AppText variant="headline">Camera access is off</AppText>
         <AppText variant="subhead" color="secondary" style={styles.centerText}>
-          Welliva needs the camera to read a barcode. The picture is never saved
+          welliva needs the camera to read a barcode. The picture is never saved
           or uploaded — only the number under the bars is used.
         </AppText>
         <View style={styles.centerActions}>

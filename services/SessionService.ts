@@ -13,6 +13,7 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { estimateCaloriesBurned } from "../models/exercise";
+import { ingestIntoLedger } from "./ExerciseLedger";
 import { todayDate } from "./OfflineStorage";
 import {
     ExerciseSessionResult,
@@ -587,6 +588,12 @@ export class SessionService {
       // is re-uploaded IN FULL on every write.
       if (history.length > 50) history.length = 50;
       await AsyncStorage.setItem(SESSION_HISTORY_KEY, JSON.stringify(history));
+      // The first-sightings index. Fed HERE, the one place every session is
+      // stored, because the history above forgets anything past 50 — and a
+      // session the ledger never saw before it aged out is a first sighting
+      // lost for good. Not awaited: the player must not wait on it, and a
+      // miss is caught up from the history the next time the coach mounts.
+      void ingestIntoLedger([summary]);
     } catch (e) {
       console.error("SessionService.saveSummary:", e);
     }

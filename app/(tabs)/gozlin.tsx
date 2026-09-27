@@ -36,8 +36,10 @@
 
 import {
   CoachPulse,
+  CuriosityChip,
   DeepDiveReader,
   EditMessageSheet,
+  ExperienceAnswerSheet,
   GozlinActionSheet,
   GozlinAvatar,
   GozlinCoachMenu,
@@ -45,6 +47,7 @@ import {
   GozlinMessageBubble,
   GozlinSuggestionBar,
   GozlinToast,
+  RecallSheet,
   ReceiptSheet,
   useGozlin,
   usePullReveal,
@@ -54,7 +57,7 @@ import {
   type DeepDiveState,
 } from "@/components/gozlin";
 import { enterFade, exitFade } from "@/components/motion";
-import { MenuButton } from "@/components/navigation";
+import { DECK_BLOCK, MenuButton } from "@/components/navigation";
 import { AmbientCanvas, AppText, useKeyboardInset } from "@/components/ui";
 import { useColors } from "@/components/ui/useColors";
 import { useBilling } from "@/contexts/BillingContext";
@@ -65,7 +68,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "@/utils/haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import type { Receipt } from "@/services/gozlin/agent";
+import type { RecallReceipt, Receipt } from "@/services/gozlin/agent";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated as RNAnimated,
@@ -122,6 +125,10 @@ export default function GozlinScreen() {
     openArchived,
     deleteArchived,
     forgetMe,
+    curiosity,
+    noted,
+    undoNote,
+    clearNoted,
   } = useGozlin();
 
   const { prompt } = useLocalSearchParams<{ prompt?: string }>();
@@ -131,6 +138,15 @@ export default function GozlinScreen() {
   // ONE receipt sheet for the whole conversation. Held here rather than per
   // bubble so a long history does not mount a modal per message.
   const [openReceipt, setOpenReceipt] = useState<Receipt | null>(null);
+  // The same, for a memory the coach quoted (YOU TOLD ME · 12 SEP).
+  const [openRecall, setOpenRecall] = useState<RecallReceipt | null>(null);
+  // The answer sheet for the one question Gozlin has (the chip above the bar).
+  const [answering, setAnswering] = useState(false);
+  // Held from the moment the sheet opens — see where the sheet is rendered.
+  const [answeringEntry, setAnsweringEntry] = useState(curiosity.chip);
+  useEffect(() => {
+    if (answering && curiosity.chip) setAnsweringEntry(curiosity.chip);
+  }, [answering, curiosity.chip]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [forgetOpen, setForgetOpen] = useState(false);
@@ -139,7 +155,19 @@ export default function GozlinScreen() {
   const autoAskedRef = useRef(false);
   const toast = useToast();
 
-  const keyboard = useKeyboardInset({ bottomInset: insets.bottom, gap: Spacing.sm });
+  /**
+   * The composer sits ON TOP of the rail, not under it.
+   *
+   * This is the one screen in the app that owns its own bottom edge, so it is
+   * the one screen that has to know the Deck's height. `restingStyle` spends
+   * this inset down as the keyboard rises — and the Deck takes itself off the
+   * screen entirely while a keyboard is up — so by the time the field is in
+   * use, the composer is sitting on the keyboard with nothing under it.
+   */
+  const keyboard = useKeyboardInset({
+    bottomInset: insets.bottom + DECK_BLOCK,
+    gap: Spacing.sm,
+  });
 
   const onSend = useCallback(
     (text?: string) => {
@@ -164,6 +192,19 @@ export default function GozlinScreen() {
     },
     [pull, onSend],
   );
+
+  // The coach kept something they said (note_experience). This toast is the
+  // consent that stands in for a confirmation sheet, so it carries the undo.
+  useEffect(() => {
+    if (!noted) return;
+    const { id, label } = noted;
+    toast.show(`Noted · ${label}`, {
+      icon: "bookmark-outline",
+      tone: "default",
+      action: { label: "Undo", onPress: () => void undoNote(id) },
+    });
+    clearNoted();
+  }, [noted, toast, undoNote, clearNoted]);
 
   // Keep the latest turn in view.
   useEffect(() => {
@@ -679,6 +720,7 @@ export default function GozlinScreen() {
                 <GozlinMessageBubble
                   message={item}
                   onOpenReceipt={setOpenReceipt}
+                  onOpenRecall={setOpenRecall}
                   expanded={item.id === lastCoachId && !isThinking}
                   onRegenerate={
                     item.id === lastCoachId && !isThinking ? regenerate : undefined
@@ -692,6 +734,9 @@ export default function GozlinScreen() {
               )}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
+              // FlatList defaults this to true on Android; clipped bubbles
+              // detach mid-draw while messages stream in (NPE `mViewFlags`).
+              removeClippedSubviews={false}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
               ListFooterComponent={isThinking ? <TypingIndicator /> : null}
@@ -712,6 +757,16 @@ export default function GozlinScreen() {
               the field — and inside this block they ride the keyboard up with it
               rather than being left behind the message list. `suggestionBleed`
               cancels this block's gutter so the row still scrolls edge to edge. */}
+            {/* Gozlin's one question, when it has one — a still row of its own
+              above the bar, never one of the rotating chips (see CuriosityChip). */}
+            {curiosity.chip ? (
+              <CuriosityChip
+                entry={curiosity.chip}
+                disabled={isThinking}
+                onOpen={() => setAnswering(true)}
+                onDismiss={() => void curiosity.dismiss()}
+              />
+            ) : null}
             <GozlinSuggestionBar
               suggestions={suggestions}
               onPick={onSend}
@@ -800,7 +855,13 @@ export default function GozlinScreen() {
         <GozlinActionSheet
           visible={!!pendingConfirm}
           title={pendingConfirm?.summary ?? ""}
-          subtitle="Gozlin never changes your data without asking."
+          // The figures the write will record come first, so what is being
+          // agreed to is on the sheet rather than implied by it.
+          subtitle={
+            pendingConfirm?.detail
+              ? `${pendingConfirm.detail}\nGozlin never changes your data without asking.`
+              : "Gozlin never changes your data without asking."
+          }
           options={confirmOptions}
           // Dismissing is a decline, not a no-op — otherwise the tool waits
           // forever on a sheet that's no longer on screen.
@@ -824,7 +885,7 @@ export default function GozlinScreen() {
         <GozlinActionSheet
           visible={forgetOpen}
           title="Clear memory?"
-          subtitle="Gozlin will clear your motivation, remembered notes, chat history and the record of habits you've stopped tracking. Your habits, logs and plans stay."
+          subtitle="Gozlin will clear your motivation, remembered notes, what you told it about things you tried, chat history and the record of habits you've stopped tracking. Your habits, logs and plans stay."
           options={forgetOptions}
           onClose={() => setForgetOpen(false)}
         />
@@ -852,6 +913,30 @@ export default function GozlinScreen() {
       </SafeAreaView>
 
       <ReceiptSheet receipt={openReceipt} onClose={() => setOpenReceipt(null)} />
+
+      <RecallSheet recall={openRecall} onClose={() => setOpenRecall(null)} />
+
+      {/* The entry is held by the sheet while it is open: answering closes the
+        question, which clears the chip, and the sheet must not vanish under
+        the finger that just answered. */}
+      <ExperienceAnswerSheet
+        visible={answering}
+        entry={answeringEntry}
+        onClose={() => setAnswering(false)}
+        onAnswer={curiosity.answer}
+        onNotNow={() => {
+          setAnswering(false);
+          void curiosity.dismiss();
+        }}
+        onStopAsking={() => {
+          setAnswering(false);
+          void curiosity.stopAsking();
+          toast.show("I won't ask about new things — switch it back on in Trust", {
+            icon: "notifications-off-outline",
+            tone: "default",
+          });
+        }}
+      />
 
       <DeepDiveReader
         visible={!!dive}

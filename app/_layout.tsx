@@ -23,9 +23,9 @@ import { AuthWrapper } from "@/components/AuthWrapper";
 import { LegalGateProvider } from "@/components/legal";
 import { IntroRevealProvider } from "@/components/motion/IntroReveal";
 import { AppDrawer } from "@/components/navigation";
-import { MealReminderRunner } from "@/components/notifications/MealReminderRunner";
 import { NotificationActionRunner } from "@/components/notifications/NotificationActionRunner";
 import { ProactiveDeliveryRunner } from "@/components/notifications/ProactiveDeliveryRunner";
+import { ReminderSyncRunner } from "@/components/notifications/ReminderSyncRunner";
 import { SupabaseAuthProvider, useAuth } from "@/components/SupabaseAuthProvider";
 import { CustomThemeProvider, useTheme } from "@/components/ThemeContext";
 import { Colors } from "@/constants/theme";
@@ -34,7 +34,6 @@ import { ensureFoodDictionaryLoaded } from "@/constants/FoodDictionary";
 import { ensureWorkoutExercisesLoaded } from "@/services/WorkoutGenerator";
 import { installBackendWarmup } from "@/services/api/warmup";
 import { initNotifications } from "@/services/notifications/init";
-import { refreshFitnessReminders } from "@/fitness/services/FitnessNotifications";
 import { useDataEpoch } from "@/services/sync/dataEpoch";
 import { installNetworkProbe } from "@/services/sync/networkProbe";
 import { setRetentionCompactor } from "@/services/sync/retention";
@@ -120,15 +119,12 @@ function RootLayoutContent() {
     void ensureDietLibraryLoaded();
     void ensureFoodDictionaryLoaded();
     void ensureWorkoutExercisesLoaded();
-    // Set the foreground handler + Android reminders channel once, so scheduled
-    // habit/fitness reminders present correctly in a release build. Fail-soft.
+    // Foreground handler, Android channels and action categories. The entry
+    // (index.js → services/notifications/boot) already did this at module
+    // scope; idempotent, so a swapped-out entry still gets it. Re-laying the
+    // reminders themselves — fitness included — is ReminderSyncRunner's job,
+    // signed-in only.
     initNotifications();
-    // Re-derive the fitness reminder schedule from the stored profile. A
-    // schedule can go missing between launches — permission granted in OS
-    // Settings after opting in, an OS-cleared queue, a restore that brought
-    // storage back but not the pending notifications — and this repairs it.
-    // Idempotent (it cancels its own ids first) and a no-op when nothing is on.
-    void refreshFitnessReminders();
     // Wake the backend now (and on every foreground) so its 30-50s cold start
     // has already happened by the time someone opens the coach. Fire-and-forget.
     return installBackendWarmup();
@@ -242,12 +238,15 @@ function RootLayoutContent() {
           </AppErrorBoundary>
           <AchievementCelebration />
           <ProactiveDeliveryRunner />
-          {/* Closes the loop on delivered notifications: "Mark as Done",
-              "Ate it", "Later", and tap-to-route. Headless. */}
+          {/* The React end of notification responses: follows a tapped
+              notification to its screen once auth settles, and gives a haptic
+              for a press applied in the foreground. The presses themselves are
+              handled before React exists — services/notifications/pipeline. */}
           <NotificationActionRunner />
-          {/* Keeps the rolling week of tap-to-log meal reminders topped up, and
-              folds a lock-screen meal tick back into a live screen. Headless. */}
-          <MealReminderRunner />
+          {/* Keeps every reminder the user set actually pending (meals, water,
+              fitness, habits), and folds lock-screen writes back into the live
+              screens. Headless. */}
+          <ReminderSyncRunner />
           <StatusBar style={currentTheme === "dark" ? "light" : "dark"} />
           </IntroRevealProvider>
         </AuthWrapper>

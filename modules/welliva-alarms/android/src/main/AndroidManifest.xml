@@ -1,0 +1,10 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!--
+    User-granted "Alarms & reminders" access (Android 12+). Lets expo-notifications
+    schedule reminders with setExactAndAllowWhileIdle, so they fire on the minute
+    even while the phone is idle. NOT pre-granted on Android 13+ installs — the app
+    asks for it from the Notifications screen. Deliberately NOT USE_EXACT_ALARM,
+    which Google Play restricts to alarm-clock and calendar apps.
+  -->
+  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+</manifest>

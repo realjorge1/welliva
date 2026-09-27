@@ -2,7 +2,7 @@
  * WELLIVA COACHES — original trainer personas that front the workout library.
  *
  * Purely editorial: a coach is a voice + specialty that gives each workout a
- * human anchor ("led by Rio"). They are original Welliva characters, not
+ * human anchor ("led by Rio"). They are original welliva characters, not
  * likenesses of real trainers, and carry no imagery — the UI renders them as
  * initial-monogram badges in the coach's accent hue.
  */

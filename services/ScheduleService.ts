@@ -481,6 +481,75 @@ export async function markMealConsumed(
   return eaten !== null;
 }
 
+/** What {@link markMealConsumedOnce} did. */
+export type MarkOnceResult =
+  | { status: "logged"; mealName: string }
+  | { status: "already"; mealName: string }
+  | { status: "missing" }
+  | { status: "closed" };
+
+/**
+ * Mark a meal consumed EXACTLY ONCE — the lock-screen "Ate it" path.
+ *
+ * {@link markMealConsumed} appends an intake record every time it is called,
+ * which is right for a tap in the app (the UI only offers it on an un-ticked
+ * meal) and wrong for a notification response, which can be delivered twice:
+ * replayed on a cold start, or handed to both the background task and the live
+ * listener on Android. Checking `isConsumed` first and writing second, as two
+ * steps, lets two deliveries both pass the check. Here the check and the tick
+ * happen inside the same schedule lock, so the second delivery always sees the
+ * first one's tick and appends nothing.
+ */
+export async function markMealConsumedOnce(
+  date: string,
+  mealType: "breakfast" | "lunch" | "dinner" | "snack",
+  snackIndex?: number,
+): Promise<MarkOnceResult> {
+  if (!canLogForDate(date)) return { status: "closed" };
+  // A read first, through the healing reader: it folds any tick the ledger holds
+  // back onto a rewritten plan, so "already eaten" is judged on the healed day.
+  await getScheduleForDate(date).catch(() => null);
+
+  const outcome = await withLock(
+    async (): Promise<
+      | { status: "logged"; mealName: string; record: ReturnType<typeof recordFor> }
+      | { status: "already"; mealName: string }
+      | { status: "missing" }
+    > => {
+      const scheduledDiets = await getScheduledDiets();
+      const index = scheduledDiets.findIndex((d) => d.date === date);
+      if (index < 0) return { status: "missing" };
+
+      const diet = scheduledDiets[index];
+      const target =
+        mealType === "snack"
+          ? diet.schedule.snacks[snackIndex ?? 0]
+          : (diet.schedule[mealType] as ScheduledMeal | null);
+      if (!target) return { status: "missing" };
+      if (target.isConsumed) return { status: "already", mealName: target.name };
+
+      const at = new Date().toISOString();
+      target.isConsumed = true;
+      target.consumedAt = at;
+      scheduledDiets[index] = diet;
+      await writeJSON(STORAGE_KEYS.SCHEDULED_DIETS, scheduledDiets);
+      return {
+        status: "logged",
+        mealName: target.name,
+        record: recordFor(target, mealType, at),
+      };
+    },
+  );
+
+  if (outcome.status === "logged") {
+    // Same ordering as markMealConsumed: the plan flag first, then the ledger
+    // record the day's calories are actually counted from.
+    await recordIntake(date, outcome.record);
+    return { status: "logged", mealName: outcome.mealName };
+  }
+  return outcome;
+}
+
 /**
  * Toggle a meal's consumed status (mark consumed or unmark).
  *

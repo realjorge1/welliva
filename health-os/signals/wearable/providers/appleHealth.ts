@@ -287,7 +287,7 @@ export function snapshotFromHealthKit(
   };
 }
 
-/** READ-ONLY. Welliva never writes to a user's health store. */
+/** READ-ONLY. welliva never writes to a user's health store. */
 function permissionSet(mod: HealthKitModule): unknown {
   const P = mod.Constants?.Permissions ?? {};
   const read = [
