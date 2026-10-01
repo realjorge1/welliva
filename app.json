@@ -4,7 +4,7 @@
     "slug": "welliva",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/welliva1024.png",
+    "icon": "./assets/images/welliva-1024.jpg",
     "scheme": "welliva",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
@@ -18,9 +18,9 @@
       "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#FFF1E6",
-        "foregroundImage": "./assets/images/welliva512.png",
-        "backgroundImage": "./assets/images/welliva512.png",
-        "monochromeImage": "./assets/images/welliva512.png"
+        "foregroundImage": "./assets/images/welliva-512.jpg",
+        "backgroundImage": "./assets/images/welliva-512.jpg",
+        "monochromeImage": "./assets/images/welliva-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -35,7 +35,7 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/welliva48.png"
+      "favicon": "./assets/images/welliva-48.jpg"
     },
     "plugins": [
       "expo-router",

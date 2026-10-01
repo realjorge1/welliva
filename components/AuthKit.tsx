@@ -108,18 +108,18 @@ const SHEET_RADIUS = 28;
  * disc (see `styles.markArt`), and the disc becomes the innermost ring of the
  * halo ladder.
  */
-const APP_ICON = require("@/assets/images/welliva512.png");
+const APP_ICON = require("@/assets/images/welliva-512.jpg");
 
 /**
- * Where the mark sits inside APP_ICON, measured off the raster. The ring's
- * centre is NOT the image's centre — it rides 41px high — and its glow reaches
- * 156px out from that centre. The crop is computed from these numbers so the
- * ring lands dead-centre in its disc, concentric with the halos, rather than
- * riding high the way a plain rounded square would.
+ * Where the mark sits inside APP_ICON, measured off the raster. The diamond
+ * sits on the image's centre, and its glow reaches 172px out — the tips, top
+ * and bottom, are what get that far. The crop is computed from these numbers
+ * so the mark lands dead-centre in its disc, concentric with the halos. Re-measure
+ * if the artwork changes: an off-centre mark rides high in a plain rounded square.
  */
-const ICON_ART = { size: 512, cx: 255, cy: 215, glow: 156 };
+const ICON_ART = { size: 512, cx: 256, cy: 255, glow: 172 };
 /** The icon's own ground, sampled off the raster. The disc paints it too, so a crop edge can never show. */
-const ICON_GROUND = "#060505";
+const ICON_GROUND = "#010101";
 
 /**
  * The halo ladder: the mark's disc, then three rings each a fixed step wider.
@@ -132,7 +132,7 @@ const ICON_GROUND = "#060505";
  * matching one point of it.
  *
  * The hairlines climb the other way, bronze → gold, leading the eye in to the
- * mark's own gold ring.
+ * mark's own gold edge.
  */
 const MARK_DISC = 88;
 const HALO_STEP = 48;
@@ -744,7 +744,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: ICON_GROUND,
   },
-  // Oversized and offset so the art's ring centre lands on the disc's centre;
+  // Oversized and offset so the mark's centre lands on the disc's centre;
   // the square's edges all fall outside the disc and are clipped away.
   markArt: {
     position: "absolute",

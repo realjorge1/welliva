@@ -29,7 +29,7 @@ import {
   type ViewStyle,
 } from "react-native";
 
-const APP_ICON = require("@/assets/images/welliva48.png");
+const APP_ICON = require("@/assets/images/welliva-48.jpg");
 
 export interface NotificationBannerPreviewProps {
   title: string;

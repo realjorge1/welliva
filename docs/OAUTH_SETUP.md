@@ -278,7 +278,7 @@ settings → Basic** has:
 - **Terms of Service URL** — `https://realjorge1.github.io/welliva/terms/`
 - **User data deletion** — choose *Data deletion instructions URL* →
   `https://realjorge1.github.io/welliva/data-deletion/`
-- **App icon** — `assets/images/welliva1024.png` (already 1024×1024)
+- **App icon** — `assets/images/welliva-1024.jpg` (already 1024×1024)
 - **Category** — Health & fitness
 
 Those pages are generated from `constants/legal.ts` by `npm run legal:site` and
