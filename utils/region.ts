@@ -48,6 +48,23 @@ const MEDITERRANEAN_CITIES = new Set([
   "Ljubljana",
 ]);
 
+/**
+ * The "Asia/" zones of East, South-East and South Asia — the kitchens our
+ * "asian" meal set is drawn from. The rest of Asia's zones (the Gulf, the
+ * Levant, Iran, the Caucasus, Central Asia, Siberia) cook something else, so
+ * they keep the "mixed" default rather than being handed rice and dal.
+ */
+const ASIAN_KITCHEN_CITIES = new Set([
+  // South Asia
+  "Kolkata", "Calcutta", "Karachi", "Dhaka", "Dacca", "Colombo", "Kathmandu", "Katmandu", "Thimphu",
+  // East Asia
+  "Shanghai", "Chongqing", "Chungking", "Harbin", "Hong Kong", "Macau", "Macao", "Taipei", "Tokyo",
+  "Seoul", "Pyongyang",
+  // South-East Asia
+  "Manila", "Jakarta", "Makassar", "Jayapura", "Pontianak", "Kuala Lumpur", "Kuching", "Singapore",
+  "Bangkok", "Ho Chi Minh", "Saigon", "Phnom Penh", "Vientiane", "Yangon", "Rangoon", "Brunei", "Dili",
+]);
+
 const DEFAULT: DetectedRegion = { cuisine: "mixed" };
 
 /** Turn an IANA city token ("New_York") into a display label ("New York"). */
@@ -57,11 +74,12 @@ function prettyCity(token: string): string {
 
 /**
  * Detect region + a default cuisine from the device time-zone. Pure, synchronous,
- * never throws — safe to call at render time.
+ * never throws — safe to call at render time. `timeZone` is for tests; the app
+ * reads the device's.
  */
-export function detectRegion(): DetectedRegion {
+export function detectRegion(timeZone?: string): DetectedRegion {
   try {
-    const tz = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone;
+    const tz = timeZone ?? Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone;
     if (!tz || !tz.includes("/")) return DEFAULT;
 
     const parts = tz.split("/");
@@ -73,13 +91,16 @@ export function detectRegion(): DetectedRegion {
       case "Africa":
         cuisine = "african";
         break;
+      case "Asia":
+        cuisine = ASIAN_KITCHEN_CITIES.has(city) ? "asian" : "mixed";
+        break;
       case "Europe":
         cuisine = MEDITERRANEAN_CITIES.has(city) ? "mediterranean" : "western";
         break;
       case "America":
         cuisine = "western";
         break;
-      // Asia / Australia / Pacific / Atlantic / Indian / Antarctica → "mixed"
+      // Australia / Pacific / Atlantic / Indian / Antarctica → "mixed"
       default:
         cuisine = "mixed";
     }

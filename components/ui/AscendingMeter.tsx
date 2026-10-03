@@ -46,7 +46,7 @@ export interface AscendingMeterProps {
   track?: string;
   /**
    * Draw this instead of the bars. For states where a filled meter would be
-   * meaningless rather than impressive — a rest day, a fully-recovered body.
+   * meaningless rather than impressive — a rest day.
    */
   glyph?: MeterGlyphName | null;
   /** What the glyph means, for screen readers. */

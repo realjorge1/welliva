@@ -5,16 +5,24 @@ import { midpoint } from "../MealCatalog";
 import {
   buildMenuDays,
   cycleDay,
+  cycleDayIn,
   daysOf,
+  dietDishesForSlot,
   dishesForSlot,
   emptyDraft,
   emptyWeek,
+  picksFor,
   portionFor,
+  toggleDishIn,
   weekdayIndex,
+  weekdaysOf,
   withDish,
   withoutDish,
+  type Dish,
   type MenuDraft,
 } from "../menuBuilder";
+import { mainSlotPool } from "../mealVariety";
+import { DIET_DATABASE } from "../../../constants/DietDatabase";
 import { breaksRestriction, mealCuisine } from "../mealRules";
 
 function bio(over: Partial<UserBio> = {}): UserBio {
@@ -167,5 +175,101 @@ describe("buildMenuDays", () => {
     for (const picks of Object.values(days)) {
       for (const p of picks) expect(p.meal.isConsumed).toBe(false);
     }
+  });
+});
+
+describe("dietDishesForSlot — choosing from inside one diet", () => {
+  it("offers only what that diet may serve, its own dishes first", () => {
+    const filter = { cuisinePreference: "african" as const };
+    const diet = DIET_DATABASE.find((d) => d.id === "traditional-african")!;
+    const pool = new Set(mainSlotPool(diet, "lunch", {}).map((d) => `lunch:${d.key}`));
+    const { dishes, staples } = dietDishesForSlot("lunch", "traditional-african", filter);
+    expect(dishes.length).toBeGreaterThan(diet.lunchOptions.length / 2);
+    for (const d of [...dishes, ...staples]) expect(pool.has(d.key), d.title).toBe(true);
+    for (const d of dishes) expect(d.cuisine).toBe("Nigerian");
+    // The diet's own lunches lead the list.
+    const own = new Set(diet.lunchOptions.map((o) => o.name));
+    expect(dishes[0]!.portions.some((p) => own.has(p.name))).toBe(true);
+  });
+
+  it("never offers a vegetarian a dish that breaks it, whichever diet they picked", () => {
+    const filter = { cuisinePreference: "african" as const, dietaryRestriction: "vegetarian" as const };
+    for (const id of ["flexitarian", "traditional-african", "vegetarian", "mediterranean"]) {
+      for (const slot of ["breakfast", "lunch", "dinner"] as const) {
+        const { dishes, staples } = dietDishesForSlot(slot, id, filter);
+        for (const d of [...dishes, ...staples]) {
+          for (const p of d.portions) expect(breaksRestriction(p.name, "vegetarian"), `${id}: ${p.name}`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("leaves out what the user dislikes", () => {
+    const { dishes } = dietDishesForSlot("breakfast", "traditional-african", {
+      cuisinePreference: "african",
+      foodDislikes: ["legume"],
+    });
+    for (const d of dishes) expect(d.title.toLowerCase()).not.toMatch(/bean|akara|moi-?moi/);
+  });
+
+  it("is empty for a diet that does not exist rather than throwing", () => {
+    expect(dietDishesForSlot("dinner", "no-such-diet", {})).toEqual({ dishes: [], staples: [] });
+  });
+});
+
+describe("a plan shorter than a week", () => {
+  const dish = (key: string, slot: "breakfast" | "lunch" | "dinner" = "breakfast"): Dish => ({
+    key: `${slot}:${key}`,
+    title: key,
+    slot,
+    cuisine: "Nigerian",
+    portions: [],
+    reach: 1,
+  });
+
+  it("knows which weekdays it reaches", () => {
+    // 2026-10-08 is a Thursday.
+    expect(weekdaysOf(["2026-10-08"])).toEqual([3]);
+    expect(weekdaysOf(["2026-10-08", "2026-10-09", "2026-10-10"])).toEqual([3, 4, 5]);
+    const nine = Array.from({ length: 9 }, (_, i) => `2026-10-${String(5 + i).padStart(2, "0")}`);
+    expect(weekdaysOf(nine)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it("only ever puts a pick on a day the plan has", () => {
+    const active = [3, 4, 5];
+    let draft = emptyDraft();
+    for (const k of ["akara", "pap", "moimoi"]) draft = toggleDishIn(draft, dish(k), 3, active);
+    draft.weeks.breakfast.forEach((key, day) => {
+      if (!active.includes(day)) expect(key, `day ${day}`).toBeNull();
+    });
+    // Three picks, three days: each gets one.
+    for (const k of ["akara", "pap", "moimoi"]) {
+      expect(daysOf(draft.weeks.breakfast, `breakfast:${k}`)).toHaveLength(1);
+    }
+  });
+
+  it("swaps the one pick of a one-day plan instead of refusing the next", () => {
+    let draft = toggleDishIn(emptyDraft(), dish("akara"), 1, [3]);
+    draft = toggleDishIn(draft, dish("pap"), 1, [3]);
+    expect(picksFor(draft, "breakfast").map((d) => d.key)).toEqual(["breakfast:pap"]);
+    expect(draft.weeks.breakfast[3]).toBe("breakfast:pap");
+  });
+
+  it("refuses a pick past the cap when there is more than one to give", () => {
+    let draft = emptyDraft();
+    draft = toggleDishIn(draft, dish("akara"), 2, [3, 4]);
+    draft = toggleDishIn(draft, dish("pap"), 2, [3, 4]);
+    const full = toggleDishIn(draft, dish("moimoi"), 2, [3, 4]);
+    expect(full).toBe(draft);
+  });
+
+  it("cycles a tapped day through the slot's own picks", () => {
+    let draft = toggleDishIn(emptyDraft(), dish("akara"), 6);
+    draft = toggleDishIn(draft, dish("pap"), 6);
+    const day = draft.weeks.breakfast.findIndex((k) => k === "breakfast:akara");
+    const next = cycleDayIn(draft, "breakfast", day);
+    expect(next.weeks.breakfast[day]).toBe("breakfast:pap");
+    // A slot with no picks is left alone.
+    expect(cycleDayIn(draft, "dinner", 0)).toBe(draft);
   });
 });

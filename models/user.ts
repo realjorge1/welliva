@@ -55,6 +55,7 @@ export type DietaryRestriction =
  */
 export type CuisinePreference =
   | "african" // Nigerian / West-African dishes
+  | "asian" // East, South-East & South Asian dishes
   | "western" // European & Western dishes
   | "mediterranean" // Mediterranean dishes
   | "mixed"; // No preference — all cuisines

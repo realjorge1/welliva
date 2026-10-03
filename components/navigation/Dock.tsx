@@ -71,11 +71,11 @@ const SWIPE_SPRING = { damping: 22, stiffness: 260, mass: 0.9 } as const;
  * ends up with the same air above it as below.
  */
 /** Card edge → the handle. */
-const HANDLE_INSET = 8;
+const HANDLE_INSET = 6;
 /** The handle itself. */
-const HANDLE_BAR = 4;
+const HANDLE_BAR = 3;
 /** Handle → the content row. */
-const HANDLE_GAP = 8;
+const HANDLE_GAP = 5;
 /** What the top chrome adds up to, and therefore what sits under the row. */
 const CARD_PAD_V = HANDLE_INSET + HANDLE_BAR + HANDLE_GAP;
 
@@ -217,7 +217,7 @@ function Card({
 }
 
 /** The plate at the left of a row: a move's glyph, or Gozlin's own mark. */
-function Plate({ move, tone, size = 38 }: { move: NextMove; tone: string; size?: number }) {
+function Plate({ move, tone, size = 34 }: { move: NextMove; tone: string; size?: number }) {
   return (
     <View
       style={[
@@ -483,22 +483,22 @@ const styles = StyleSheet.create({
   grab: { width: 34, height: HANDLE_BAR, borderRadius: 2 },
 
   row: { flexDirection: "row", alignItems: "center", gap: Spacing.sm + 4 },
-  text: { flex: 1, gap: 2 },
+  text: { flex: 1, gap: 1 },
   /** RN's flexShrink defaults to 0 — anything that may truncate needs this. */
   shrink: { flexShrink: 1, minWidth: 0 },
 
-  plate: { borderRadius: 13, alignItems: "center", justifyContent: "center" },
+  plate: { borderRadius: 12, alignItems: "center", justifyContent: "center" },
 
   transport: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
+    width: 36,
+    height: 36,
+    borderRadius: 13,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
   },
 
-  segments: { flexDirection: "row", gap: 4, marginTop: Spacing.sm + 4 },
+  segments: { flexDirection: "row", gap: 4, marginTop: Spacing.sm + 1 },
   segment: { flex: 1, height: 4, borderRadius: 2 },
 
   more: {
@@ -506,7 +506,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
     paddingHorizontal: 11,
-    paddingVertical: 7,
+    paddingVertical: 5,
     borderRadius: Radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
   },

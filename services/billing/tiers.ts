@@ -282,13 +282,14 @@ export type FeatureId =
   | "foods"
   | "photo-log"
   | "deep-dive"
+  | "adaptive-training"
   | "generic";
 
 export const FEATURE_MIN_TIER: Record<FeatureId, Tier> = {
   /* ── Gozlin. Every one of these spends inference on a real question. ───────*/
   "coach-limit": "pro", // 0 on free — the conversation IS the paid feature
   "deep-dive": "pro", // "the research behind my answer"
-  "ai-plans": "pro",
+  "ai-plans": "pro", // MEAL plans written for this body (workout plans are the engine's, for everyone)
   insights: "pro",
   "photo-log": "pro", // none on free, 30/day on Pro
 
@@ -297,6 +298,10 @@ export const FEATURE_MIN_TIER: Record<FeatureId, Tier> = {
   foods: "pro", // the searchable whole-foods catalog
   sync: "pro",
   history: "pro", // 10 days → no cutoff at all
+  // Today's planned session eased to the recovery score. Every user's plan is
+  // built and progressed from their data, with every reason shown; this is the
+  // daily layer on top of it.
+  "adaptive-training": "pro",
 
   /** The unattributed ask. There is only one thing to offer. */
   generic: "pro",

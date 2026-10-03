@@ -26,7 +26,7 @@
  * they chose, hard dietary restriction, allergies. A vegetarian is never shown
  * a dish they would then be served.
  */
-import type { DietMealOption, MealCuisine } from "../../constants/DietDatabase";
+import { DIET_DATABASE, type DietMealOption, type MealCuisine } from "../../constants/DietDatabase";
 import type { MealType, ScheduledMeal } from "../../models/diet";
 import type { NutritionTargets } from "../../models/nutrition";
 import type { CuisinePreference, DietaryRestriction, UserBio } from "../../models/user";
@@ -42,9 +42,11 @@ import {
   dishKey,
   dishTitle,
   hasAllergen,
+  hasDislike,
   mealCuisine,
   preferredCuisine,
 } from "./mealRules";
+import { mainSlotPool, type PoolDish } from "./mealVariety";
 
 export type MainSlot = "breakfast" | "lunch" | "dinner";
 export const MAIN_SLOTS: readonly MainSlot[] = ["breakfast", "lunch", "dinner"];
@@ -137,6 +139,48 @@ export function dishesForSlot(
   return dishes.sort((a, b) => b.reach - a.reach || a.title.localeCompare(b.title));
 }
 
+/**
+ * The dishes ONE DIET may serve this user, for picking — the same pool the day
+ * generator rotates through (mealVariety), so "let me choose" and "plan them for
+ * me" draw from one shelf and neither can step outside the diet.
+ *
+ * `dishes` are the user's kitchen, the diet's own first; `staples` are its
+ * cuisine-neutral everyday options. A diet with nothing at all in the user's
+ * kitchen lists what it does have rather than an empty page.
+ */
+export function dietDishesForSlot(
+  slot: MainSlot,
+  dietId: string,
+  filter: MenuFilter,
+): { dishes: Dish[]; staples: Dish[] } {
+  const diet = DIET_DATABASE.find((d) => d.id === dietId);
+  if (!diet) return { dishes: [], staples: [] };
+
+  const pool = mainSlotPool(diet, slot, {
+    restriction: filter.dietaryRestriction,
+    allergies: filter.allergies,
+  }).filter((d) => !d.portions.some((p) => hasDislike(p.name, filter.foodDislikes)));
+
+  const toDish = (d: PoolDish<DietMealOption>): Dish => ({
+    key: `${slot}:${d.key}`,
+    title: dishTitle(d.name),
+    slot,
+    cuisine: d.cuisine,
+    portions: d.portions,
+    reach: d.reach,
+  });
+  const order = (a: PoolDish, b: PoolDish) =>
+    Number(b.own) - Number(a.own) || b.reach - a.reach || a.name.localeCompare(b.name);
+  const listed = (list: PoolDish<DietMealOption>[]) => [...list].sort(order).map(toDish);
+
+  const want = preferredCuisine(filter.cuisinePreference);
+  if (want === null) return { dishes: listed(pool), staples: [] };
+  const mine = pool.filter((d) => d.cuisine === want);
+  const staples = pool.filter((d) => d.cuisine === "Universal");
+  const elsewhere = pool.filter((d) => d.cuisine !== want && d.cuisine !== "Universal");
+  return { dishes: listed(mine.length > 0 ? mine : elsewhere), staples: listed(staples) };
+}
+
 /** The authored size of a dish closest to the calories this slot should carry. */
 export function portionFor(dish: Dish, targetKcal: number): DietMealOption {
   let best = dish.portions[0];
@@ -184,6 +228,18 @@ export function daysOf(week: Week, key: string): number[] {
   return week.flatMap((k, i) => (k === key ? [i] : []));
 }
 
+/** Every weekday, Monday first. */
+const ALL_WEEKDAYS: readonly number[] = [0, 1, 2, 3, 4, 5, 6];
+
+/**
+ * The weekdays a run of dates actually lands on, Monday first. A plan of a week
+ * or more touches all seven; "just today" touches one, and a dish rotated onto
+ * any other weekday would never be served.
+ */
+export function weekdaysOf(dates: readonly string[]): number[] {
+  return [...new Set(dates.map(weekdayIndex))].sort((a, b) => a - b);
+}
+
 const ringDistance = (a: number, b: number) => {
   const d = Math.abs(a - b);
   return Math.min(d, DAYS_IN_WEEK - d);
@@ -197,29 +253,35 @@ const ringDistance = (a: number, b: number) => {
  * FARTHEST from the days the new dish already has, so two dishes alternate
  * rather than splitting the week into a block of each. Existing hand edits are
  * disturbed only as far as the new dish's share requires.
+ *
+ * `active` limits it to the weekdays the plan really has (see weekdaysOf); the
+ * rest stay Gozlin's, which for a plan that never reaches them means nothing.
  */
-export function withDish(week: Week, key: string): Week {
+export function withDish(week: Week, key: string, active: readonly number[] = ALL_WEEKDAYS): Week {
   const next = [...week];
   if (next.includes(key)) return next;
+  const days = active.length > 0 ? active : ALL_WEEKDAYS;
+  const on = (k: string) => days.filter((d) => next[d] === k);
 
   const picks = [...new Set(next.filter((k): k is string => k !== null))];
-  if (picks.length === 0 && next.every((k) => k === null)) {
-    return next.map(() => key);
+  if (picks.length === 0 && days.every((d) => next[d] === null)) {
+    for (const d of days) next[d] = key;
+    return next;
   }
-  const share = Math.max(1, Math.floor(DAYS_IN_WEEK / (picks.length + 1)));
+  const share = Math.max(1, Math.floor(days.length / (picks.length + 1)));
 
   for (let claimed = 0; claimed < share; claimed++) {
-    const free = next.flatMap((k, i) => (k === null ? [i] : []));
+    const free = days.filter((d) => next[d] === null);
     let candidates = free;
     if (candidates.length === 0) {
       const counts = picks
-        .map((p) => ({ p, n: daysOf(next, p).length }))
+        .map((p) => ({ p, n: on(p).length }))
         .filter((c) => c.n > 1)
         .sort((a, b) => b.n - a.n);
       if (counts.length === 0) break;
-      candidates = daysOf(next, counts[0].p);
+      candidates = on(counts[0].p);
     }
-    const mine = daysOf(next, key);
+    const mine = on(key);
     const day =
       mine.length === 0
         ? candidates[Math.min(1, candidates.length - 1)]
@@ -283,6 +345,46 @@ export function emptyDraft(): MenuDraft {
 /** Picked dishes in one slot, in the order they were picked. */
 export function picksFor(draft: MenuDraft, slot: MainSlot): Dish[] {
   return Object.values(draft.dishes).filter((d) => d.slot === slot);
+}
+
+/**
+ * Pick or un-pick a dish; the week re-balances around it.
+ *
+ * At most `maxPicks` per meal. When that is one — a plan of a single day has one
+ * breakfast to give — a new pick REPLACES the old one, the way a radio button
+ * does, instead of being refused.
+ */
+export function toggleDishIn(
+  draft: MenuDraft,
+  dish: Dish,
+  maxPicks: number,
+  active: readonly number[] = ALL_WEEKDAYS,
+): MenuDraft {
+  const slot = dish.slot;
+  if (draft.dishes[dish.key]) {
+    const { [dish.key]: _gone, ...rest } = draft.dishes;
+    const remaining = Object.values(rest)
+      .filter((d) => d.slot === slot)
+      .map((d) => d.key);
+    return { dishes: rest, weeks: { ...draft.weeks, [slot]: withoutDish(draft.weeks[slot], dish.key, remaining) } };
+  }
+  const current = picksFor(draft, slot);
+  if (current.length >= maxPicks) {
+    if (maxPicks !== 1) return draft;
+    const cleared = toggleDishIn(draft, current[0]!, maxPicks, active);
+    return toggleDishIn(cleared, dish, maxPicks, active);
+  }
+  return {
+    dishes: { ...draft.dishes, [dish.key]: dish },
+    weeks: { ...draft.weeks, [slot]: withDish(draft.weeks[slot], dish.key, active) },
+  };
+}
+
+/** A tapped weekday moves on to the slot's next pick, then to Gozlin. */
+export function cycleDayIn(draft: MenuDraft, slot: MainSlot, day: number): MenuDraft {
+  const picks = picksFor(draft, slot).map((d) => d.key);
+  if (picks.length === 0) return draft;
+  return { ...draft, weeks: { ...draft.weeks, [slot]: cycleDay(draft.weeks[slot], day, picks) } };
 }
 
 export interface BuildMenuInput {

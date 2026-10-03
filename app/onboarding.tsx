@@ -138,6 +138,14 @@ import {
   generateWorkoutPlan,
 } from "../services/WorkoutGenerator";
 import {
+  DAY_SHORT,
+  DEFAULT_DAYS_FOR_GOAL,
+  resolveTrainingPrefs,
+  spacedDays,
+} from "../services/training";
+import { updateFitnessProfile } from "../fitness/services/FitnessProfileStore";
+import type { ChosenWorkout, WorkoutPlanMode } from "../fitness/types";
+import {
   ActivityLevel,
   CommonAllergy,
   CuisinePreference,
@@ -233,16 +241,6 @@ const GOAL_REACTION: Record<PrimaryGoal, string> = {
   athletic_performance: "Good. We'll train for output and feed it properly.",
 };
 
-/** Sensible weekly training default per goal for users who skip the training step. */
-const DEFAULT_DAYS_FOR_GOAL: Record<PrimaryGoal, number> = {
-  lose_weight: 3,
-  build_muscle: 4,
-  improve_fitness: 4,
-  increase_energy: 3,
-  better_health: 3,
-  athletic_performance: 5,
-};
-
 const DIETARY_RESTRICTION_OPTIONS: GridOption<DietaryRestriction>[] = [
   { value: "none", label: "No restrictions" },
   { value: "vegetarian", label: "Vegetarian" },
@@ -257,6 +255,7 @@ const DIETARY_RESTRICTION_OPTIONS: GridOption<DietaryRestriction>[] = [
 const CUISINE_OPTIONS: GridOption<CuisinePreference>[] = [
   { value: "mixed", label: "A bit of everything", subtitle: "Draw from all cuisines", glyph: "globe" },
   { value: "african", label: "African", subtitle: "Nigerian & West-African dishes", glyph: "leaf" },
+  { value: "asian", label: "Asian", subtitle: "Indian, Chinese, Japanese, Thai & more", glyph: "bowl" },
   { value: "western", label: "European & Western", subtitle: "Classic Western meals", glyph: "plate" },
   { value: "mediterranean", label: "Mediterranean", subtitle: "Greek, Italian & coastal", glyph: "coast" },
 ];
@@ -290,7 +289,26 @@ const EQUIPMENT_SHORT: Record<Equipment, string> = {
 const HEIGHT_RANGE = { min: 100, max: 250 } as const;
 const WEIGHT_RANGE = { min: 30, max: 300 } as const;
 
-const WORKOUT_DAY_OPTIONS = [2, 3, 4, 5, 6];
+/** How the week's workouts get made — the same choice the meal step offers. */
+const PLAN_MODE_OPTIONS: GridOption<WorkoutPlanMode>[] = [
+  {
+    value: "planned",
+    label: "Plan them for me",
+    subtitle: "Every session built around your goals, level and kit, and moved up as you get stronger",
+    glyph: "spark",
+  },
+  {
+    value: "chosen",
+    label: "Let me choose",
+    subtitle: "Pick workouts you like. I set the reps for your level and plan any day you leave open",
+    glyph: "search",
+  },
+];
+
+/** At most this many library workouts are offered to pick from. */
+const PICK_LIST_SIZE = 8;
+
+const LEVEL_RANK: Record<ExerciseLevel, number> = { beginner: 0, intermediate: 1, advanced: 2 };
 
 const MEALS_OPTIONS: GridOption<string>[] = [
   { value: "3", label: "3 meals", subtitle: "Breakfast, lunch, dinner + a snack" },
@@ -497,7 +515,16 @@ export default function OnboardingScreen() {
   const [dietaryRestriction, setDietaryRestriction] = useState<DietaryRestriction>("none");
   const [cuisinePreference, setCuisinePreference] = useState<CuisinePreference>("mixed");
   const [equipment, setEquipment] = useState<Equipment[]>(["none"]);
-  const [workoutDaysPerWeek, setWorkoutDaysPerWeek] = useState<number>(4);
+  /** Training weekdays (0 = Mon) — THE days: plan, reminders and weekly target. */
+  const [trainingDays, setTrainingDays] = useState<number[]>(() => spacedDays(4));
+  /** Until the user touches the days, they follow the first goal's default. */
+  const daysTouched = useRef(false);
+  /** Who plans the workouts: Gozlin, or the user (with Gozlin filling gaps). */
+  const [planMode, setPlanMode] = useState<WorkoutPlanMode>("planned");
+  /** Library workouts the user picked, in pick order; they land on days in order. */
+  const [picks, setPicks] = useState<string[]>([]);
+  /** The workout library, loaded only once someone asks to choose. */
+  const [catalog, setCatalog] = useState<typeof import("../fitness/services/WorkoutCatalog") | null>(null);
   const [mealsPerDay, setMealsPerDay] = useState<3 | 4>(3);
   const [allergies, setAllergies] = useState<string[]>([]);
   const [customAllergy, setCustomAllergy] = useState("");
@@ -517,7 +544,7 @@ export default function OnboardingScreen() {
 
   /** Which field on the "about" step holds the caret (the rest recede). */
   const [focusedField, setFocusedField] = useState<string | null>(null);
-  /** How many of the training step's three questions are on screen (1–3). */
+  /** How many of the training step's questions are on screen (1–5). */
   const [trainingRevealed, setTrainingRevealed] = useState(1);
   /** Which of the food step's three questions is on screen (0–2). */
   const [foodQuestion, setFoodQuestion] = useState(0);
@@ -548,6 +575,107 @@ export default function OnboardingScreen() {
 
   const primaryGoal = goals[0] ?? null;
   const trainingEnabled = useMemo(() => goals.some((g) => TRAINING_GOALS.has(g)), [goals]);
+
+  /* ── Training days, plan mode and picks ───────────────────────────────── */
+
+  // The days start from the first goal's sensible default, spaced for
+  // recovery, and stop following it the moment the user picks their own.
+  useEffect(() => {
+    if (daysTouched.current || !primaryGoal) return;
+    setTrainingDays(spacedDays(DEFAULT_DAYS_FOR_GOAL[primaryGoal]));
+  }, [primaryGoal]);
+
+  const toggleTrainingDay = useCallback((day: number) => {
+    daysTouched.current = true;
+    setTrainingDays((cur) => {
+      const next = cur.includes(day) ? cur.filter((d) => d !== day) : [...cur, day].sort((a, b) => a - b);
+      return next.length > 0 ? next : cur; // a plan needs at least one day
+    });
+  }, []);
+
+  const choosePlanMode = useCallback((mode: WorkoutPlanMode) => {
+    setPlanMode(mode);
+    if (mode === "chosen") {
+      // The library is ~3,000 lines of data; load it only for someone choosing.
+      void import("../fitness/services/WorkoutCatalog").then((m) => setCatalog(() => m));
+    }
+  }, []);
+
+  /** Workouts that fit the kit and level the user just gave, goal-fit first. */
+  const workoutOptions = useMemo<GridOption<string>[] | null>(() => {
+    if (!catalog) return null;
+    const rank = LEVEL_RANK[exerciseLevel];
+    return catalog
+      .getAllWorkouts()
+      .filter(
+        (w) =>
+          catalog.workoutFitsEquipment(w, equipment) &&
+          LEVEL_RANK[w.difficulty as ExerciseLevel] <= rank,
+      )
+      .sort(
+        (a, b) =>
+          Number(!!primaryGoal && b.goalFit.includes(primaryGoal)) -
+            Number(!!primaryGoal && a.goalFit.includes(primaryGoal)) ||
+          LEVEL_RANK[b.difficulty as ExerciseLevel] - LEVEL_RANK[a.difficulty as ExerciseLevel] ||
+          a.durationMinutes - b.durationMinutes ||
+          a.id.localeCompare(b.id),
+      )
+      .slice(0, PICK_LIST_SIZE)
+      .map((w) => ({
+        value: w.id,
+        label: w.name,
+        subtitle: `${w.durationMinutes} min · ${w.style === "hiit" ? "HIIT" : w.style.charAt(0).toUpperCase() + w.style.slice(1)} · ${w.difficulty.charAt(0).toUpperCase() + w.difficulty.slice(1)}`,
+      }));
+  }, [catalog, equipment, exerciseLevel, primaryGoal]);
+
+  // A pick list built for other kit or another level must not keep picks the
+  // list no longer offers, and never more picks than training days.
+  useEffect(() => {
+    setPicks((cur) => {
+      const offered = workoutOptions ? new Set(workoutOptions.map((o) => o.value)) : null;
+      const next = cur.filter((id) => !offered || offered.has(id)).slice(0, trainingDays.length);
+      return next.length === cur.length ? cur : next;
+    });
+  }, [workoutOptions, trainingDays.length]);
+
+  const togglePick = useCallback(
+    (id: string) => {
+      setPicks((cur) =>
+        cur.includes(id)
+          ? cur.filter((p) => p !== id)
+          : cur.length < trainingDays.length
+            ? [...cur, id]
+            : cur,
+      );
+    },
+    [trainingDays.length],
+  );
+
+  /** Picks land on the training days in order; the rest stay Gozlin's. */
+  const chosenWorkouts = useMemo<ChosenWorkout[]>(
+    () =>
+      planMode === "chosen"
+        ? picks.slice(0, trainingDays.length).map((workoutId, i) => ({ day: trainingDays[i], workoutId }))
+        : [],
+    [planMode, picks, trainingDays],
+  );
+
+  const daysCaption = `${trainingDays.map((d) => DAY_SHORT[d]).join(", ")} — ${trainingDays.length} ${
+    trainingDays.length === 1 ? "day" : "days"
+  } a week. Change them any time; the plan re-fits itself.`;
+
+  const picksCaption = (() => {
+    const names = new Map((workoutOptions ?? []).map((o) => [o.value, o.label]));
+    const line = trainingDays
+      .map((d, i) => `${DAY_SHORT[d]}: ${picks[i] ? names.get(picks[i]) ?? "your pick" : "Gozlin plans"}`)
+      .join(" · ");
+    return picks.length >= trainingDays.length
+      ? `${line}. One per training day.`
+      : `${line}. Pick up to ${trainingDays.length}, or none.`;
+  })();
+
+  /** The training step's questions: four, or five for someone choosing. */
+  const trainingPhases = planMode === "chosen" ? 5 : 4;
 
   // Ordered step machine + progress steps, both branching on `trainingEnabled`.
   const STEPS = useMemo<Step[]>(
@@ -719,7 +847,7 @@ export default function OnboardingScreen() {
       cuisinePreference,
       equipment,
       workoutDaysPerWeek: trainingEnabled
-        ? workoutDaysPerWeek
+        ? trainingDays.length
         : DEFAULT_DAYS_FOR_GOAL[primaryGoal ?? "better_health"],
       allergies: [
         ...allergies,
@@ -745,7 +873,7 @@ export default function OnboardingScreen() {
       dietaryRestriction,
       cuisinePreference,
       equipment,
-      workoutDaysPerWeek,
+      trainingDays.length,
       allergies,
       customAllergy,
       medicalConditions,
@@ -852,9 +980,19 @@ export default function OnboardingScreen() {
       firstDay = generateDietPlan(bio, targets, today, dietId)?.schedule ?? null;
     }
 
+    // The same engine, over the same answers the save writes to the fitness
+    // profile (handleComplete) — so the week revealed is the week saved.
     const wp = generateWorkoutPlan(bio, currentWeekStart(), {
-      equipment: bio.equipment,
-      daysPerWeek: bio.workoutDaysPerWeek,
+      prefs: trainingEnabled
+        ? {
+            ...resolveTrainingPrefs(bio, null),
+            days: trainingDays,
+            daysSource: "you",
+            mode: planMode,
+            chosen: chosenWorkouts,
+          }
+        : resolveTrainingPrefs(bio, null),
+      library: catalog ? (id) => catalog.getWorkout(id) ?? undefined : undefined,
     });
     const sessions = wp.sessions.filter((s) => !s.isRestDay);
     const equipmentSummary =
@@ -887,8 +1025,22 @@ export default function OnboardingScreen() {
         .filter((d): d is number => typeof d === "number"),
       sessionMinutes: sessions[0]?.totalDurationMinutes ?? null,
       equipmentSummary,
+      // The first lines of "how this week was built" — goal, days, length.
+      trainingReasons: (wp.reasons ?? []).slice(0, 3),
+      trainingPicks: sessions.filter((s) => s.source === "chosen").length,
     };
-  }, [currentStep, basis, mealMode, menuDraft, menuLength]);
+  }, [
+    currentStep,
+    basis,
+    mealMode,
+    menuDraft,
+    menuLength,
+    trainingEnabled,
+    trainingDays,
+    planMode,
+    chosenWorkouts,
+    catalog,
+  ]);
 
   /* ── Finishing ────────────────────────────────────────────────────────── */
 
@@ -936,6 +1088,15 @@ export default function OnboardingScreen() {
 
     try {
       const bio = buildBio();
+      // The training answers go to the fitness profile FIRST: the first week
+      // (completeOnboarding → generateWorkoutWeek) reads its days, plan mode
+      // and picks from there — the same values the reveal was built from.
+      await updateFitnessProfile({
+        daysAvailable: trainingEnabled ? trainingDays : spacedDays(bio.workoutDaysPerWeek ?? 3),
+        daysSource: trainingEnabled ? "you" : "derived",
+        planMode: trainingEnabled ? planMode : "planned",
+        chosenWorkouts: trainingEnabled ? chosenWorkouts : [],
+      });
       if (mealMode === "choose" && basis) {
         // Their menu, every day of it, written through the planner — so it is
         // editable there tomorrow like any menu they plan by hand. Built BEFORE
@@ -1104,8 +1265,8 @@ export default function OnboardingScreen() {
   };
 
   const primaryAction = () => {
-    if (currentStep === "training" && trainingRevealed < 3) {
-      setTrainingRevealed((r) => Math.min(r + 1, 3));
+    if (currentStep === "training" && trainingRevealed < trainingPhases) {
+      setTrainingRevealed((r) => Math.min(r + 1, trainingPhases));
       return;
     }
     if (currentStep === "food" && foodQuestion < 2) {
@@ -1144,7 +1305,11 @@ export default function OnboardingScreen() {
     // The build and the reveal have no action bar; hold the last wording so the
     // label does not re-cut to "Continue" underneath its own fade-out.
     if (currentStep === "building" || currentStep === "plan") return lastLabel.current;
-    if (currentStep === "training" && trainingRevealed < 3) return "Continue";
+    if (currentStep === "training" && trainingRevealed < trainingPhases) return "Continue";
+    // Choosing nothing is a choice the button names, like the menu's skips.
+    if (currentStep === "training" && planMode === "chosen" && picks.length === 0) {
+      return "Let Gozlin plan them";
+    }
     if (currentStep === "food" && foodQuestion < 2) return "Continue";
     if (currentStep === "menu") return menuActionLabel;
     return isLastForm ? "Build my plan" : "Continue";
@@ -1377,11 +1542,22 @@ export default function OnboardingScreen() {
               equipmentOptions={EQUIPMENT_OPTIONS}
               equipment={equipment}
               onEquipment={toggleEquipment}
-              dayOptions={WORKOUT_DAY_OPTIONS}
-              days={workoutDaysPerWeek}
-              onDays={setWorkoutDaysPerWeek}
+              days={trainingDays}
+              onToggleDay={toggleTrainingDay}
+              daysCaption={daysCaption}
+              modeOptions={PLAN_MODE_OPTIONS}
+              mode={planMode}
+              onMode={choosePlanMode}
+              chooseMode="chosen"
+              workoutOptions={workoutOptions}
+              picks={picks}
+              onTogglePick={togglePick}
+              picksCaption={picksCaption}
               revealed={trainingRevealed}
-              onRevealNext={() => setTrainingRevealed((r) => Math.min(r + 1, 3))}
+              // Capped at the most phases there can be, not at `trainingPhases`:
+              // choosing "Let me choose" reveals the picks from a timer set in
+              // the render BEFORE the mode changed, which would still cap at 4.
+              onRevealNext={() => setTrainingRevealed((r) => Math.min(r + 1, 5))}
               width={contentWidth}
               delay={OPTIONS_DELAY}
             />

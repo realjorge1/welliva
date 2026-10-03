@@ -82,7 +82,26 @@ const SLOT_COPY: Record<MainSlot, { title: string; support: string; noun: string
   },
 };
 
+/** The same three questions for a plan of one day: one dish each, nothing to rotate. */
+const ONE_DAY_COPY: Record<MainSlot, { title: string; support: string }> = {
+  breakfast: {
+    title: "Which breakfast today?",
+    support: "Pick one and I’ll size it to your morning. Tap another to change your mind.",
+  },
+  lunch: {
+    title: "And for lunch?",
+    support: "One dish, sized to your afternoon — or leave it to Gozlin.",
+  },
+  dinner: {
+    title: "Last one — dinner.",
+    support: "Light or hearty, your call. Leave it open and Gozlin fills it.",
+  },
+};
+
 const TABS = ["Breakfast", "Lunch", "Dinner", "How long"];
+const MEAL_TABS = TABS.slice(0, 3);
+
+const ALL_DAYS: readonly number[] = [0, 1, 2, 3, 4, 5, 6];
 
 /**
  * One colour per pick, in pick order, drawn from the app's data-viz hues so a
@@ -116,11 +135,13 @@ function MenuTabs({
   reached,
   counts,
   onJump,
+  tabs = TABS,
 }: {
   phase: number;
   reached: number;
   counts: number[];
   onJump: (phase: number) => void;
+  tabs?: readonly string[];
 }) {
   const { colors } = useColors();
   const motion = useMotion();
@@ -158,7 +179,7 @@ function MenuTabs({
 
   return (
     <View style={styles.tabs} accessibilityRole="tablist">
-      {TABS.map((label, i) => {
+      {tabs.map((label, i) => {
         const tabPhase = i + 1;
         const isActive = tabPhase === phase;
         const canJump = tabPhase <= reached && !isActive;
@@ -333,16 +354,36 @@ function ModeChoice({
   cuisine,
   dailyKcal,
   samples,
+  dietName,
+  oneDay,
 }: {
   mode: MenuMode;
   onMode: (m: MenuMode) => void;
   cuisine: string | null;
   dailyKcal: number;
   samples: MenuSample[];
+  dietName?: string | null;
+  oneDay?: boolean;
 }) {
   const { colors } = useColors();
   const kcal = dailyKcal.toLocaleString("en-US");
   const kitchen = cuisine ? `${cuisine} ` : "";
+  // Starting a diet from the Diet screen: the dishes are that diet's, so say so.
+  const support = dietName
+    ? `Every dish stays within the ${dietName}${cuisine ? ` and your ${cuisine} kitchen` : ""}, portioned to your ${kcal} kcal.`
+    : cuisine
+      ? `Every dish comes from ${cuisine} cooking, portioned to your ${kcal} kcal.`
+      : `Every dish is portioned to your ${kcal} kcal.`;
+  const autoBody = dietName
+    ? oneDay
+      ? `Gozlin builds today from the ${dietName}’s ${kitchen}dishes.`
+      : `Gozlin builds each day from the ${dietName}’s ${kitchen}dishes — never the same plate two days running.`
+    : `Gozlin builds each day from ${kitchen}dishes and keeps them varied.`;
+  const chooseBody = dietName
+    ? oneDay
+      ? "Pick today’s breakfast, lunch and dinner from this diet. I’ll size the portions and fill any gaps."
+      : "Pick your own breakfasts, lunches and dinners from this diet. I’ll size the portions and fill any gaps."
+    : "Pick your own breakfasts, lunches and dinners. I’ll size the portions and fill any gaps.";
   return (
     <View style={styles.chapter}>
       <View style={styles.question}>
@@ -350,9 +391,7 @@ function ModeChoice({
           How should we plan your meals?
         </AnimatedText>
         <AnimatedText variant="support" color="secondary" delay={120} duration={Dur.content}>
-          {cuisine
-            ? `Every dish comes from ${cuisine} cooking, portioned to your ${kcal} kcal.`
-            : `Every dish is portioned to your ${kcal} kcal.`}
+          {support}
         </AnimatedText>
       </View>
 
@@ -361,7 +400,7 @@ function ModeChoice({
           selected={mode === "auto"}
           onPress={() => onMode("auto")}
           title="Plan them for me"
-          body={`Gozlin builds each day from ${kitchen}dishes and keeps them varied.`}
+          body={autoBody}
           lead={<AILogoBadge size={34} />}
           delay={OPTIONS_DELAY}
         >
@@ -372,7 +411,7 @@ function ModeChoice({
           selected={mode === "choose"}
           onPress={() => onMode("choose")}
           title="Let me choose"
-          body="Pick your own breakfasts, lunches and dinners. I’ll size the portions and fill any gaps."
+          body={chooseBody}
           lead={
             <View style={[styles.leadDisc, { borderColor: alpha(colors.primary, 0.45) }]}>
               <OnboardingGlyph name="plate" tone={colors.primary} size={20} />
@@ -406,6 +445,7 @@ function DishRow({
   days,
   onPress,
   capped,
+  when,
 }: {
   dish: Dish;
   selected: boolean;
@@ -414,7 +454,10 @@ function DishRow({
   days: number[];
   onPress: () => void;
   capped: boolean;
+  /** Overrides the weekday line — "Today" on a one-day plan. */
+  when?: string;
 }) {
+  const dayText = when ?? daysLine(days);
   const { colors } = useColors();
   const motion = useMotion();
   const sel = useSharedValue(selected ? 1 : 0);
@@ -458,7 +501,7 @@ function DishRow({
           press.value = withSpring(0, Spring.press);
         }}
         accessibilityRole="checkbox"
-        accessibilityLabel={`${dish.title}. ${meta}.${selected ? ` ${daysLine(days)}.` : ""}`}
+        accessibilityLabel={`${dish.title}. ${meta}.${selected ? ` ${dayText}.` : ""}`}
         accessibilityState={{ checked: selected, selected }}
         style={styles.dishPad}
       >
@@ -475,9 +518,9 @@ function DishRow({
             {meta}
           </AppText>
           {selected ? (
-            <Appear key={daysLine(days)} delay={0} duration={Dur.ui} distance={4}>
+            <Appear key={dayText} delay={0} duration={Dur.ui} distance={4}>
               <AppText variant="footnote" color={tone} style={styles.daysLine}>
-                {daysLine(days)}
+                {dayText}
               </AppText>
             </Appear>
           ) : null}
@@ -497,6 +540,8 @@ const CUT_WORDS = [
   "rice", "beans", "yam", "plantain", "pap", "akara", "moi-moi", "soup", "swallow", "stew",
   "porridge", "egg", "fish", "chicken", "salad", "oats", "toast", "yogurt", "pasta",
   "potato", "wrap", "bowl", "lentil", "chickpea", "tofu", "quinoa", "omelette",
+  // The Asian kitchen's own staples.
+  "curry", "noodle", "dal", "roti", "congee",
 ];
 
 function cutsFor(dishes: Dish[]): string[] {
@@ -555,6 +600,8 @@ function SlotChapter({
   onCycleDay,
   metaFor,
   maxPicks,
+  active = ALL_DAYS,
+  planLength = 7,
 }: {
   slot: MainSlot;
   dishes: Dish[];
@@ -564,10 +611,22 @@ function SlotChapter({
   onCycleDay: (slot: MainSlot, day: number) => void;
   metaFor: (dish: Dish) => string;
   maxPicks: number;
+  /** The weekdays the plan reaches, Monday = 0. Every day, unless it is shorter than a week. */
+  active?: readonly number[];
+  /** How many days the plan runs. */
+  planLength?: number;
 }) {
   const { colors } = useColors();
   const tones = pickTones(colors);
-  const copy = SLOT_COPY[slot];
+  const oneDay = planLength === 1;
+  const copy = oneDay
+    ? { ...SLOT_COPY[slot], ...ONE_DAY_COPY[slot] }
+    : planLength < 7 && slot === "breakfast"
+      ? {
+          ...SLOT_COPY[slot],
+          support: `Pick a few. I’ll rotate them through your ${planLength} days and size each one to your morning.`,
+        }
+      : SLOT_COPY[slot];
   const [cut, setCut] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [showStaples, setShowStaples] = useState(dishes.length < 12);
@@ -588,7 +647,8 @@ function SlotChapter({
     return tones[(at < 0 ? picks.length : at) % tones.length]!;
   };
   const week = draft.weeks[slot];
-  const marks: WeekMark[] = week.map((key) => {
+  const marks: WeekMark[] = week.map((key, day) => {
+    if (!active.includes(day)) return { label: null, tone: null, spoken: "", inactive: true };
     const dish = key ? draft.dishes[key] : undefined;
     return dish
       ? { label: monogram(dish.title), tone: toneOf(dish.key), spoken: dish.title }
@@ -603,8 +663,9 @@ function SlotChapter({
   const visibleStaples = staples.filter((d) => !q || d.title.toLowerCase().includes(q));
   const listed = paged(visible, shown, draft.dishes);
   const listedStaples = paged(visibleStaples, staplesShown, draft.dishes);
-  const capped = picks.length >= maxPicks;
-  const gozlinDays = week.filter((k) => k === null).length;
+  // A one-dish meal is a radio: a new tap replaces the pick, so nothing is "full".
+  const capped = maxPicks > 1 && picks.length >= maxPicks;
+  const gozlinDays = active.filter((d) => week[d] === null).length;
 
   const row = (dish: Dish, i: number) => {
     const selected = !!draft.dishes[dish.key];
@@ -625,6 +686,7 @@ function SlotChapter({
           days={selected ? week.flatMap((k, d) => (k === dish.key ? [d] : [])) : []}
           capped={capped}
           onPress={() => onToggleDish(dish)}
+          when={oneDay ? "Today" : undefined}
         />
       </Appear>
     );
@@ -644,23 +706,26 @@ function SlotChapter({
         </AnimatedText>
       </View>
 
-      {/* The week — the one place days are assigned, drawn as the picture of them. */}
-      <Appear delay={OPTIONS_DELAY} duration={Dur.content} distance={8}>
-        <View style={[styles.weekCard, { backgroundColor: alpha(colors.surface, 0.55), borderColor: alpha(colors.border, 0.9) }]}>
-          <WeekStrip
-            marks={marks}
-            onPressDay={picks.length > 0 ? (day) => onCycleDay(slot, day) : undefined}
-            delay={OPTIONS_DELAY + 80}
-          />
-          <AppText variant="footnote" color="tertiary" align="center" accessibilityLiveRegion="polite">
-            {picks.length === 0
-              ? `Nothing picked — Gozlin will choose every ${slot}.`
-              : gozlinDays > 0
-                ? `Gozlin fills ${gozlinDays === 1 ? "one day" : `${gozlinDays} days`}. Tap a day to change it.`
-                : "Tap a day to swap what’s on it."}
-          </AppText>
-        </View>
-      </Appear>
+      {/* The week — the one place days are assigned, drawn as the picture of them.
+          A one-day plan has nothing to arrange, so it has no week. */}
+      {oneDay ? null : (
+        <Appear delay={OPTIONS_DELAY} duration={Dur.content} distance={8}>
+          <View style={[styles.weekCard, { backgroundColor: alpha(colors.surface, 0.55), borderColor: alpha(colors.border, 0.9) }]}>
+            <WeekStrip
+              marks={marks}
+              onPressDay={picks.length > 0 ? (day) => onCycleDay(slot, day) : undefined}
+              delay={OPTIONS_DELAY + 80}
+            />
+            <AppText variant="footnote" color="tertiary" align="center" accessibilityLiveRegion="polite">
+              {picks.length === 0
+                ? `Nothing picked — Gozlin will choose every ${slot}.`
+                : gozlinDays > 0
+                  ? `Gozlin fills ${gozlinDays === 1 ? "one day" : `${gozlinDays} days`}. Tap a day to change it.`
+                  : "Tap a day to swap what’s on it."}
+            </AppText>
+          </View>
+        </Appear>
+      )}
 
       {dishes.length >= 12 ? (
         <Appear delay={OPTIONS_DELAY + 100} duration={Dur.ui} distance={6}>
@@ -719,7 +784,9 @@ function SlotChapter({
 
       {capped ? (
         <AppText variant="footnote" color="tertiary" accessibilityLiveRegion="polite">
-          {maxPicks} is plenty to rotate through a week — remove one to add another.
+          {planLength < 7
+            ? `${maxPicks} is plenty for ${planLength} days — remove one to add another.`
+            : `${maxPicks} is plenty to rotate through a week — remove one to add another.`}
         </AppText>
       ) : null}
 
@@ -889,10 +956,21 @@ export interface MenuPlannerProps {
   /** The line under each dish: the portion it would actually be served at. */
   metaFor: (dish: Dish) => string;
   maxPicks: number;
-  lengths: readonly MenuLength[];
-  length: number;
-  onLength: (days: number) => void;
-  width: number;
+  /**
+   * Whether the planner asks "how long?" as its last beat. Onboarding does; the
+   * Diet screen has already asked by the time it opens the planner.
+   */
+  showLength?: boolean;
+  lengths?: readonly MenuLength[];
+  length?: number;
+  onLength?: (days: number) => void;
+  width?: number;
+  /** The diet the dishes come from, when one was chosen first (the Diet screen). */
+  dietName?: string | null;
+  /** The weekdays the plan reaches, Monday = 0 — all seven unless it is shorter than a week. */
+  active?: readonly number[];
+  /** How many days the plan runs, when known up front. */
+  planLength?: number;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -910,10 +988,14 @@ export function MenuPlanner({
   onCycleDay,
   metaFor,
   maxPicks,
+  showLength = true,
   lengths,
   length,
   onLength,
   width,
+  dietName,
+  active = ALL_DAYS,
+  planLength = 7,
   style,
 }: MenuPlannerProps) {
   // The furthest beat visited — tabs up to it can be jumped back to.
@@ -923,24 +1005,35 @@ export function MenuPlanner({
   const counts = (["breakfast", "lunch", "dinner"] as MainSlot[]).map(
     (s) => Object.values(draft.dishes).filter((d) => d.slot === s).length,
   );
+  const asksLength = showLength && !!lengths && length !== undefined && !!onLength;
 
   const body = () => {
     if (phase === 0) {
-      return <ModeChoice mode={mode} onMode={onMode} cuisine={cuisine} dailyKcal={dailyKcal} samples={samples} />;
+      return (
+        <ModeChoice
+          mode={mode}
+          onMode={onMode}
+          cuisine={cuisine}
+          dailyKcal={dailyKcal}
+          samples={samples}
+          dietName={dietName}
+          oneDay={planLength === 1}
+        />
+      );
     }
-    if (phase === 4) {
+    if (phase === 4 && asksLength) {
       return (
         <LengthChapter
-          lengths={lengths}
-          length={length}
-          onLength={onLength}
+          lengths={lengths!}
+          length={length!}
+          onLength={onLength!}
           draft={draft}
-          width={width}
+          width={width ?? 0}
           cuisine={cuisine}
         />
       );
     }
-    const slot = SLOT_OF_PHASE[phase] ?? "breakfast";
+    const slot = SLOT_OF_PHASE[phase] ?? "dinner";
     return (
       <SlotChapter
         key={slot}
@@ -952,6 +1045,8 @@ export function MenuPlanner({
         onCycleDay={onCycleDay}
         metaFor={metaFor}
         maxPicks={maxPicks}
+        active={active}
+        planLength={planLength}
       />
     );
   };
@@ -960,7 +1055,13 @@ export function MenuPlanner({
     <View style={[styles.wrap, style]}>
       {phase > 0 ? (
         <Appear duration={Dur.ui} distance={6}>
-          <MenuTabs phase={phase} reached={reached} counts={counts} onJump={onJump} />
+          <MenuTabs
+            phase={phase}
+            reached={reached}
+            counts={counts}
+            onJump={onJump}
+            tabs={asksLength ? TABS : MEAL_TABS}
+          />
         </Appear>
       ) : null}
       <CrossFade contentKey={phase} style={styles.stage}>

@@ -37,6 +37,8 @@ export interface RecoveryAdjustment {
   delta: number;
   /** Human drivers for the explainability trail. */
   drivers: string[];
+  /** The drivers that cost points, in the same order — what to name when recovery is held down. */
+  against: string[];
   /** True once at least one real wearable metric contributed. */
   hasSignal: boolean;
 }
@@ -53,20 +55,23 @@ function clamp(n: number, lo: number, hi: number): number {
 export function recoveryAdjustment(w: WearableSnapshot): RecoveryAdjustment {
   let delta = 0;
   const drivers: string[] = [];
+  const against: string[] = [];
   let hasSignal = false;
+  const cost = (points: number, driver: string) => {
+    delta -= points;
+    drivers.push(driver);
+    against.push(driver);
+  };
 
   if (typeof w.sleepHours === "number") {
     hasSignal = true;
     const h = w.sleepHours;
     if (h < 5) {
-      delta -= 18;
-      drivers.push(`only ${h.toFixed(1)}h sleep last night`);
+      cost(18, `only ${h.toFixed(1)}h sleep last night`);
     } else if (h < 6) {
-      delta -= 10;
-      drivers.push(`${h.toFixed(1)}h sleep (short)`);
+      cost(10, `${h.toFixed(1)}h sleep (short)`);
     } else if (h < 7) {
-      delta -= 4;
-      drivers.push(`${h.toFixed(1)}h sleep`);
+      cost(4, `${h.toFixed(1)}h sleep`);
     } else if (h >= 8) {
       delta += 6;
       drivers.push(`${h.toFixed(1)}h sleep (well rested)`);
@@ -77,11 +82,9 @@ export function recoveryAdjustment(w: WearableSnapshot): RecoveryAdjustment {
     hasSignal = true;
     const ratio = w.hrvMs / w.hrvBaselineMs;
     if (ratio < 0.8) {
-      delta -= 14;
-      drivers.push("HRV well below your baseline");
+      cost(14, "HRV well below your baseline");
     } else if (ratio < 0.9) {
-      delta -= 7;
-      drivers.push("HRV a bit below baseline");
+      cost(7, "HRV a bit below baseline");
     } else if (ratio > 1.1) {
       delta += 6;
       drivers.push("HRV above your baseline");
@@ -95,11 +98,10 @@ export function recoveryAdjustment(w: WearableSnapshot): RecoveryAdjustment {
     w.restingHr > w.restingHrBaselineMs + 6
   ) {
     hasSignal = true;
-    delta -= 5;
-    drivers.push("resting heart rate elevated");
+    cost(5, "resting heart rate elevated");
   }
 
-  return { delta: clamp(delta, -30, 12), drivers, hasSignal };
+  return { delta: clamp(delta, -30, 12), drivers, against, hasSignal };
 }
 
 /** A short basis string describing which real metrics were used (for RecoveryState.basis). */

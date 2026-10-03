@@ -115,6 +115,12 @@ export const KEYS = {
   TRACKING_MODE: "@welliva_tracking_mode",
   /** User overrides for daily nutrition targets, when they set their own. */
   CUSTOM_TARGETS: "@welliva_custom_targets",
+  /**
+   * The Diet screen's "did you have these?" nudge: which unlogged day it last
+   * asked about, when it first appeared, and whether it has ended. Device-local
+   * (services/nutrition/backlogNudge).
+   */
+  BACKLOG_NUDGE: "@welliva_backlog_nudge",
 
   // --- Legal -----------------------------------------------------------------
   /** Which legal version this account accepted (services/legal/LegalAcceptance). */

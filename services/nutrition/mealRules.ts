@@ -33,9 +33,19 @@ export function mealCuisine(meal: { cuisine?: MealCuisine; isNigerian?: boolean 
 /** The catalog cuisine a preference asks for. `mixed` asks for none in particular. */
 export const PREFERENCE_CUISINE: Record<Exclude<CuisinePreference, "mixed">, MealCuisine> = {
   african: "Nigerian",
+  asian: "Asian",
   western: "Western",
   mediterranean: "Mediterranean",
 };
+
+/**
+ * How a kitchen reads on a label. The West-African kitchen is stored as
+ * "Nigerian" — the name it had before it held Ghanaian and Senegalese dishes —
+ * so a chip that says so would mislabel waakye and thieboudienne.
+ */
+export function cuisineLabel(cuisine: MealCuisine): string {
+  return cuisine === "Nigerian" ? "West African" : cuisine;
+}
 
 /** The cuisine a preference asks for, or null for "a bit of everything". */
 export function preferredCuisine(pref: CuisinePreference | undefined): MealCuisine | null {
@@ -47,6 +57,8 @@ export function cuisineWord(pref: CuisinePreference | undefined): string {
   switch (pref) {
     case "african":
       return "African";
+    case "asian":
+      return "Asian";
     case "western":
       return "Western";
     case "mediterranean":
@@ -74,6 +86,7 @@ export function servesPreference(
 export const CUISINE_NAMED_DIETS: Record<string, MealCuisine> = {
   mediterranean: "Mediterranean",
   "traditional-african": "Nigerian",
+  "traditional-asian": "Asian",
 };
 
 /**
@@ -84,6 +97,7 @@ export const CUISINE_NAMED_DIETS: Record<string, MealCuisine> = {
  */
 const NEIGHBOUR_CUISINES: Record<MealCuisine, MealCuisine[]> = {
   Nigerian: [],
+  Asian: [],
   Western: ["Mediterranean"],
   Mediterranean: ["Western"],
   Universal: [],
@@ -105,6 +119,19 @@ export function signatureDietFor(pref: CuisinePreference | undefined): string | 
   return hit ? hit[0] : null;
 }
 
+/**
+ * Ordered cuisine tiers for a preference. A planner tries each tier in turn and
+ * uses the first that holds enough dishes, so a preference NARROWS the pool when
+ * it can but never starves a slot. `null` = no preference ("a bit of everything").
+ * The second tier is the kitchen plus its neighbours (NEIGHBOUR_CUISINES) and the
+ * cuisine-neutral staples.
+ */
+export function cuisineTiers(pref: CuisinePreference | undefined): MealCuisine[][] | null {
+  const want = preferredCuisine(pref);
+  if (!want) return null;
+  return [[want], [want, ...NEIGHBOUR_CUISINES[want], "Universal"]];
+}
+
 // ============================================================================
 // DIETARY RESTRICTION
 // ============================================================================
@@ -120,6 +147,9 @@ const MEAT = [
   "chicken", "turkey", "duck", "liver", "kidney", "meat", "meats", "gizzard", "shawarma",
   "kebab", "prosciutto", "salami", "chorizo", "pepperoni", "veal", "oxtail", "burger",
   "meatball", "meatballs", "bolognese", "pancetta", "gyro", "souvlaki", "kofta",
+  // The Asian kitchen's meat words that don't say "meat".
+  "lechon", "chashu", "char siu", "bulgogi", "tonkatsu", "galbi", "kalbi", "keema",
+  "tocino", "longganisa",
 ];
 const FISH = [
   "fish", "salmon", "tuna", "mackerel", "sardine", "sardines", "tilapia", "catfish", "cod",
@@ -127,21 +157,33 @@ const FISH = [
   "crayfish", "seafood", "crab", "lobster", "mussel", "mussels", "clam", "clams",
   "oyster", "oysters", "calamari", "squid", "octopus", "periwinkle", "stockfish",
   "herring", "sea bass", "seabass", "bream", "hake", "scallop", "scallops",
+  // Fish that hides in a broth or a condiment: dashi and bonito (Japanese stock),
+  // nam pla and patis (Thai and Filipino fish sauce), bagoong and belacan (fish
+  // or shrimp pastes), ikan bilis (dried anchovies).
+  "dashi", "bonito", "katsuobushi", "eel", "unagi", "nam pla", "patis", "bagoong",
+  "belacan", "ikan bilis",
 ];
 const SHELLFISH = [
   "shrimp", "shrimps", "prawn", "prawns", "crayfish", "crab", "lobster", "mussel",
   "mussels", "clam", "clams", "oyster", "oysters", "periwinkle", "scallop", "scallops",
-  "calamari", "squid", "octopus", "seafood",
+  "calamari", "squid", "octopus", "seafood", "bagoong", "belacan",
 ];
-const PORK = ["pork", "bacon", "ham", "prosciutto", "salami", "chorizo", "pepperoni", "pancetta", "lard"];
+const PORK = [
+  "pork", "bacon", "ham", "prosciutto", "salami", "chorizo", "pepperoni", "pancetta", "lard",
+  "lechon", "chashu", "char siu", "tonkatsu", "tocino", "longganisa",
+];
 const DAIRY = [
   "milk", "cheese", "yogurt", "yoghurt", "butter", "cream", "whey", "ghee", "paneer",
   "feta", "parmesan", "mozzarella", "ricotta", "halloumi", "labneh", "kefir", "tzatziki",
   "custard", "latte", "cheesecake", "gouda", "cheddar", "brie", "burrata", "skyr",
+  // South Asian dairy that doesn't say "milk": lassi, raita, dahi and curd
+  // (yoghurt), malai (cream), makhani (butter gravy), kheer (milk pudding).
+  "lassi", "raita", "dahi", "curd", "malai", "makhani", "kheer", "nono",
 ];
-const EGG = ["egg", "eggs", "omelet", "omelette", "frittata", "shakshuka", "quiche"];
+const EGG = ["egg", "eggs", "omelet", "omelette", "frittata", "shakshuka", "quiche", "tamagoyaki", "tamago"];
 const HONEY = ["honey"];
-const ALCOHOL = ["wine", "beer", "rum", "brandy", "sherry", "vodka", "liqueur"];
+// Mirin, sake and Shaoxing wine are how alcohol reaches a teriyaki or a glaze.
+const ALCOHOL = ["wine", "beer", "rum", "brandy", "sherry", "vodka", "liqueur", "mirin", "sake", "shaoxing", "soju"];
 const GLUTEN = [
   "bread", "toast", "pasta", "spaghetti", "noodle", "noodles", "couscous", "bulgur",
   "barley", "rye", "wheat", "semolina", "semovita", "flour", "cracker", "crackers",
@@ -150,6 +192,11 @@ const GLUTEN = [
   "sandwich", "bun", "breadcrumbs", "lasagne", "lasagna", "gnocchi", "orzo", "penne",
   "fusilli", "ravioli", "tagliatelle", "linguine", "sourdough", "baguette", "ciabatta",
   "focaccia", "brioche", "granola", "crumble",
+  // Soy sauce is brewed with wheat (tamari is the gluten-free one), and so are
+  // the sauces built on it; the rest are wheat breads, noodles and wrappers.
+  "soy sauce", "teriyaki", "gochujang", "doubanjiang", "udon", "ramen", "soba",
+  "dumpling", "dumplings", "gyoza", "wonton", "wontons", "bao", "naan", "chapati",
+  "chapatis", "roti", "rotis", "paratha", "puri", "samosa", "samosas", "tempura", "panko",
 ];
 
 /**
@@ -164,11 +211,22 @@ const EXEMPT: RegExp[] = [
   /(soy|soya|almond|oat|coconut|rice|cashew|plant) (milk|yogh?urt|cream)/g,
   /buckwheat/g, // a seed, not wheat
   /butter ?beans?/g, // lima beans
+  // Gluten-free noodles and flours that would otherwise read as wheat.
+  /(rice|glass|shirataki)[ -]noodles?/g,
+  /(gram|chickpea|besan|rice|cassava|plantain|yam|corn|maize|millet|sorghum|teff|bambara)[ -]flour/g,
+  /bean ?curd/g, // tofu, not dairy curd
+  /kidney ?beans?/g, // rajma — a legume, not offal
 ];
 
-/** Negations the catalog writes into names: "(no meat/fish)", "fish-free", "without egg". */
+/**
+ * Negations the catalog writes into names: "(no meat/fish)", "fish-free", "without egg".
+ *
+ * A negation ends at a comma. "Okra Soup (no swallow, extra fish)" negates the
+ * swallow, not the fish — reading on to the bracket used to strip ", extra fish"
+ * with it and serve that soup to vegetarians.
+ */
 const NEGATIONS: RegExp[] = [
-  /\b(no|without|free of|minus)\s+[a-z/&, -]+?(?=[)+;]|$)/g,
+  /\b(no|without|free of|minus)\s+[a-z/& -]+?(?=[),+;]|$)/g,
   /\b[a-z]+-free\b/g,
 ];
 
@@ -259,16 +317,33 @@ export function restrictionWord(restriction: DietaryRestriction): string {
 // ALLERGIES & DISLIKES
 // ============================================================================
 
+/**
+ * Allergies are matched as SUBSTRINGS (see hasAllergen), and these short words
+ * hide inside longer ones: "eel" in "steel-cut oats", "lassi" in "classic",
+ * "patis" in "patisserie". Anchored to a leading space, they still catch "Grilled
+ * Eel" and "Mango Lassi" without striking oats off an allergy plan.
+ */
+const SUBSTRING_TRAPS = new Set(["eel", "patis", "lassi", "curd", "dahi", "nono", "malai"]);
+const forAllergy = (words: string[]): string[] =>
+  words.map((w) => (SUBSTRING_TRAPS.has(w) ? ` ${w}` : w));
+
 /** Allergy tokens the user can pick, expanded to the words a meal name would use. */
 const ALLERGY_WORDS: Record<string, string[]> = {
-  peanuts: ["peanut", "peanuts", "groundnut", "groundnuts", "peanut butter"],
+  // Satay sauce and kuli-kuli are groundnut by another name.
+  peanuts: ["peanut", "peanuts", "groundnut", "groundnuts", "peanut butter", "satay", "kuli"],
   tree_nuts: ["almond", "almonds", "cashew", "cashews", "walnut", "walnuts", "hazelnut", "pecan", "pistachio", "pistachios", "nuts"],
-  dairy: DAIRY,
+  dairy: forAllergy(DAIRY),
   eggs: EGG,
   shellfish: SHELLFISH,
-  fish: FISH.filter((w) => !SHELLFISH.includes(w)),
-  wheat: ["wheat", "bread", "toast", "pasta", "couscous", "semolina", "semovita", "flour"],
-  soy: ["soy", "soya", "tofu", "tempeh", "edamame", "miso"],
+  fish: forAllergy(FISH.filter((w) => !SHELLFISH.includes(w))),
+  wheat: [
+    "wheat", "bread", "toast", "pasta", "couscous", "semolina", "semovita", "flour",
+    "chapati", "naan", "paratha", "udon", "ramen", "soba", "dumpling", "soy sauce",
+    // Matched as substrings, so the short ones carry their spaces: "roti" alone
+    // is inside "protein", and "bao" inside "baobab".
+    " roti", " bao ",
+  ],
+  soy: ["soy", "soya", "tofu", "tempeh", "edamame", "miso", "natto"],
   gluten: GLUTEN,
 };
 
@@ -288,6 +363,32 @@ export function hasAllergen(name: string, allergies: string[] | undefined): bool
     if (!token) return false;
     const words = ALLERGY_WORDS[token] ?? ALLERGY_WORDS[token.replace(/\s+/g, "_")] ?? [token];
     return words.some((w) => lower.includes(w));
+  });
+}
+
+/**
+ * Dislike families → the words a meal name would use. A stored dislike like
+ * "dairy" (Adaptive Nutrition's detector writes these) excludes "Cheese Omelet"
+ * and "Greek Yogurt Bowl", not just meals literally named "dairy".
+ */
+const DISLIKE_WORDS: Record<string, string[]> = {
+  dairy: ["milk", "cheese", "yogurt", "yoghurt", "butter", "cream", "dairy"],
+  egg: ["egg", "omelet", "omelette", "frittata"],
+  eggs: ["egg", "omelet", "omelette", "frittata"],
+  fish: ["fish", "salmon", "tuna", "mackerel", "sardine", "shrimp", "prawn", "seafood", "tilapia", "catfish"],
+  "red-meat": ["beef", "steak", "lamb", "mutton", "goat", "pork", "bacon"],
+  poultry: ["chicken", "turkey"],
+  legume: ["bean", "lentil", "chickpea", "moimoi", "moi-moi", "akara", "hummus"],
+};
+
+/** Does a meal name touch something the user said they don't eat? */
+export function hasDislike(name: string, dislikes: string[] | undefined): boolean {
+  if (!dislikes || dislikes.length === 0) return false;
+  const lower = name.toLowerCase();
+  return dislikes.some((raw) => {
+    const token = raw.trim().toLowerCase();
+    if (!token) return false;
+    return (DISLIKE_WORDS[token] ?? [token]).some((w) => lower.includes(w));
   });
 }
 

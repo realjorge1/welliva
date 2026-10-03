@@ -48,6 +48,9 @@ describe("no tier gates the diet catalog", () => {
       (f) => !tierAllowsFeature("free", f as keyof typeof FEATURE_MIN_TIER),
     );
     expect(lockedForFree.sort()).toEqual([
+      // Today's session eased to recovery. The plan itself — built, progressed
+      // and explained from the user's data — is free.
+      "adaptive-training",
       "ai-plans",
       "coach-limit",
       "deep-dive",
@@ -67,8 +70,9 @@ describe("no tier gates the diet catalog", () => {
 });
 
 describe("the catalog as a whole", () => {
-  it("is 28 diets, every one of them free", () => {
-    expect(ALL_IDS.length).toBe(28);
+  it("is 29 diets, every one of them free", () => {
+    // 28 + the Traditional Asian Diet (2026-10), the "asian" cuisine's own plan.
+    expect(ALL_IDS.length).toBe(29);
   });
 
   it("has no duplicate ids", () => {
@@ -89,7 +93,7 @@ describe("the Condition mode label", () => {
     }
   });
 
-  it("labels 13 of the 28 diets", () => {
+  it("labels 13 of the 29 diets", () => {
     // Pinned so a plan changing sides is a red build with a diff to review,
     // not a silent edit to a list nobody reads.
     expect(CONDITION_DIET_IDS.length).toBe(13);

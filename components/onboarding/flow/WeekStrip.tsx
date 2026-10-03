@@ -38,6 +38,11 @@ export interface WeekMark {
   tone: string | null;
   /** What the day holds, spoken: "Akara and Pap". */
   spoken: string;
+  /**
+   * A weekday the plan never reaches ("just today" has one day; three days
+   * have three). Drawn faint and untappable — nothing put there would be served.
+   */
+  inactive?: boolean;
 }
 
 function DayCell({
@@ -75,8 +80,10 @@ function DayCell({
 
   const discStyle = useAnimatedStyle(() => ({ transform: [{ scale: pop.value }] }));
 
-  const planned = mark.label !== null && mark.tone !== null;
+  const inactive = !!mark.inactive;
+  const planned = !inactive && mark.label !== null && mark.tone !== null;
   const tone = mark.tone ?? colors.textTertiary;
+  const press = inactive ? undefined : onPress;
 
   const disc = (
     <Animated.View
@@ -85,7 +92,11 @@ function DayCell({
         { width: size, height: size, borderRadius: size / 2 },
         planned
           ? { backgroundColor: alpha(tone, 0.16), borderColor: alpha(tone, 0.7), borderStyle: "solid" }
-          : { backgroundColor: "transparent", borderColor: alpha(colors.textTertiary, 0.55), borderStyle: "solid" },
+          : {
+              backgroundColor: "transparent",
+              borderColor: alpha(colors.textTertiary, inactive ? 0.2 : 0.55),
+              borderStyle: "solid",
+            },
         discStyle,
       ]}
     >
@@ -93,7 +104,7 @@ function DayCell({
         <AppText variant="caption" color={tone} style={styles.mono} numberOfLines={1}>
           {mark.label}
         </AppText>
-      ) : (
+      ) : inactive ? null : (
         <OnboardingGlyph name="spark" tone={alpha(colors.textTertiary, 0.9)} size={size * 0.46} weight={1.8} />
       )}
     </Animated.View>
@@ -103,19 +114,21 @@ function DayCell({
     <Appear delay={enterDelay} duration={Dur.ui} distance={6} style={styles.cell}>
       <Pressable
         onPress={
-          onPress
+          press
             ? () => {
                 selectHaptic();
-                onPress();
+                press();
               }
             : undefined
         }
-        disabled={!onPress}
+        disabled={!press}
         hitSlop={4}
-        accessibilityRole={onPress ? "button" : "text"}
-        accessibilityLabel={`${DAY_NAMES[index]}: ${planned ? mark.spoken : "Gozlin picks"}.`}
-        accessibilityHint={onPress ? "Changes what is on this day." : undefined}
-        style={styles.press}
+        accessibilityRole={press ? "button" : "text"}
+        accessibilityLabel={`${DAY_NAMES[index]}: ${
+          inactive ? "not part of this plan" : planned ? mark.spoken : "Gozlin picks"
+        }.`}
+        accessibilityHint={press ? "Changes what is on this day." : undefined}
+        style={[styles.press, inactive && styles.faint]}
       >
         {showLetter ? (
           <AppText variant="caption" color="tertiary">
@@ -167,6 +180,7 @@ export function WeekStrip({
 const styles = StyleSheet.create({
   row: { flexDirection: "row", justifyContent: "space-between" },
   cell: { flex: 1, alignItems: "center" },
+  faint: { opacity: 0.45 },
   press: { alignItems: "center", gap: Spacing.xs, paddingVertical: 2 },
   disc: { alignItems: "center", justifyContent: "center", borderWidth: 1 },
   mono: { letterSpacing: 0.4 },

@@ -91,6 +91,10 @@ export const DEVICE_LOCAL_KEYS: readonly string[] = [
   // within hours anyway — syncing them would push churn to the cloud to
   // suppress a prompt that has already lapsed by the time it lands.
   "@welliva_deck_dismissed_v1",
+  // the Diet screen's "did you have these?" nudge — when THIS phone showed it
+  // and whether it has ended (services/nutrition/backlogNudge). Its five
+  // minutes are a moment on one screen; the meals it asks about sync anyway.
+  "@welliva_backlog_nudge",
   // sync engine bookkeeping
   "@welliva_profile_synced_at",
   "@welliva_sync_telemetry",

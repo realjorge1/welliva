@@ -4,6 +4,14 @@
  * Hero art, coach persona, personal fit %, block-by-block breakdown
  * (warm-up / workout / cool-down) and one big Start button that launches the
  * EXISTING guided-session player with the catalog's param bundle.
+ *
+ * "LET ME CHOOSE" ENDS HERE. A workout can be put on one of the user's
+ * training days: opened from the week rail's "Pick" (`?pickDay=`), the page
+ * leads with "Use on Tuesday"; opened any other way, "Put it on my week"
+ * offers the training days. Either way the choice is written to the fitness
+ * profile and the plan rebuilds itself from it — the workout's moves, with
+ * reps set for the user's level and anything unsafe for them swapped, each
+ * swap saying why (services/training/week.ts).
  */
 
 import { AppText, Button, Card, Pill, Screen, useColors } from "@/components/ui";
@@ -14,16 +22,21 @@ import { CoachBadge } from "@/fitness/components/CoachBadge";
 import { getCoach } from "@/fitness/data/coaches";
 import { useFitnessProfile } from "@/fitness/hooks/useFitnessProfile";
 import {
+  loadFitnessProfile,
+  updateFitnessProfile,
+} from "@/fitness/services/FitnessProfileStore";
+import {
   flattenWorkout,
   getWorkout,
   workoutSuitability,
   workoutToPlayerParams,
   type FlatWorkoutItem,
 } from "@/fitness/services/WorkoutCatalog";
+import { DAY_NAMES, DAY_SHORT, resolveTrainingPrefs } from "@/services/training";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "@/utils/haptics";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
 const BLOCK_TITLES: Record<FlatWorkoutItem["block"], string> = {
@@ -33,10 +46,10 @@ const BLOCK_TITLES: Record<FlatWorkoutItem["block"], string> = {
 };
 
 export default function WorkoutDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, pickDay: pickDayParam } = useLocalSearchParams<{ id: string; pickDay?: string }>();
   const { colors } = useColors();
   const { userBio } = useProfile();
-  const { toggleFavorite, isFavorite } = useFitnessProfile();
+  const { profile, toggleFavorite, isFavorite } = useFitnessProfile();
 
   const workout = useMemo(() => (id ? getWorkout(id) : null), [id]);
   const items = useMemo(() => (workout ? flattenWorkout(workout) : []), [workout]);
@@ -45,12 +58,46 @@ export default function WorkoutDetailScreen() {
     [workout, userBio],
   );
 
+  // The user's training days (the same reading the plan uses), the day this
+  // page was opened to fill — if any — and where this workout already sits.
+  const trainingDays = useMemo(() => resolveTrainingPrefs(userBio, profile).days, [userBio, profile]);
+  const pickDay = useMemo(() => {
+    const d = Number(pickDayParam);
+    return Number.isInteger(d) && trainingDays.includes(d) ? d : null;
+  }, [pickDayParam, trainingDays]);
+  const onDays = useMemo(
+    () =>
+      profile.planMode === "chosen" && workout
+        ? (profile.chosenWorkouts ?? []).filter((c) => c.workoutId === workout.id).map((c) => c.day)
+        : [],
+    [profile.planMode, profile.chosenWorkouts, workout],
+  );
+  const [choosingDay, setChoosingDay] = useState(false);
+
   const handleStart = useCallback(() => {
     if (!workout) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     const params = workoutToPlayerParams(workout);
     router.push({ pathname: "/guided-session", params });
   }, [workout]);
+
+  /** Put this workout on a training day; the plan rebuilds from the profile. */
+  const putOnDay = useCallback(
+    async (day: number) => {
+      if (!workout) return;
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      const current = await loadFitnessProfile();
+      const others = (current.chosenWorkouts ?? []).filter((c) => c.day !== day);
+      await updateFitnessProfile({
+        planMode: "chosen",
+        chosenWorkouts: [...others, { day, workoutId: workout.id }],
+      });
+      setChoosingDay(false);
+      // Opened to fill a day: the choice is made, go back to the week.
+      if (pickDay !== null) router.dismissTo("/exercise" as never);
+    },
+    [workout, pickDay],
+  );
 
   if (!workout) {
     return (
@@ -133,7 +180,60 @@ export default function WorkoutDetailScreen() {
         </View>
       </View>
 
-      <Button label="Start workout" icon="play" onPress={handleStart} style={styles.startBtn} />
+      {pickDay !== null ? (
+        <>
+          <Button
+            label={`Use on ${DAY_NAMES[pickDay]}`}
+            icon="calendar"
+            onPress={() => void putOnDay(pickDay)}
+            style={styles.pickBtn}
+          />
+          <Button label="Start it now instead" icon="play" variant="tonal" onPress={handleStart} style={styles.startBtn} />
+        </>
+      ) : (
+        <>
+          <Button label="Start workout" icon="play" onPress={handleStart} style={styles.pickBtn} />
+          <Button
+            label={onDays.length > 0 ? `On your week: ${onDays.map((d) => DAY_SHORT[d]).join(", ")}` : "Put it on my week"}
+            icon="calendar-outline"
+            variant="tonal"
+            onPress={() => setChoosingDay((v) => !v)}
+            style={choosingDay ? styles.pickBtn : styles.startBtn}
+          />
+          {choosingDay && (
+            <View style={styles.dayChooser}>
+              <AppText variant="footnote" color="tertiary">
+                Which training day? It replaces whatever that day had — reps are set for your level.
+              </AppText>
+              <View style={styles.dayChips}>
+                {trainingDays.map((d) => {
+                  const here = onDays.includes(d);
+                  return (
+                    <Pressable
+                      key={d}
+                      onPress={() => void putOnDay(d)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Put ${workout.name} on ${DAY_NAMES[d]}`}
+                      accessibilityState={{ selected: here }}
+                      style={[
+                        styles.dayChip,
+                        {
+                          borderColor: here ? colors.primary : colors.border,
+                          backgroundColor: here ? alpha(colors.primary, 0.14) : colors.surface,
+                        },
+                      ]}
+                    >
+                      <AppText variant="callout" weight="600" color={here ? "brand" : "secondary"}>
+                        {DAY_SHORT[d]}
+                      </AppText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+        </>
+      )}
 
       {/* Coach */}
       <Card style={styles.block} padding="lg">
@@ -316,7 +416,19 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     justifyContent: "center",
   },
-  startBtn: { marginVertical: Spacing.xl },
+  startBtn: { marginBottom: Spacing.xl },
+  pickBtn: { marginTop: Spacing.xl, marginBottom: Spacing.sm },
+  dayChooser: { gap: Spacing.sm, marginBottom: Spacing.xl },
+  dayChips: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm },
+  dayChip: {
+    minWidth: 56,
+    minHeight: 40,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 
   coachRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
   coachMotto: { marginTop: Spacing.md, fontStyle: "italic" },

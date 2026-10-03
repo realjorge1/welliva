@@ -138,6 +138,7 @@ export function buildTwin(input: GozlinSnapshotInput): GozlinTwin {
   const recovery = computeRecovery({
     workoutLog: input.workoutLog,
     todaySession: plannedSession,
+    exerciseLevel: input.bio?.exerciseLevel,
     wearable: input.wearable,
     checkins: input.checkins,
     now,

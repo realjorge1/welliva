@@ -1,12 +1,19 @@
 /**
  * TrainingSelector — the training step as a coaching conversation.
  *
- * Three questions (experience, equipment, days) that used to be three stacked
- * forms on one screen. Here they are DISCLOSED: only the first is on screen to
- * begin with, answering it brings the second into place, and so on. Answered
- * questions stay visible above rather than collapsing away — the user can
- * change an answer without navigating backwards, which is the difference
- * between a conversation and an interrogation.
+ * Experience, equipment, which DAYS, then how the workouts get planned — the
+ * same choice the meal step offers ("Plan them for me" / "Let me choose") —
+ * and, for someone who wants to choose, the workouts themselves. They are
+ * DISCLOSED: only the first is on screen to begin with, answering it brings
+ * the next into place, and so on. Answered questions stay visible above
+ * rather than collapsing away — the user can change an answer without
+ * navigating backwards, which is the difference between a conversation and an
+ * interrogation.
+ *
+ * Days are weekdays, not a count. "3 days" used to become Mon/Wed/Fri behind
+ * the user's back while their reminders went to whatever days setup stored;
+ * the days picked here are the days the plan, the reminders and the weekly
+ * target all use.
  *
  * The reveal state is owned by the STEP, not by this component, because the
  * action bar has to know whether "Continue" means "show me the next question"
@@ -112,6 +119,53 @@ export function DaySelector({
   );
 }
 
+/* ─────────────────────────── Weekday picker ────────────────────────────── */
+
+const LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+/** Seven day tokens, Monday first. The step keeps at least one selected. */
+export function WeekdayPicker({
+  days,
+  onToggle,
+}: {
+  days: readonly number[];
+  onToggle: (day: number) => void;
+}) {
+  const { colors } = useColors();
+  return (
+    <View style={styles.weekdays}>
+      {LETTERS.map((letter, i) => {
+        const on = days.includes(i);
+        return (
+          <Pressable
+            key={WEEKDAYS[i]}
+            onPress={() => {
+              selectHaptic();
+              onToggle(i);
+            }}
+            hitSlop={4}
+            style={[
+              styles.weekday,
+              {
+                borderColor: on ? alpha(colors.primary, 0.6) : alpha(colors.border, 0.9),
+                backgroundColor: on ? alpha(colors.primary, 0.18) : alpha(colors.surface, 0.72),
+              },
+            ]}
+            accessibilityRole="checkbox"
+            accessibilityLabel={WEEKDAYS[i]}
+            accessibilityState={{ checked: on }}
+          >
+            <AppText variant="callout" weight="600" color={on ? "brand" : "tertiary"}>
+              {letter}
+            </AppText>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 /* ────────────────────────────── One phase ──────────────────────────────── */
 
 function Phase({
@@ -160,7 +214,7 @@ function Phase({
 
 /* ─────────────────────────────── The step ──────────────────────────────── */
 
-export interface TrainingSelectorProps<E extends string, Q extends string> {
+export interface TrainingSelectorProps<E extends string, Q extends string, M extends string, W extends string> {
   experienceOptions: GridOption<E>[];
   experience: E;
   onExperience: (v: E) => void;
@@ -169,11 +223,27 @@ export interface TrainingSelectorProps<E extends string, Q extends string> {
   equipment: readonly Q[];
   onEquipment: (v: Q) => void;
 
-  dayOptions: number[];
-  days: number;
-  onDays: (v: number) => void;
+  /** Training weekdays, 0 = Mon. */
+  days: readonly number[];
+  onToggleDay: (day: number) => void;
+  /** "Mon, Wed, Fri — rest days between help you recover." */
+  daysCaption: string;
 
-  /** 1, 2 or 3 — how many questions are on screen. Owned by the step. */
+  /** "Plan them for me" / "Let me choose". */
+  modeOptions: GridOption<M>[];
+  mode: M;
+  onMode: (v: M) => void;
+  /** The mode that asks for picks. */
+  chooseMode: M;
+
+  /** Library workouts to pick from; null while they load. */
+  workoutOptions: GridOption<W>[] | null;
+  picks: readonly W[];
+  onTogglePick: (v: W) => void;
+  /** "Mon: Morning Ignition · Wed: Gozlin plans · …" */
+  picksCaption: string;
+
+  /** 1–5 — how many questions are on screen. Owned by the step. */
   revealed: number;
   /** Called when answering a question should bring the next one into place. */
   onRevealNext: () => void;
@@ -183,23 +253,32 @@ export interface TrainingSelectorProps<E extends string, Q extends string> {
   delay?: number;
 }
 
-export function TrainingSelector<E extends string, Q extends string>({
+export function TrainingSelector<E extends string, Q extends string, M extends string, W extends string>({
   experienceOptions,
   experience,
   onExperience,
   equipmentOptions,
   equipment,
   onEquipment,
-  dayOptions,
   days,
-  onDays,
+  onToggleDay,
+  daysCaption,
+  modeOptions,
+  mode,
+  onMode,
+  chooseMode,
+  workoutOptions,
+  picks,
+  onTogglePick,
+  picksCaption,
   revealed,
   onRevealNext,
   width,
   delay = 0,
-}: TrainingSelectorProps<E, Q>) {
+}: TrainingSelectorProps<E, Q, M, W>) {
   const { colors } = useColors();
   const [touchedExperience, setTouchedExperience] = useState(false);
+  const [touchedMode, setTouchedMode] = useState(false);
 
   return (
     <View style={styles.phases}>
@@ -241,15 +320,64 @@ export function TrainingSelector<E extends string, Q extends string>({
         </AppText>
       </Phase>
 
-      <Phase title="How many days feel realistic?" revealed={revealed >= 3} delay={Stagger.layer}>
-        <DaySelector options={dayOptions} value={days} onChange={onDays} />
+      <Phase title="Which days can you train?" revealed={revealed >= 3} delay={Stagger.layer}>
+        <WeekdayPicker
+          days={days}
+          onToggle={(d) => {
+            onToggleDay(d);
+            // Multi-select: the next question waits long enough for a second tap.
+            if (revealed < 4) setTimeout(onRevealNext, Pace.handover + 100);
+          }}
+        />
         <View style={styles.dayNote}>
           <View style={[styles.dot, { backgroundColor: alpha(colors.primary, 0.7) }]} />
           <AppText variant="footnote" color="tertiary" style={styles.flex}>
-            {days} days a week. You can change this any time — the plan re-fits itself.
+            {daysCaption}
           </AppText>
         </View>
       </Phase>
+
+      <Phase title="How should we plan your workouts?" revealed={revealed >= 4} delay={Stagger.layer}>
+        <MultiSelectGrid
+          options={modeOptions}
+          selected={touchedMode ? [mode] : []}
+          onToggle={(v) => {
+            setTouchedMode(true);
+            onMode(v);
+            if (v === chooseMode && revealed < 5) setTimeout(onRevealNext, Pace.advance);
+          }}
+          width={width}
+          columns={1}
+          role="radio"
+          delay={revealed >= 4 ? Stagger.layer * 1.5 : 0}
+          recedeUnselected
+        />
+      </Phase>
+
+      {mode === chooseMode && (
+        <Phase title="Pick workouts you'd enjoy" revealed={revealed >= 5} delay={Stagger.layer}>
+          {workoutOptions ? (
+            <MultiSelectGrid
+              options={workoutOptions}
+              selected={picks}
+              onToggle={onTogglePick}
+              width={width}
+              columns={1}
+              delay={revealed >= 5 ? Stagger.layer * 1.5 : 0}
+            />
+          ) : (
+            <AppText variant="footnote" color="tertiary">
+              Finding workouts that fit your level and kit…
+            </AppText>
+          )}
+          <View style={styles.dayNote}>
+            <View style={[styles.dot, { backgroundColor: alpha(colors.primary, 0.7) }]} />
+            <AppText variant="footnote" color="tertiary" style={styles.flex}>
+              {picksCaption}
+            </AppText>
+          </View>
+        </Phase>
+      )}
     </View>
   );
 }
@@ -279,4 +407,15 @@ const styles = StyleSheet.create({
 
   dayNote: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
   dot: { width: 5, height: 5, borderRadius: 3 },
+
+  weekdays: { flexDirection: "row", justifyContent: "space-between", gap: 6 },
+  weekday: {
+    flex: 1,
+    aspectRatio: 1,
+    maxWidth: 48,
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });

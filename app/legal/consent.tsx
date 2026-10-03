@@ -28,8 +28,6 @@ import {
   CONSENT_SUMMARY,
   LEGAL_DOCS,
   LEGAL_DOC_ORDER,
-  LEGAL_LAST_UPDATED,
-  LEGAL_VERSION,
   type ConsentSummaryCard,
 } from "@/constants/legal";
 import { Radius, Spacing, alpha } from "@/constants/theme";
@@ -172,10 +170,6 @@ export default function ConsentScreen() {
               );
             })}
           </Card>
-
-          <AppText variant="caption" color="tertiary" align="center" style={styles.stamp}>
-            Version {LEGAL_VERSION} · Last updated {LEGAL_LAST_UPDATED}
-          </AppText>
         </ScrollView>
 
         {/* Sticky decision bar — the only way forward */}
@@ -307,8 +301,6 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
   },
   docSub: { marginTop: 2 },
-
-  stamp: { marginTop: Spacing.md },
 
   footer: {
     paddingHorizontal: Spacing.screen,

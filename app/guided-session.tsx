@@ -122,8 +122,11 @@ const GLOW_REST_MS = 4000;
 
 /** Anything above the stage: the header row plus the exercise segments. */
 const HEADER_ZONE = 68;
-/** The dock: one primary button, the four-slot icon row, and the gap between. */
-const DOCK_ZONE = 142;
+/** The dock's primary action: a compact square-cornered button, not a slab. */
+const PRIMARY_HEIGHT = 44;
+/** The dock: one primary button, the four-slot icon row, and the gap between —
+ *  8 top pad + 44 button + 12 gap + 62 row (42 disc, 5 gap, 15 label). */
+const DOCK_ZONE = 126;
 
 /**
  * The stage's fixed zones, in two sizes.
@@ -283,10 +286,14 @@ function buildExerciseList(
   planLookup: Map<string, PlannedExercise>,
   setsStr?: string,
   repsStr?: string,
+  restStr?: string,
 ): SessionExerciseInfo[] {
   const ids = idsStr.split(",").map((s) => s.trim());
   const setsArr = setsStr ? setsStr.split(",").map((s) => parseInt(s.trim(), 10)) : [];
   const repsArr = repsStr ? repsStr.split(",").map((s) => s.trim()) : [];
+  // Plan sessions prescribe their own rests (short for fat loss, long for
+  // strength); a library run passes none and keeps each move's default.
+  const restArr = restStr ? restStr.split(",").map((s) => parseInt(s.trim(), 10)) : [];
 
   return ids
     .map((id, i) => {
@@ -300,7 +307,7 @@ function buildExerciseList(
           exerciseType: dbEntry.exerciseType,
           sets: setsArr[i] || dbEntry.defaultSets,
           reps: repsArr[i] || dbEntry.defaultReps,
-          restSeconds: dbEntry.restSeconds,
+          restSeconds: restArr[i] || dbEntry.restSeconds,
           transitionSeconds: 30,
           setupPosition: dbEntry.setupPosition,
           instructions: dbEntry.instructions,
@@ -315,6 +322,7 @@ function buildExerciseList(
         const info = plannedToSessionInfo(planned);
         if (setsArr[i]) info.sets = setsArr[i];
         if (repsArr[i]) info.reps = repsArr[i];
+        if (restArr[i]) info.restSeconds = restArr[i];
         return info;
       }
       return null;
@@ -329,6 +337,8 @@ export default function GuidedSessionScreen() {
     workoutSessionId?: string;
     sets?: string;
     reps?: string;
+    /** Rest seconds per exercise, comma-joined like sets/reps. Optional. */
+    rest?: string;
     /** "1" → restore the persisted in-progress session instead of starting fresh. */
     resume?: string;
   }>();
@@ -379,8 +389,8 @@ export default function GuidedSessionScreen() {
   }, [workoutPlan]);
 
   const exercises = useMemo(
-    () => buildExerciseList(params.exerciseIds || "", planLookup, params.sets, params.reps),
-    [params.exerciseIds, params.sets, params.reps, planLookup],
+    () => buildExerciseList(params.exerciseIds || "", planLookup, params.sets, params.reps, params.rest),
+    [params.exerciseIds, params.sets, params.reps, params.rest, planLookup],
   );
 
   const isResume = params.resume === "1";
@@ -1104,13 +1114,19 @@ export default function GuidedSessionScreen() {
                 style={[styles.dock, chromeStyle]}
                 pointerEvents={dimmed ? "none" : "auto"}
               >
-                <Button
-                  label={primary.label}
-                  icon={primary.icon}
-                  variant={primary.variant}
-                  size="lg"
-                  onPress={primary.onPress}
-                />
+                {/* Half the stage wide, spanning the two middle dock slots, and
+                    the same width in every phase so the target never moves. */}
+                <View style={styles.primaryWrap}>
+                  <Button
+                    label={primary.label}
+                    icon={primary.icon}
+                    variant={primary.variant}
+                    size="md"
+                    fullWidth={false}
+                    onPress={primary.onPress}
+                    style={[styles.primaryBtn, { width: Math.round(stageWidth / 2) }]}
+                  />
+                </View>
                 <View
                   style={[styles.dockRow, phase === "COUNTDOWN" && styles.dockRowHidden]}
                   pointerEvents={phase === "COUNTDOWN" ? "none" : "auto"}
@@ -1622,7 +1638,7 @@ function DockButton({
       <Reanimated.View style={[styles.dockIcon, discStyle, disabled && styles.dockDisabled]}>
         <Ionicons
           name={icon}
-          size={19}
+          size={18}
           color={disabled ? colors.textTertiary : colors.text}
         />
       </Reanimated.View>
@@ -2340,13 +2356,17 @@ const styles = StyleSheet.create({
   },
 
   dock: { gap: Spacing.md, paddingTop: Spacing.sm },
+  // Centred so the button's touch area is only the button itself — a stretched
+  // wrapper would take taps from the empty space either side of it.
+  primaryWrap: { alignItems: "center" },
+  primaryBtn: { height: PRIMARY_HEIGHT, paddingHorizontal: Spacing.md, borderRadius: 0 },
   dockRow: { flexDirection: "row", alignItems: "flex-start" },
   dockRowHidden: { opacity: 0 },
   dockBtn: { flex: 1, alignItems: "center", gap: 5 },
   dockIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",

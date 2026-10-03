@@ -148,6 +148,48 @@ export interface ReminderPrefs {
 }
 
 /**
+ * How the week's training is made (services/training):
+ *  • "planned" — Gozlin builds every training day from the profile.
+ *  • "chosen"  — the user puts library workouts on their days; any day they
+ *    leave open is still planned, so a "chosen" week is never half empty.
+ */
+export type WorkoutPlanMode = "planned" | "chosen";
+
+/** A library workout the user put on one of their training days. */
+export interface ChosenWorkout {
+  /** 0 = Mon … 6 = Sun. */
+  day: number;
+  workoutId: string;
+}
+
+/**
+ * A change to the plan that Gozlin proposed and the user applied. Recorded so
+ * every rebuild re-applies it instead of quietly undoing it: a swap holds for
+ * four weeks, a dose change for the week it was made in — after that, the
+ * sessions the user logged at the new dose carry it forward on their own.
+ */
+export interface TrainingAdjustment {
+  /** Stable per (week, exercise, kind) so re-applying replaces, never stacks. */
+  id: string;
+  /** ISO timestamp. */
+  appliedAt: string;
+  /** Monday (YYYY-MM-DD) of the week it was applied in. */
+  weekStart: string;
+  /** Gozlin's own title for it ("Swap Lunges → Step-ups"). */
+  title: string;
+  /** The exercise it targets; null = the whole session (rest changes). */
+  exerciseId: string | null;
+  exerciseName: string | null;
+  change: {
+    replacementId?: string;
+    replacementName?: string;
+    repFactor?: number;
+    setsDelta?: number;
+    restDeltaSeconds?: number;
+  };
+}
+
+/**
  * The evolving fitness profile — everything the module remembers about how
  * this user likes to train. UX/preference state only; body data (weight,
  * injuries, equipment, level) stays in UserBio, the app's single source of
@@ -167,6 +209,22 @@ export interface FitnessProfile {
   preferredStyles: WorkoutStyle[];
   /** Days the user plans to train: 0 = Mon … 6 = Sun. */
   daysAvailable: number[];
+  /**
+   * Set once `daysAvailable` holds REAL training days, and says where they
+   * came from: "you" = picked in onboarding, setup or Settings; "derived" =
+   * fixed from the profile's days-per-week the first time a plan was built.
+   * From then on `daysAvailable` is THE set of training days: the weekly plan,
+   * the reminders and the weekly target all read it. Absent, `daysAvailable`
+   * is only the store's placeholder default. The provenance is kept because
+   * the plan's reasons quote it — "the days you picked" must be true.
+   */
+  daysSource?: "you" | "derived";
+  /** How the week is made — see WorkoutPlanMode. Absent = "planned". */
+  planMode?: WorkoutPlanMode;
+  /** Library workouts the user put on their days ("Let me choose"). */
+  chosenWorkouts?: ChosenWorkout[];
+  /** Gozlin changes the user applied, re-applied on every rebuild. */
+  trainingAdjustments?: TrainingAdjustment[];
   /** Free-text target milestone ("first full push-up", "5k under 30"). */
   milestone?: string;
 

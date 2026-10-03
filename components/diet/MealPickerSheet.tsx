@@ -65,6 +65,7 @@ import {
   shouldOfferLookup,
   type LookupCandidate,
 } from "@/services/nutrition/FoodLookupService";
+import { cuisineLabel } from "@/services/nutrition/mealRules";
 import {
   cuisinesForSlot,
   ensureMealCatalogLoaded,
@@ -685,7 +686,7 @@ export function MealPickerSheet({
                   {cuisines.map((c) => (
                     <Chip
                       key={c}
-                      label={c}
+                      label={cuisineLabel(c)}
                       size="sm"
                       active={cuisine === c}
                       onPress={() => setCuisine(cuisine === c ? null : c)}

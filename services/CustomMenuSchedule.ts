@@ -65,6 +65,20 @@ export function isCustomSchedule(schedule: { dietId: string } | null): boolean {
 }
 
 /**
+ * The diet a projected day says it follows.
+ *
+ * A menu hand-picked from the whole catalog (onboarding's "let me choose", the
+ * planner) follows no diet. A menu picked from INSIDE one diet — the Diet
+ * screen's "let me choose" after picking a diet — does, and its days carry that
+ * diet so the screen's swap sheet, alternatives and banner stay within it.
+ */
+export function projectedDiet(period: MealPlanPeriod): { dietId: string; dietName: string } {
+  return period.mode === "diet" && period.dietId
+    ? { dietId: period.dietId, dietName: period.dietName ?? period.label }
+    : { dietId: CUSTOM_DIET_ID, dietName: period.label };
+}
+
+/**
  * Project one day of a custom period into the schedule store.
  *
  * Returns whether a schedule now exists for that date, so callers can report
@@ -197,8 +211,7 @@ function emptyCustomDay(
 ): DaySchedule {
   return {
     date,
-    dietId: CUSTOM_DIET_ID,
-    dietName: period.label,
+    ...projectedDiet(period),
     breakfast: null,
     lunch: null,
     dinner: null,

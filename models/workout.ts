@@ -48,6 +48,25 @@ export interface PlannedExercise {
   targetMuscles?: string[];
   coachCues?: string[];
   description?: string;
+
+  /**
+   * Which part of the session it belongs to. Absent = "main" — every plan built
+   * before warm-ups and cool-downs were real exercises.
+   */
+  block?: "warmup" | "main" | "cooldown";
+  /** The job it does inside the work block (see services/training/templates). */
+  role?: "main" | "accessory" | "finisher" | "balance" | "mobility";
+  /**
+   * Why this movement is in the session, in one plain line — written by the
+   * same code that chose it, from the input that decided the choice.
+   */
+  reason?: string;
+  /**
+   * Why the sets × reps are what they are when they MOVED (or deliberately
+   * held) from last time. Absent on a starting dose: the week's reasons already
+   * say how starting doses are set.
+   */
+  doseReason?: string;
 }
 
 /** A complete workout session for a single day */
@@ -61,6 +80,12 @@ export interface WorkoutSession {
   cooldownMinutes: number;
   totalDurationMinutes: number;
   isRestDay: boolean;
+  /** Why this day trains what it does, in one plain line. */
+  reason?: string;
+  /** "chosen" = a library workout the user put on this day. */
+  source?: "planned" | "chosen";
+  /** The library workout behind a "chosen" day. */
+  libraryWorkoutId?: string;
 }
 
 /** A full weekly workout plan */
@@ -72,6 +97,23 @@ export interface GeneratedWorkoutPlan {
   sessions: WorkoutSession[];
   /** Inputs used to generate this plan (for determinism check) */
   inputHash: string;
+  /** How this week was built — one plain line per input that shaped it. */
+  reasons?: string[];
+  /** How the week was made (see fitness/types WorkoutPlanMode). */
+  mode?: "planned" | "chosen";
+  /** The engine that built it. A plan from an older engine is rebuilt. */
+  engineVersion?: number;
+  /**
+   * Fingerprint of the dose rules this plan was built with. When it changes
+   * (a new goal), last week's doses are no longer a starting point to climb
+   * from, and the next build starts fresh rather than carrying them.
+   */
+  schemeKey?: string;
+  /**
+   * Monday the current dose rules took effect, when they changed under an
+   * existing plan. Sessions logged before it are not climbed from.
+   */
+  schemeSince?: string;
 }
 
 /** Log entry for a completed workout */

@@ -86,7 +86,9 @@ describe("scope — it opens Gozlin, not the tier", () => {
    * fails here until someone puts it on one side or the other.
    */
   it("accounts for every gated feature, on one side of the line or the other", () => {
-    const OUTSIDE: readonly FeatureId[] = ["habits", "foods", "sync", "history", "generic"];
+    // adaptive-training is outside: it spends no inference — it eases a
+    // session the engine already built, on the phone.
+    const OUTSIDE: readonly FeatureId[] = ["habits", "foods", "sync", "history", "adaptive-training", "generic"];
     const all = (Object.keys(FEATURE_MIN_TIER) as FeatureId[]).sort();
     expect([...TRIAL_FEATURES, ...OUTSIDE].sort()).toEqual(all);
   });

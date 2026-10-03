@@ -35,6 +35,7 @@ import { isHistoryRangeLocked } from "@/services/billing";
 import { ProgressPhotosCard } from "@/fitness/components/ProgressPhotos";
 import { useFitnessProfile } from "@/fitness/hooks/useFitnessProfile";
 import { buildProgressSnapshot, weekStartOf } from "@/fitness/services/ProgressService";
+import { resolveTrainingPrefs } from "@/services/training";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo } from "react";
@@ -147,15 +148,21 @@ export default function FitnessProgressScreen() {
   // Progress photos are owner-scoped in Storage, so the gallery needs the uid.
   const { user } = useAuth();
 
+  // The weekly target is the plan's own training days — one set of days, app-wide.
+  const trainingDayCount = useMemo(
+    () => resolveTrainingPrefs(app.userBio, profile).days.length,
+    [app.userBio, profile],
+  );
+
   const snapshot = useMemo(
     () =>
       buildProgressSnapshot({
         workoutLog: app.workoutLog,
         sessionHistory: app.sessionHistory,
         today: app.currentDate,
-        weeklyTargetDays: profile.daysAvailable.length || 3,
+        weeklyTargetDays: trainingDayCount,
       }),
-    [app.workoutLog, app.sessionHistory, app.currentDate, profile.daysAvailable.length],
+    [app.workoutLog, app.sessionHistory, app.currentDate, trainingDayCount],
   );
 
   const today = app.currentDate;
@@ -221,7 +228,7 @@ export default function FitnessProgressScreen() {
   const weightDelta =
     latestWeight && firstWeight ? latestWeight.weightKg - firstWeight.weightKg : null;
 
-  const target = profile.daysAvailable.length || 3;
+  const target = trainingDayCount;
 
   // The four lifetime/period numbers, as a card-less spec sheet: a colour-keyed
   // label over one big tabular figure. No tiles, no badges — the numbers carry

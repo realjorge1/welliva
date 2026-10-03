@@ -446,6 +446,14 @@ export const WellivaApi = {
     targets: NutritionTargets;
     date: string;
     dietId?: string;
+    /**
+     * The main meals of the days just before `date`. Each day is generated on
+     * its own, so without these Gozlin cannot know what it served yesterday —
+     * and a model asked the same question gives the same answer. A server that
+     * predates the field strips it (its schema is not strict), so sending it is
+     * always safe.
+     */
+    recentMeals?: string[];
   }): Promise<DietGenerateResponse> {
     return post("/v1/diet/generate", args, 30000, isDietGenerateResponse);
   },

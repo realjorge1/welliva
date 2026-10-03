@@ -237,9 +237,14 @@ export const PLAN_IDENTITY: Record<Tier, PlanIdentity> = {
         feature: "deep-dive",
       },
       {
-        text: "Diet and workout plans written for your body, not picked for it",
+        text: "Meal plans written for your body, not picked for it",
         icon: "sparkles-outline",
         feature: "ai-plans",
+      },
+      {
+        text: "Training that reads your recovery — today's session eased on a low day",
+        icon: "pulse-outline",
+        feature: "adaptive-training",
       },
       {
         text: "Suggested-for-you and custom habits — unlimited, with full heatmaps",

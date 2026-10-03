@@ -46,7 +46,8 @@ export interface ScheduledMeal {
   carbsG: { min: number; max: number };
   fatG: { min: number; max: number };
   isNigerian?: boolean;
-  cuisine?: "Nigerian" | "Western" | "Mediterranean" | "Universal";
+  /** The kitchen — see MealCuisine in constants/DietDatabase ("Nigerian" is West African). */
+  cuisine?: "Nigerian" | "Asian" | "Western" | "Mediterranean" | "Universal";
   isConsumed: boolean;
   consumedAt?: string; // ISO timestamp
 }

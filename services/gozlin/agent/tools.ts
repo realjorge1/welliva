@@ -355,6 +355,31 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
           completionRate: round(t.completionRate * 100) + "%",
         })),
         dataLimited: a.dataLimited,
+        // Why the plan is what it is — the training engine's own reasons
+        // (services/training), so a "why is X in my plan?" is answered from
+        // the inputs that built it, never from a guess.
+        plan: ctx.snapshot.workoutPlan
+          ? {
+              howThisWeekWasBuilt: (ctx.snapshot.workoutPlan.reasons ?? []).slice(0, 8),
+              week: ctx.snapshot.workoutPlan.sessions.map((s) => ({
+                day: s.dayLabel,
+                why: s.reason ?? null,
+              })),
+              today: ctx.snapshot.workoutSession
+                ? {
+                    session: ctx.snapshot.workoutSession.dayLabel,
+                    moves: ctx.snapshot.workoutSession.exercises
+                      .filter((e) => (e.block ?? "main") === "main")
+                      .map((e) => ({
+                        exercise: e.name,
+                        dose: `${e.sets}×${e.reps}`,
+                        why: e.reason ?? null,
+                        doseWhy: e.doseReason ?? null,
+                      })),
+                  }
+                : null,
+            }
+          : null,
       };
     },
   },
@@ -560,6 +585,8 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
       const r = computeRecovery({
         workoutLog: ctx.snapshot.workoutLog,
         todaySession: ctx.snapshot.workoutSession,
+        // The twin's level too, for the same reason as the check-ins below.
+        exerciseLevel: ctx.snapshot.bio?.exerciseLevel,
         wearable: ctx.snapshot.wearable ?? null,
         // The snapshot's copy first — it is what the twin's state-block score
         // was computed from, and the tool must never disagree with that line.

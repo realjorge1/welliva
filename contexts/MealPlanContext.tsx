@@ -66,11 +66,13 @@ import {
 import { KEYS, readJSON, todayDate, writeJSON } from "../services/OfflineStorage";
 import { getOrBuildReport } from "../services/PeriodReportService";
 import {
+  clearScheduledDietsAfter,
   getBacklogPrompt,
   logPermissionFor,
   toggleMealConsumed,
   type LogPermission,
 } from "../services/ScheduleService";
+import { invalidateDietBuffer } from "../services/PlanSync";
 import { loadBodyLogs } from "../services/BodyLogService";
 import { getDietHistory } from "../services/ScheduleService";
 import { useNutrition, useProfile, useSystem } from "./AppContext";
@@ -95,6 +97,14 @@ export interface StartMenuPlanInput {
   /** Targets in force at the start — passed in because the provider's own
    *  copy can still be the pre-onboarding null when this is called. */
   baseline?: Partial<PeriodBaseline>;
+  /**
+   * The diet the menu was picked from (the Diet screen's "let me choose"). The
+   * plan is then that diet's period, and its days say so. Omitted for a menu
+   * picked from the whole catalog, which follows no diet.
+   */
+  diet?: { id: string; name: string };
+  /** How the user phrased the length. Defaults to "week" for 7 days, else "custom". */
+  durationKind?: PlanDuration;
 }
 
 interface MealPlanContextValue {
@@ -192,6 +202,10 @@ interface MealPlanContextValue {
   }) => Promise<void>;
 
   // --- Back-logging ---
+  /**
+   * Yesterday, if it is still open and has unticked meals. Raw data: when the
+   * Diet screen SHOWS it is that screen's call (components/diet/useBacklogNudge).
+   */
   backlogPrompt: BacklogPrompt | null;
   /** Tick a meal on a past-but-open day. False when the window has closed. */
   backlogMeal: (
@@ -199,7 +213,6 @@ interface MealPlanContextValue {
     mealType: MealType,
     snackIndex?: number,
   ) => Promise<boolean>;
-  dismissBacklogPrompt: () => void;
   permissionFor: (date: string) => LogPermission;
 
   // --- Ad-hoc (untracked) results ---
@@ -234,7 +247,6 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
     partialKeys: NutrientKey[];
   }>({ totals: {}, partialKeys: [] });
   const [backlogPrompt, setBacklogPrompt] = useState<BacklogPrompt | null>(null);
-  const [backlogDismissed, setBacklogDismissed] = useState<string | null>(null);
   const [adHocResult, setAdHocResult] = useState<AdHocResult | null>(null);
 
   // Guards a re-entrant refresh while one is already in flight.
@@ -268,7 +280,9 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
         prompt ? { date: prompt.date, unloggedMeals: prompt.unloggedMeals } : null,
       );
 
-      if (period?.mode === "custom") {
+      // Any period can carry a menu: a custom one always, a diet one when its
+      // meals were picked by hand from inside the diet.
+      if (period) {
         const [entries, dates] = await Promise.all([
           MealPlan.getCustomEntriesForDate(period.id, currentDate),
           MealPlan.getPlannedDates(period.id),
@@ -306,10 +320,15 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
    * fills any unscheduled day, so it can have written a diet over a day the user
    * had hand-picked. Both are fixed by re-projecting, which is idempotent — it
    * carries consumption across and clears days the user has emptied.
+   *
+   * A diet period whose meals were picked by hand is healed the same way; one
+   * the generator plans has no menu and nothing to re-project.
    */
   const repaired = useRef<string | null>(null);
+  const hasMenu = plannedDates.length > 0;
   useEffect(() => {
-    if (!activePeriod || activePeriod.mode !== "custom") return;
+    if (!activePeriod) return;
+    if (activePeriod.mode !== "custom" && !hasMenu) return;
     const stamp = `${activePeriod.id}:${currentDate}`;
     if (repaired.current === stamp) return;
     repaired.current = stamp;
@@ -321,11 +340,10 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
         console.warn("MealPlanContext: custom menu projection failed:", e);
       }
     })();
-  }, [activePeriod, currentDate, refreshTodayDiet]);
+  }, [activePeriod, hasMenu, currentDate, refreshTodayDiet]);
 
-  // A dismissal only applies to the day it was made on.
+  // An ad-hoc result only belongs to the day it was made on.
   useEffect(() => {
-    setBacklogDismissed(null);
     setAdHocResult((r) => (r && isAdHocResultFresh(r, currentDate) ? r : null));
   }, [currentDate]);
 
@@ -359,6 +377,16 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
           ...input.baseline,
         },
       });
+
+      // A new plan replaces what the old one had queued. Days already cached
+      // past the start — the old diet's generated week, a previous menu's
+      // projection, the offline buffer — would otherwise be served next week by
+      // a plan the user has just left, because the rollover never rewrites a
+      // day it finds cached. Today and the past stay: they may hold meals
+      // already eaten, and the new plan writes today itself.
+      invalidateDietBuffer();
+      await clearScheduledDietsAfter(period.startDate);
+
       await refresh();
       return period;
     },
@@ -369,9 +397,10 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
     async (input: StartMenuPlanInput) => {
       const length = Math.max(1, Math.round(input.lengthDays));
       const period = await startPeriod({
-        mode: "custom",
+        mode: input.diet ? "diet" : "custom",
+        ...(input.diet ? { dietId: input.diet.id, dietName: input.diet.name } : {}),
         label: input.label,
-        durationKind: length === 7 ? "week" : "custom",
+        durationKind: input.durationKind ?? (length === 7 ? "week" : "custom"),
         startDate: input.startDate,
         customEndDate: addDays(input.startDate, length - 1),
         ...(input.baseline ? { baseline: input.baseline } : {}),
@@ -693,10 +722,6 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
     [refresh, refreshTodayDiet],
   );
 
-  const dismissBacklogPrompt = useCallback(() => {
-    setBacklogDismissed(currentDate);
-  }, [currentDate]);
-
   const permissionFor = useCallback(
     (date: string) => logPermissionFor(date, currentDate),
     [currentDate],
@@ -762,9 +787,8 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
       removeLoggedFood,
       correctLoggedItem,
 
-      backlogPrompt: backlogDismissed === currentDate ? null : backlogPrompt,
+      backlogPrompt,
       backlogMeal,
-      dismissBacklogPrompt,
       permissionFor,
 
       adHocResult,
@@ -782,8 +806,8 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
       savedMeals, saveMealForReuse, deleteSavedMeal, todayFoodLog, todayNutrients,
       analyzeFood, logFoodAnalysis, logFood, logCatalogFood, removeLoggedFood,
       correctLoggedItem,
-      backlogPrompt, backlogDismissed, currentDate, backlogMeal,
-      dismissBacklogPrompt, permissionFor, adHocResult, publishAdHocResult,
+      backlogPrompt, backlogMeal,
+      permissionFor, adHocResult, publishAdHocResult,
       clearAdHocResult, refresh,
     ],
   );

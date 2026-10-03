@@ -6,16 +6,23 @@
  * weekly rhythm, and doorways into the Explore / Progress / Calendar /
  * Settings screens of the fitness module.
  *
- * Everything the previous tab did is preserved: the weekly plan view, the
- * tailored-match card, plan regeneration, recents, and the guided-session
- * launch contract (exerciseIds/sets/reps params) are unchanged. The exercise
- * browser moved to Explore → Exercises with identical behaviour.
+ * THE PLAN EXPLAINS ITSELF. Today's session lists each move with the reason it
+ * is there and, when its dose moved, why. "How this week was built" lists the
+ * inputs that shaped the week; the week rail says why each day trains what it
+ * does and lets the user choose their own workouts for any day. There is no
+ * "Regenerate": the plan is built from the user's data (services/training), so
+ * a reroll would rebuild the same week — what changes it is changing the data.
+ *
+ * Pro adds the daily layer: on an amber or red recovery day today's session is
+ * shown as its lighter version, every change listed, with the full session one
+ * tap away. The guided-session launch contract (exerciseIds/sets/reps/rest) is
+ * the same one library workouts use.
  */
 
 import {
   AmbientCanvas,
   AppText,
-  AscendingMeter,
+  BatteryGauge,
   Button,
   Card,
   IconBadge,
@@ -24,7 +31,6 @@ import {
   NAV_CLEARANCE,
   Pill,
   Reveal,
-  Ring,
   SectionHeader,
   useColors,
   useElasticScroll,
@@ -34,10 +40,16 @@ import { GozlinButton, useReadinessSignals } from "@/components/gozlin";
 import { ScreenTopBar, useDeck } from "@/components/navigation";
 import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
+import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useProfile, useSystem, useWorkout } from "@/contexts/AppContext";
+import { useAllows, useBilling } from "@/contexts/BillingContext";
 import { ArtTile } from "@/fitness/components/ArtTile";
+import { recoveryCopy } from "@/fitness/components/recoveryCopy";
+import { PlanReasons } from "@/fitness/components/PlanReasons";
+import { WeekPlanRail } from "@/fitness/components/WeekPlanRail";
 import { useFitnessProfile } from "@/fitness/hooks/useFitnessProfile";
+import type { WorkoutPlanMode } from "@/fitness/types";
 import {
   recommendToday,
   type RecommendationInput,
@@ -54,17 +66,20 @@ import {
   loadFitnessProfile,
   rememberRecommendation,
   saveFitnessProfile,
+  updateFitnessProfile,
 } from "@/fitness/services/FitnessProfileStore";
 import type { SessionState } from "@/models/session";
-import { WorkoutSession } from "@/models/workout";
+import { PlannedExercise, WorkoutSession } from "@/models/workout";
 import { computeRecovery } from "@/services/gozlin/GozlinRecoveryEngine";
 import { SessionService } from "@/services/SessionService";
-import { workoutPlanMatch } from "@/services/WorkoutGenerator";
+import { formatDose, lightenSession, resolveTrainingPrefs } from "@/services/training";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "@/utils/haptics";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AppState,
+  Pressable,
   ScrollView,
   StyleSheet,
   View,
@@ -72,8 +87,6 @@ import {
   type NativeSyntheticEvent,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-const WEEK = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 // Weekly-rings config. Vivid, distinct hues that read on both light + dark cards
 // (outer → inner). The active-minutes goal follows the WHO 150-min/week guide.
@@ -88,23 +101,53 @@ const sessionService = SessionService.getInstance();
 // the user once, on Home, is a welcome; greeting them again on every screen they
 // visit is noise. Home owns it now (constants/HomeGreetings).
 
+/** The work itself. A plan from before warm-ups were real moves has no blocks: all work. */
+function workBlock(s: WorkoutSession): PlannedExercise[] {
+  return s.exercises.filter((e) => (e.block ?? "main") === "main");
+}
+
+function blockOf(s: WorkoutSession, block: "warmup" | "cooldown"): PlannedExercise[] {
+  return s.exercises.filter((e) => e.block === block);
+}
+
+/** Warm-up and cool-down as one quiet line each: real moves, not the point of the day. */
+function BlockLine({ label, items }: { label: string; items: PlannedExercise[] }) {
+  if (items.length === 0) return null;
+  return (
+    <View style={styles.blockLine}>
+      <AppText variant="caption" color="tertiary" uppercase>
+        {label}
+      </AppText>
+      <AppText variant="footnote" color="tertiary" numberOfLines={2}>
+        {items.map((e) => e.name).join(" · ")}
+      </AppText>
+    </View>
+  );
+}
+
 export default function ExerciseScreen() {
   const { colors } = useColors();
   const router = useRouter();
 
-  const { workoutPlan, workoutLog, sessionHistory, regenerateWorkoutPlan } = useWorkout();
+  const { workoutPlan, workoutLog, sessionHistory } = useWorkout();
   const { isOnboardingComplete, userBio } = useProfile();
   const { currentDate } = useSystem();
   const { profile, ready: profileReady } = useFitnessProfile();
+  // Pro: today's planned session eased to the recovery score.
+  const adaptiveTraining = useAllows("adaptive-training");
+  const { openUpgrade } = useBilling();
 
-  const [isRegenerating, setIsRegenerating] = useState(false);
   const [savedSession, setSavedSession] = useState<SessionState | null>(null);
+  /** The date the user chose the full session over the lighter one. */
+  const [fullOn, setFullOn] = useState<string | null>(null);
 
-  /* ── preserved plan logic ─────────────────────────────────────────── */
+  /* ── the plan ─────────────────────────────────────────────────────── */
 
-  const planMatch = useMemo(
-    () => (userBio ? workoutPlanMatch(userBio) : null),
-    [userBio],
+  // The one reading of the training days that the plan, the reminders and the
+  // weekly target share (services/training/prefs).
+  const trainingPrefs = useMemo(
+    () => resolveTrainingPrefs(userBio, profile),
+    [userBio, profile],
   );
 
   const todayDayIndex = useMemo(() => {
@@ -122,45 +165,102 @@ export default function ExerciseScreen() {
     [workoutLog, currentDate],
   );
 
+  // The same wearable + check-in inputs Gozlin's twin reads, so this card and
+  // the coach quote one readiness score for the same day.
+  const { wearable, checkins } = useReadinessSignals(currentDate);
+
+  // The battery recharges by the hour, so this card's clock has to move. A tab
+  // screen stays mounted, and a time read once at mount would freeze the
+  // battery where it was: re-read it on every visit, on every return to the
+  // app, and every five minutes while the tab is open.
+  const [now, setNow] = useState(() => Date.now());
+  useFocusEffect(
+    useCallback(() => {
+      setNow(Date.now());
+      const tick = setInterval(() => setNow(Date.now()), 5 * 60_000);
+      const sub = AppState.addEventListener("change", (state) => {
+        if (state === "active") setNow(Date.now());
+      });
+      return () => {
+        clearInterval(tick);
+        sub.remove();
+      };
+    }, []),
+  );
+
+  const recovery = useMemo(
+    () =>
+      computeRecovery({
+        workoutLog,
+        todaySession,
+        exerciseLevel: userBio?.exerciseLevel,
+        wearable,
+        checkins,
+        now: new Date(now),
+      }),
+    [workoutLog, todaySession, userBio?.exerciseLevel, wearable, checkins, now],
+  );
+
+  // Pro on an amber or red day: the lighter version of today's session, with
+  // every change listed. The full session stays one tap away.
+  const lighter = useMemo(
+    () =>
+      adaptiveTraining && todaySession && userBio && recovery.level !== "green"
+        ? lightenSession(
+            todaySession,
+            { level: recovery.level, score: recovery.score },
+            EXERCISE_DATABASE,
+            userBio,
+          )
+        : null,
+    [adaptiveTraining, todaySession, userBio, recovery.level, recovery.score],
+  );
+  const eased = lighter !== null && fullOn !== currentDate;
+  const shownSession = eased && lighter ? lighter.session : todaySession;
+
   const handleStartSession = useCallback(() => {
-    if (!todaySession) return;
+    if (!shownSession) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    const exerciseIds = todaySession.exercises.map((e) => e.exerciseId).join(",");
-    const sets = todaySession.exercises.map((e) => e.sets).join(",");
-    const reps = todaySession.exercises.map((e) => e.reps).join(",");
+    const exerciseIds = shownSession.exercises.map((e) => e.exerciseId).join(",");
+    const sets = shownSession.exercises.map((e) => e.sets).join(",");
+    const reps = shownSession.exercises.map((e) => e.reps).join(",");
+    const rest = shownSession.exercises.map((e) => e.restSeconds).join(",");
     router.push({
       pathname: "/guided-session",
       params: {
         exerciseIds,
-        sessionLabel: todaySession.dayLabel,
-        workoutSessionId: todaySession.id,
+        sessionLabel: shownSession.dayLabel,
+        workoutSessionId: shownSession.id,
         sets,
         reps,
+        rest,
       },
     });
-  }, [todaySession, router]);
+  }, [shownSession, router]);
 
-  const handleRegen = useCallback(async () => {
-    setIsRegenerating(true);
-    try {
-      await regenerateWorkoutPlan();
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    } catch (e) {
-      console.error("Regen failed:", e);
-    } finally {
-      setIsRegenerating(false);
-    }
-  }, [regenerateWorkoutPlan]);
+  /* ── choosing ─────────────────────────────────────────────────────── */
 
-  /* ── new intelligence layer ───────────────────────────────────────── */
-
-  // The same wearable + check-in inputs Gozlin's twin reads, so this card and
-  // the coach quote one readiness score for the same day.
-  const { wearable, checkins } = useReadinessSignals(currentDate);
-  const recovery = useMemo(
-    () => computeRecovery({ workoutLog, todaySession, wearable, checkins }),
-    [workoutLog, todaySession, wearable, checkins],
+  // The plan rebuilds itself from the profile (contexts/domain/useWorkoutState
+  // listens), so these only ever write the user's choice.
+  const setPlanMode = useCallback((mode: WorkoutPlanMode) => {
+    Haptics.selectionAsync().catch(() => {});
+    void updateFitnessProfile({ planMode: mode });
+  }, []);
+  const clearPick = useCallback((day: number) => {
+    void loadFitnessProfile().then((p) =>
+      updateFitnessProfile({
+        chosenWorkouts: (p.chosenWorkouts ?? []).filter((c) => c.day !== day),
+      }),
+    );
+  }, []);
+  const pickForDay = useCallback(
+    (day: number) => {
+      router.push({ pathname: "/fitness/library", params: { pickDay: String(day) } } as never);
+    },
+    [router],
   );
+
+  /* ── the day's recommendation ─────────────────────────────────────── */
 
   const recommendation = useMemo(() => {
     const input: RecommendationInput = {
@@ -174,6 +274,7 @@ export default function ExerciseScreen() {
       workoutLog,
       sessionHistory,
       recoveryLevel: recovery.level,
+      adaptiveTraining,
     };
     return recommendToday(input);
   }, [
@@ -187,6 +288,7 @@ export default function ExerciseScreen() {
     workoutLog,
     sessionHistory,
     recovery.level,
+    adaptiveTraining,
   ]);
 
   const recommendedWorkout = useMemo(
@@ -262,9 +364,10 @@ export default function ExerciseScreen() {
       minutes: entries.reduce((s, l) => s + (l.durationMinutes || 0), 0),
       intensity,
       streak: workoutStreakDays(workoutLog, currentDate),
-      target: profile.daysAvailable.length || 3,
+      // The days the plan schedules — never a separate number of its own.
+      target: trainingPrefs.days.length,
     };
-  }, [workoutLog, currentDate, profile.daysAvailable.length]);
+  }, [workoutLog, currentDate, trainingPrefs.days.length]);
 
   // Three weekly rings (outer → inner): days trained, session intensity, active
   // minutes toward the WHO 150-min/week goal.
@@ -308,6 +411,7 @@ export default function ExerciseScreen() {
       : recovery.level === "amber"
         ? colors.warning
         : colors.error;
+  const { label: recoveryLabel, note: recoveryNote } = recoveryCopy(recovery, now);
 
   let revealIndex = 0;
 
@@ -403,7 +507,7 @@ export default function ExerciseScreen() {
 
           {/* Today — the recommendation hero */}
           <Reveal index={revealIndex++}>
-            {recommendation.kind === "plan_session" && todaySession ? (
+            {recommendation.kind === "plan_session" && shownSession ? (
               <Card padding="xxl" style={styles.block}>
                 <View style={styles.todayHead}>
                   <IconBadge
@@ -413,10 +517,10 @@ export default function ExerciseScreen() {
                   />
                   <View style={styles.flex}>
                     <AppText variant="headline">
-                      {todayCompleted ? "Workout complete" : "Today's workout"}
+                      {todayCompleted ? "Workout complete" : eased ? "Today's workout, lighter" : "Today's workout"}
                     </AppText>
                     <AppText variant="subhead" color="secondary">
-                      {todaySession.dayLabel} · {todaySession.exercises.length} exercises
+                      {shownSession.dayLabel} · {workBlock(shownSession).length} moves · {shownSession.totalDurationMinutes} min
                     </AppText>
                   </View>
                   {todayCompleted && <Pill label="Done" tone={colors.success} icon="checkmark" />}
@@ -424,6 +528,44 @@ export default function ExerciseScreen() {
 
                 {!todayCompleted && (
                   <>
+                    {lighter && eased ? (
+                      <View style={[styles.lighter, { backgroundColor: alpha(colors.warning, 0.1) }]}>
+                        {lighter.changes.map((c, i) => (
+                          <AppText
+                            key={c}
+                            variant="footnote"
+                            color={i === 0 ? "primary" : "secondary"}
+                            weight={i === 0 ? "600" : undefined}
+                          >
+                            {i === 0 ? c : `· ${c}`}
+                          </AppText>
+                        ))}
+                        <Pressable
+                          onPress={() => setFullOn(currentDate)}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel="Do the full session instead"
+                          style={styles.lighterToggle}
+                        >
+                          <AppText variant="footnote" color="brand" weight="600">
+                            Do the full session instead
+                          </AppText>
+                        </Pressable>
+                      </View>
+                    ) : lighter ? (
+                      <Pressable
+                        onPress={() => setFullOn(null)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Use the lighter version for today"
+                        style={styles.lighterToggle}
+                      >
+                        <AppText variant="footnote" color="brand" weight="600">
+                          Use the lighter version for today
+                        </AppText>
+                      </Pressable>
+                    ) : null}
+
                     <View style={styles.reasonList}>
                       {recommendation.reasons.map((r) => (
                         <View key={r} style={styles.reasonRow}>
@@ -434,22 +576,52 @@ export default function ExerciseScreen() {
                         </View>
                       ))}
                     </View>
+
+                    {!adaptiveTraining && recovery.level !== "green" && (
+                      <Pressable
+                        onPress={() => openUpgrade("adaptive-training")}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Pro eases today's session to your recovery. Opens the upgrade screen."
+                        style={styles.lockRow}
+                      >
+                        <Ionicons name="lock-closed" size={13} color={colors.textTertiary} />
+                        <AppText variant="footnote" color="tertiary" style={styles.flex}>
+                          Pro eases today&apos;s session to your recovery
+                        </AppText>
+                      </Pressable>
+                    )}
+
                     <Button label="Start workout" icon="play" onPress={handleStartSession} style={styles.startBtn} />
                   </>
                 )}
 
                 <View style={[styles.exerciseList, { borderTopColor: colors.divider }]}>
-                  {todaySession.exercises.map((ex, i) => (
+                  <BlockLine label="Warm-up" items={blockOf(shownSession, "warmup")} />
+                  {workBlock(shownSession).map((ex, i) => (
                     <View key={ex.exerciseId + i} style={styles.exercisePreview}>
-                      <View style={[styles.exDot, { backgroundColor: colors.primary }]} />
-                      <AppText variant="body" numberOfLines={1} style={styles.flex}>
-                        {ex.name}
-                      </AppText>
-                      <AppText variant="footnote" color="tertiary" style={styles.sets}>
-                        {ex.sets}×{ex.reps}
-                      </AppText>
+                      <View style={styles.exerciseTop}>
+                        <View style={[styles.exDot, { backgroundColor: colors.primary }]} />
+                        <AppText variant="body" numberOfLines={1} style={styles.flex}>
+                          {ex.name}
+                        </AppText>
+                        <AppText variant="footnote" color="tertiary" style={styles.sets}>
+                          {formatDose(ex)}
+                        </AppText>
+                      </View>
+                      {ex.reason ? (
+                        <AppText variant="footnote" color="tertiary" style={styles.exerciseWhy}>
+                          {ex.reason}
+                        </AppText>
+                      ) : null}
+                      {ex.doseReason ? (
+                        <AppText variant="footnote" color="brand" style={styles.exerciseWhy}>
+                          {ex.doseReason}
+                        </AppText>
+                      ) : null}
                     </View>
                   ))}
+                  <BlockLine label="Cool-down" items={blockOf(shownSession, "cooldown")} />
                 </View>
               </Card>
             ) : recommendation.kind === "library_workout" && recommendedWorkout ? (
@@ -637,119 +809,56 @@ export default function ExerciseScreen() {
                       numberOfLines={1}
                       style={styles.flex}
                     >
-                      {recovery.level === "green"
-                        ? "Ready to train"
-                        : recovery.level === "amber"
-                          ? "Train moderately"
-                          : "Prioritize recovery"}
+                      {recoveryLabel}
                     </AppText>
                   </View>
+                  {recoveryNote && (
+                    <AppText variant="footnote" color="tertiary" numberOfLines={1}>
+                      {recoveryNote}
+                    </AppText>
+                  )}
                 </View>
-                {/* At a perfect score the bar is five full segments that mean
-                    "nothing to recover from" — the same shape the app uses for
-                    "you finished everything", on a day the body is asking to be
-                    used. A flexed arm says the true thing in the same box; the
-                    moment recovery is anything short of full, the meter comes
-                    back and fills as the body does. */}
-                <AscendingMeter
-                  progress={recovery.score / 100}
+                {/* A battery, not the progress bars Home uses: recovery drains
+                    with training and refills with rest, which is the one
+                    direction a progress meter can't show. */}
+                <BatteryGauge
+                  charge={recovery.score / 100}
                   tone={recoveryTone}
-                  height={30}
-                  glyph={recovery.score >= 100 ? "flex" : null}
-                  glyphLabel="Fully recovered — ready to train"
+                  label={`Recovery ${recovery.score} of 100. ${recoveryLabel}`}
                 />
               </View>
             </Card>
           </Reveal>
 
-          {/* Tailored-to-you match (preserved) */}
-          {workoutPlan && planMatch && (
+          {/* How this week was built — the plan's own reasons, card-less. It
+              replaced a "Tailored to you 92%" card whose number was a constant. */}
+          {workoutPlan?.reasons && workoutPlan.reasons.length > 0 && (
             <Reveal index={revealIndex++}>
-              <Card style={styles.block} padding="lg">
-                <View style={styles.matchHead}>
-                  <Ring progress={planMatch.percent / 100} size={62} strokeWidth={6}>
-                    <AppText variant="callout" color="brand" style={styles.matchPctText}>
-                      {planMatch.percent}%
-                    </AppText>
-                  </Ring>
-                  <View style={styles.flex}>
-                    <AppText variant="callout">Tailored to you</AppText>
-                    <AppText variant="footnote" color="tertiary" style={styles.matchSub}>
-                      {planMatch.notes.length > 0
-                        ? planMatch.notes.join(" · ")
-                        : "Matched to your level, goal and equipment"}
-                    </AppText>
-                  </View>
-                </View>
-              </Card>
+              <View style={styles.section}>
+                <PlanReasons
+                  reasons={workoutPlan.reasons}
+                  onEdit={() => router.push("/fitness/setup" as never)}
+                />
+              </View>
             </Reveal>
           )}
 
-          {/* Week plan — CARD-LESS too (the second "this week" view): a bare
-              schedule rail on the page where today is the only filled surface.
-              Regeneration moved into the section header, so the block ends on
-              the week itself instead of on a button. */}
+          {/* Week plan — CARD-LESS too: a bare schedule rail on the page where
+              today is the only filled surface. Each day says why it trains what
+              it does, and "Let me choose" puts the user's own picks on days. */}
           {workoutPlan && (
             <Reveal index={revealIndex++}>
               <View style={styles.section}>
-                <SectionHeader
-                  title="Week plan"
-                  subtitle={`${workoutPlan.sessions.length} sessions · ${Math.max(
-                    0,
-                    7 - workoutPlan.sessions.length,
-                  )} rest days`}
-                  actionLabel={isRegenerating ? "Generating…" : "Regenerate"}
-                  onAction={isRegenerating ? undefined : handleRegen}
-                  weight="700"
+                <WeekPlanRail
+                  plan={workoutPlan}
+                  todayIndex={todayDayIndex}
+                  trainingDays={trainingPrefs.days}
+                  mode={trainingPrefs.mode}
+                  onMode={setPlanMode}
+                  onPick={pickForDay}
+                  onClearPick={clearPick}
+                  onEditDays={() => router.push("/fitness/setup" as never)}
                 />
-                {WEEK.map((day, i) => {
-                  const session = workoutPlan.sessions.find((s) => s.dayOfWeek === i);
-                  const isToday = i === todayDayIndex;
-                  return (
-                    <View
-                      key={day}
-                      style={[
-                        styles.weekRow,
-                        i < WEEK.length - 1 && {
-                          borderBottomWidth: StyleSheet.hairlineWidth,
-                          borderBottomColor: colors.divider,
-                        },
-                        isToday && {
-                          backgroundColor: colors.primarySoft,
-                          borderRadius: Radius.lg,
-                          borderBottomWidth: 0,
-                        },
-                      ]}
-                    >
-                      <AppText
-                        variant="caption"
-                        uppercase
-                        color={isToday ? "brand" : "tertiary"}
-                        style={styles.weekDay}
-                      >
-                        {day}
-                      </AppText>
-                      <View
-                        style={[
-                          styles.weekDot,
-                          {
-                            backgroundColor: session ? colors.primary : "transparent",
-                            borderColor: session ? colors.primary : colors.borderStrong,
-                          },
-                        ]}
-                      />
-                      <AppText
-                        variant="body"
-                        color={session ? "primary" : "tertiary"}
-                        style={styles.flex}
-                        numberOfLines={1}
-                      >
-                        {session ? session.dayLabel : "Rest"}
-                      </AppText>
-                      {isToday && <Pill label="Today" tone={colors.primary} size="sm" />}
-                    </View>
-                  );
-                })}
               </View>
             </Reveal>
           )}
@@ -846,14 +955,16 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.md,
     borderTopWidth: 1,
   },
-  exercisePreview: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
-    paddingVertical: Spacing.sm,
-  },
+  exercisePreview: { paddingVertical: Spacing.sm },
+  exerciseTop: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
+  // Indented past the dot, so the reason reads as belonging to the move.
+  exerciseWhy: { marginLeft: 8 + Spacing.sm, marginTop: 2 },
   exDot: { width: 8, height: 8, borderRadius: 4 },
   sets: { fontWeight: "600" },
+  blockLine: { paddingVertical: Spacing.sm, gap: 2 },
+  lighter: { marginTop: Spacing.lg, padding: Spacing.md, borderRadius: Radius.lg, gap: 2 },
+  lighterToggle: { marginTop: Spacing.sm, alignSelf: "flex-start" },
+  lockRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: Spacing.md },
 
   recRow: {
     flexDirection: "row",
@@ -895,22 +1006,6 @@ const styles = StyleSheet.create({
   },
   recoveryScore: { flexDirection: "row", alignItems: "baseline", gap: Spacing.sm, marginTop: 2 },
   recoveryNum: { fontWeight: "800", fontVariant: ["tabular-nums"] },
-
-  // Week rail (card-less)
-  weekRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.md,
-  },
-  weekDay: { width: 34, letterSpacing: 0.6, fontWeight: "700" },
-  weekDot: { width: 8, height: 8, borderRadius: 4, borderWidth: 1.5 },
-
-  // Tailored match
-  matchHead: { flexDirection: "row", alignItems: "center", gap: Spacing.lg },
-  matchPctText: { fontWeight: "800", fontVariant: ["tabular-nums"] },
-  matchSub: { marginTop: 2 },
 });
 
 /**

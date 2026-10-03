@@ -45,6 +45,12 @@ export interface RecommendationInput {
   recoveryLevel: RecoveryLevel;
   /** Overrides profile.typicalDurationMin ("I only have 15 today"). */
   minutesAvailable?: number;
+  /**
+   * Pro: today's plan session is eased to the recovery score
+   * (services/training/lighten) rather than swapped for something else, so on
+   * a red day the plan session still leads — as its recovery version.
+   */
+  adaptiveTraining?: boolean;
 }
 
 /* ─────────────────────── body-region load model ─────────────────────── */
@@ -139,6 +145,25 @@ export function recommendToday(input: RecommendationInput): FitnessRecommendatio
     };
   }
 
+  // 2a) Pro, red, a plan day: keep the plan's session, as its recovery version.
+  if (
+    recoveryLevel === "red" &&
+    input.adaptiveTraining &&
+    input.todaySession &&
+    !planFatigue(profile, input.date)
+  ) {
+    const s = input.todaySession;
+    return {
+      kind: "plan_session",
+      title: s.dayLabel,
+      reasons: [
+        "Recovery is low — this is the recovery version of today's session",
+        ...(s.reason ? [s.reason] : []),
+      ].slice(0, 4),
+      insight: "Same moves, less of each. Show up, keep it easy, bank the habit.",
+    };
+  }
+
   // 2) Recovery red → actively steer to restorative movement.
   if (recoveryLevel === "red") {
     const gentle = pickLibrary(input, minutes, { onlyLowEnergy: true });
@@ -167,10 +192,22 @@ export function recommendToday(input: RecommendationInput): FitnessRecommendatio
   if (input.todaySession && !planFatigue(profile, input.date)) {
     const s = input.todaySession;
     const reasons: string[] = [];
-    if (bio) reasons.push(`Matched to your ${bio.exerciseLevel} level`);
-    reasons.push(`Today's focus: ${s.focus}`);
+    // The plan says why this day trains what it does; a plan stored before
+    // the plan carried reasons gets the lines it always had.
+    if (s.reason) {
+      reasons.push(s.reason);
+    } else {
+      if (bio) reasons.push(`Matched to your ${bio.exerciseLevel} level`);
+      reasons.push(`Today's focus: ${s.focus}`);
+    }
     reasons.push(`About ${s.totalDurationMinutes} min`);
-    if (recoveryLevel === "amber") reasons.push("Keep intensity moderate — recovery is mid-range");
+    if (recoveryLevel === "amber") {
+      reasons.push(
+        input.adaptiveTraining
+          ? "Recovery is mid-range — eased to match"
+          : "Keep intensity moderate — recovery is mid-range",
+      );
+    }
     return {
       kind: "plan_session",
       title: s.dayLabel,

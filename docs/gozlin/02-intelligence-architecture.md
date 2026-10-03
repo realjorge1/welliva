@@ -283,11 +283,17 @@ A lightweight, transparent readiness signal — WHOOP-inspired, but honest about
 
 ### Scoring (0–100 → state)
 ```
-load    = sessions in last 3 days, weighted by completion% and duration
-density = consecutive training days without rest
-score   = 100 − (load penalty) − (density penalty) + (rest recovery bonus)
+battery = starts full a week back; each session drains it by
+          minutes × (0.5 + 0.5 × completion) ÷ drainMinutes(level),
+          and every hour without training recharges rechargePerHour(level)
+          beginner 75 min · 1.6/h   intermediate 110 min · 2.0/h   advanced 150 min · 2.4/h
+score   = battery, then the wearable and check-in folds (check-in can cap it)
 state   = GREEN ≥70 · AMBER 40–69 · RED <40
 ```
+Each level's usual session (30 / 45 / 60 min) costs about 40 points and recharges in
+about a day. Back-to-back hard days need no separate density penalty: they never give
+the battery time to fill. `fullAt` says when it will be full again, but only while the
+battery is what's holding the score down (a short night doesn't recharge on its clock).
 Future inputs (sleepHrs, HRV, soreness self-report) slot in as additional penalties/bonuses
 behind the same `RecoveryState` interface — no downstream changes.
 

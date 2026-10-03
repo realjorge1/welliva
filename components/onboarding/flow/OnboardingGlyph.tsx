@@ -42,6 +42,7 @@ export type GlyphName =
   | "leaf"
   | "plate"
   | "coast"
+  | "bowl"
   // Menu
   | "sunrise"
   | "moon"
@@ -159,6 +160,15 @@ const GLYPHS: Record<GlyphName, { d?: string[]; c?: [number, number, number][] }
   coast: {
     d: ["M3.2 15.4 C 6.2 12.2, 9.2 18.2, 12.2 15.4 C 15.2 12.2, 18.2 18.2, 21 15.4"],
     c: [[16.6, 7.2, 2.7]],
+  },
+  /** The Asian kitchen: a rice bowl, chopsticks resting in it. */
+  bowl: {
+    d: [
+      "M4 12.2 H20 A 8 6.8 0 0 1 4 12.2 Z",
+      "M9.6 20.6 H14.4",
+      "M12.6 10.4 L18.8 3.6",
+      "M14.8 10.8 L20.4 5.2",
+    ],
   },
 
   // ── Menu ──

@@ -9,6 +9,11 @@
  *   • Exercises — the full exercise database with personal suitability
  *     (this is the former Fitness-tab "Browse" mode, preserved verbatim in
  *     behaviour: same suitability model, same detail routing)
+ *
+ * Opened from the week rail's "Pick" (`?pickDay=2`), Explore is choosing a
+ * workout for that day: it says so, starts on the workouts that fit the
+ * user's kit, and hands the day to the workout page, whose button becomes
+ * "Use on Wednesday".
  */
 
 import { AmbientCanvas, AppText, IconBadge, useColors } from "@/components/ui";
@@ -22,6 +27,7 @@ import { useFitnessProfile } from "@/fitness/hooks/useFitnessProfile";
 import { filterWorkouts } from "@/fitness/services/WorkoutCatalog";
 import type { WorkoutFilter, WorkoutStyle } from "@/fitness/types";
 import type { Difficulty } from "@/models/exercise";
+import { DAY_NAMES } from "@/services/training";
 import { exerciseSuitability } from "@/services/WorkoutGenerator";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -77,18 +83,25 @@ const EX_CATEGORIES = [
 export default function FitnessLibraryScreen() {
   const { colors } = useColors();
   const router = useRouter();
-  const params = useLocalSearchParams<{ view?: string; favorites?: string }>();
+  const params = useLocalSearchParams<{ view?: string; favorites?: string; pickDay?: string }>();
   const { userBio } = useProfile();
   const { profile, toggleFavorite, isFavorite } = useFitnessProfile();
 
+  /** The weekday this visit is choosing a workout for, when opened from "Pick". */
+  const pickDay = useMemo(() => {
+    const d = Number(params.pickDay);
+    return params.pickDay !== undefined && Number.isInteger(d) && d >= 0 && d <= 6 ? d : null;
+  }, [params.pickDay]);
+
   const [viewMode, setViewMode] = useState<ViewMode>(
-    params.view === "exercises" ? "exercises" : "workouts",
+    params.view === "exercises" && pickDay === null ? "exercises" : "workouts",
   );
   const [query, setQuery] = useState("");
   const [style, setStyle] = useState<WorkoutStyle | "all">("all");
   const [maxMinutes, setMaxMinutes] = useState(0);
   const [level, setLevel] = useState<Difficulty | "all">("all");
-  const [ownedOnly, setOwnedOnly] = useState(false);
+  // Choosing for a day starts on what the user can actually do with their kit.
+  const [ownedOnly, setOwnedOnly] = useState(pickDay !== null);
   const [favoritesOnly, setFavoritesOnly] = useState(params.favorites === "1");
 
   // Exercise-browser filters (unchanged behaviour from the old Browse mode)
@@ -128,8 +141,11 @@ export default function FitnessLibraryScreen() {
   }, [exCategory, exLevel, userBio]);
 
   const openWorkout = useCallback(
-    (id: string) => router.push(`/fitness/workout/${id}` as never),
-    [router],
+    (id: string) =>
+      router.push(
+        (pickDay !== null ? `/fitness/workout/${id}?pickDay=${pickDay}` : `/fitness/workout/${id}`) as never,
+      ),
+    [router, pickDay],
   );
 
   const openExercise = useCallback(
@@ -196,6 +212,7 @@ export default function FitnessLibraryScreen() {
         <Pressable
           onPress={onPress}
           accessibilityRole="button"
+          accessibilityLabel={`Filter: ${label}`}
           accessibilityState={{ selected: active }}
           style={[
             styles.chip,
@@ -240,29 +257,40 @@ export default function FitnessLibraryScreen() {
         <AppText variant="display" style={styles.flex}>
           Explore
         </AppText>
-        <View style={[styles.segment, { backgroundColor: colors.surfaceMuted }]}>
-          {(["workouts", "exercises"] as ViewMode[]).map((mode) => {
-            const active = viewMode === mode;
-            return (
-              <Pressable
-                key={mode}
-                onPress={() => setViewMode(mode)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                style={[styles.segmentBtn, active && { backgroundColor: colors.surface }]}
-              >
-                <AppText
-                  variant="callout"
-                  color={active ? "brand" : "tertiary"}
-                  style={styles.segmentText}
+        {pickDay === null && (
+          <View style={[styles.segment, { backgroundColor: colors.surfaceMuted }]}>
+            {(["workouts", "exercises"] as ViewMode[]).map((mode) => {
+              const active = viewMode === mode;
+              return (
+                <Pressable
+                  key={mode}
+                  onPress={() => setViewMode(mode)}
+                  accessibilityRole="button"
+                  accessibilityLabel={mode === "workouts" ? "Show workouts" : "Show exercises"}
+                  accessibilityState={{ selected: active }}
+                  style={[styles.segmentBtn, active && { backgroundColor: colors.surface }]}
                 >
-                  {mode === "workouts" ? "Workouts" : "Exercises"}
-                </AppText>
-              </Pressable>
-            );
-          })}
-        </View>
+                  <AppText
+                    variant="callout"
+                    color={active ? "brand" : "tertiary"}
+                    style={styles.segmentText}
+                  >
+                    {mode === "workouts" ? "Workouts" : "Exercises"}
+                  </AppText>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
       </View>
+      {pickDay !== null && (
+        <View style={[styles.pickBanner, { backgroundColor: colors.primarySoft }]}>
+          <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+          <AppText variant="footnote" color="secondary" style={styles.flex}>
+            Choosing a workout for {DAY_NAMES[pickDay]}. Open one, then tap “Use on {DAY_NAMES[pickDay]}”.
+          </AppText>
+        </View>
+      )}
     </View>
   );
 
@@ -434,6 +462,16 @@ export default function FitnessLibraryScreen() {
 }
 
 const styles = StyleSheet.create({
+  pickBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    marginHorizontal: Spacing.screen,
+    marginBottom: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.lg,
+  },
   flex: { flex: 1 },
 
   headerRow: {

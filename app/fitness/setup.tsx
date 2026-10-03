@@ -284,6 +284,9 @@ export default function FitnessSetupScreen() {
     const chosenDays = [...days].sort((a, b) => a - b);
     const patch: FitnessProfilePatch = {
       setupComplete: true,
+      // These are the training days now — the plan, reminders and weekly
+      // target all read them, and the plan rebuilds itself from this save.
+      daysSource: "you",
       goals,
       location,
       typicalDurationMin: duration,

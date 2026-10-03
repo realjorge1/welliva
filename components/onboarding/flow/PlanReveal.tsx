@@ -132,6 +132,10 @@ export interface PlanRevealPreview {
   trainingWeekdays: number[];
   sessionMinutes: number | null;
   equipmentSummary: string;
+  /** The first lines of the week's own "how this was built" — the engine's words. */
+  trainingReasons?: string[];
+  /** How many training days are the user's picks from the library. */
+  trainingPicks?: number;
 }
 
 export interface PlanRevealProps {
@@ -516,7 +520,26 @@ export function PlanReveal({
               <Pill text={`${trainingDays} days a week`} />
               <Pill text={equipmentSummary} />
               {preview.sessionMinutes ? <Pill text={`~${preview.sessionMinutes} min`} /> : null}
+              {preview.trainingPicks ? (
+                <Pill text={`${preview.trainingPicks} ${preview.trainingPicks === 1 ? "pick" : "picks"} of yours`} />
+              ) : null}
             </View>
+            {/* Why the week looks like this — the plan's own first reasons,
+                so the reveal explains the training the way it explains meals. */}
+            {preview.trainingReasons && preview.trainingReasons.length > 0 ? (
+              <View style={styles.reasons}>
+                {preview.trainingReasons.map((reason, i) => (
+                  <Appear key={reason} delay={T.week + 260 + i * 110} duration={Dur.ui} distance={6}>
+                    <View style={styles.reason}>
+                      <View style={[styles.bullet, { backgroundColor: alpha(colors.primary, 0.8) }]} />
+                      <AppText variant="footnote" color="secondary" style={styles.flex}>
+                        {reason}
+                      </AppText>
+                    </View>
+                  </Appear>
+                ))}
+              </View>
+            ) : null}
           </Panel>
         ) : (
           <View style={[styles.note, { backgroundColor: alpha(colors.surface, 0.6), borderColor: alpha(colors.border, 0.85) }]}>

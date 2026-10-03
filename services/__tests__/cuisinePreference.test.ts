@@ -154,3 +154,49 @@ describe("the meals a user is served", () => {
     }
   });
 });
+
+describe("an Asian user (the kitchen added 2026-10)", () => {
+  const asian = (over: Partial<UserBio> = {}) => bio({ cuisinePreference: "asian", ...over });
+
+  it("is matched to the Asian tradition itself when nothing medical competes", () => {
+    expect(top(asian())).toBe("traditional-asian");
+  });
+
+  it("is never headlined by another kitchen's diet, whatever the goal", () => {
+    for (const goal of ["lose_weight", "build_muscle", "improve_fitness", "better_health", "increase_energy", "athletic_performance"] as const) {
+      const pick = top(asian({ primaryGoal: goal, goals: [goal] }));
+      expect(pick, goal).not.toBe("mediterranean");
+      expect(pick, goal).not.toBe("traditional-african");
+    }
+  });
+
+  it("is served an Asian dish at every main meal, every day", () => {
+    const b = asian();
+    const targets = calculateNutritionTargets(b);
+    for (const date of dates) {
+      const day = generateDietPlan(b, targets, date)!.schedule;
+      for (const meal of [day.breakfast, day.lunch, day.dinner]) {
+        expect(mealCuisine(meal!), `${date} ${meal!.name}`).toBe("Asian");
+      }
+    }
+  });
+
+  it("sends an Asian vegetarian to the vegetarian plan, and serves it Asian", () => {
+    const b = asian({ dietaryRestriction: "vegetarian" });
+    expect(top(b)).toBe("vegetarian");
+    const targets = calculateNutritionTargets(b);
+    for (const date of dates) {
+      const day = generateDietPlan(b, targets, date, "vegetarian")!.schedule;
+      for (const meal of [day.breakfast, day.lunch, day.dinner]) {
+        expect(mealCuisine(meal!), meal!.name).toBe("Asian");
+        expect(breaksRestriction(meal!.name, "vegetarian"), meal!.name).toBe(false);
+      }
+    }
+  });
+
+  it("does not pull the Asian plan onto anyone who chose another kitchen", () => {
+    for (const cuisinePreference of ["african", "western", "mediterranean"] as const) {
+      expect(top(bio({ cuisinePreference }))).not.toBe("traditional-asian");
+    }
+  });
+});

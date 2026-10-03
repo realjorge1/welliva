@@ -181,6 +181,14 @@ export interface RecoveryState {
   recommendation: string;
   /** Honest about inputs — currently a training-load proxy (no wearables yet). */
   basis: string;
+  /**
+   * When the training battery is full again (epoch ms). Set only while the
+   * battery is what keeps the score under 100: a short night or a "Drained"
+   * doesn't recharge on the battery's clock, so it never gets a time.
+   */
+  fullAt?: number | null;
+  /** What keeps the score under 100 when it isn't the battery ("you said you felt drained"). */
+  heldBackBy?: string | null;
 }
 
 // ════════════════════════════════════════════════════════════════

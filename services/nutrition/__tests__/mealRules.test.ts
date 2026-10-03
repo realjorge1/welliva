@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   breaksRestriction,
+  cuisineTiers,
   dietNameContradicts,
   dishKey,
   dishTitle,
   hasAllergen,
+  hasDislike,
   servesPreference,
   signatureDietFor,
 } from "../mealRules";
@@ -40,6 +42,14 @@ describe("breaksRestriction", () => {
     expect(breaksRestriction("Efo Riro (vegan) + Small Swallow", "vegan")).toBe(false);
   });
 
+  it("ends a negation at the comma", () => {
+    // "(no swallow, extra fish)" leaves out the swallow, not the fish. Reading on
+    // to the bracket stripped the fish too and served this soup to vegetarians.
+    expect(breaksRestriction("Okra Soup (no swallow, extra fish)", "vegetarian")).toBe(true);
+    expect(breaksRestriction("Protein Smoothie (no banana, no sugar)", "vegan")).toBe(false);
+    expect(breaksRestriction("Soft beans porridge (no pepper, little oil)", "vegan")).toBe(false);
+  });
+
   it("never restricts anyone with no restriction", () => {
     expect(breaksRestriction("Pepper Soup (Goat/Fish/Chicken)", "none")).toBe(false);
     expect(breaksRestriction("Pepper Soup (Goat/Fish/Chicken)", undefined)).toBe(false);
@@ -57,7 +67,26 @@ describe("hasAllergen", () => {
   });
 });
 
+describe("hasDislike", () => {
+  it("expands a family to the names a dish uses", () => {
+    expect(hasDislike("Cheese Omelet", ["dairy"])).toBe(true);
+    expect(hasDislike("Moi-Moi + Pap", ["legume"])).toBe(true);
+    expect(hasDislike("Grilled Chicken + Rice", ["red-meat"])).toBe(false);
+  });
+  it("matches anything else as written", () => {
+    expect(hasDislike("Okra Soup + Eba", ["okra"])).toBe(true);
+    expect(hasDislike("Okra Soup + Eba", [])).toBe(false);
+  });
+});
+
 describe("cuisine", () => {
+  it("narrows to a kitchen first, then to its neighbours and the staples", () => {
+    expect(cuisineTiers("african")).toEqual([["Nigerian"], ["Nigerian", "Universal"]]);
+    expect(cuisineTiers("western")).toEqual([["Western"], ["Western", "Mediterranean", "Universal"]]);
+    expect(cuisineTiers("mediterranean")).toEqual([["Mediterranean"], ["Mediterranean", "Western", "Universal"]]);
+    expect(cuisineTiers("mixed")).toBeNull();
+  });
+
   it("treats untagged Nigerian dishes as Nigerian", () => {
     expect(servesPreference({ isNigerian: true }, "african")).toBe(true);
     expect(servesPreference({ cuisine: "Western" }, "african")).toBe(false);

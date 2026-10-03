@@ -20,7 +20,9 @@ import type { MealPlanPeriod } from "../../models/mealPlan";
 import {
   CUSTOM_DIET_ID,
   isCustomSchedule,
+  projectedDiet,
   syncCustomDay,
+  syncCustomDays,
   syncWholeCustomPeriod,
 } from "../CustomMenuSchedule";
 import * as MealPlan from "../MealPlanService";
@@ -273,5 +275,60 @@ describe("the repair pass", () => {
         `Breakfast ${date}`,
       );
     }
+  });
+});
+
+describe("a menu picked from inside a diet", () => {
+  async function startDietMenu(): Promise<MealPlanPeriod> {
+    return MealPlan.startPeriod({
+      mode: "diet",
+      dietId: "vegetarian",
+      dietName: "Vegetarian Diet",
+      label: "Vegetarian Diet",
+      durationKind: "week",
+      startDate: TODAY,
+    });
+  }
+
+  it("lands on the calendar as that diet's day, so the screen stays inside the diet", async () => {
+    const period = await startDietMenu();
+    await MealPlan.setCustomMenuDays(period.id, {
+      [TOMORROW]: [{ slot: "breakfast", meal: meal("Akara + Pap") }],
+    });
+    await syncCustomDays(period, [TOMORROW], TODAY);
+
+    const schedule = await getScheduleForDate(TOMORROW);
+    expect(schedule?.breakfast?.name).toBe("Akara + Pap");
+    expect(schedule?.dietId).toBe("vegetarian");
+    expect(schedule?.dietName).toBe("Vegetarian Diet");
+    expect(isCustomSchedule(schedule)).toBe(false);
+  });
+
+  it("never clears a day of its diet that has no picks — that day is the generator's", async () => {
+    const period = await startDietMenu();
+    const generated: DaySchedule = {
+      date: TOMORROW,
+      dietId: "vegetarian",
+      dietName: "Vegetarian Diet",
+      breakfast: meal("Beans Porridge"),
+      lunch: null,
+      dinner: null,
+      snacks: [],
+      status: "upcoming",
+    };
+    await saveDaySchedule(generated);
+    await syncWholeCustomPeriod(period, TODAY);
+    expect((await getScheduleForDate(TOMORROW))?.breakfast?.name).toBe("Beans Porridge");
+  });
+
+  it("says which diet a projected day follows", () => {
+    const base = { label: "My menu" } as MealPlanPeriod;
+    expect(projectedDiet({ ...base, mode: "custom", dietId: null, dietName: null })).toEqual({
+      dietId: CUSTOM_DIET_ID,
+      dietName: "My menu",
+    });
+    expect(
+      projectedDiet({ ...base, mode: "diet", dietId: "keto", dietName: "Keto Diet" }),
+    ).toEqual({ dietId: "keto", dietName: "Keto Diet" });
   });
 });

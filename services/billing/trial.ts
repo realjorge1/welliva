@@ -113,7 +113,7 @@ export const TRIAL_HOURS = 30;
 export const TRIAL_FEATURES: readonly FeatureId[] = [
   "coach-limit", // the conversation itself
   "deep-dive", // the research behind an answer
-  "ai-plans", // diet + workout plans written for this body
+  "ai-plans", // meal plans written for this body
   "insights", // correlations and nudges you can open
   "photo-log", // portions read from a photo
 ] as const;

@@ -294,6 +294,7 @@ const CUISINES: {
 }[] = [
   { value: "mixed", label: "No preference", icon: "globe-outline" },
   { value: "african", label: "African", icon: "leaf-outline" },
+  { value: "asian", label: "Asian", icon: "flame-outline" },
   { value: "western", label: "Western", icon: "restaurant-outline" },
   { value: "mediterranean", label: "Mediterranean", icon: "fish-outline" },
 ];

@@ -17,10 +17,9 @@
       "package": "com.welliva.app",
       "versionCode": 1,
       "adaptiveIcon": {
-        "backgroundColor": "#FFF1E6",
-        "foregroundImage": "./assets/images/welliva-512.jpg",
-        "backgroundImage": "./assets/images/welliva-512.jpg",
-        "monochromeImage": "./assets/images/welliva-monochrome.png"
+        "backgroundColor": "#000000",
+        "foregroundImage": "./assets/images/icon-wordmark-foreground.png",
+        "monochromeImage": "./assets/images/icon-wordmark-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -42,13 +41,10 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/splash-wordmark.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#F6F8F7",
-          "dark": {
-            "backgroundColor": "#000000"
-          }
+          "backgroundColor": "#000000"
         }
       ],
       "expo-secure-store",

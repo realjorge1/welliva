@@ -32,7 +32,6 @@ import type { UserBio, UserGoals } from "../../models/user";
 import type { GeneratedWorkoutPlan } from "../../models/workout";
 import {
   archiveWaterDay,
-  currentWeekStart,
   KEYS,
   readJSON,
   todayDate,
@@ -41,7 +40,6 @@ import {
 } from "../../services/OfflineStorage";
 import { ensureDietBuffer, ensureDietForDate } from "../../services/PlanSync";
 import { sweepClosedDays } from "../../services/ScheduleService";
-import { shouldRegenerateWorkoutPlan } from "../../services/WorkoutGenerator";
 
 interface Params {
   currentDate: string;
@@ -55,7 +53,8 @@ interface Params {
   setPlanState: Dispatch<SetStateAction<PlanState>>;
   refreshTodayDiet: () => Promise<void>;
   refreshDietHistory: () => Promise<void>;
-  regenerateWorkoutPlan: () => Promise<void>;
+  /** Rebuild the workout plan if a new week (or new inputs) made it stale. */
+  ensureWorkoutPlanCurrent: () => Promise<void>;
   /**
    * Re-read water + streak from storage, folding in any glass logged from the
    * lock screen before the day turned over (see services/nutrition/waterStore).
@@ -75,7 +74,7 @@ export function useDayChange({
   setPlanState,
   refreshTodayDiet,
   refreshDietHistory,
-  regenerateWorkoutPlan,
+  ensureWorkoutPlanCurrent,
   syncLiveCounters,
 }: Params): void {
   /**
@@ -171,18 +170,9 @@ export function useDayChange({
         }
         await refreshTodayDiet();
         await refreshDietHistory();
-        // Check if workout plan needs regen (new week)
-        if (workoutPlan && userBio) {
-          const weekStart = currentWeekStart();
-          if (
-            shouldRegenerateWorkoutPlan(workoutPlan, userBio, weekStart, {
-              equipment: userBio.equipment,
-              daysPerWeek: userBio.workoutDaysPerWeek,
-            })
-          ) {
-            await regenerateWorkoutPlan();
-          }
-        }
+        // A new week rebuilds the workout plan — the moment last week's logged
+        // sessions move this week's doses. No-op when the plan is current.
+        if (userBio) await ensureWorkoutPlanCurrent();
       }
     };
     /**

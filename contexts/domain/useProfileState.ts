@@ -44,10 +44,11 @@ import {
   saveDaySchedule,
 } from "../../services/ScheduleService";
 import {
-  describeAdaptations,
-  ensureWorkoutExercisesLoaded,
-  generateWorkoutPlan,
-} from "../../services/WorkoutGenerator";
+  loadFitnessProfile,
+  updateFitnessProfile,
+} from "../../fitness/services/FitnessProfileStore";
+import { resolveTrainingPrefs, spacedDays } from "../../services/training";
+import { describeAdaptations } from "../../services/WorkoutGenerator";
 
 interface Params {
   userBio: UserBio | null;
@@ -134,14 +135,25 @@ export function useProfileState({
         if (dp) await saveDaySchedule(dp.schedule);
 
         // ── Workout ───────────────────────────────────────────────────────
-        // Regenerate honoring new equipment / training days / level / goal AND
-        // new injuries / medical conditions (the generator's safety filter drops
-        // contraindicated movements; intensity is capped where needed).
-        await ensureWorkoutExercisesLoaded(); // generator reads the exercise pool
-        const wp = generateWorkoutPlan(newBio, weekStart, {
-          equipment: newBio.equipment,
-          daysPerWeek: newBio.workoutDaysPerWeek,
-        });
+        // A days-per-week COUNT (the training nudge asks for one) becomes real
+        // weekdays, spaced for recovery — the fitness profile holds THE training
+        // days, so a count that never reached it would leave the plan on the
+        // old ones. Settings writes picked weekdays itself and passes the
+        // matching count, which leaves them alone here.
+        if (updates.workoutDaysPerWeek !== undefined) {
+          const profile = await loadFitnessProfile();
+          const current = resolveTrainingPrefs(newBio, profile).days;
+          if (current.length !== updates.workoutDaysPerWeek) {
+            await updateFitnessProfile({
+              daysAvailable: spacedDays(updates.workoutDaysPerWeek),
+              daysSource: "derived",
+            });
+          }
+        }
+        // Rebuild honoring new equipment / training days / level / goal AND
+        // new injuries / medical conditions (the engine's safety rules drop
+        // contraindicated movements and cap intensity where needed).
+        const wp = await generateWorkoutWeek(newBio, weekStart, workoutPlan);
         setWorkoutPlan(wp);
         await writeJSON(KEYS.WORKOUT_PLAN, wp);
 
@@ -252,10 +264,11 @@ export function useProfileState({
       return next;
     });
 
-    // Auto-generate the workout plan — AI-first (honors equipment + training
-    // days), local deterministic fallback when offline/unconfigured.
+    // Build the first workout week from everything onboarding asked — the
+    // training days and plan mode were written to the fitness profile just
+    // before this (app/onboarding.tsx), so the week lands on the user's days.
     const weekStart = currentWeekStart();
-    const wp = await generateWorkoutWeek(bio, weekStart);
+    const wp = await generateWorkoutWeek(bio, weekStart, null);
     setWorkoutPlan(wp);
     await writeJSON(KEYS.WORKOUT_PLAN, wp);
 

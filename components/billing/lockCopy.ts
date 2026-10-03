@@ -58,10 +58,16 @@ export const LOCK_COPY: Record<LockId, LockCopy> = {
     icon: "chatbubbles-outline",
   },
   "ai-plans": {
-    title: "Plans built for you, not picked for you",
+    title: "Meal plans built for you, not picked for you",
     blurb:
-      "Free matches you to the full reviewed catalog of diets and workouts — all of it. Pro is the one that writes a plan against your own body, goals, conditions and local foods instead of picking the closest fit.",
+      "Free matches you to the full reviewed catalog of diets — all of it. Pro is the one that writes your meals against your own body, goals, conditions and local foods instead of picking the closest fit.",
     icon: "sparkles-outline",
+  },
+  "adaptive-training": {
+    title: "Training that reads your recovery",
+    blurb:
+      "Free builds every session from your profile and moves it up from what you log, with every reason shown. Pro also eases today's session when your recovery is low — same moves, fewer sets, more rest, no jumping — and lets Gozlin tune it and talk it through.",
+    icon: "pulse-outline",
   },
   sync: {
     title: "Your data on every device",

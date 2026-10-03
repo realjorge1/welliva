@@ -5,7 +5,13 @@
 import { loadCatalog } from "../services/catalogs/CatalogLoader";
 import { augmentDietsWithLibrary } from "./MealLibrary";
 
-export type MealCuisine = "Nigerian" | "Western" | "Mediterranean" | "Universal";
+/**
+ * The kitchen a meal belongs to. "Nigerian" is the West-African kitchen (its
+ * name predates the Ghanaian and Senegalese dishes it now also holds) — the one
+ * a user's "african" preference asks for. "Asian" spans East, South-East and
+ * South Asia.
+ */
+export type MealCuisine = "Nigerian" | "Asian" | "Western" | "Mediterranean" | "Universal";
 
 export interface DietMealOption {
   name: string;
@@ -4013,6 +4019,60 @@ export const DIET_DATABASE: DietData[] = [
         isNigerian: true,
       },
     ],
+  },
+
+  // ===============================================
+  // DIET #12b: TRADITIONAL ASIAN BALANCED DIET
+  // ===============================================
+  // The Asian kitchen's own plan — what the West-African plan above is to the
+  // "african" preference. Its meals live in constants/MealLibrary.ts (the
+  // ASIA group): one copy of each dish, placed into this plan and into every
+  // other plan it clinically fits, rather than a second copy here to drift.
+  // The arrays below fill when the library merges at module load.
+  {
+    id: "traditional-asian",
+    name: "Traditional Asian Diet",
+    fullName: "Traditional Asian Balanced Diet (East, South-East & South Asia)",
+    description:
+      "The everyday plates of India, China, Japan, Korea, Thailand, Vietnam and the Philippines — rice, noodles, lentils and vegetables at the centre, fish, tofu, eggs and lean meat beside them, portioned to your targets.",
+    icon: "restaurant-outline",
+    difficulty: "Easy",
+    category: "Ethical, Cultural & Plant-Based",
+    principles: {
+      emphasis: [
+        "Rice, noodles or roti as the base — brown or mixed rice when you can",
+        "Vegetables at every meal",
+        "Lentils, tofu, fish and eggs for protein",
+        "Steaming, stir-frying and simmering over deep-frying",
+      ],
+      moderate: ["White rice portions", "Coconut-milk curries", "Soy, fish and oyster sauces"],
+      limited: ["Deep-fried snacks", "Sweet drinks and desserts"],
+      avoids: ["Heavy-handed salty sauces and pickles", "Oversized refined-rice portions"],
+      adaptation: [
+        "Half the plate vegetables, a quarter rice or noodles",
+        "Brown, red or mixed rice in place of some white",
+        "Lighter on coconut cream and frying oil",
+        "Low-sodium soy sauce, or tamari when gluten-free",
+      ],
+    },
+    clinicalInfo: {
+      safeFor: ["Adults", "Families", "Weight management", "Type-2 diabetics (with portioned rice)"],
+      cautionFor: [
+        "Hypertension — soy, fish and miso sauces are salty",
+        "Soy, peanut, fish and shellfish allergies — common in these kitchens",
+      ],
+      guidelines: ["WHO", "Chinese Dietary Guidelines (2022)", "ICMR-NIN Dietary Guidelines for Indians (2024)"],
+      clinicalNotes: [
+        "Plant-forward and high in fibre once rice is portioned and whole grains are used",
+        "Fish and soy foods support heart health",
+        "Sodium from sauces is the main thing to watch",
+        "Lentils, tofu and eggs make it easy to eat well as a vegetarian",
+      ],
+    },
+    breakfastOptions: [],
+    lunchOptions: [],
+    dinnerOptions: [],
+    snackOptions: [],
   },
 
   // ===============================================

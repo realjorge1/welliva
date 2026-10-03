@@ -1,13 +1,15 @@
 /**
  * DIET PLAN GENERATOR
  *
- * Deterministic generator that selects daily meals from the diet database
- * based on user preferences, calorie targets, and the current day.
+ * Deterministic generator that builds a day's meals from the diet database
+ * based on user preferences, calorie targets, and the date.
  *
  * Rules:
- * - Same inputs + same day → same meal selection (deterministic)
- * - Calorie target respected (picks meals closest to target split)
- * - Dietary restrictions and allergies enforced
+ * - Same inputs + same day → same meals (deterministic)
+ * - Consecutive days differ: each slot ROTATES through every dish the diet may
+ *   serve before repeating one (services/nutrition/mealVariety)
+ * - Calorie target respected (each portion sized to what the day still needs)
+ * - Dietary restrictions and allergies enforced, never relaxed
  * - Only regenerates when user changes prefs or taps "Regenerate"
  */
 
@@ -16,30 +18,20 @@ import {
     DietData,
     DietMealOption,
     DietSnackOption,
-    MealCuisine,
 } from "../constants/DietDatabase";
-import { DaySchedule, MealType, ScheduledMeal } from "../models/diet";
+import { DaySchedule, ScheduledMeal } from "../models/diet";
 import { NutritionTargets } from "../models/nutrition";
-import { CuisinePreference, UserBio } from "../models/user";
+import { UserBio } from "../models/user";
 import {
     getAllAvailableDiets,
     getRecommendedDiets,
     getSafeOptionDiets,
 } from "./DietMatchService";
-import { mealsForSlot } from "./nutrition/MealCatalog";
-import { breaksRestriction, hasAllergen, mealCuisine } from "./nutrition/mealRules";
+import { planDay } from "./nutrition/mealVariety";
 
 // ============================================================================
-// DETERMINISTIC SEED
+// DETERMINISTIC IDS
 // ============================================================================
-
-function seededRandom(seed: number): () => number {
-  let s = seed;
-  return () => {
-    s = (s * 16807 + 0) % 2147483647;
-    return (s - 1) / 2147483646;
-  };
-}
 
 function hashString(str: string): number {
   let hash = 0;
@@ -93,49 +85,33 @@ export function generateDietPlan(
 
   if (!diet) return null;
 
-  // 2. Build deterministic seed from date + diet. Cuisine preference is part of
-  // the seed so changing it reshuffles meal variety (not just the pool).
-  const seedStr = `${date}_${diet.id}_${bio.primaryGoal}_${bio.dietaryRestriction}_${bio.cuisinePreference ?? "mixed"}_${(bio.foodDislikes ?? []).slice().sort().join(",")}`;
-  const seed = hashString(seedStr);
-  const rand = seededRandom(seed);
-
-  // 3. Target calorie split across meals
+  // 2. The day: every slot takes its turn in the diet's rotation (mealVariety),
+  // each portion sized against the calorie split below. Cuisine, restriction,
+  // allergies and dislikes all shape the rotation, so changing any of them
+  // reshuffles the days ahead.
   const mealSplit = getMealCalorieSplit(targets.calories, bio.mealsPerDay);
-
-  // 4. Select meals deterministically
-  const breakfast = selectBestMeal(
-    diet.breakfastOptions,
-    "breakfast",
-    mealSplit.breakfast,
+  const day = planDay({
+    diet,
     bio,
-    rand,
-  );
-  const lunch = selectBestMeal(diet.lunchOptions, "lunch", mealSplit.lunch, bio, rand);
-  const dinner = selectBestMeal(
-    diet.dinnerOptions,
-    "dinner",
-    mealSplit.dinner,
-    bio,
-    rand,
-  );
+    split: mealSplit,
+    snackCount: bio.mealsPerDay === 4 ? 2 : 1,
+    date,
+  });
+  if (!day) return null;
 
-  // Select 1-2 snacks
-  const snackCount = bio.mealsPerDay === 4 ? 2 : 1;
-  const snacks = selectSnacks(diet.snackOptions, snackCount, bio, rand);
-
-  // 5. Build schedule
+  // 3. Build schedule
   const schedule: DaySchedule = {
     date,
     dietId: diet.id,
     dietName: diet.name,
-    breakfast: mealOptionToScheduled(breakfast, "breakfast"),
-    lunch: mealOptionToScheduled(lunch, "lunch"),
-    dinner: mealOptionToScheduled(dinner, "dinner"),
-    snacks: snacks.map((s, i) => snackOptionToScheduled(s, i)),
+    breakfast: mealOptionToScheduled(day.breakfast, "breakfast"),
+    lunch: mealOptionToScheduled(day.lunch, "lunch"),
+    dinner: mealOptionToScheduled(day.dinner, "dinner"),
+    snacks: day.snacks.map((s, i) => snackOptionToScheduled(s, i)),
     status: "active",
   };
 
-  // 6. Calculate estimated nutrition
+  // 4. Calculate estimated nutrition
   const dailyNutritionEstimate = calculateDayNutrition(schedule);
 
   return { diet, schedule, dailyNutritionEstimate };
@@ -200,186 +176,6 @@ export function getMealCalorieSplit(
     dinner: totalCalories * 0.35,
     snack: totalCalories * 0.05,
   };
-}
-
-/**
- * Ordered cuisine tiers for a preference. The generator tries each tier in
- * turn and uses the first that has enough options, so a preference NARROWS the
- * pool when possible but never starves a diet of meals. `null` = no preference.
- */
-function cuisineTiers(pref?: CuisinePreference): MealCuisine[][] | null {
-  switch (pref) {
-    case "african":
-      return [["Nigerian"], ["Nigerian", "Universal"]];
-    case "western":
-      return [["Western"], ["Western", "Mediterranean", "Universal"]];
-    case "mediterranean":
-      return [["Mediterranean"], ["Mediterranean", "Western", "Universal"]];
-    case "mixed":
-    default:
-      return null;
-  }
-}
-
-/**
- * Narrow a pool toward the user's preferred cuisine with graceful fallback.
- * Works for both meals and snacks (snacks may lack a `cuisine` tag, so we
- * infer Nigerian from `isNigerian`, else Universal).
- */
-function applyCuisinePreference<
-  T extends { cuisine?: MealCuisine; isNigerian?: boolean },
->(pool: T[], pref: CuisinePreference | undefined, minKeep = 2): T[] {
-  const tiers = cuisineTiers(pref);
-  if (!tiers || pool.length === 0) return pool;
-
-  const cuisineOf = (o: T): MealCuisine => mealCuisine(o);
-
-  const need = Math.min(minKeep, pool.length);
-  for (const tier of tiers) {
-    const allowed = new Set(tier);
-    const narrowed = pool.filter((o) => allowed.has(cuisineOf(o)));
-    if (narrowed.length >= need) return narrowed;
-  }
-  return pool;
-}
-
-/**
- * The options in a slot this user can actually be served: nothing that breaks
- * their dietary restriction, nothing they are allergic to.
- *
- * Unlike cuisine and dislikes, these do NOT relax when the pool runs thin. The
- * old rule ("if every option conflicts, serve them anyway") meant a diet with
- * no vegetarian dinner would put fish in front of a vegetarian. When the diet
- * genuinely has nothing safe for a slot, the answer comes from the whole meal
- * catalog instead — preferring the user's cuisine — and only if the catalog has
- * nothing either does the diet's own list come back as a last resort.
- */
-function safePool<T extends DietMealOption | DietSnackOption>(
-  options: T[],
-  slot: MealType,
-  bio: UserBio,
-): T[] {
-  const safe = (o: { name: string }) =>
-    !breaksRestriction(o.name, bio.dietaryRestriction) && !hasAllergen(o.name, bio.allergies);
-
-  const own = options.filter(safe);
-  if (own.length > 0) return own;
-
-  const borrowed = mealsForSlot(slot)
-    .filter((m) => m.origin === "diet" && safe(m))
-    .map(
-      (m) =>
-        ({
-          name: m.name,
-          calories: m.calories,
-          protein: m.protein,
-          carbs: m.carbs,
-          fat: m.fat,
-          ...(m.isNigerian ? { isNigerian: true } : {}),
-          ...(m.cuisine ? { cuisine: m.cuisine } : {}),
-        }) as T,
-    );
-  return borrowed.length > 0 ? borrowed : options;
-}
-
-function selectBestMeal(
-  options: DietMealOption[],
-  slot: MealType,
-  targetCalories: number,
-  bio: UserBio,
-  rand: () => number,
-): DietMealOption {
-  const allergySafe = safePool(options, slot, bio);
-
-  // Honor learned/declared food preferences (e.g. dairy-free), then prefer the
-  // user's cuisine (each with safe fallback), then score by calorie fit.
-  const dislikeSafe = applyDislikes(allergySafe, bio.foodDislikes, 2);
-  const pool = applyCuisinePreference(dislikeSafe, bio.cuisinePreference);
-
-  // Score each option by closeness to calorie target
-  const scored = pool.map((opt) => {
-    const avgCal = (opt.calories.min + opt.calories.max) / 2;
-    const diff = Math.abs(avgCal - targetCalories);
-    return { opt, diff };
-  });
-
-  // Sort by closeness
-  scored.sort((a, b) => a.diff - b.diff);
-
-  // Pick from top 3 candidates using seeded random for variety
-  const topN = Math.min(3, scored.length);
-  const idx = Math.floor(rand() * topN);
-  return scored[idx].opt;
-}
-
-function selectSnacks(
-  options: DietSnackOption[],
-  count: number,
-  bio: UserBio,
-  rand: () => number,
-): DietSnackOption[] {
-  // Keep snacks allergy-safe and aligned to the cuisine preference too.
-  const base = safePool(options, "snack", bio);
-  const dislikeSafe = applyDislikes(base, bio.foodDislikes, count);
-  // The cuisine narrowing must leave at least `count` snacks: with a floor of
-  // one, a cuisine holding a single snack left a 4-meal user with ONE snack
-  // where their plan promised two.
-  const pool = [...applyCuisinePreference(dislikeSafe, bio.cuisinePreference, count)];
-  const selected: DietSnackOption[] = [];
-
-  for (let i = 0; i < count && pool.length > 0; i++) {
-    const idx = Math.floor(rand() * pool.length);
-    selected.push(pool[idx]);
-    pool.splice(idx, 1);
-  }
-
-  return selected;
-}
-
-/**
- * Known dietary-preference families → meal-name keywords. Lets a single stored
- * dislike like "dairy" exclude "Cheese Omelet", "Greek Yogurt Bowl", etc. — not
- * just meals literally named "dairy". Tags mirror Adaptive Nutrition's detector
- * (Gozlin Phase 6) so a learned avoidance reshapes future plans for real.
- */
-const DISLIKE_KEYWORDS: Record<string, string[]> = {
-  dairy: ["milk", "cheese", "yogurt", "yoghurt", "butter", "cream", "dairy"],
-  egg: ["egg", "omelet", "omelette", "frittata"],
-  eggs: ["egg", "omelet", "omelette", "frittata"],
-  fish: ["fish", "salmon", "tuna", "mackerel", "sardine", "shrimp", "prawn", "seafood", "tilapia", "catfish"],
-  "red-meat": ["beef", "steak", "lamb", "mutton", "goat", "pork", "bacon"],
-  poultry: ["chicken", "turkey"],
-  legume: ["bean", "lentil", "chickpea", "moimoi", "moi-moi", "akara", "hummus"],
-};
-
-/** Expand a dislike token to its keyword family (or itself if unknown). */
-function dislikeKeywords(token: string): string[] {
-  const key = token.trim().toLowerCase();
-  return DISLIKE_KEYWORDS[key] ?? (key ? [key] : []);
-}
-
-function hasDislikeConflict(
-  meal: { name: string },
-  dislikes?: string[],
-): boolean {
-  if (!dislikes || dislikes.length === 0) return false;
-  const name = meal.name.toLowerCase();
-  return dislikes.some((d) => dislikeKeywords(d).some((k) => name.includes(k)));
-}
-
-/**
- * Drop disliked meals from a pool, but never below `minKeep` — a preference
- * narrows the pool when possible yet never starves a diet (mirrors the cuisine
- * fallback discipline).
- */
-function applyDislikes<T extends { name: string }>(
-  pool: T[],
-  dislikes: string[] | undefined,
-  minKeep = 2,
-): T[] {
-  if (!dislikes || dislikes.length === 0 || pool.length === 0) return pool;
-  const kept = pool.filter((o) => !hasDislikeConflict(o, dislikes));
-  return kept.length >= Math.min(minKeep, pool.length) ? kept : pool;
 }
 
 export function mealOptionToScheduled(
