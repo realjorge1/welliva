@@ -50,7 +50,7 @@ footer nav a { margin-right: 16px; white-space: nowrap; }
 <main>
 <h1>Privacy Policy</h1>
 <p class="summary">What welliva collects, where it lives, and how to erase it.</p>
-<p class="updated">Last updated 26 September 2026</p>
+<p class="updated">Last updated 15 October 2026</p>
 <h2>The short version</h2>
 <p>welliva is a personal health and fitness app. To build your plan it needs health information about you — including sensitive information such as pregnancy status, medical conditions, medications and injuries.</p>
 <p>welliva is built device-first: your detailed history (meals, workouts, check-ins, the coach's memory) is stored on your phone. What leaves the device is limited to what is needed to sign you in, to keep your account in sync across your devices, and — only if you switch it on — a short, minimised summary sent to the AI coach.</p>
@@ -68,6 +68,7 @@ footer nav a { margin-right: 16px; white-space: nowrap; }
 <li>Food: dietary style, cuisine preference, meals per day, allergies and foods you dislike</li>
 <li>Health context: medical conditions (including pregnancy and trimester, diabetes, kidney, liver, thyroid, digestive and hormonal conditions), injuries or pain areas, and medications or medication categories</li>
 <li>Your logs: meals and foods eaten, water, workouts and sessions completed, body measurements and weigh-ins, habits, streaks, and mood/energy/sleep check-ins</li>
+<li>Your cycle log, only if you switch cycle tracking on: the dates your periods start and end, flow, symptoms you note (such as cramps or headache), mood and energy, how long your cycle usually is, and ovulation-test results if you turn on the fertile-window estimate. Cycle tracking is off until you enable it</li>
 <li>Photos, if you add them: a profile picture, progress photos, and meal photos you ask the coach to analyse</li>
 <li>Messages you send to the AI coach</li>
 </ul>
@@ -83,9 +84,11 @@ footer nav a { margin-right: 16px; white-space: nowrap; }
 </ul>
 <h2>Why we use it (and our legal basis)</h2>
 <p>Health data is a special category of personal data. Where the law requires it, we rely on your explicit consent — given at sign-up and revocable at any time — to process it. Withdrawing consent means we can no longer personalise your plan; you can delete your account at the same time.</p>
+<p>Your cycle log is health data too. You give your explicit consent for it by switching cycle tracking on, and you withdraw that consent by switching it off or by deleting the log, both in Cycle settings.</p>
 <ul>
 <li>To create your nutrition targets, meal plan and training plan — this is the service you asked for (performance of a contract)</li>
 <li>To keep you safe: allergies, conditions, injuries and medications are used to filter foods and exercises out of your plan</li>
+<li>To track your cycle, estimate when your next period is likely and, on days you log cramps or heavy flow, ease your workout — only if you switch cycle tracking on</li>
 <li>To sync your account across your devices and restore it if you change phone</li>
 <li>To send reminders you have enabled</li>
 <li>To keep the service secure and to diagnose faults</li>
@@ -93,6 +96,7 @@ footer nav a { margin-right: 16px; white-space: nowrap; }
 <h2>Where your data lives</h2>
 <p>On your device. Your timeline, logs, summaries and the coach's memory are stored locally on your phone.</p>
 <p>In your private cloud account. So your account survives a lost phone, your profile and logs are synced to our hosted database (Supabase). Rows are protected by per-user row-level security: your account can only read and write its own data. Photos and voice notes go to private storage buckets scoped to your user id, and are served through short-lived signed links — never public URLs.</p>
+<p>Your cycle log. It is stored on your phone and, by default, included in your account backup — the same sync that carries your other logs. Switch the backup off in Cycle settings and the log stays on your phone only; the copy in your cloud account is erased. It reaches the AI coach only if you switch on &quot;Let Gozlin see your cycle&quot; in Cycle settings, which is off by default; the coach then sees your cycle day, when your next period is likely and what you logged today, and nothing else. &quot;Delete all cycle data&quot; erases the log from your phone and from your backup, and you can export it first.</p>
 <p>With the AI coach, only if enabled. When you use Gozlin's cloud features, a minimised summary of the relevant context — not your full history — is sent over an encrypted connection to our backend, which uses Anthropic's Claude models to generate the reply. It is used to answer you, and not to train third-party models.</p>
 <p>Weather. If you enable weather, coarse coordinates are sent to Open-Meteo to fetch a forecast. No account identifier is attached.</p>
 
