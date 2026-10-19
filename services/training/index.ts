@@ -15,7 +15,7 @@ export {
   type TrainingPrefs,
 } from "./prefs";
 export { deriveContext, EMPHASIS_LABEL, type Emphasis, type TrainingContext } from "./context";
-export { lightenSession, type LighterSession, type Readiness } from "./lighten";
+export { lightenSession, type LightenReason, type LighterSession, type Readiness } from "./lighten";
 export { formatDose } from "./dose";
 export { DAY_NAMES, DAY_SHORT } from "./templates";
 export {

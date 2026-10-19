@@ -74,6 +74,7 @@ import {
 } from "../services/ScheduleService";
 import { invalidateDietBuffer } from "../services/PlanSync";
 import { loadBodyLogs } from "../services/BodyLogService";
+import { creditCommitment } from "../services/StreakService";
 import { getDietHistory } from "../services/ScheduleService";
 import { useNutrition, useProfile, useSystem } from "./AppContext";
 
@@ -645,7 +646,11 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
     async (analysis: FoodAnalysis, slot: MealType | null, date?: string) => {
       const target = date ?? todayDate();
       const entry = await logAnalysis({ date: target, slot, analysis });
-      if (entry) await refreshLog(target);
+      if (entry) {
+        await refreshLog(target);
+        // Logging what you ate keeps the day (a past date is ignored inside).
+        void creditCommitment(target);
+      }
       return entry !== null;
     },
     [refreshLog],
@@ -661,7 +666,10 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
     }) => {
       const target = args.date ?? todayDate();
       const entry = await logKnownFood({ ...args, date: target });
-      if (entry) await refreshLog(target);
+      if (entry) {
+        await refreshLog(target);
+        void creditCommitment(target);
+      }
       return entry !== null;
     },
     [refreshLog],
@@ -685,7 +693,10 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
         unit: args.unit,
         origin: args.origin,
       });
-      if (entry) await refreshLog(target);
+      if (entry) {
+        await refreshLog(target);
+        void creditCommitment(target);
+      }
       return entry;
     },
     [refreshLog],

@@ -3,8 +3,9 @@
  *
  * Identity first (photo, name, the one line that says who this person is to
  * welliva), then the destinations in the order they were specified, then the two
- * exploratory surfaces below a hairline, then Upgrade and Settings pinned to the
- * floor.
+ * exploratory surfaces below a hairline, then Upgrade and Settings in a footer
+ * that FOLLOWS the list rather than sitting on the floor — how a tall phone's
+ * spare height is spent is menuRhythm.ts's whole job.
  *
  * EVERYTHING MOVES OFF `progress`, not off mount. The panel's parallax, its
  * scale and fade, and each row's own staggered slide are all interpolations of
@@ -50,7 +51,7 @@ import { useColors } from "@/components/ui/useColors";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import Animated, {
   Easing,
@@ -64,7 +65,7 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from "react-native-reanimated";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   MENU_HAIRLINE,
   MENU_PARALLAX,
@@ -80,6 +81,7 @@ import {
   UPGRADE_ITEM,
   type MenuItem,
 } from "./menu";
+import { ROW_GAP, ROW_MIN, menuRhythm, type MenuShape } from "./menuRhythm";
 import { useAccountIdentity } from "./useAccountIdentity";
 
 export interface SideMenuProps {
@@ -173,6 +175,20 @@ export function SideMenu({
     ],
   }));
 
+  const insets = useSafeAreaInsets();
+  /**
+   * The height the list and the footer share: everything under the profile
+   * header. Measured rather than derived from the window, because the header's
+   * own height moves with the phone's text size, and this is the one number
+   * the rhythm depends on. The panel lays out at launch, long before anyone
+   * opens it, so the one re-render this costs is never seen.
+   */
+  const [bodyHeight, setBodyHeight] = useState(0);
+  const rhythm = useMemo(
+    () => menuRhythm(bodyHeight, insets.bottom, MENU_SHAPE),
+    [bodyHeight, insets.bottom],
+  );
+
   // One running index across all three groups, so the stagger reads as a single
   // cascade down the panel rather than three restarts.
   let row = 0;
@@ -181,67 +197,88 @@ export function SideMenu({
     <Animated.View
       style={[styles.panel, { width, backgroundColor: MENU_SURFACE }, panelStyle]}
     >
-      <SafeAreaView style={styles.flex} edges={["top", "bottom", "left"]}>
+      {/* No bottom edge: the lift under the footer carries the inset itself. */}
+      <SafeAreaView style={styles.flex} edges={["top", "left"]}>
         <ProfileHeader
           progress={progress}
           onPress={() => onNavigate(PROFILE_ITEM)}
           active={activePath === PROFILE_ITEM.href}
         />
 
-        <ScrollView
+        <View
           style={styles.flex}
-          contentContainerStyle={styles.list}
-          showsVerticalScrollIndicator={false}
+          onLayout={(e) => setBodyHeight(e.nativeEvent.layout.height)}
         >
-          {PRIMARY_ITEMS.map((item) => (
+          {/* SHRINK-WRAPPED, NOT `flex: 1`. As tall as its rows when they fit,
+              so the footer follows Memory instead of waiting at the floor; it
+              shrinks and scrolls only when they don't, which keeps a short
+              phone's footer in view exactly as before. */}
+          <ScrollView
+            style={styles.listScroll}
+            contentContainerStyle={[styles.list, { paddingBottom: rhythm.gap }]}
+            showsVerticalScrollIndicator={false}
+          >
+            {PRIMARY_ITEMS.map((item) => (
+              <Row
+                key={item.route}
+                item={item}
+                index={row++}
+                height={rhythm.row}
+                progress={progress}
+                openIntent={openIntent}
+                active={activePath === item.href}
+                onPress={() => onNavigate(item)}
+              />
+            ))}
+
+            <View style={[styles.hairline, { marginVertical: rhythm.gap }]} />
+
+            {SECONDARY_ITEMS.map((item) => (
+              <Row
+                key={item.route}
+                item={item}
+                index={row++}
+                height={rhythm.row}
+                progress={progress}
+                openIntent={openIntent}
+                active={activePath === item.href}
+                onPress={() => onNavigate(item)}
+                muted
+              />
+            ))}
+          </ScrollView>
+
+          {/* Upgrade and Settings — outside the scroll, so neither can ever
+              scroll out of reach on a short phone. Both are about the app
+              rather than about your data, and Upgrade leads because "what am I
+              paying for" is a question people arrive with, not one they browse
+              to. */}
+          <View style={[styles.footer, { paddingTop: rhythm.gap }]}>
             <Row
-              key={item.route}
-              item={item}
+              item={UPGRADE_ITEM}
               index={row++}
+              height={rhythm.row}
               progress={progress}
               openIntent={openIntent}
-              active={activePath === item.href}
-              onPress={() => onNavigate(item)}
+              active={activePath === UPGRADE_ITEM.href}
+              onPress={() => onNavigate(UPGRADE_ITEM)}
             />
-          ))}
-
-          <View style={styles.hairline} />
-
-          {SECONDARY_ITEMS.map((item) => (
             <Row
-              key={item.route}
-              item={item}
-              index={row++}
+              item={SETTINGS_ITEM}
+              index={row}
+              height={rhythm.row}
               progress={progress}
               openIntent={openIntent}
-              active={activePath === item.href}
-              onPress={() => onNavigate(item)}
-              muted
+              active={activePath === SETTINGS_ITEM.href}
+              onPress={() => onNavigate(SETTINGS_ITEM)}
             />
-          ))}
-        </ScrollView>
+          </View>
 
-        {/* Upgrade and Settings — pinned to the floor so neither ever scrolls
-            out of reach. Both are about the app rather than about your data,
-            and Upgrade leads because "what am I paying for" is a question
-            people arrive with, not one they browse to. */}
-        <View style={styles.footer}>
-          <Row
-            item={UPGRADE_ITEM}
-            index={row++}
-            progress={progress}
-            openIntent={openIntent}
-            active={activePath === UPGRADE_ITEM.href}
-            onPress={() => onNavigate(UPGRADE_ITEM)}
-          />
-          <Row
-            item={SETTINGS_ITEM}
-            index={row}
-            progress={progress}
-            openIntent={openIntent}
-            active={activePath === SETTINGS_ITEM.href}
-            onPress={() => onNavigate(SETTINGS_ITEM)}
-          />
+          {/* THE LIFT. Never less than the device inset plus the rhythm's
+              floor, so Settings is never sitting on the glass; it flexes to
+              take whatever the rows and gaps did not, so on a tall phone the
+              spare room ends up under the menu instead of in the middle of it. */}
+          <View style={{ flexGrow: 1, minHeight: insets.bottom + rhythm.lift }} />
         </View>
       </SafeAreaView>
     </Animated.View>
@@ -357,6 +394,7 @@ function ProfileHeader({
 function Row({
   item,
   index,
+  height = ROW_MIN,
   progress,
   openIntent,
   active,
@@ -365,6 +403,8 @@ function Row({
 }: {
   item: MenuItem;
   index: number;
+  /** The rhythm's row height — taller on a tall phone, see menuRhythm.ts. */
+  height?: number;
   progress: SharedValue<number>;
   openIntent: DrawerOpenIntent | null;
   active: boolean;
@@ -451,18 +491,18 @@ function Row({
         accessibilityLabel={item.label}
         style={({ pressed }) => [
           styles.row,
+          { minHeight: height },
           pressed && { backgroundColor: alpha(colors.text, 0.05) },
         ]}
       >
         {/* Fixed-width slot, sized for the active glyph — see the file header.
-            Gozlin keeps its own mark; what it does NOT keep is its own colour.
-            The brand-gradient badge that used to render here was lit whether or
-            not you were on the screen, so it out-shouted the genuinely active
-            row. Monochrome, it takes the same tint as every other mark and the
-            menu's one rule holds: gold means "you are here". */}
+            Gozlin's mark is the diamond artwork in its own colours, never
+            tinted: the owner's call (2026-10-15, "exactly as is"), which
+            retired the monochrome bolt. "You are here" is still said by the
+            gold label and the size jump, which the mark takes part in. */}
         <View style={styles.markSlot}>
           {item.mark === "gozlin" ? (
-            <AILogoIcon size={active ? MARK_ACTIVE : MARK_REST} color={tint} />
+            <AILogoIcon size={active ? MARK_ACTIVE : MARK_REST} />
           ) : (
             <Ionicons
               name={active ? item.activeIcon : item.icon}
@@ -510,6 +550,13 @@ function Row({
 const MARK_REST = 21;
 const MARK_ACTIVE = 30;
 
+/** What the rhythm has to fit: the scrolling list, and the two footer rows. */
+const MENU_SHAPE: MenuShape = {
+  listRows: PRIMARY_ITEMS.length + SECONDARY_ITEMS.length,
+  footerRows: 2,
+  hairline: StyleSheet.hairlineWidth,
+};
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
 
@@ -548,12 +595,12 @@ const styles = StyleSheet.create({
   avatarFallback: { alignItems: "center", justifyContent: "center" },
   profileSub: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 1 },
 
-  // List
+  // List. Its bottom padding and the hairline's margins come from the rhythm.
+  listScroll: { flexGrow: 0, flexShrink: 1 },
   list: {
     paddingTop: Spacing.md,
     paddingHorizontal: Spacing.xs,
-    paddingBottom: Spacing.lg,
-    gap: 2,
+    gap: ROW_GAP,
   },
   row: {
     flexDirection: "row",
@@ -561,8 +608,9 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     paddingHorizontal: Spacing.xs,
     // `minHeight`, not `height`: a label that wraps to two lines has to be able
-    // to grow the row instead of being clipped by it.
-    minHeight: 46,
+    // to grow the row instead of being clipped by it. The rhythm raises it on a
+    // tall phone (see Row's `height`).
+    minHeight: ROW_MIN,
     paddingVertical: Spacing.xs,
     borderRadius: Radius.md,
   },
@@ -585,7 +633,6 @@ const styles = StyleSheet.create({
   hairline: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: MENU_HAIRLINE,
-    marginVertical: Spacing.md,
     marginHorizontal: Spacing.sm,
   },
 
@@ -593,7 +640,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: MENU_HAIRLINE,
     paddingHorizontal: Spacing.xs,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xs,
+    gap: ROW_GAP,
   },
 });

@@ -153,6 +153,37 @@ const FIXTURES: Record<string, [string, string]> = {
     JSON.stringify([{ kind: "disordered_eating", at: "2026-07-01T08:00:00.000Z" }]),
     JSON.stringify([{ kind: "disordered_eating", at: "2026-07-09T08:00:00.000Z" }]),
   ],
+  // InsightEntry[] — an insight opened on each phone, one opened on both.
+  "@gozlin_insight_ledger": [
+    JSON.stringify([
+      { key: "low-water:2026-10-17", card: { title: "t", message: "m" }, openedAt: "2026-10-17T08:00:00.000Z" },
+      { key: "habit:abc", card: { title: "t", message: "m" }, openedAt: "2026-10-16T08:00:00.000Z" },
+    ]),
+    JSON.stringify([
+      { key: "workout-late:2026-10-17", card: { title: "t", message: "m" }, openedAt: "2026-10-17T19:00:00.000Z" },
+      { key: "habit:abc", card: { title: "t", message: "m" }, openedAt: "2026-10-16T08:00:00.000Z" },
+    ]),
+  ],
+  // PeriodEpisode[] — p1 removed on one phone (tombstone, newer), p2 only there.
+  "@welliva_cycle_periods": [
+    JSON.stringify([
+      { id: "p1", start: "2026-09-01", end: "2026-09-05", updatedAt: "2026-09-05T08:00:00.000Z" },
+    ]),
+    JSON.stringify([
+      { id: "p1", start: "2026-09-01", end: "2026-09-05", deleted: true, updatedAt: "2026-09-20T08:00:00.000Z" },
+      { id: "p2", start: "2026-09-29", end: null, updatedAt: "2026-09-29T08:00:00.000Z" },
+    ]),
+  ],
+  // Record<date, CycleDayLog> — 09-02 edited on both, later wins; 09-03 one side.
+  "@welliva_cycle_days": [
+    JSON.stringify({
+      "2026-09-02": { date: "2026-09-02", symptoms: ["cramps"], updatedAt: "2026-09-02T08:00:00.000Z" },
+    }),
+    JSON.stringify({
+      "2026-09-02": { date: "2026-09-02", updatedAt: "2026-09-02T21:00:00.000Z" },
+      "2026-09-03": { date: "2026-09-03", flow: "light", updatedAt: "2026-09-03T08:00:00.000Z" },
+    }),
+  ],
   [KEYS.NUTRITION_HISTORY]: [
     JSON.stringify([{ date: "2026-07-01", calories: 2000, mealsLogged: 3 }]),
     JSON.stringify([{ date: "2026-07-02", calories: 2100, mealsLogged: 2 }]),
@@ -271,6 +302,28 @@ describe("a memory forgotten on one phone", () => {
       expect(row.forgotten).toBe(true);
       expect(merged).not.toContain("hamstrings");
     }
+  });
+});
+
+describe("a period removed on one phone", () => {
+  const [kept, removed] = FIXTURES["@welliva_cycle_periods"] as [string, string];
+
+  it("stays removed, whichever side the merge runs from", () => {
+    for (const merged of [
+      merge("@welliva_cycle_periods", kept, removed),
+      merge("@welliva_cycle_periods", removed, kept),
+    ]) {
+      const rows = JSON.parse(merged!) as { id: string; deleted?: boolean }[];
+      expect(rows.find((r) => r.id === "p1")?.deleted).toBe(true);
+      expect(rows.map((r) => r.id).sort()).toEqual(["p1", "p2"]);
+    }
+  });
+
+  it("lets the later edit of a day win — including clearing it", () => {
+    const [phone, tablet] = FIXTURES["@welliva_cycle_days"] as [string, string];
+    const merged = JSON.parse(merge("@welliva_cycle_days", phone, tablet)!);
+    expect(merged["2026-09-02"].symptoms).toBeUndefined();
+    expect(merged["2026-09-03"].flow).toBe("light");
   });
 });
 

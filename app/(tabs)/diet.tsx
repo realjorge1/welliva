@@ -62,6 +62,7 @@ import {
 import { mealsForSlot } from "@/services/nutrition/MealCatalog";
 import { TargetsRecalcCard } from "@/components/nutrition/TargetsRecalcCard";
 import { Gradients, Radius, Spacing, alpha } from "@/constants/theme";
+import { retroText } from "@/constants/RetroFont";
 import { useNutrition, useProfile, useSystem } from "@/contexts/AppContext";
 import { useMealPlan } from "@/contexts/MealPlanContext";
 import { PlanDurationPicker } from "@/components/diet/PlanDurationPicker";
@@ -1121,9 +1122,10 @@ export default function DietScreen() {
     proteinStatus.state === "ahead";
 
   const header = (
-    <Reveal index={0}>
+    <Reveal index={0} pointerEvents="box-none">
       <ScreenTopBar
         style={styles.header}
+        compactTitle="Diet"
         title={
           <>
             <AppText variant="title">Diet</AppText>
@@ -1159,7 +1161,7 @@ export default function DietScreen() {
 
   return (
     <>
-      <Screen header={header}>
+      <Screen header={header} floatingHeader>
         {/* Active plan period — what you committed to and how far through it
             you are. Without this the app can show today's meals but never says
             what they're part of. */}
@@ -1340,7 +1342,11 @@ export default function DietScreen() {
                         {todayDiet!.source === "weekly" ? "Weekly plan" : "Today's plan"}
                       </AppText>
                     </View>
-                    <AppText variant="headline" numberOfLines={2} style={styles.bannerName}>
+                    <AppText
+                      variant="headline"
+                      numberOfLines={2}
+                      style={[styles.bannerName, retroText]}
+                    >
                       {todayDiet!.schedule!.dietName}
                     </AppText>
                     {currentDietData?.description && (
@@ -2150,7 +2156,7 @@ export default function DietScreen() {
                 {smartPicks.length > 0 && (
                   <View style={styles.smartBlock}>
                     <View style={styles.smartHead}>
-                      <AILogoIcon size={16} color={colors.primary} />
+                      <AILogoIcon size={16} />
                       <AppText variant="headline">Smart picks</AppText>
                     </View>
                     <AppText variant="subhead" color="tertiary" style={styles.modalSectionSub}>
@@ -2335,7 +2341,7 @@ function AlternativeToast({
         ]}
       >
         <View style={styles.altToastHead}>
-          <AILogoIcon size={15} color={colors.primary} />
+          <AILogoIcon size={15} />
           <AppText
             variant="caption"
             color="brand"
@@ -2557,7 +2563,7 @@ function SmartPickCard({
               {pick.option.name}
             </AppText>
             {pick.isBest && (
-              <Pill label="Best fit" tone={colors.primary} size="sm" iconNode={<AILogoIcon size={11} color={colors.primary} />} />
+              <Pill label="Best fit" tone={colors.primary} size="sm" iconNode={<AILogoIcon size={11} />} />
             )}
           </View>
           <AppText variant="footnote" color="tertiary" style={styles.swapMacros}>

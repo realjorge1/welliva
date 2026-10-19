@@ -88,6 +88,12 @@ export const LOCK_COPY: Record<LockId, LockCopy> = {
       "The cards on your home screen are free and stay there. Pro opens them — the correlation behind each one, across your sleep, food, training and mood.",
     icon: "bulb-outline",
   },
+  "insight-history": {
+    title: "Every insight, kept",
+    blurb:
+      "New insights and opening them are free, always. Pro keeps each one you open so you can find it again — the last hundred, with what I said and when.",
+    icon: "albums-outline",
+  },
   habits: {
     title: "Habits of your own",
     blurb:

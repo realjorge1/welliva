@@ -49,7 +49,7 @@ import {
   FoodLookupSheet,
 } from "@/components/foods";
 import { ProLockCard } from "@/components/billing";
-import { ScreenTopBar } from "@/components/navigation";
+import { FloatingHeader, ScreenTopBar, useFloatingHeader } from "@/components/navigation";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Chip } from "@/components/ui/Chip";
@@ -118,6 +118,7 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
 } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 /**
  * A row, carrying its own list key.
@@ -182,11 +183,8 @@ const PARALLAX = {
   groups: { rate: 0.12, fade: 130 },
 } as const;
 
-/** Scroll distance over which the rule under the pinned title fades in. */
-const RULE_IN = 28;
-
 export default function FoodsScreen() {
-  const { colors, isDark } = useColors();
+  const { colors } = useColors();
   const { logCatalogFood, removeLoggedFood } = useMealPlan();
   const { userBio } = useProfile();
   /** The catalog is Pro. See the note above this screen's return. */
@@ -577,11 +575,18 @@ export default function FoodsScreen() {
   // chrome on this screen (see PARALLAX). The elastic hook forwards the list's
   // scroll events, so there is still exactly one `onScroll` on the list.
   const scrollY = useSharedValue(0);
+  // The header floats over the list and folds as the list passes under it
+  // (FloatingHeader), so the list starts at the top of the glass.
+  const insets = useSafeAreaInsets();
+  const chrome = useFloatingHeader(insets.top);
+  const track = chrome.track;
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      scrollY.value = e.nativeEvent.contentOffset.y;
+      const y = e.nativeEvent.contentOffset.y;
+      scrollY.value = y;
+      track(y);
     },
-    [scrollY],
+    [scrollY, track],
   );
 
   // The SectionList owns the scroll here rather than Screen's ScrollView, so it
@@ -614,10 +619,6 @@ export default function FoodsScreen() {
       transform: [{ translateY: y * PARALLAX.groups.rate }],
     };
   });
-
-  const ruleStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(scrollY.value, [0, RULE_IN], [0, 1], Extrapolation.CLAMP),
-  }));
 
   // Chip and FilterRow supply their own selection haptic; this only owns state.
   const toggleFilter = useCallback((key: string) => {
@@ -653,73 +654,81 @@ export default function FoodsScreen() {
    * a food. Same reason the group sections no longer carry one.
    */
   const header = (
-    <View>
-      <ScreenTopBar
-        style={styles.headerRow}
-        title={
-          <>
-            <AppText variant="title">Foods</AppText>
-            <AppText variant="footnote" color="tertiary">
-              Search anything you eat · tap for the full label
-            </AppText>
-          </>
-        }
-        /*
-         * The scanner is PINNED, opposite the screen name.
-         *
-         * It used to live as a bare glyph inside the search field, which was
-         * wrong twice over: the search row rides the list and parallaxes away
-         * (see PARALLAX), so the fastest way to log a packaged food vanished on
-         * the first flick — and an unlabelled icon among three other glyphs read
-         * as decoration. Here it is on the only line that never moves, it is
-         * captioned, and it mirrors the title/subtitle pair on the left so the
-         * header reads as one row rather than a title with a button stuck on it.
-         */
-        /* The scanner comes with the catalog, so it goes when the catalog goes.
-           Leaving a live camera button pinned above a lock card would be the
-           worst of both: the one control still working on a screen that just
-           said the feature is Pro. */
-        titleRight={
-          !allowsFoods ? null : (
+    <ScreenTopBar
+      style={styles.headerRow}
+      title={
+        <>
+          <AppText variant="title">Foods</AppText>
+          <AppText variant="footnote" color="tertiary">
+            Search anything you eat · tap for the full label
+          </AppText>
+        </>
+      }
+      /*
+       * The scanner is PINNED, opposite the screen name.
+       *
+       * It used to live as a bare glyph inside the search field, which was
+       * wrong twice over: the search row rides the list and parallaxes away
+       * (see PARALLAX), so the fastest way to log a packaged food vanished on
+       * the first flick — and an unlabelled icon among three other glyphs read
+       * as decoration. Here it is captioned, and it mirrors the title/subtitle
+       * pair on the left so the header reads as one row rather than a title
+       * with a button stuck on it. This line folds away when the list passes
+       * under the header, so the island carries the glyph from then on
+       * (`foldedRight`, below) — the scanner is never more than a tap away.
+       */
+      /* The scanner comes with the catalog, so it goes when the catalog goes.
+         Leaving a live camera button pinned above a lock card would be the
+         worst of both: the one control still working on a screen that just
+         said the feature is Pro. */
+      titleRight={
+        !allowsFoods ? null : (
+        <Pressable
+          onPress={() => setScannerOpen(true)}
+          hitSlop={10}
+          style={styles.scanAction}
+          accessibilityRole="button"
+          accessibilityLabel="Scan a barcode"
+          accessibilityHint="Opens the camera to read a packaged food's barcode"
+        >
+          <View
+            style={[
+              styles.scanBadge,
+              {
+                backgroundColor: alpha(colors.primary, 0.12),
+                borderColor: alpha(colors.primary, 0.3),
+              },
+            ]}
+          >
+            <Ionicons name="barcode-outline" size={20} color={colors.primary} />
+          </View>
+          <AppText variant="caption" color="tertiary">
+            Scan barcode
+          </AppText>
+        </Pressable>
+        )
+      }
+      foldedRight={
+        !allowsFoods ? null : (
           <Pressable
             onPress={() => setScannerOpen(true)}
             hitSlop={10}
-            style={styles.scanAction}
+            style={[
+              styles.scanBadge,
+              {
+                backgroundColor: alpha(colors.primary, 0.12),
+                borderColor: alpha(colors.primary, 0.3),
+              },
+            ]}
             accessibilityRole="button"
             accessibilityLabel="Scan a barcode"
             accessibilityHint="Opens the camera to read a packaged food's barcode"
           >
-            <View
-              style={[
-                styles.scanBadge,
-                {
-                  backgroundColor: alpha(colors.primary, 0.12),
-                  borderColor: alpha(colors.primary, 0.3),
-                },
-              ]}
-            >
-              <Ionicons name="barcode-outline" size={20} color={colors.primary} />
-            </View>
-            <AppText variant="caption" color="tertiary">
-              Scan barcode
-            </AppText>
+            <Ionicons name="barcode-outline" size={20} color={colors.primary} />
           </Pressable>
-          )
-        }
-      />
-
-      {/* Arrives as soon as the list moves, so the pinned title keeps an edge
-          once the search row has drifted out from under it. */}
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          styles.headerRule,
-          // Same ink tint as the row hairlines — see FoodRow.
-          { backgroundColor: alpha(colors.text, isDark ? 0.1 : 0.08) },
-          ruleStyle,
-        ]}
-      />
-    </View>
+        )
+      }
+    />
   );
 
   /**
@@ -905,7 +914,7 @@ export default function FoodsScreen() {
    */
   if (!allowsFoods) {
     return (
-      <Screen header={header}>
+      <Screen header={header} floatingHeader>
         <ProLockCard lock="foods" />
       </Screen>
     );
@@ -913,8 +922,10 @@ export default function FoodsScreen() {
 
   return (
     // `scroll={false}`: the SectionList owns the scroll. Nesting it inside the
-    // Screen's ScrollView would render every row and warn.
-    <Screen header={header} scroll={false}>
+    // Screen's ScrollView would render every row and warn. `edges={[]}`: the
+    // list runs to the top of the glass, and the floating header clears the
+    // inset itself.
+    <Screen scroll={false} edges={[]}>
       {/* The list is rendered even with nothing in it, and the miss state goes
           through `ListEmptyComponent`. It has to: search and the filters live in
           the list header now, and swapping the whole list out for a card would
@@ -930,7 +941,10 @@ export default function FoodsScreen() {
           stickySectionHeadersEnabled={false}
           showsVerticalScrollIndicator={false}
           {...elastic.scrollProps}
-          contentContainerStyle={{ paddingBottom: NAV_CLEARANCE }}
+          // Hidden for the one frame before the header is measured: until then
+          // the list doesn't know where it starts, and would jump.
+          style={chrome.ready ? undefined : styles.hidden}
+          contentContainerStyle={{ paddingTop: chrome.contentTop, paddingBottom: NAV_CLEARANCE }}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           // Tuned for low-end Android: a small first paint, small batches, and a
@@ -945,6 +959,11 @@ export default function FoodsScreen() {
           windowSize={7}
         />,
       )}
+      {/* After the list, so it draws over the list running under it. It is
+          absolute, so Screen's gutter doesn't reach it — it brings its own. */}
+      <FloatingHeader state={chrome} style={styles.gutter}>
+        {header}
+      </FloatingHeader>
 
       <FoodDetailSheet
         food={selected}
@@ -1100,8 +1119,9 @@ const FoodRow = React.memo(function FoodRow({
 });
 
 const styles = StyleSheet.create({
+  hidden: { opacity: 0 },
+  gutter: { paddingHorizontal: Spacing.screen },
   headerRow: { paddingTop: Spacing.xs, paddingBottom: Spacing.md },
-  headerRule: { height: StyleSheet.hairlineWidth },
   // Caption under the glyph, so it lands level with the title's own subtitle.
   scanAction: { alignItems: "center", gap: 3 },
   scanBadge: {

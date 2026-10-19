@@ -13,6 +13,15 @@
  */
 import type { FigureMotion } from "./movementProfiles";
 
+/**
+ * Every motion that can be shown from the front. The pattern fallbacks that
+ * have a front view and the idle pose are always here; floor and all-fours
+ * work has no entry, because the rig cannot foreshorten a bone and its "front"
+ * view drew a person standing upright — see animation/cameras.ts.
+ */
+type AlwaysFront = "squat" | "push" | "pull" | "core" | "cardio" | "flexibility" | "neutral" | "idle";
+type FrontProfileMap = Partial<Record<FigureMotion, FrontProfile>> & Record<AlwaysFront, FrontProfile>;
+
 /** Node order in a flat front frame: [x,y] per node. Center nodes sit at x=50. */
 export const FRONT_NODES = [
   "head",
@@ -88,7 +97,7 @@ const L = (
   foot: [number, number],
 ): number[] => [...shoulder, ...elbow, ...hand, ...hip, ...knee, ...foot];
 
-export const FRONT_PROFILES: Record<FigureMotion, FrontProfile> = {
+export const FRONT_PROFILES: FrontProfileMap = {
   // Bodyweight squat — hips sink, knees track out, arms reach forward.
   squat: {
     frames: [
@@ -96,14 +105,6 @@ export const FRONT_PROFILES: Record<FigureMotion, FrontProfile> = {
       P([50, 30], [50, 45], [50, 66], [62, 46], [71, 45], [80, 44], [60, 66], [67, 79], [59, 94]),
     ],
     loopMs: 2400,
-  },
-  // Hip hinge / good-morning — torso folds forward, legs stay long.
-  hinge: {
-    frames: [
-      P([50, 16], [50, 32], [50, 58], [61, 33], [63, 46], [64, 58], [56, 58], [56, 77], [56, 94]),
-      P([50, 32], [50, 44], [50, 58], [60, 45], [61, 56], [62, 66], [56, 58], [56, 77], [56, 94]),
-    ],
-    loopMs: 2600,
   },
   // Overhead press — hands drive from the shoulders to full extension.
   push: {
@@ -190,32 +191,6 @@ export const FRONT_PROFILES: Record<FigureMotion, FrontProfile> = {
     loopMs: 700,
   },
 
-  // High knees — knee drives to hip height, opposite arm pumps up.
-  highKnee: {
-    frames: [
-      P([50, 17], [50, 32], [50, 56], [60, 32], [62, 45], [57, 56], [56, 56], [60, 38], [58, 55]),
-      P([50, 17], [50, 32], [50, 56], [60, 32], [62, 45], [54, 36], [56, 56], [56, 75], [56, 92]),
-    ],
-    framesL: [
-      L([40, 32], [38, 45], [46, 36], [44, 56], [44, 75], [44, 92]),
-      L([40, 32], [38, 45], [42, 56], [44, 56], [40, 38], [42, 55]),
-    ],
-    loopMs: 620,
-  },
-
-  // Butt kicks — the heel snaps up toward the glute; the knee barely moves.
-  buttKick: {
-    frames: [
-      P([50, 17], [50, 32], [50, 57], [60, 33], [62, 46], [57, 56], [56, 57], [56, 76], [65, 62]),
-      P([50, 17], [50, 32], [50, 57], [60, 33], [62, 46], [55, 38], [56, 57], [56, 76], [56, 93]),
-    ],
-    framesL: [
-      L([40, 33], [38, 46], [45, 38], [44, 57], [44, 76], [44, 93]),
-      L([40, 33], [38, 46], [43, 56], [44, 57], [44, 76], [35, 62]),
-    ],
-    loopMs: 640,
-  },
-
   // Burpee — the whole body drops to the floor and springs back up tall.
   burpee: {
     frames: [
@@ -260,20 +235,6 @@ export const FRONT_PROFILES: Record<FigureMotion, FrontProfile> = {
     loopMs: 1100,
   },
 
-  // March in place — the same alternation as a high knee, half the tempo and
-  // half the lift.
-  march: {
-    frames: [
-      P([50, 17], [50, 33], [50, 57], [60, 34], [62, 46], [60, 58], [56, 57], [58, 42], [57, 58]),
-      P([50, 17], [50, 33], [50, 57], [60, 34], [62, 46], [60, 58], [56, 57], [56, 76], [56, 93]),
-    ],
-    framesL: [
-      L([40, 34], [38, 46], [42, 58], [44, 57], [44, 76], [44, 93]),
-      L([40, 34], [38, 46], [40, 58], [44, 57], [42, 42], [43, 58]),
-    ],
-    loopMs: 1300,
-  },
-
   // Shadow boxing — alternating straight punches over a live guard.
   boxing: {
     frames: [
@@ -283,37 +244,6 @@ export const FRONT_PROFILES: Record<FigureMotion, FrontProfile> = {
     framesL: [
       L([40, 34], [38, 45], [44, 36], [44, 58], [43, 76], [42, 93]),
       L([40, 34], [30, 41], [20, 46], [44, 58], [43, 76], [42, 93]),
-    ],
-    loopMs: 700,
-  },
-
-  // Bear crawl — a quadruped travelling on hands and toes, hips low.
-  bearCrawl: {
-    frames: [
-      P([50, 42], [50, 54], [50, 74], [60, 54], [64, 68], [66, 82], [56, 74], [62, 84], [60, 95]),
-      P([50, 40], [50, 52], [50, 72], [60, 52], [62, 66], [62, 80], [56, 72], [64, 82], [64, 94]),
-    ],
-    loopMs: 1400,
-  },
-
-  // Inchworm — a standing fold that walks its hands out to a plank.
-  inchworm: {
-    frames: [
-      P([50, 46], [50, 58], [50, 76], [59, 58], [61, 70], [62, 82], [55, 76], [55, 86], [55, 96]),
-      P([50, 52], [50, 62], [50, 78], [59, 62], [60, 74], [60, 86], [55, 78], [56, 87], [57, 96]),
-    ],
-    loopMs: 3000,
-  },
-
-  // Mountain climber — a held plank with one knee driving under the chest.
-  mountainClimber: {
-    frames: [
-      P([50, 52], [50, 60], [50, 78], [59, 60], [61, 72], [62, 84], [55, 78], [55, 88], [55, 97]),
-      P([50, 52], [50, 60], [50, 78], [59, 60], [61, 72], [62, 84], [55, 78], [62, 72], [64, 84]),
-    ],
-    framesL: [
-      L([41, 60], [39, 72], [38, 84], [45, 78], [45, 88], [45, 97]),
-      L([41, 60], [39, 72], [38, 84], [45, 78], [38, 72], [36, 84]),
     ],
     loopMs: 700,
   },
@@ -347,16 +277,6 @@ export const FRONT_PROFILES: Record<FigureMotion, FrontProfile> = {
 
   // ── Strength & floor work ───────────────────────────────────────────────
 
-  // Push-up — a real push-up. The `push` fallback is an overhead press, which
-  // is the single most-noticed wrong demonstration in the catalogue.
-  pushup: {
-    frames: [
-      P([50, 44], [50, 56], [50, 76], [60, 56], [68, 64], [74, 74], [55, 76], [55, 87], [55, 96]),
-      P([50, 50], [50, 62], [50, 80], [60, 62], [72, 62], [74, 74], [55, 80], [55, 89], [55, 97]),
-    ],
-    loopMs: 2200,
-  },
-
   // Lunge — a split stance sinking straight down, not a squat.
   lunge: {
     frames: [
@@ -368,33 +288,6 @@ export const FRONT_PROFILES: Record<FigureMotion, FrontProfile> = {
       L([40, 46], [38, 58], [37, 70], [44, 68], [42, 84], [41, 97]),
     ],
     loopMs: 2400,
-  },
-
-  // Plank — a hold. It breathes and does nothing else, which is the point.
-  plank: {
-    frames: [
-      P([50, 50], [50, 58], [50, 78], [60, 58], [62, 70], [63, 82], [55, 78], [55, 88], [55, 97]),
-      P([50, 51], [50, 59], [50, 79], [60, 59], [62, 71], [63, 83], [55, 79], [55, 89], [55, 98]),
-    ],
-    loopMs: 4200,
-  },
-
-  // Glute bridge — supine, the hips drive to the ceiling.
-  gluteBridge: {
-    frames: [
-      P([50, 16], [50, 32], [50, 56], [60, 33], [64, 44], [66, 55], [56, 56], [57, 72], [56, 88]),
-      P([50, 16], [50, 32], [50, 52], [60, 33], [64, 44], [66, 55], [56, 52], [58, 68], [56, 86]),
-    ],
-    loopMs: 2400,
-  },
-
-  // Leg raise — supine, straight legs travel from the floor to vertical.
-  legRaise: {
-    frames: [
-      P([50, 14], [50, 30], [50, 54], [60, 31], [64, 42], [66, 53], [56, 54], [56, 72], [56, 90]),
-      P([50, 14], [50, 30], [50, 54], [60, 31], [64, 42], [66, 53], [56, 54], [59, 66], [60, 80]),
-    ],
-    loopMs: 2600,
   },
 
   // Calf raise — the whole body rises on the toes and lowers.
@@ -424,20 +317,16 @@ export const FRONT_PROFILES: Record<FigureMotion, FrontProfile> = {
     loopMs: 2000,
   },
 
-  // Superman — prone, arms and legs lift off the floor together.
-  superman: {
-    frames: [
-      P([50, 16], [50, 30], [50, 54], [60, 31], [64, 22], [68, 12], [56, 54], [57, 72], [57, 90]),
-      P([50, 13], [50, 28], [50, 53], [60, 29], [64, 19], [68, 8], [56, 53], [57, 70], [57, 87]),
-    ],
-    loopMs: 3000,
-  },
-
-  // Side plank — the body is one diagonal line, the top arm stacked above it.
+  // Forearm side plank seen from the front: one low straight line, feet
+  // stacked, top arm to the ceiling.
   sidePlank: {
     frames: [
-      P([36, 30], [42, 42], [52, 62], [46, 40], [48, 28], [50, 16], [54, 62], [60, 78], [64, 94]),
-      P([36, 34], [42, 46], [52, 66], [46, 44], [48, 32], [50, 20], [54, 66], [60, 81], [64, 96]),
+      P([82.5, 65], [67.5, 70.4], [44, 79], [70, 80.2], [70, 93.4], [82, 93.4], [46.1, 84.6], [27.9, 90.1], [11.2, 93.5]),
+      P([82.8, 66.5], [67.6, 71.7], [44, 79.8], [69.9, 81.4], [69.9, 94.6], [81.9, 94.6], [46, 85.5], [28.1, 92.1], [11.2, 93.5]),
+    ],
+    framesL: [
+      L([63.1, 61.4], [63.1, 48.2], [63.1, 36.2], [41.9, 73.4], [23.6, 78.5], [7.1, 82.3]),
+      L([63.4, 62.5], [63.4, 49.3], [63.4, 37.3], [42, 74.1], [23.7, 78.9], [7, 82.3]),
     ],
     loopMs: 4000,
   },
@@ -464,35 +353,404 @@ export const FRONT_PROFILES: Record<FigureMotion, FrontProfile> = {
     loopMs: 4200,
   },
 
-  // Bird dog — on all fours, opposite arm and leg reach out long.
-  birdDog: {
+  /* ══════════════════════════════════════════════════════════════════════
+   * THE REST OF THE CATALOGUE — 2026-10-15 accuracy pass.
+   *
+   * A user reported the standing torso twist playing the wrong movement. It
+   * was: flex_14 had no profile of its own and fell back to the flexibility
+   * family loop (a reach-up into a forward fold). So did forty other
+   * exercises — crunches, sit-ups and V-ups drew a STANDING knee tuck, every
+   * stretch drew the same fold, lateral raises drew an overhead press. Every
+   * catalogued exercise now has a profile of its own, authored on constant
+   * bone lengths (so nothing stretches mid-rep) and checked frame by frame.
+   * ══════════════════════════════════════════════════════════════════════ */
+
+  // Standing torso twist — arms swing loose around the body, head follows,
+  // trailing heel pivots.
+  torsoTwist: {
     frames: [
-      P([50, 46], [50, 56], [50, 76], [60, 56], [62, 68], [63, 80], [55, 76], [56, 86], [56, 96]),
-      P([50, 44], [50, 54], [50, 74], [60, 54], [62, 42], [63, 30], [55, 74], [56, 84], [56, 94]),
+      P([51.9, 17.1], [50, 33], [50, 58], [60, 34], [72.9, 36.7], [84, 41.2], [56, 58], [58, 76.9], [59, 93.9]),
+      P([48.1, 17.1], [50, 33], [50, 58], [60, 34], [48.9, 41.1], [38.5, 47.1], [56, 58], [51.7, 76.5], [57.5, 92.5]),
     ],
     framesL: [
-      L([41, 56], [39, 68], [38, 80], [45, 76], [44, 86], [44, 96]),
-      L([41, 54], [39, 66], [38, 78], [45, 74], [44, 88], [44, 98]),
+      L([40, 34], [51.1, 41.1], [61.5, 47.1], [44, 58], [48.3, 76.5], [42.5, 92.5]),
+      L([40, 34], [27.1, 36.7], [16, 41.2], [44, 58], [42, 76.9], [41, 93.9]),
     ],
-    loopMs: 2800,
+    loopMs: 2400,
   },
 
-  // Cat-cow — on all fours, the spine rolls between arched and rounded.
-  catCow: {
+  // Arms out at shoulder height; seen from the front a circle is an
+  // up-and-down bob of the hands.
+  armCircles: {
     frames: [
-      P([50, 48], [50, 58], [50, 78], [60, 58], [62, 70], [63, 82], [55, 78], [55, 88], [55, 97]),
-      P([50, 54], [50, 60], [50, 76], [60, 60], [62, 72], [63, 84], [55, 76], [55, 86], [55, 95]),
+      P([50, 17], [50, 33], [50, 58], [60, 34], [73.1, 32.4], [85, 30.5], [56, 58], [56, 77], [56, 94]),
+      P([50, 17], [50, 33], [50, 58], [60, 34], [73.1, 35.4], [85, 37.3], [56, 58], [56, 77], [56, 94]),
     ],
-    loopMs: 3400,
+    loopMs: 1300,
   },
 
-  // Child's pose — kneeling, folded forward, arms reaching long.
-  childsPose: {
+  // Half neck rolls, ear toward one shoulder then the other. Body still.
+  neckRoll: {
     frames: [
-      P([50, 62], [50, 70], [50, 84], [60, 70], [62, 60], [63, 48], [55, 84], [55, 94], [52, 98]),
-      P([50, 64], [50, 72], [50, 86], [60, 72], [62, 62], [63, 50], [55, 86], [55, 96], [52, 99]),
+      P([57.5, 18.9], [50, 33], [50, 58], [60, 34], [62.1, 47], [63.1, 59], [56, 58], [56, 77], [56, 94]),
+      P([42.5, 18.9], [50, 33], [50, 58], [60, 34], [62.1, 47], [63.1, 59], [56, 58], [56, 77], [56, 94]),
     ],
-    loopMs: 3600,
+    framesL: [
+      L([40, 34], [37.9, 47], [36.9, 59], [44, 58], [44, 77], [44, 94]),
+      L([40, 34], [37.9, 47], [36.9, 59], [44, 58], [44, 77], [44, 94]),
+    ],
+    loopMs: 5200,
+  },
+
+  // Arms rise out to the sides to shoulder height, elbows soft and leading.
+  lateralRaise: {
+    frames: [
+      P([50, 17], [50, 33], [50, 58], [60, 34], [62.7, 46.9], [64, 58.8], [56, 58], [57.2, 77], [57.5, 94]),
+      P([50, 17], [50, 33], [50, 58], [60, 34], [73.2, 33.1], [85.1, 34.5], [56, 58], [57.2, 77], [57.5, 94]),
+    ],
+    loopMs: 2400,
+  },
+
+  // Band pull-apart: hands start together in front of the chest and open into
+  // a T.
+  pullApart: {
+    frames: [
+      P([50, 17], [50, 33], [50, 58], [60, 34], [49.5, 26], [50.4, 38], [56, 58], [57.2, 77], [57.5, 94]),
+      P([50, 17], [50, 33], [50, 58], [60, 34], [73.2, 33.8], [85.2, 34], [56, 58], [57.2, 77], [57.5, 94]),
+    ],
+    loopMs: 2000,
+  },
+
+  // Band face pull: arms reach forward at face height, then elbows drive high
+  // and wide, hands to the ears.
+  facePull: {
+    frames: [
+      P([50, 17], [50, 33], [50, 58], [60, 34], [49.2, 41.6], [52.4, 30], [56, 58], [57.2, 77], [57.5, 94]),
+      P([50, 17], [50, 33], [50, 58], [60, 34], [73.2, 33.1], [67.9, 22.3], [56, 58], [57.2, 77], [57.5, 94]),
+    ],
+    loopMs: 2200,
+  },
+
+  // Bent-over reverse fly, seen from the front: the hinged torso foreshortens,
+  // arms sweep from hanging to a T.
+  reverseFly: {
+    frames: [
+      P([50, 47], [50, 56], [50, 66], [60, 57], [60.5, 70.2], [60, 82.2], [56, 66], [55.4, 82], [55.4, 96]),
+      P([50, 47], [50, 56], [50, 66], [60, 57], [73.1, 55.6], [85.1, 56], [56, 66], [55.4, 82], [55.4, 96]),
+    ],
+    loopMs: 2400,
+  },
+
+  // Forearms on the door frame at shoulder height (goal posts); the chest
+  // leans gently through.
+  doorwayStretch: {
+    frames: [
+      P([50, 17], [50, 33], [50, 58], [60, 34], [73.2, 34.2], [73.2, 22.2], [56, 58], [57, 77], [57, 94]),
+      P([50, 17.6], [50, 33.6], [50, 58.6], [60, 34.6], [73.2, 35.3], [73.6, 23.3], [56, 58.6], [59.8, 77.2], [57, 94]),
+    ],
+    loopMs: 4200,
+  },
+
+  // Standing on one leg, the other lifts straight out to the side, hands on
+  // hips.
+  hipAbduction: {
+    frames: [
+      P([50, 17], [50, 33], [50, 58], [60, 34], [60.5, 47.2], [52.4, 56], [56, 58], [60.2, 76.5], [59, 93.5]),
+      P([50, 17], [50, 33], [50, 58], [60, 34], [60.5, 47.2], [52.4, 56], [56, 58], [66.6, 73.8], [76.1, 87.8]),
+    ],
+    framesL: [
+      L([40, 34], [39.5, 47.2], [47.6, 56], [44, 58], [44, 77], [44, 94]),
+      L([40, 34], [39.5, 47.2], [47.6, 56], [44, 58], [44, 77], [44, 94]),
+    ],
+    loopMs: 2200,
+  },
+
+  // From a wide stance, sit the hips over one bent leg; the other leg stays
+  // long. Hands at the chest.
+  lateralLunge: {
+    frames: [
+      P([50, 19.6], [50, 35.6], [50, 60.6], [60, 36.6], [47, 34.2], [49.4, 46], [56, 60.6], [64.4, 77.6], [69, 94]),
+      P([61.4, 29], [60.9, 45], [60, 70], [70.8, 46.4], [57.6, 46.2], [52.4, 57], [66, 70], [80.9, 81.8], [69, 94]),
+    ],
+    framesL: [
+      L([40, 36.6], [53, 34.2], [50.6, 46], [44, 60.6], [35.6, 77.6], [31, 94]),
+      L([50.8, 45.7], [63.8, 48.2], [55.6, 57], [54, 70], [46.7, 87.6], [31, 94]),
+    ],
+    loopMs: 2400,
+  },
+
+  // Wide stance, sink deep onto one leg with the other long, then shift across
+  // to the other side.
+  cossackSquat: {
+    frames: [
+      P([65.9, 36.1], [64.7, 52.1], [63, 77], [74.6, 53.8], [61.5, 53.1], [56.4, 64], [69, 77], [86.7, 83.9], [73, 94]),
+      P([34.1, 36.1], [35.3, 52.1], [37, 77], [45.3, 52.4], [32.4, 55.1], [40.4, 64], [43, 77], [56.4, 90.5], [73, 94]),
+    ],
+    framesL: [
+      L([54.7, 52.4], [67.6, 55.1], [59.6, 64], [57, 77], [43.6, 90.5], [27, 94]),
+      L([25.4, 53.8], [38.5, 53.1], [43.6, 64], [31, 77], [13.3, 83.9], [27, 94]),
+    ],
+    loopMs: 3000,
+  },
+
+  // One leg steps diagonally behind and across the other; both knees bend,
+  // hips stay square.
+  curtsyLunge: {
+    frames: [
+      P([50, 17], [50, 33], [50, 58], [60, 34], [46.8, 34.3], [49.4, 46], [56, 58], [56, 77], [56, 94]),
+      P([49, 26], [49, 42], [49, 67], [59, 43], [45.8, 43.3], [48.4, 55], [55, 67], [38, 75.5], [38, 92.5]),
+    ],
+    framesL: [
+      L([40, 34], [53.2, 34.3], [50.6, 46], [44, 58], [44, 77], [44, 94]),
+      L([39, 43], [52.2, 43.1], [50.6, 55], [43, 67], [54.9, 81.8], [43, 94]),
+    ],
+    loopMs: 2400,
+  },
+
+  // Wide stance, toes out; sink straight down with the knees pushing out over
+  // the toes. Hands at the chest.
+  sumoSquat: {
+    frames: [
+      P([50, 19], [50, 35], [50, 60], [60, 36], [46.9, 34.3], [49.4, 46], [56, 60], [63.2, 77.6], [68.9, 93.6]),
+      P([50, 33], [50, 49], [50, 74], [60, 50], [46.9, 48.3], [49.4, 60], [56, 74], [74.6, 77.9], [69, 94]),
+    ],
+    loopMs: 2400,
+  },
+
+  // Standing on one leg, the other foot just off the floor; a quiet sway, arms
+  // a little out.
+  singleLegBalance: {
+    frames: [
+      P([50, 17], [50, 33], [50, 58], [60, 34], [64.5, 46.4], [67, 58.1], [56, 58], [67.8, 72.9], [57, 86]),
+      P([49.7, 17], [50.1, 33], [50.8, 58], [60.2, 33.7], [65.5, 45.8], [68.8, 57.3], [56.8, 58], [68.5, 73], [57.5, 86]),
+    ],
+    framesL: [
+      L([40, 34], [35.5, 46.4], [33, 58.1], [44, 58], [44, 77], [44, 94]),
+      L([40.2, 34.3], [35.4, 46.6], [32.7, 58.3], [44.8, 58], [45.3, 77], [45, 94]),
+    ],
+    loopMs: 4200,
+  },
+
+  // Hands behind the head; one knee lifts out to the side as the same-side
+  // elbow crunches down to meet it.
+  sideCrunch: {
+    frames: [
+      P([50, 17], [50, 33], [50, 58], [60, 34], [66.8, 22.7], [54.9, 21], [56, 58], [56, 77], [56, 94]),
+      P([60.7, 19], [55.7, 34.2], [48, 58], [64.9, 38.3], [72, 27.1], [60.4, 24], [53.9, 57.2], [72.8, 59.2], [74.6, 76.1]),
+    ],
+    framesL: [
+      L([40, 34], [33.2, 22.7], [45.1, 21], [44, 58], [44, 77], [44, 94]),
+      L([45.9, 32.1], [45.3, 18.9], [56.6, 15], [42.1, 58.8], [46.8, 77.2], [44, 94]),
+    ],
+    loopMs: 2000,
+  },
+
+  // Upright side steps: step out, tap the other foot in, step back the other
+  // way.
+  stepTouch: {
+    frames: [
+      P([59, 17.8], [59, 33.8], [59, 58.8], [69, 34.8], [76.4, 45.7], [81.3, 56.7], [65, 58.8], [70.4, 77], [71, 94]),
+      P([41, 17.8], [41, 33.8], [41, 58.8], [51, 34.8], [52.8, 47.9], [53.7, 59.8], [47, 58.8], [38.1, 75.6], [40, 92.5]),
+    ],
+    framesL: [
+      L([49, 34.8], [47.2, 47.9], [46.3, 59.8], [53, 58.8], [61.9, 75.6], [60, 92.5]),
+      L([31, 34.8], [23.6, 45.7], [18.7, 56.7], [35, 58.8], [29.6, 77], [29, 94]),
+    ],
+    loopMs: 1300,
+  },
+
+  // Squat holding the weight at the chest, elbows down and inside the knees at
+  // the bottom.
+  gobletSquat: {
+    frames: [
+      P([50, 17], [50, 33], [50, 58], [60, 34], [46.9, 32.3], [49.4, 44], [56, 58], [58.5, 76.8], [60, 93.8]),
+      P([50, 29], [50, 45], [50, 70], [60, 46], [46.8, 45.3], [49.4, 57], [56, 70], [71.3, 81.3], [60, 94]),
+    ],
+    loopMs: 2400,
+  },
+
+  // Squat, then explode off the floor with the arms swinging up; land soft
+  // back into the squat.
+  jumpSquat: {
+    frames: [
+      P([50, 29], [50, 45], [50, 70], [60, 46], [57.7, 59], [56.5, 70.9], [56, 70], [70.9, 81.8], [59, 94]),
+      P([50, 8], [50, 24], [50, 49], [60, 25], [66.2, 13.3], [70.3, 2.1], [56, 49], [55.3, 68], [54.7, 85]),
+    ],
+    loopMs: 1400,
+  },
+
+  // Stay low and pulse a few inches up and down without standing.
+  squatPulse: {
+    frames: [
+      P([50, 31], [50, 47], [50, 72], [60, 48], [46.9, 46.3], [49.4, 58], [56, 72], [72.1, 82.1], [60, 94]),
+      P([50, 26], [50, 42], [50, 67], [60, 43], [46.9, 41.3], [49.4, 53], [56, 67], [69.8, 80.1], [60, 94]),
+    ],
+    loopMs: 900,
+  },
+
+  // Rest at the very bottom of a squat, heels down, elbows pressing the knees
+  // out, palms together.
+  deepSquat: {
+    frames: [
+      P([50, 39], [50, 55], [50, 80], [60, 56], [47.8, 51.1], [48.9, 63], [56, 80], [74.8, 82.8], [62, 94]),
+      P([50, 39.6], [50, 55.6], [50, 80.6], [60, 56.6], [47.8, 51.6], [48.9, 63.5], [56, 80.6], [74.9, 82.9], [62, 94]),
+    ],
+    loopMs: 4200,
+  },
+
+  // From a quarter squat, explode into the air with arms and legs flung wide
+  // into a star.
+  starJump: {
+    frames: [
+      P([50, 23], [50, 39], [50, 64], [60, 40], [58.6, 53.1], [58.2, 65.1], [56, 64], [65.4, 80.5], [55, 94]),
+      P([50, 9], [50, 25], [50, 50], [60, 26], [70.1, 17.5], [79, 9.5], [56, 50], [63.7, 67.4], [70.6, 82.9]),
+    ],
+    loopMs: 1200,
+  },
+
+  // Low athletic stance, the fastest smallest steps on the spot, arms pumping.
+  fastFeet: {
+    frames: [
+      P([50, 23], [50, 39], [50, 64], [60, 40], [68.4, 50.2], [56.4, 50], [56, 64], [70.3, 76.5], [60, 90]),
+      P([50, 23], [50, 39], [50, 64], [60, 40], [65.7, 51.9], [54.4, 56], [56, 64], [67.8, 78.9], [60, 94]),
+    ],
+    framesL: [
+      L([40, 40], [34.3, 51.9], [45.6, 56], [44, 64], [32.2, 78.9], [40, 94]),
+      L([40, 40], [31.6, 50.2], [43.6, 50], [44, 64], [29.7, 76.5], [40, 90]),
+    ],
+    loopMs: 420,
+  },
+
+  // On one foot, rise as high as possible onto the ball of the foot; the free
+  // foot hooks behind.
+  singleCalfRaise: {
+    frames: [
+      P([50, 17], [50, 33], [50, 58], [60, 34], [63.4, 46.8], [65.5, 58.6], [56, 58], [41.7, 70.5], [52, 84]),
+      P([50, 11], [50, 27], [50, 52], [60, 28], [63.4, 40.8], [65.5, 52.6], [56, 52], [41.7, 64.5], [52, 78]),
+    ],
+    framesL: [
+      L([40, 34], [36.6, 46.8], [34.5, 58.6], [44, 58], [44, 77], [44, 94]),
+      L([40, 28], [36.6, 40.8], [34.5, 52.6], [44, 52], [44, 71], [44, 88]),
+    ],
+    loopMs: 1800,
+  },
+
+  // Seen from above, lying face down: the arms hover and sweep from the hips
+  // to overhead and back.
+  snowAngel: {
+    frames: [
+      P([81, 60], [65, 60], [40, 60], [64, 70], [51.4, 73.9], [39.7, 76.8], [40, 66], [21, 67.3], [4.1, 67.9]),
+      P([81, 60], [65, 60], [40, 60], [64, 70], [76.6, 73.9], [88.3, 76.8], [40, 66], [21, 67.3], [4.1, 67.9]),
+    ],
+    framesL: [
+      L([64, 50], [51.4, 46.1], [39.7, 43.2], [40, 54], [21, 52.7], [4.1, 52.1]),
+      L([64, 50], [76.6, 46.1], [88.3, 43.2], [40, 54], [21, 52.7], [4.1, 52.1]),
+    ],
+    loopMs: 3000,
+  },
+
+  // Prone Y-T raises. From above the arms switch between a Y and a T; from the
+  // side they lift off the floor.
+  yRaise: {
+    frames: [
+      P([81, 60], [65, 60], [40, 60], [64, 70], [74.1, 78.5], [83.3, 86.2], [40, 66], [21, 67.3], [4.1, 67.9]),
+      P([81, 60], [65, 60], [40, 60], [64, 70], [64, 83.2], [64, 95.2], [40, 66], [21, 67.3], [4.1, 67.9]),
+    ],
+    framesL: [
+      L([64, 50], [74.1, 41.5], [83.3, 33.8], [40, 54], [21, 52.7], [4.1, 52.1]),
+      L([64, 50], [64, 36.8], [64, 24.8], [40, 54], [21, 52.7], [4.1, 52.1]),
+    ],
+    loopMs: 2600,
+  },
+
+  // Seen from above, lying face up with arms out wide: the legs, held
+  // together, sweep from side to side.
+  windshieldWiper: {
+    frames: [
+      P([81, 60], [65, 60], [40, 60], [64, 70], [63.5, 83.2], [63.1, 95.2], [40, 66], [23.9, 55.9], [9.5, 46.9]),
+      P([81, 60], [65, 60], [40, 60], [64, 70], [63.5, 83.2], [63.1, 95.2], [40, 66], [23.9, 76.1], [9.5, 85.1]),
+    ],
+    framesL: [
+      L([64, 50], [63.5, 36.8], [63.1, 24.8], [40, 54], [23.9, 43.9], [9.5, 34.9]),
+      L([64, 50], [63.5, 36.8], [63.1, 24.8], [40, 54], [23.9, 64.1], [9.5, 73.1]),
+    ],
+    loopMs: 2600,
+  },
+
+  // Forearm side plank: lower the bottom hip toward the floor, then drive it
+  // back up.
+  sidePlankDip: {
+    frames: [
+      P([82.5, 65], [67.5, 70.4], [44, 79], [70, 80.2], [70, 93.4], [82, 93.4], [46.1, 84.6], [27.9, 90.1], [11.2, 93.5]),
+      P([77.6, 64], [64.5, 73.2], [44, 87.5], [69.4, 81.9], [69.4, 95.1], [81.4, 95.1], [47.4, 92.4], [28.5, 93.4], [11.5, 93.5]),
+    ],
+    framesL: [
+      L([63.1, 61.4], [63.1, 48.2], [63.1, 36.2], [41.9, 73.4], [23.6, 78.5], [7.1, 82.3]),
+      L([57.9, 65.5], [57.9, 52.3], [57.9, 40.3], [40.6, 82.6], [22.7, 88.9], [7, 82.3]),
+    ],
+    loopMs: 2000,
+  },
+
+  // Seated tall, soles together, knees dropped out to the sides; the knees
+  // ease toward the floor.
+  butterfly: {
+    frames: [
+      P([50, 43], [50, 59], [50, 84], [60, 60], [57.1, 72.9], [53.9, 84.4], [56, 84], [71.5, 85.1], [56.5, 85.9]),
+      P([50, 43.4], [50, 59.4], [50, 84.4], [60, 60.4], [57.4, 73.3], [54.4, 85], [56, 84.4], [71, 88.4], [56.1, 90.5]),
+    ],
+    loopMs: 4200,
+  },
+
+  // Seated 90/90: front knee bent in front, back knee bent out to the side;
+  // sit tall, then lean over the front shin.
+  ninetyNinety: {
+    frames: [
+      P([50, 43], [50, 59], [50, 84], [60, 60], [58.9, 73.2], [57.3, 85], [56, 84], [71.5, 87.9], [56.6, 88.9]),
+      P([59, 43.9], [55.7, 59.5], [50.5, 84], [65.3, 62.6], [63.5, 75.7], [61.2, 87.5], [56.5, 84], [72, 87.9], [57.1, 88.9]),
+    ],
+    framesL: [
+      L([40, 60], [39.5, 73.2], [39.6, 85.2], [44, 84], [28.5, 87.9], [19.2, 99.7]),
+      L([45.7, 58.4], [46.1, 71.6], [47.1, 83.6], [44.5, 84], [29, 87.9], [19.7, 99.7]),
+    ],
+    loopMs: 4200,
+  },
+
+  // On all fours, seen head-on: the knee lifts out to the side to hip height,
+  // hips staying square.
+  fireHydrant: {
+    frames: [
+      P([50, 58], [50, 68], [50, 74], [62.4, 69.2], [62.9, 82.4], [62.9, 94.4], [56, 74], [56, 93], [56, 96]),
+      P([50, 58], [50, 68], [50, 74], [62.4, 69.2], [62.9, 82.4], [62.9, 94.4], [56, 74], [74.9, 76], [75.9, 78.8]),
+    ],
+    framesL: [
+      L([37.6, 69.2], [37.1, 82.4], [37.1, 94.4], [44, 74], [44, 93], [44, 96]),
+      L([37.6, 69.2], [37.1, 82.4], [37.1, 94.4], [44, 74], [44, 93], [44, 96]),
+    ],
+    loopMs: 2000,
+  },
+
+  // Hang from the bar, hands fixed; drive the elbows down to pull the chin
+  // over the bar.
+  pullUp: {
+    frames: [
+      P([50, 27], [50, 43], [50, 68], [60, 44], [63.6, 31.3], [66.3, 19.6], [56, 68], [55.7, 84], [55.7, 97]),
+      P([50, 7], [50, 23], [50, 48], [60, 24], [71.9, 29.6], [66.4, 19], [56, 48], [55.7, 64], [55.7, 77]),
+    ],
+    loopMs: 2600,
+  },
+
+  // Facing a low step: tap one toe on it, then quickly switch feet, arms
+  // pumping.
+  toeTap: {
+    frames: [
+      P([50, 16], [50, 32], [50, 57], [60, 33], [66.9, 44.2], [56.4, 50], [56, 57], [66.6, 72.7], [56, 86]),
+      P([50, 16], [50, 32], [50, 57], [60, 33], [58.5, 46.1], [56.4, 57.9], [56, 57], [56, 76], [56, 93]),
+    ],
+    framesL: [
+      L([40, 33], [41.5, 46.1], [43.6, 57.9], [44, 57], [44, 76], [44, 93]),
+      L([40, 33], [33.1, 44.2], [43.6, 50], [44, 57], [33.4, 72.7], [44, 86]),
+    ],
+    loopMs: 700,
   },
 };
 

@@ -33,6 +33,7 @@ import type { GozlinChatContext } from "../GozlinChatEngine";
 import { crossReference, type HabitTrackerBrief } from "../GozlinTrackerHabits";
 import { conditionRules } from "./clinical";
 import { experienceEvidence } from "./experiences";
+import { cycleStateLines } from "../../cycle/brief";
 
 // ════════════════════════════════════════════════════════════════
 // TIER 1 — frozen. Cache breakpoint goes here.
@@ -193,7 +194,7 @@ export function localClock(asOf: string): { date: string; label: string } {
  */
 export function twinStateMessage(
   twin: GozlinTwin,
-  ctx?: Pick<GozlinChatContext, "snapshot" | "identity" | "habits" | "experiences" | "now">,
+  ctx?: Pick<GozlinChatContext, "snapshot" | "identity" | "habits" | "experiences" | "cycle" | "now">,
   /** The message being answered — enables the habit cross-reference and recall. */
   userText?: string,
 ): WireMessage {
@@ -245,6 +246,11 @@ export function twinStateMessage(
   if (ctx?.experiences) {
     lines.push(...experienceEvidence(userText ?? "", ctx, ctx.now ?? new Date()).lines);
   }
+
+  // Her cycle — present only when she switched it on for Gozlin. Every figure
+  // in these lines is a field of the brief, which GozlinAgent adds to the
+  // grounding set, so "day 12" is citable exactly when it was shown.
+  lines.push(...cycleStateLines(ctx?.cycle));
 
   const rules = conditionRules(ctx?.snapshot.bio ?? null);
   if (rules.length > 0) {

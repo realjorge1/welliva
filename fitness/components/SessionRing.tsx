@@ -2,26 +2,26 @@
  * SessionRing — the workout player's instrument (public wrapper).
  *
  * A frame, not a hero. The demonstration figure occupies the middle of the
- * stage; this ring wraps it and reports where the athlete is — one arc per set,
- * the live one filling, a comet on its leading edge, and a gold overtime hand
- * on the outside once the work box is spent. Its `children` render centred
- * inside the ring, which is where the figure lives.
+ * stage; this ring wraps it and reports where the athlete is — one chunky arc
+ * per set, the live one filling with a knob on its leading edge, and a gold
+ * overtime hand on the outside once the work box is spent. Its `children`
+ * render centred inside the ring, which is where the figure lives.
  *
- * Renders the animated Skia instrument when available, and a clean static SVG
- * ring otherwise (reduced-motion surfaces, Skia-less web, the window before a
- * native rebuild) — there is always an instrument on screen.
+ * Renders the animated Skia instrument when available, and a static SVG ring
+ * of the same shape otherwise (reduced-motion surfaces, Skia-less web, the
+ * window before a native rebuild) — there is always an instrument on screen.
  *
  * Phase colour is passed in by the player: brand while working, gold on the
  * overtime / final push, water on rest.
  */
 import { isSkiaAvailable } from "@/components/skia/skiaSafe";
 import { useColors } from "@/components/ui";
-import { alpha } from "@/constants/theme";
 import React from "react";
 import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
-import Svg, { Circle, Path } from "react-native-svg";
+import Svg, { Circle, G, Path } from "react-native-svg";
 import type { SkiaSessionRingProps } from "./SessionRing.skia";
+import { ringGeometry, ringPalette } from "./sessionRingStyle";
 
 let SkiaRing: React.ComponentType<SkiaSessionRingProps> | null = null;
 if (isSkiaAvailable) {
@@ -37,12 +37,14 @@ export interface SessionRingProps {
   /** Which segment is live, 1-based. */
   currentSegment?: number;
   size?: number;
-  /** Ramp for the live arc and the comet. Defaults to the brand ramp. */
+  /** Ramp for the band. Defaults to the brand ramp. */
   gradient?: readonly [string, string, ...string[]];
   /** Seconds past the work box — draws the gold hand on the outside. */
   overtimeSeconds?: number;
   /** Breathe the halo (rest / final push). */
   pulse?: boolean;
+  /** Thump the knob once a second — the last seconds of the box, overtime. */
+  beat?: boolean;
   /** How long the charge takes to reach a new level, in ms. */
   duration?: number;
   /**
@@ -62,6 +64,7 @@ export const SessionRing = React.memo(function SessionRing({
   gradient,
   overtimeSeconds = 0,
   pulse = false,
+  beat = false,
   duration,
   linear = false,
   children,
@@ -80,8 +83,10 @@ export const SessionRing = React.memo(function SessionRing({
           currentSegment={currentSegment}
           size={size}
           colors={grad}
+          ground={colors.background}
           overtimeSeconds={overtimeSeconds}
           pulse={pulse}
+          beat={beat}
           duration={duration}
           linear={linear}
         />
@@ -92,6 +97,7 @@ export const SessionRing = React.memo(function SessionRing({
           currentSegment={currentSegment}
           size={size}
           gradient={grad}
+          ground={colors.background}
         />
       )}
       {children != null && (
@@ -123,66 +129,48 @@ function arcPath(
   return `M${x0},${y0} A${r},${r} 0 ${sweep > 180 ? 1 : 0},1 ${x1},${y1}`;
 }
 
+/** The same chunky band as the Skia ring — track, banked sets, the live fill. */
 function StaticRing({
   progress,
   segments,
   currentSegment,
   size,
   gradient,
+  ground,
 }: {
   progress: number;
   segments: number;
   currentSegment: number;
   size: number;
   gradient: readonly [string, string, ...string[]];
+  ground: string;
 }) {
   const clamped = Math.max(0, Math.min(1, progress || 0));
-  const count = Math.max(1, Math.round(segments));
-  const liveIndex = Math.max(0, Math.min(count - 1, Math.round(currentSegment) - 1));
+  const g = ringGeometry(size, segments);
+  const pal = ringPalette(gradient, ground);
+  const liveIndex = Math.max(0, Math.min(g.count - 1, Math.round(currentSegment) - 1));
+  const sets = Array.from({ length: g.count }, (_, i) => i);
 
-  const cx = size / 2;
-  const cy = size / 2;
-  const R = size / 2;
-  const arcR = R * 0.93;
-  const arcW = size * 0.026;
-
-  const c0 = gradient[0];
-  const cMid = gradient[Math.floor(gradient.length / 2)] ?? c0;
-
-  const step = 360 / count;
-  const gapDeg = count > 1 ? Math.min(7, 34 / count) : 0;
-  const sweepDeg = count === 1 ? 359.9 : step - gapDeg;
-  const startDeg = (i: number) => -90 + i * step + gapDeg / 2;
+  const band = (i: number, sweep: number, color: string, key: string) => (
+    <Path
+      key={key}
+      d={arcPath(g.cx, g.cy, g.arcR, g.startDeg(i), sweep)}
+      stroke={color}
+      strokeWidth={g.arcW}
+      strokeLinecap="round"
+      fill="none"
+    />
+  );
 
   return (
     <Svg width={size} height={size}>
-      <Circle
-        cx={cx}
-        cy={cy}
-        r={R * 0.8}
-        stroke={alpha(cMid, 0.16)}
-        strokeWidth={Math.max(0.6, size * 0.0028)}
-        fill="none"
-      />
-      {Array.from({ length: count }).map((_, i) => (
-        <Path
-          key={`t-${i}`}
-          d={arcPath(cx, cy, arcR, startDeg(i), sweepDeg)}
-          stroke={alpha(cMid, i < liveIndex ? 0.9 : 0.13)}
-          strokeWidth={arcW}
-          strokeLinecap="round"
-          fill="none"
-        />
-      ))}
-      {clamped > 0.01 && (
-        <Path
-          d={arcPath(cx, cy, arcR, startDeg(liveIndex), sweepDeg * clamped)}
-          stroke={c0}
-          strokeWidth={arcW}
-          strokeLinecap="round"
-          fill="none"
-        />
-      )}
+      <Circle cx={g.cx} cy={g.cy} r={g.plateR} fill={pal.plate} />
+      <G transform={`translate(0 ${g.lip})`}>
+        {sets.map((i) => band(i, g.sweepDeg, i < liveIndex ? pal.fillLip : pal.trackLip, `l-${i}`))}
+        {clamped > 0.01 ? band(liveIndex, g.sweepDeg * clamped, pal.fillLip, "l-live") : null}
+      </G>
+      {sets.map((i) => band(i, g.sweepDeg, i < liveIndex ? pal.fill : pal.track, `t-${i}`))}
+      {clamped > 0.01 ? band(liveIndex, g.sweepDeg * clamped, pal.fill, "live") : null}
     </Svg>
   );
 }

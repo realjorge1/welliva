@@ -8,19 +8,15 @@
  * Diet and Fitness this costs no additional re-render — see the AppContext
  * split.
  *
- * THE SPLIT IT MAKES. Out of one ladder come four different things, and the
+ * THE SPLIT IT MAKES. Out of one ladder come three different things, and the
  * distinction is the Deck's entire design:
  *
- *   · `live`    — already in flight. Gets the dock's top slot as a controller,
- *                 cannot be dismissed, and outranks everything the day merely
- *                 wants.
- *   · `cue`     — the one time-bound prompt this screen can act on. Small,
- *                 occasional, dismissible.
- *   · `agenda`  — every open prompt, for when the cue is pulled up. NOT
- *                 filtered by route, because a list that hides the row you are
- *                 standing on would report a count it cannot back.
- *   · `progress`— today's scheduled commitments, done against total. The Home
- *                 tab's ring and the agenda's header are the same two numbers.
+ *   · `live`     — already in flight (a guided session left mid-set). Not a
+ *                  prompt, so it is never counted among them and cannot be
+ *                  dismissed.
+ *   · `cue`      — the one time-bound prompt this screen can act on, carried by
+ *                  the rail's folded pill.
+ *   · `finished` — the sentence a day with nothing open still owes.
  */
 
 import { useOpenThread } from "@/components/gozlin";
@@ -30,12 +26,10 @@ import type { SessionState } from "@/models/session";
 import type { WorkoutSession } from "@/models/workout";
 import { SessionService } from "@/services/SessionService";
 import { useEffect, useMemo, useState } from "react";
-import { useDismissals, type Dismissals } from "./dismissals";
+import { useDismissals } from "./dismissals";
 import {
   finishedDayMove,
   resolveAgenda,
-  resolveDayProgress,
-  type DayProgress,
   type MealSlot,
   type NextMove,
   type NextMoveInput,
@@ -44,21 +38,12 @@ import {
 const sessionService = SessionService.getInstance();
 
 export interface DeckState {
-  /** Already running. The dock's top tenant, and never dismissible. */
+  /** Already running, and never dismissible. */
   live: NextMove | null;
   /** The one prompt this screen can act on, or null when the day is clear. */
   cue: NextMove | null;
-  /** Every open prompt, route-unfiltered, dismissals applied. */
-  agenda: NextMove[];
-  /** How many of `agenda` are not the cue — the card's "N more". */
-  more: number;
   /** The sentence a day with nothing open still owes. */
   finished: NextMove;
-  /** Today's scheduled commitments, done against total. */
-  progress: DayProgress;
-  /** How many prompts are currently under a "not now" lease. */
-  dismissedCount: number;
-  dismissals: Dismissals;
   /** Today's planned session, for the quick-log row and the player launch. */
   todaySession: WorkoutSession | null;
   addWater: (ml: number) => void;
@@ -233,14 +218,13 @@ export function useDeckState(
     ],
   );
 
-  const { live, cue, agenda, more, dismissedCount } = useMemo(() => {
+  const { live, cue } = useMemo(() => {
     const open = resolveAgenda(input);
     const liveMove = open.find((m) => m.live) ?? null;
 
     // Prompts are everything the day wants that has not been waved away. The
-    // live tenant is excluded because it is not a prompt — it is a thing
-    // already happening, and listing it as an open item to be picked would
-    // double-count the one move the dock is already showing as a controller.
+    // live move is excluded because it is not a prompt — it is a thing already
+    // happening.
     const prompts = open.filter((m) => !m.live && !dismissals.isDismissed(m.id));
 
     // The cue alone is route-filtered: offering "go to Diet" while standing on
@@ -252,24 +236,13 @@ export function useDeckState(
         (m) => m.suppressOn === undefined || here === null || m.suppressOn !== here,
       ) ?? null;
 
-    return {
-      live: liveMove,
-      cue: top,
-      agenda: prompts,
-      more: Math.max(0, prompts.length - (top ? 1 : 0)),
-      dismissedCount: open.filter((m) => !m.live && dismissals.isDismissed(m.id)).length,
-    };
+    return { live: liveMove, cue: top };
   }, [input, dismissals]);
 
   return {
     live,
     cue,
-    agenda,
-    more,
     finished: useMemo(() => finishedDayMove(input), [input]),
-    progress: useMemo(() => resolveDayProgress(input), [input]),
-    dismissedCount,
-    dismissals,
     todaySession,
     addWater,
     waterMl: consumedNutrition.waterMl,

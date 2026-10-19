@@ -164,7 +164,7 @@ export function MealCard({ item, index, onToggle, onSwap }: MealCardProps) {
                 </AppText>
                 {item.smartSwap && !completed && (
                   <View style={[styles.smartHint, { backgroundColor: colors.primarySoft }]}>
-                    <AILogoIcon size={10} color={colors.primary} />
+                    <AILogoIcon size={10} />
                     <AppText variant="caption" color="brand" style={styles.bold}>
                       Smart swap
                     </AppText>

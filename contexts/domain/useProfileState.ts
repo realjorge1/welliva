@@ -17,6 +17,7 @@ import type { BodyLogEntry, GeneratedWorkoutPlan } from "../../models/workout";
 import type { BioChangeSummary, OnboardingPlanOptions } from "../AppContext";
 import { ensureDietLibraryLoaded } from "../../constants/DietDatabase";
 import { addBodyLog } from "../../services/BodyLogService";
+import { creditCommitment } from "../../services/StreakService";
 import { generateDietPlan } from "../../services/DietPlanGenerator";
 import {
   dietConflictsWithCuisine,
@@ -408,6 +409,8 @@ export function useProfileState({
   const logBodyMeasurement = useCallback(async (entry: BodyLogEntry) => {
     const next = await addBodyLog(entry);
     setBodyLogs(next);
+    // A weigh-in keeps the day — only when it IS today's (checked inside).
+    void creditCommitment(entry.date);
   }, []);
 
   /** Set the target body weight the Transformation Forecast aims at. */

@@ -31,46 +31,33 @@
  * a shared swell, a run of light, a riffle, and a line of dominoes. Four
  * variations on "lift each chip in turn" would be one movement with a wardrobe.
  *
- * ── THE ROTATION, AND WHY IT IS ONE EVENT AND NOT TWO ───────────────────────
+ * ── THE ROTATION: ONE HAND PER VISIT ────────────────────────────────────────
  *
- * FOUR CHIPS ARE SHOWN OUT OF A POOL OF TWENTY-ODD, and the four change every
- * time the row stirs. Eight fixed chips looked like a menu, and a menu is
- * something you read once and stop seeing — by the third session they were
- * furniture, and a chip nobody looks at is a chip nobody taps.
+ * FOUR CHIPS ARE SHOWN OUT OF A POOL OF TWENTY-ODD, and the four change BETWEEN
+ * VISITS — never while you are looking at them. Leave the coach screen and the
+ * next hand is dealt behind you; come back and it is already there.
  *
- * THE MOVEMENT IS THE CHANGE, not a cue that a change is coming. The row dips
- * its opacity for about a third of a second in the middle of the sweep, the
- * prompts are swapped inside that dip, and the movement carries on to its end.
- * So there is no separate transition to design or to sit through: the thing
- * that was already drawing your eye is the thing that hands you new prompts.
+ * The hand used to change every time the row stirred, inside an opacity dip in
+ * the middle of the movement. The owner switched that off (2026-10-15): a row
+ * that swaps itself every seven seconds takes away the prompt somebody was
+ * halfway through reading, and nobody can settle on a row that is never the
+ * same twice. One hand per visit keeps what the rotation was for — eight fixed
+ * chips looked like a menu, and a menu is something you read once and stop
+ * seeing — without the row ever changing under someone. The idle movement
+ * above is untouched; it simply no longer carries a swap.
  *
- * THE SWAP IS DRIVEN BY THE CLOCK ITSELF, NOT BY A TIMER RACING IT. This is
- * the whole of the fix in this pass. The dip is computed from `phase` on the UI
- * thread; the swap used to be a `setTimeout` set to fire at roughly the same
- * moment. Two independent clocks, one of them a JS timer competing with React
- * renders and network callbacks — so on a busy frame the labels changed a beat
- * AFTER the row had already come back up, and you watched the text pop. It is
- * now a `useAnimatedReaction` on `phase` crossing the swap instant: the deal
- * happens on the exact frame the dip bottoms out, every time, because it is
- * reading the same value the fade is. One clock, one event.
- *
- * ALL FOUR SWAP TOGETHER, on one instant, even under a staggered movement like
- * the wave. Swapping each chip as the crest reached it would be prettier for
- * exactly one cycle and then wrong forever: a chip's width follows its label,
- * so a stagger means chips resizing while their neighbours are fully visible,
- * and the row jitters sideways. One instant, everything invisible, one relayout
- * — and the scroll is returned to the start inside the same dip, so a new hand
- * never arrives already scrolled halfway off the screen.
+ * DEALT ON THE WAY OUT, NOT ON THE WAY IN. The next hand is dealt the moment
+ * the screen loses focus, while it is hidden, so coming back never shows the
+ * old prompts for a frame before the new ones land. The deck and the next hand
+ * live at MODULE scope (`visits`), so this holds whether the screen stays
+ * mounted as a tab or is rebuilt from scratch: a fresh mount picks up the hand
+ * its predecessor dealt. The first visit of a session still opens on the
+ * curated front of the pool.
  *
  * THE POOL IS DEALT, NOT SAMPLED. Draws come off a shuffled deck that excludes
- * what is currently on screen and is only refilled when it runs out, so you
- * work through the whole pool instead of seeing the same three prompts
- * recur — which is what independent random picks actually do.
- *
- * IT ONLY ROTATES WHILE THE ROW IS ALIVE. Reduce-motion, the thinking state and
- * a hand on the row all stop the clock, and the prompts stop with it — swapping
- * them silently under someone who asked for less motion is the same request,
- * ignored.
+ * what was just on screen and is only refilled when it runs out, so you work
+ * through the whole pool instead of seeing the same three prompts recur — which
+ * is what independent random picks actually do.
  *
  * IT IS ONE CLOCK, NOT N ANIMATIONS. The chips do not own timers. A single
  * linear `phase` sweeps 0→1 across the active window and each chip reads its
@@ -91,14 +78,11 @@
  * ── THE HAND ON THE ROW ─────────────────────────────────────────────────────
  *
  * Touch the row and every bit of the above stops. `idleGain` rides to zero over
- * a few frames, the sweep is abandoned, and the pending swap is disarmed; a
- * couple of seconds after your finger settles it all fades back and the clock
- * restarts.
+ * a few frames and the sweep is abandoned; a couple of seconds after your
+ * finger settles it all fades back and the clock restarts.
  *
- * THAT IS THREE SEPARATE BUGS CLOSED WITH ONE VALUE. A row that keeps stirring
- * under a dragging finger fights the scroll for the same pixels. A row that
- * swaps its prompts mid-drag takes away the chip somebody was in the middle of
- * reading — the single most annoying thing a rotating surface can do. And the
+ * THAT IS TWO SEPARATE BUGS CLOSED WITH ONE VALUE. A row that keeps stirring
+ * under a dragging finger fights the scroll for the same pixels. And the
  * end-of-row stack below needs a still stage to play on, or it is competing
  * with a wave for the same transforms.
  *
@@ -138,6 +122,7 @@ import { alpha, Radius, Spacing } from "@/constants/theme";
 import type { GozlinSuggestion } from "@/services/gozlin";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "@/utils/haptics";
+import { useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Platform,
@@ -153,8 +138,6 @@ import Animated, {
   Easing,
   interpolateColor,
   runOnJS,
-  scrollTo,
-  useAnimatedReaction,
   useAnimatedRef,
   useAnimatedScrollHandler,
   useAnimatedStyle,
@@ -266,17 +249,81 @@ const HEADROOM_BOTTOM = 16;
  * Four is what fits a phone's width without the fourth being a sliver. A fifth
  * was tried, on the theory that a row which always overflows is more obviously
  * scrollable; it bought a little of that and cost the thing that matters more —
- * at four, a full hand is legible at rest, which is what lets a rotation read
- * as a CHANGE rather than as movement somewhere off the edge. The row still
- * scrolls, and the fold at its ends still says so.
+ * at four, a full hand is legible at rest, which is what lets a new hand read as
+ * a CHANGE when you come back rather than as something somewhere off the edge.
+ * The row still scrolls, and the fold at its ends still says so.
  */
 const VISIBLE_CHIPS = 4;
-/** Where in the sweep the prompts change, as a fraction of it. */
-const SWAP_AT = 0.36;
-/** Half-width of the dip around that instant, in the same units. */
-const SWAP_HALF = 0.075;
-/** How far down the dip goes. Not quite to zero: a dropped frame at 0 reads as a blank row. */
-const SWAP_FADE = 0.96;
+
+/* ── The hand, across visits ────────────────────────────────────────────── */
+
+/**
+ * Module scope on purpose — see "DEALT ON THE WAY OUT" in the header. A screen
+ * that is torn down and rebuilt must still meet the hand dealt as it was left,
+ * and must not start the deck over (which would bring the same prompts back
+ * round long before the pool is spent).
+ */
+const visits: {
+  /** The pool the two fields below were dealt from. A new pool starts over. */
+  pool: GozlinSuggestion[] | null;
+  /** What is left of the shuffled deck. Refilled only when it runs dry. */
+  deck: GozlinSuggestion[];
+  /** The hand to show on the next visit, dealt as the last one ended. */
+  next: GozlinSuggestion[] | null;
+} = { pool: null, deck: [], next: null };
+
+/** Point the shared memory at `pool`, forgetting anything dealt from another. */
+function adoptPool(pool: GozlinSuggestion[]): void {
+  if (visits.pool === pool) return;
+  visits.pool = pool;
+  visits.deck = [];
+  visits.next = null;
+}
+
+/** What a visit opens on: the hand dealt last time, else the curated front. */
+function openingHand(pool: GozlinSuggestion[]): GozlinSuggestion[] {
+  adoptPool(pool);
+  return visits.next ?? pool.slice(0, VISIBLE_CHIPS);
+}
+
+/**
+ * Deal the next hand off the shared deck, or null if the pool can't fill one.
+ *
+ * TWO PASSES, and the second one exists for a small pool. The first refuses
+ * anything that was on screen — a prompt that survives a new visit reads as the
+ * rotation having failed rather than as a fresh hand. But with only five or six
+ * prompts in the pool there may not BE four fresh ones, and a single pass would
+ * then deal nothing and freeze the row forever. So the second pass allows
+ * repeats: a repeated chip is a blemish, a frozen row is a dead feature. Within
+ * one hand a prompt can never appear twice either way.
+ */
+function dealFrom(
+  pool: GozlinSuggestion[],
+  current: GozlinSuggestion[],
+): GozlinSuggestion[] | null {
+  adoptPool(pool);
+  if (pool.length <= VISIBLE_CHIPS) return null;
+  const onScreen = new Set(current.map((s) => s.label));
+  const hand: GozlinSuggestion[] = [];
+
+  const draw = (allowHeld: boolean) => {
+    // Bounded by construction: every iteration removes a card from the deck,
+    // and a deck that empties is refilled at most a couple of times here.
+    let guard = pool.length * 2 + 8;
+    while (hand.length < VISIBLE_CHIPS && guard-- > 0) {
+      if (visits.deck.length === 0) visits.deck = shuffle(pool);
+      const next = visits.deck.pop();
+      if (!next) break;
+      if (hand.some((h) => h.label === next.label)) continue;
+      if (!allowHeld && onScreen.has(next.label)) continue;
+      hand.push(next);
+    }
+  };
+
+  draw(false);
+  if (hand.length < VISIBLE_CHIPS) draw(true);
+  return hand.length === VISIBLE_CHIPS ? hand : null;
+}
 
 /** How long the idle motion takes to hand the stage over to a finger, and back. */
 const GAIN_OUT_MS = 130;
@@ -387,8 +434,6 @@ export function GozlinSuggestionBar({
    * moment a finger lands on the row and back to one once it settles.
    */
   const idleGain = useSharedValue(1);
-  /** Armed at the top of each sweep; the reaction below disarms it as it fires. */
-  const swapArmed = useSharedValue(false);
 
   // ── The pull at the ends ──
   const offsetX = useSharedValue(0);
@@ -403,26 +448,46 @@ export function GozlinSuggestionBar({
   const latch = useSharedValue(0);
 
   /**
-   * The four on screen. Seeded from the front of the pool so the first thing a
-   * new user sees is the curated set, not a random hand.
+   * The four on screen: whatever the last visit dealt on its way out, or —
+   * on the first visit of a session — the curated front of the pool.
    */
-  const [shown, setShown] = useState<GozlinSuggestion[]>(() =>
-    suggestions.slice(0, VISIBLE_CHIPS),
-  );
-  /** What is left of the shuffled deck. Refilled only when it runs dry. */
-  const deck = useRef<GozlinSuggestion[]>([]);
-  /** Read inside the swap callback without making the clock depend on it. */
+  const [shown, setShown] = useState<GozlinSuggestion[]>(() => openingHand(suggestions));
+  /** Read inside the blur handler without re-subscribing the focus effect. */
   const shownRef = useRef(shown);
   shownRef.current = shown;
 
-  // A pool that changes identity (or a screen that mounts with fewer prompts
-  // than fit) re-seeds the row rather than leaving stale chips on it.
+  // A pool that changes identity after mount re-seeds the row rather than
+  // leaving stale chips on it. (The first render already opened on this pool.)
+  const poolRef = useRef(suggestions);
   useEffect(() => {
-    deck.current = [];
-    setShown(suggestions.slice(0, VISIBLE_CHIPS));
+    if (poolRef.current === suggestions) return;
+    poolRef.current = suggestions;
+    setShown(openingHand(suggestions));
   }, [suggestions]);
 
-  const rotates = suggestions.length > VISIBLE_CHIPS;
+  /**
+   * THE ROTATION. Nothing happens while the screen is in view; the cleanup is
+   * the moment it is left, and that is when the next hand is dealt — behind
+   * the user's back, so the return opens on it. The row is also put back to
+   * its start: a new hand is a new offer, and an offer that comes back already
+   * scrolled past its first two prompts has hidden the part that was curated.
+   *
+   * The pool is read through `poolRef`, not captured: a callback that depended
+   * on it would re-run the focus effect when the pool changed, and its cleanup
+   * would deal a new hand in plain view.
+   */
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        const hand = dealFrom(poolRef.current, shownRef.current);
+        if (!hand) return;
+        visits.next = hand;
+        setShown(hand);
+        scrollRef.current?.scrollTo({ x: 0, animated: false });
+      },
+      [scrollRef],
+    ),
+  );
 
   /* ── A hand on the row ────────────────────────────────────────────────── */
 
@@ -456,7 +521,6 @@ export function GozlinSuggestionBar({
    */
   useEffect(() => {
     if (held) {
-      swapArmed.value = false;
       cancelAnimation(phase);
       idleGain.value = withTiming(0, { duration: GAIN_OUT_MS }, (done) => {
         if (done) phase.value = 0;
@@ -464,75 +528,9 @@ export function GozlinSuggestionBar({
       return;
     }
     idleGain.value = withTiming(1, { duration: GAIN_IN_MS });
-  }, [held, idleGain, phase, swapArmed]);
+  }, [held, idleGain, phase]);
 
-  /* ── The rotation ─────────────────────────────────────────────────────── */
-
-  /**
-   * Deal the next hand.
-   *
-   * TWO PASSES, and the second one exists for a small pool. The first refuses
-   * anything currently on screen — a prompt that survives a swap reads as the
-   * animation having failed rather than as a rotation. But with only five or
-   * six prompts in the pool there may not BE four fresh ones, and a single
-   * pass would then deal nothing and freeze the row forever. So the second
-   * pass allows repeats: a repeated chip is a blemish, a frozen row is a dead
-   * feature. Within one hand a prompt can never appear twice either way.
-   *
-   * The row is returned to its start by the reaction below rather than here —
-   * that has to happen on the UI thread, on the same frame as the dip.
-   */
-  const dealNext = useCallback(() => {
-    const onScreen = new Set(shownRef.current.map((s) => s.label));
-    const hand: GozlinSuggestion[] = [];
-
-    const draw = (allowHeld: boolean) => {
-      // Bounded by construction: every iteration removes a card from the deck,
-      // and a deck that empties is refilled at most a couple of times here.
-      let guard = suggestions.length * 2 + 8;
-      while (hand.length < VISIBLE_CHIPS && guard-- > 0) {
-        if (deck.current.length === 0) deck.current = shuffle(suggestions);
-        const next = deck.current.pop();
-        if (!next) break;
-        if (hand.some((h) => h.label === next.label)) continue;
-        if (!allowHeld && onScreen.has(next.label)) continue;
-        hand.push(next);
-      }
-    };
-
-    draw(false);
-    if (hand.length < VISIBLE_CHIPS) draw(true);
-
-    // Still short — the pool cannot fill a row at all. Keep what is up rather
-    // than rendering a gap.
-    if (hand.length !== VISIBLE_CHIPS) return;
-    setShown(hand);
-  }, [suggestions]);
-
-  /**
-   * THE SWAP, ON THE ROW'S OWN CLOCK.
-   *
-   * Not a timer set to fire near the dip — a reaction to the very value that
-   * draws it. `swapArmed` is what makes it once-per-sweep: `phase` is monotonic
-   * inside a sweep, so the first frame past SWAP_AT is the frame, and every
-   * frame after it is disarmed.
-   *
-   * THE SCROLL GOES BACK TO ZERO IN THE SAME BREATH, and from here rather than
-   * from `dealNext`, because this is the UI thread: the row is returned to its
-   * start on the frame the dip bottoms out, not one JS tick later. A new hand
-   * is a new offer, and an offer that arrives already scrolled past its first
-   * two prompts has hidden the part that was curated.
-   */
-  useAnimatedReaction(
-    () => phase.value,
-    (p) => {
-      if (!swapArmed.value || p < SWAP_AT) return;
-      swapArmed.value = false;
-      scrollTo(scrollRef, 0, 0, false);
-      runOnJS(dealNext)();
-    },
-    [dealNext],
-  );
+  /* ── The idle movement ────────────────────────────────────────────────── */
 
   useEffect(() => {
     // A row of chips dancing under a "Typing…" status is the app fidgeting at
@@ -541,7 +539,6 @@ export function GozlinSuggestionBar({
     // scroll for the same pixels.
     if (disabled || reduceMotion || held) {
       cancelAnimation(phase);
-      swapArmed.value = false;
       if (disabled || reduceMotion) phase.value = 0;
       return;
     }
@@ -564,7 +561,6 @@ export function GozlinSuggestionBar({
 
     const play = () => {
       movement.value = nextMovement();
-      swapArmed.value = rotates;
       phase.value = 0;
       phase.value = withTiming(1, { duration: SWEEP_MS, easing: Easing.linear });
     };
@@ -576,7 +572,7 @@ export function GozlinSuggestionBar({
       clearInterval(every);
       cancelAnimation(phase);
     };
-  }, [phase, movement, swapArmed, disabled, reduceMotion, held, rotates]);
+  }, [phase, movement, disabled, reduceMotion, held]);
 
   /* ── Where the row is, and how far it can go ──────────────────────────── */
 
@@ -706,7 +702,6 @@ export function GozlinSuggestionBar({
             movement={movement}
             idleGain={idleGain}
             squeeze={squeeze}
-            swapping={rotates}
             disabled={disabled}
             onPick={onPick}
             colors={colors}
@@ -725,7 +720,6 @@ function Chip({
   movement,
   idleGain,
   squeeze,
-  swapping,
   disabled,
   onPick,
   colors,
@@ -738,8 +732,6 @@ function Chip({
   movement: SharedValue<number>;
   idleGain: SharedValue<number>;
   squeeze: SharedValue<number>;
-  /** The row rotates its prompts — dip for the swap. False for a fixed row. */
-  swapping: boolean;
   disabled?: boolean;
   onPick: (prompt: string) => void;
   colors: ReturnType<typeof useColors>["colors"];
@@ -786,23 +778,6 @@ function Chip({
    * different hat — into a riffle running down the row.
    */
   const tiltDir = index % 2 === 0 ? 1 : -1;
-
-  /**
-   * The dip that hides the prompt change: a cosine bell centred on SWAP_AT.
-   * Every chip computes the same number off the same clock, so all four go dark
-   * together and the relayout happens where nobody can see it.
-   *
-   * Scaled by `idleGain` for one specific case: a finger landing mid-dip. The
-   * sweep is abandoned there and then, and without this the row would be left
-   * sitting at 4% opacity until the next cycle.
-   */
-  const swapFade = useDerivedValue(() => {
-    if (!swapping) return 1;
-    const d = Math.abs(phase.value - SWAP_AT);
-    if (d >= SWAP_HALF) return 1;
-    const dip = SWAP_FADE * 0.5 * (1 + Math.cos((d / SWAP_HALF) * Math.PI));
-    return 1 - dip * idleGain.value;
-  }, [swapping]);
 
   const motionStyle = useAnimatedStyle(() => {
     const m = movement.value;
@@ -860,7 +835,6 @@ function Chip({
     }
 
     return {
-      opacity: swapFade.value,
       transform: [
         { translateX: idleX + foldX },
         { translateY: idleY + foldY },

@@ -42,6 +42,7 @@ import { useSocialProviders } from "@/components/auth/socialProviders";
 import { OrbField, useOrbTouch } from "@/components/OrbField";
 import { enterFade, exitFade } from "@/components/motion";
 import { useKeyboardInset } from "@/components/ui";
+import { withWordmark } from "@/components/ui/Wordmark";
 import { brandGradientDark } from "@/constants/theme";
 import * as Haptics from "@/utils/haptics";
 import { Ionicons } from "@expo/vector-icons";
@@ -100,26 +101,28 @@ const ROW_RADIUS = 14;
 const SHEET_RADIUS = 28;
 
 /**
- * The real app icon — the same artwork app.json ships as the launcher icon. The
- * 512 raster is already bundled, so reusing it is free.
+ * The real app icon — the same artwork app.json ships as the launcher icon:
+ * since 2026-10-15 the gold "welliva" wordmark on black (the diamond that was
+ * here is now Gozlin's mark, and belongs to the coach, not the sign-in).
  *
- * Its ground is near-black and square, and on the brown hero that square read
- * as a plate. So the hero never shows the raw square: it crops the art to a
- * disc (see `styles.markArt`), and the disc becomes the innermost ring of the
- * halo ladder.
+ * Its ground is black and square, and on the brown hero that square read as a
+ * plate. So the hero never shows the raw square: it crops the art to a disc
+ * (see `styles.markArt`), and the disc becomes the innermost ring of the halo
+ * ladder.
  */
-const APP_ICON = require("@/assets/images/welliva-512.jpg");
+const APP_ICON = require("@/assets/images/icon-wordmark.png");
 
 /**
- * Where the mark sits inside APP_ICON, measured off the raster. The diamond
- * sits on the image's centre, and its glow reaches 172px out — the tips, top
- * and bottom, are what get that far. The crop is computed from these numbers
- * so the mark lands dead-centre in its disc, concentric with the halos. Re-measure
- * if the artwork changes: an off-centre mark rides high in a plain rounded square.
+ * Where the mark sits inside APP_ICON, measured off the raster. The word's ink
+ * is centred at (510, 512), and its farthest pixel — the tail of the "a" — is
+ * 421px out; `glow` is that reach (the field kept its name from the diamond,
+ * whose glow was the farthest thing). The crop is computed from these numbers
+ * so the word lands dead-centre in its disc and never touches the rim.
+ * Re-measure if the artwork changes.
  */
-const ICON_ART = { size: 512, cx: 256, cy: 255, glow: 172 };
+const ICON_ART = { size: 1024, cx: 510, cy: 512, glow: 421 };
 /** The icon's own ground, sampled off the raster. The disc paints it too, so a crop edge can never show. */
-const ICON_GROUND = "#010101";
+const ICON_GROUND = "#000000";
 
 /**
  * The halo ladder: the mark's disc, then three rings each a fixed step wider.
@@ -217,7 +220,13 @@ function AuthHero({
 /* ──────────────────────────────── The chrome ────────────────────────────── */
 
 /**
- * The header bar: a dismiss control on the left, the app's name centred.
+ * The header bar: a dismiss control, and deliberately nothing else.
+ *
+ * It used to centre the app's name here too. That put a second "welliva" on
+ * the screen — a small text one floating directly above the hero's disc, which
+ * IS the app icon and already says the word in the real wordmark. Two marks,
+ * one of them a lesser copy of the other. The text one is gone; the icon is
+ * the only place the name appears on this surface.
  *
  * The dismiss control is drawn ONLY when there is somewhere to go back to.
  * Sign-in is the root of the signed-out stack (AuthWrapper redirects there and
@@ -225,7 +234,7 @@ function AuthHero({
  * that does nothing — the one thing a close button must never be. On sign-up
  * and verify-email, both pushed from sign-in, it is real and it appears.
  */
-function AuthHeader({ title }: { title: string }) {
+function AuthHeader() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const canDismiss = router.canGoBack();
@@ -245,10 +254,6 @@ function AuthHeader({ title }: { title: string }) {
           </Pressable>
         )}
       </View>
-      <Text style={styles.headerTitle} numberOfLines={1}>
-        {title}
-      </Text>
-      <View style={styles.headerSlot} />
     </View>
   );
 }
@@ -270,7 +275,7 @@ function AuthHeader({ title }: { title: string }) {
  * `useKeyboardInset`, locked to the system's own keyboard animation. Same
  * mechanism the onboarding container uses.
  */
-export function AuthScreen({ title, children }: { title: string; children: React.ReactNode }) {
+export function AuthScreen({ children }: { children: React.ReactNode }) {
   const { height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   // Touch observers for the orb field: any press or swipe that lands on an orb
@@ -310,7 +315,7 @@ export function AuthScreen({ title, children }: { title: string; children: React
         </ScrollView>
       </Animated.View>
 
-      <AuthHeader title={title} />
+      <AuthHeader />
     </View>
   );
 }
@@ -324,8 +329,8 @@ export function AuthScreen({ title, children }: { title: string; children: React
 export function AuthSheetTitle({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <View style={styles.sheetHead}>
-      <Text style={styles.sheetTitle}>{title}</Text>
-      <Text style={styles.sheetSubtitle}>{subtitle}</Text>
+      <Text style={styles.sheetTitle}>{withWordmark(title)}</Text>
+      <Text style={styles.sheetSubtitle}>{withWordmark(subtitle)}</Text>
     </View>
   );
 }
@@ -348,8 +353,8 @@ export function AuthTrustNote({ title, body }: { title: string; body: string }) 
       <View style={styles.trustMark}>
         <Ionicons name="lock-closed" size={17} color={GOLD} />
       </View>
-      <Text style={styles.trustTitle}>{title}</Text>
-      <Text style={styles.trustBody}>{body}</Text>
+      <Text style={styles.trustTitle}>{withWordmark(title)}</Text>
+      <Text style={styles.trustBody}>{withWordmark(body)}</Text>
     </View>
   );
 }
@@ -780,14 +785,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.10)",
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: "center",
-    color: WHITE,
-    fontSize: 15,
-    fontWeight: "700",
-    letterSpacing: 0.1,
   },
 
   /* Layout */

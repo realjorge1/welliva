@@ -139,7 +139,7 @@ export default function SignInScreen() {
   };
 
   return (
-    <AuthScreen title="welliva">
+    <AuthScreen>
       <AuthSheetTitle
         title="Welcome back!"
         subtitle="Please choose your preferred sign in method"

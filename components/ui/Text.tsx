@@ -3,11 +3,15 @@
  *
  *   <AppText variant="title">Today</AppText>
  *   <AppText variant="caption" color="tertiary" uppercase>Protein</AppText>
+ *
+ * Every literal "welliva" in its string children is set as the app icon's
+ * wordmark — gold Pacifico — wherever it falls (see ./Wordmark.tsx).
  */
 import { Typography, type TypographyVariant } from "@/constants/theme";
 import React from "react";
 import { Text, type TextProps, type TextStyle } from "react-native";
 import { useColors } from "./useColors";
+import { withWordmark } from "./Wordmark";
 
 type ColorRole =
   | "primary"
@@ -32,6 +36,12 @@ export interface AppTextProps extends TextProps {
   uppercase?: boolean;
   /** Opacity-style dimming without changing the hue. */
   dim?: boolean;
+  /**
+   * The ink for "welliva" in this text. Defaults to the icon's gold; a label
+   * that sits ON gold (a filled button) passes its own colour so the word
+   * keeps the icon's face without disappearing into the fill.
+   */
+  wordmarkColor?: string;
 }
 
 /**
@@ -73,7 +83,9 @@ export function AppText({
   align,
   uppercase,
   dim,
+  wordmarkColor,
   style,
+  children,
   ...rest
 }: AppTextProps) {
   const { colors } = useColors();
@@ -94,6 +106,8 @@ export function AppText({
         style,
       ]}
       {...rest}
-    />
+    >
+      {withWordmark(children, wordmarkColor)}
+    </Text>
   );
 }

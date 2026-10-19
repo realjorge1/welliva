@@ -41,6 +41,8 @@ import { makeWeighIn } from "@/services/BodyLogService";
 import { coachTransport } from "@/services/api";
 import { useBilling } from "@/contexts/BillingContext";
 import { useHabits } from "@/contexts/HabitsContext";
+import { useCycleOptional } from "@/contexts/CycleContext";
+import { buildCycleBrief } from "@/services/cycle/brief";
 import {
   checkCoachQuota,
   checkDeepDive,
@@ -386,6 +388,23 @@ export function useGozlin(): UseGozlin {
     [habitViews, retiredHabits, app.currentDate],
   );
 
+  // Her cycle reaches the coach ONLY with "Let Gozlin see your cycle" on
+  // (consent cycle_gozlin, off by default). Off — or not tracking — and the
+  // brief is absent, so the coach has nothing to say about it.
+  const cycle = useCycleOptional();
+  const cycleBrief = useMemo(
+    () =>
+      cycle && cycle.settings.enabled && cycle.shareWithGozlin
+        ? buildCycleBrief({
+            status: cycle.view.status,
+            prediction: cycle.view.prediction,
+            todayLog: cycle.view.todayLog,
+            showFertileWindow: cycle.settings.showFertileWindow,
+          })
+        : undefined,
+    [cycle],
+  );
+
   const chatContext = useMemo<GozlinChatContext>(
     () => ({
       twin,
@@ -394,6 +413,7 @@ export function useGozlin(): UseGozlin {
       identity,
       checkins,
       habits: habitBrief,
+      cycle: cycleBrief,
       experiences: curiosity.brief,
       conversation: messages,
       weekStart: currentWeekStart(),
@@ -406,6 +426,7 @@ export function useGozlin(): UseGozlin {
       identity,
       checkins,
       habitBrief,
+      cycleBrief,
       curiosity.brief,
       messages,
       app.userGoals,

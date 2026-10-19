@@ -29,6 +29,7 @@ import {
   SectionHeader,
   useColors,
 } from "@/components/ui";
+import { insightTitle } from "@/constants/RetroFont";
 import { Gradients, Motion, Radius, Spacing, alpha } from "@/constants/theme";
 import type { BehaviorScore, GozlinHabitReport } from "@/services/gozlin";
 import { Ionicons } from "@expo/vector-icons";
@@ -244,7 +245,7 @@ export function CoachDeepDive({
               {/* ── Hero: the tapped insight, in full ── */}
               <View style={styles.hero}>
                 <IconBadge name={(insight?.icon ?? "sparkles") as IconName} tone={tone} size={64} />
-                <AppText variant="title" style={styles.heroTitle}>
+                <AppText variant="title" style={[styles.heroTitle, insightTitle, { fontSize: 18, lineHeight: 26 }]}>
                   {insight?.title}
                 </AppText>
                 <AppText variant="body" color="secondary" style={styles.heroMsg}>

@@ -430,7 +430,7 @@ export default function UpgradeScreen() {
   // so `Screen`'s NAV_CLEARANCE default is what keeps the last plan card off
   // the rail.
   return (
-    <Screen header={header}>
+    <Screen header={header} floatingHeader>
       {/* ── Where you are now ─────────────────────────────────────────────── */}
       <Reveal index={0}>
         {isSubscriber ? (

@@ -53,6 +53,7 @@ import {
   readWaterCounter,
 } from "../../services/nutrition/waterStore";
 import {
+  creditCommitment,
   loadStreakData,
   recordActivity,
   StreakData,
@@ -379,6 +380,9 @@ export function useNutritionState({
           if (updated !== rec) saveAchievementRecord(updated);
           return updated;
         });
+        // The WHOLE goal keeps the day — one glass doesn't. Outside the state
+        // updater on purpose: an updater may run twice and must stay pure.
+        void creditCommitment(today);
       }
     },
     [userGoals, nutritionTargets, setAchievementRecord],

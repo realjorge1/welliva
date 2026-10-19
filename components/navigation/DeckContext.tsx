@@ -1,9 +1,6 @@
 /**
  * THE DECK — one object at the base of the screen, and the rules it lives by.
  *
- *   ╭────────────────────────────────────────────────────╮
- *   │  ▸ Log lunch          Grilled chicken bowl  2 more │  ← THE DOCK
- *   ╰────────────────────────────────────────────────────╯
  *   ╭──────────────────────────────────────────╮  ╭─────╮
  *   │  ◉ Home    Diet    Fitness    Gozlin     │  │  +  │  ← THE RAIL
  *   ╰──────────────────────────────────────────╯  ╰─────╯
@@ -21,11 +18,15 @@
  *     the swipe menu, rendered from the same `menu.ts` and lit with the same
  *     gold, which is what stops it being a second navigation system competing
  *     with the drawer for authority. The drawer is still the map.
- *   · THE DOCK is occasional. One slot above the rail with a priority of
- *     tenants — a live session, then a time-bound cue, then a write receipt,
- *     then NOTHING. The ladder did not die; it was demoted from the biggest
- *     button on screen to a card that has to earn its appearance, and which can
- *     be told "not now" (see dismissals.ts).
+ *   · THE PROMPT is occasional. It does not get a card of its own: scroll, and
+ *     the rail folds its three labels away and the space they leave carries the
+ *     one thing the day wants (the ladder in nextMove.ts). A write receipt
+ *     ("250 ml logged") stacks above the rail for two seconds and goes.
+ *
+ *     There used to be a DOCK above the rail — a card carrying a paused session,
+ *     the cue and "N more", with a swipe-to-dismiss. It was removed (owner,
+ *     2026-10-17): two bars at the base was one too many, and the rail's pill
+ *     already says the same thing.
  *
  * IT LIVES INSIDE THE DRAWER'S CONTENT, NOT OVER THE APP. Mounted once, as a
  * sibling of `children` inside AppDrawer's transformed view, so it rides the
@@ -39,8 +40,7 @@
  * screens already report, not from a pan of its own — deliberately, because the
  * bottom of this app is where the drawer's edge pan and the Android elastic
  * pull were already negotiated once, and a third claimant would have re-opened
- * that. The only new gesture in the whole Deck is the cue card's horizontal
- * swipe, which begins well clear of the drawer's 32pt edge strip.
+ * that.
  */
 
 import React, { createContext, useContext } from "react";
@@ -109,7 +109,7 @@ export const RAIL_HEIGHT = 62;
 export const RAIL_CONDENSED = 54;
 /** Gutter either side of the whole Deck. */
 export const DECK_GUTTER = 16;
-/** Between the tab pill and the action button, and between dock and rail. */
+/** Between the tab pill and the action button, and between receipt and rail. */
 export const DECK_GAP = 10;
 /** Breathing room between the rail and the device's home indicator. */
 export const DECK_BASE_GAP = 12;
@@ -117,14 +117,14 @@ export const DECK_BASE_GAP = 12;
 /**
  * How much room the Deck takes ABOVE the device's own bottom inset, at rest.
  *
- * The dock is not in this figure, on purpose: it is occasional, and sizing
- * every page for a card that is usually absent would leave a permanent hole at
- * the bottom of the app. A screen reserves the rail; the dock floats over the
- * last inch of content the way a cue is supposed to.
+ * The receipt is not in this figure, on purpose: it is occasional, and sizing
+ * every page for a pill that is usually absent would leave a permanent hole at
+ * the bottom of the app. A screen reserves the rail; the receipt floats over the
+ * last inch of content.
  *
- * `Screen` covers this through NAV_CLEARANCE. The one caller that needs the
- * number directly is Gozlin, whose composer owns the bottom edge and has to sit
- * ON TOP of the rail rather than under it.
+ * `Screen` covers this through NAV_CLEARANCE. Gozlin used to read it to sit its
+ * composer on top of the rail; the coach has no rail now (`RAILLESS_PATHS`) and
+ * its composer sits on the bottom safe area.
  */
 export const DECK_BLOCK = DECK_BASE_GAP + RAIL_HEIGHT;
 

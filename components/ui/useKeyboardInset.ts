@@ -62,8 +62,11 @@ import {
 } from "react-native-reanimated";
 
 export interface KeyboardInsetOptions {
-  /** The screen's bottom safe-area inset, in points. */
-  bottomInset?: number;
+  /**
+   * The screen's bottom safe-area inset, in points. A shared value when it
+   * moves on its own, so the bar follows on the UI thread.
+   */
+  bottomInset?: number | SharedValue<number>;
   /** Padding the bar keeps under itself at all times. */
   gap?: number;
 }
@@ -88,10 +91,10 @@ export function useKeyboardInset({
     [keyboard],
   );
 
-  const restingStyle = useAnimatedStyle(
-    () => ({ paddingBottom: gap + Math.max(0, bottomInset - keyboard.height.value) }),
-    [keyboard, bottomInset, gap],
-  );
+  const restingStyle = useAnimatedStyle(() => {
+    const floor = typeof bottomInset === "number" ? bottomInset : bottomInset.value;
+    return { paddingBottom: gap + Math.max(0, floor - keyboard.height.value) };
+  }, [keyboard, bottomInset, gap]);
 
   return useMemo(
     () => ({ height: keyboard.height, containerStyle, restingStyle }),

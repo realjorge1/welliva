@@ -29,6 +29,8 @@ export type ConsentCategory =
   | "proactive_notifications" // out-of-app briefings + anticipation alerts
   // ── coaching behaviours — how Gozlin acts on what it already sees; ON by default ──
   | "experience_followups" // ask how a new exercise went, remember the answer
+  // ── the cycle log — its own boundary, OFF by default ──
+  | "cycle_gozlin" // put her cycle day + today's cycle log in front of the coach
   // ── declared-but-not-implemented (honest, future-proof UI) ──
   | "cloud_backup"
   | "crash_diagnostics";
@@ -54,7 +56,7 @@ export const CONSENT_VERSION = 1;
  * what it can already see. It is the one group whose switch may default ON —
  * see experience_followups below.
  */
-export type ConsentGroup = "core" | "integration" | "coaching" | "future";
+export type ConsentGroup = "core" | "integration" | "coaching" | "future" | "cycle";
 
 export interface ConsentCategoryMeta {
   label: string;
@@ -152,6 +154,16 @@ export const CONSENT_CATEGORY_META: Record<ConsentCategory, ConsentCategoryMeta>
     // new: only sessions the person already logged, and it leaves the phone
     // only as one line of a chat they are already having.
     defaultGranted: true,
+  },
+  cycle_gozlin: {
+    label: "Cycle in Gozlin chats",
+    blurb:
+      "When you chat, I can see your cycle day, when your next period is likely and what you logged today — nothing else. Off until you switch it on.",
+    // Its own group: the Trust screen shows it only to someone who tracks a
+    // cycle, inside Reach, because it is data leaving the phone.
+    group: "cycle",
+    icon: "water",
+    defaultGranted: false,
   },
   cloud_backup: {
     label: "Encrypted backup",

@@ -1,41 +1,66 @@
 /**
  * ExerciseFigure.skia — one animated demonstration PANEL (Skia impl).
  *
- * A PICTOGRAM athlete, held to the classic stick-figure reference: a detached
- * circular head over a blocky trunk, uniform round-capped limbs, one flat
- * colour. No gradients, no outlines, no shading, no glow, no highlighting —
- * the silhouette does all the work, which is exactly why pictograms read at a
- * glance.
+ * TWO LOOKS ON ONE SKELETON.
  *
- * Under it is a skeletal rig (see animation/rig.ts): every bone is a capsule
- * built ONCE and moved by a matrix, nested so a forearm rides its upper arm
- * rides its shoulder. Nothing is rebuilt per frame — the renderer this replaced
- * allocated a native path per limb per frame, which is what made the exercise
- * screens stutter and eventually kill the app.
+ *   character (default) — the athlete drawn in animation/characterArt.ts: a big
+ *     head with curly hair and a plain resting face, a tee, shorts, socks and
+ *     trainers. Built the way a rigged cartoon is: every part is a shape parented
+ *     to a bone, the face is drawn once and never moves, and a LIFE LAYER runs on
+ *     top of the body — breath, the squash of a landing, hair that drags —
+ *     without ever blocking it.
+ *   pictogram — the original: a detached circular head over a blocky trunk,
+ *     uniform round-capped limbs, one flat colour. Kept whole, one prop away.
  *
- * Motion is deliberately loose rather than mechanical: each bone runs the rep
- * clock slightly BEHIND its parent (`FOLLOW_LAG` per level of the chain), so a
- * hand trails a forearm trails an upper arm. That overlapping action is what
- * separates a figure that moves from a figure that is merely posed.
+ * Both look at the same solved pose (animation/motion.ts): the skeleton walked
+ * once per frame on the UI thread, with a feel per movement, joints trailing
+ * their parents, and the planted foot held to the floor. Every shape is built
+ * ONCE and moved by a matrix; nothing native is allocated per frame — the first
+ * renderer allocated a path per limb per frame, which is what killed the app.
+ *
+ * Everything is drawn in the rig's own 0–100 box units inside ONE group that
+ * scales and places it, so a bone transform is just (x, y, angle).
+ *
+ * The clock handed in runs over a MACRO cycle of several reps (see tempo.ts),
+ * so the breath and the hair can run longer than the rep the limbs repeat.
  *
  * A panel holds ONE orientation (front OR side) so the parent can stand both
- * next to each other on a single shared rep clock. No flip.
+ * next to each other on a single shared clock. No flip.
  *
  * Loaded lazily (only when isSkiaAvailable), so this file's static Skia import
  * is safe: it is never evaluated on a surface without the native module.
  */
-import type { FigureMotion } from "@/fitness/animation/movementProfiles";
 import {
-  SIDE_FAR_BONES,
-  buildFrontRig,
-  buildSideRig,
-  type Rig,
-} from "@/fitness/animation/rig";
+  KIT,
+  buildCharacterArt,
+  faceMirrored,
+  type CharacterArt,
+  type FigureLook,
+  type FigureView,
+  type HeadArt,
+  type Shape,
+} from "@/fitness/animation/characterArt";
+import {
+  buildMotionKit,
+  framePanel,
+  headFrame,
+  headRadius,
+  motionBounds,
+  repPhase,
+  solveLife,
+  solvePose,
+  type MotionKit,
+} from "@/fitness/animation/motion";
+import type { FigureMotion } from "@/fitness/animation/movementProfiles";
+import { propsFor } from "@/fitness/animation/props";
+import { SIDE_FAR_BONES, buildFrontRig, buildSideRig, type Rig } from "@/fitness/animation/rig";
+import { FX } from "@/fitness/animation/tempo";
 import {
   Canvas,
   Circle,
   Group,
   Path,
+  RoundedRect,
   Skia,
   type SkPath,
   type Transforms3d,
@@ -43,33 +68,252 @@ import {
 import React, { useMemo } from "react";
 import { useDerivedValue, type SharedValue } from "react-native-reanimated";
 
-export type FigureView = "front" | "side";
+export type { FigureView };
 
 export interface SkiaFigurePanelProps {
   view: FigureView;
   motion: FigureMotion;
   size: number;
-  /** The one flat colour the whole figure is drawn in. */
+  /**
+   * The pictogram's one flat colour. The character wears its own kit and uses it
+   * for the tint of its ground shadow only.
+   */
   color: string;
-  /** Shared rep clock, 0→1 looping. Frozen at 0 = static top-of-rep pose. */
+  /** Shared clock, 0→1 looping over the macro cycle. Frozen at 0 = the first pose. */
   progress: SharedValue<number>;
+  /** Which figure demonstrates. Defaults to the character. */
+  look?: FigureLook;
+  /**
+   * Radius in px, around the panel's centre, the figure's whole silhouette must
+   * stay inside — see `framePanel`. Omit it for the standard standing-on-a-line
+   * framing.
+   */
+  fit?: number;
+}
+
+/** The pictogram's far arm/leg, and every look's equipment, set back by opacity. */
+const FAR_OPACITY = 0.42;
+/** How far the side view's far limbs are set back, in box units. */
+const FAR_SHIFT = 3.2;
+/** Equipment under the character — a neutral, so a bench never wears the kit. */
+const PROP_COLOR = "#8E949E";
+/** The ground shadow's strength, under the figure. */
+const SHADOW_OPACITY = 0.13;
+/** The chest's breath: how much the tee swells along and across the torso. */
+const BREATH_ALONG = 0.01;
+const BREATH_ACROSS = 0.035;
+
+const svgPath = (d: string): SkPath => Skia.Path.MakeFromSVGString(d) ?? Skia.Path.Make();
+
+/* ─────────────────────────── Shapes, built once ──────────────────────────── */
+
+/** A shape with its path parsed — built once per panel, never per frame. */
+interface Prepared {
+  path: SkPath;
+  fill?: string;
+  opacity?: number;
+  stroke?: { color: string; width: number };
+}
+
+const prepare = (shapes: Shape[]): Prepared[] =>
+  shapes.map((s) => ({ path: svgPath(s.d), fill: s.fill, opacity: s.opacity, stroke: s.stroke }));
+
+const Shapes = React.memo(function Shapes({ shapes }: { shapes: Prepared[] }) {
+  return (
+    <>
+      {shapes.map((s, i) =>
+        s.stroke ? (
+          <Path
+            key={i}
+            path={s.path}
+            style="stroke"
+            strokeWidth={s.stroke.width}
+            strokeCap="round"
+            color={s.stroke.color}
+          />
+        ) : (
+          <Path key={i} path={s.path} color={s.fill} opacity={s.opacity} />
+        ),
+      )}
+    </>
+  );
+});
+
+/** The per-frame transform of one bone, read off the solved pose. */
+function useBoneTransform(pose: SharedValue<number[]>, index: number) {
+  return useDerivedValue<Transforms3d>(() => {
+    "worklet";
+    const p = pose.value;
+    return [
+      { translateX: p[index * 3] },
+      { translateY: p[index * 3 + 1] },
+      { rotate: p[index * 3 + 2] },
+    ];
+  }, [pose, index]);
+}
+
+/** One of the character's bones — everything it wears, on one transform. */
+const DressedBone = React.memo(function DressedBone({
+  pose,
+  index,
+  shapes,
+}: {
+  pose: SharedValue<number[]>;
+  index: number;
+  shapes: Prepared[];
+}) {
+  const transform = useBoneTransform(pose, index);
+  return (
+    <Group transform={transform}>
+      <Shapes shapes={shapes} />
+    </Group>
+  );
+});
+
+/** The upper spine: a bone like any other, but the chest swells with the breath. */
+const Chest = React.memo(function Chest({
+  pose,
+  fx,
+  index,
+  shapes,
+}: {
+  pose: SharedValue<number[]>;
+  fx: SharedValue<number[]>;
+  index: number;
+  shapes: Prepared[];
+}) {
+  const transform = useDerivedValue<Transforms3d>(() => {
+    "worklet";
+    const p = pose.value;
+    const b = fx.value[FX.BREATH];
+    return [
+      { translateX: p[index * 3] },
+      { translateY: p[index * 3 + 1] },
+      { rotate: p[index * 3 + 2] },
+      { scaleX: 1 + BREATH_ALONG * b },
+      { scaleY: 1 + BREATH_ACROSS * b },
+    ];
+  }, [pose, fx, index]);
+  return (
+    <Group transform={transform}>
+      <Shapes shapes={shapes} />
+    </Group>
+  );
+});
+
+/**
+ * A front-on trainer. The front rig has no foot bone, so the shoe hangs off the
+ * tip of the shin — LEVEL, not turned with the shin: a foot stays flat on the
+ * floor through a squat or a jumping jack, whatever the leg above it does.
+ */
+const FrontShoe = React.memo(function FrontShoe({
+  pose,
+  index,
+  length,
+  out,
+  drop,
+  shapes,
+}: {
+  pose: SharedValue<number[]>;
+  index: number;
+  length: number;
+  out: number;
+  drop: number;
+  shapes: Prepared[];
+}) {
+  const transform = useDerivedValue<Transforms3d>(() => {
+    "worklet";
+    const p = pose.value;
+    const a = p[index * 3 + 2];
+    return [
+      { translateX: p[index * 3] + length * Math.cos(a) + out },
+      { translateY: p[index * 3 + 1] + length * Math.sin(a) + drop },
+    ];
+  }, [pose, index, length, out, drop]);
+  return (
+    <Group transform={transform}>
+      <Shapes shapes={shapes} />
+    </Group>
+  );
+});
+
+/* ─────────────────────────────── The head ────────────────────────────────── */
+
+interface PreparedHead {
+  art: HeadArt;
+  puffs: Prepared[];
+  back: Prepared[];
+  skull: Prepared[];
+  face: Prepared[];
+  front: Prepared[];
+}
+
+function prepareHead(head: HeadArt): PreparedHead {
+  return {
+    art: head,
+    puffs: prepare(head.puffs),
+    back: prepare(head.back),
+    skull: prepare(head.skull),
+    face: prepare(head.face),
+    front: prepare(head.front),
+  };
 }
 
 /**
- * How far each level of the chain trails the one above it, as a fraction of the
- * rep. Small on purpose: enough to loosen the movement, not enough to pull a
- * joint visibly out of its socket.
+ * The character's head, drawn in its own unit frame — radius 1, crown toward −y,
+ * face toward +x. The parent group turns it to follow the neck (so a face looks
+ * at the floor in a plank and at the sky in a bridge), tilts it a hair with the
+ * effort, and mirrors it for the few poses authored the other way round.
+ *
+ * THE FACE IS DRAWN, NOT DRIVEN. It used to be a rig: a `Brow` and a `Mouth`
+ * component per feature, an `Eyes` group with a clipped white, a pupil that
+ * glanced and two lids that blinked and squinted — six more derived values
+ * recomputed on the UI thread every frame, and six more things moving in a
+ * panel whose whole point is one moving body. Now the eyes and the mouth are
+ * two more entries in `Shapes`, prepared once.
  */
-const FOLLOW_LAG = 0.013;
-/** The far arm/leg of a side view, set back so the body reads with depth. */
-const FAR_OPACITY = 0.42;
+function CharacterHead({
+  head,
+  fx,
+  frame,
+}: {
+  head: PreparedHead;
+  fx: SharedValue<number[]>;
+  frame: SharedValue<Transforms3d>;
+}) {
+  const art = head.art;
+  const [px, py] = art.swayPivot;
+  const sway = useDerivedValue<Transforms3d>(() => {
+    "worklet";
+    const f = fx.value;
+    return [
+      { translateX: px },
+      { translateY: py + f[FX.BOB] },
+      { rotate: f[FX.SWAY] },
+      { translateX: -px },
+      { translateY: -py },
+    ];
+  }, [fx, px, py]);
+  return (
+    <Group transform={frame}>
+      {/* The hair's puffs ride behind the skull and drag behind the head's turn. */}
+      <Group transform={sway}>
+        <Shapes shapes={head.puffs} />
+      </Group>
+      <Shapes shapes={head.back} />
+      <Shapes shapes={head.skull} />
+      <Shapes shapes={head.face} />
+      <Shapes shapes={head.front} />
+    </Group>
+  );
+}
 
-/* ─────────────────────────────── Geometry ──────────────────────────────── */
+/* ─────────────────────────────── The pictogram ───────────────────────────── */
 
 /**
- * A capsule running from the bone's origin along +x to (length, 0), `w0` wide
- * at the base and `w1` at the tip, fully rounded at both ends. Built once per
- * bone, then only ever transformed.
+ * A capsule running from the bone's origin along +x to (length, 0), `w0` wide at
+ * the base and `w1` at the tip, fully rounded at both ends. Built once per bone,
+ * then only ever transformed.
  */
 function capsule(length: number, w0: number, w1: number, tip: number): SkPath {
   const h0 = w0 / 2;
@@ -86,77 +330,6 @@ function capsule(length: number, w0: number, w1: number, tip: number): SkPath {
   return p;
 }
 
-interface PanelGeometry {
-  rig: Rig;
-  panelW: number;
-  k: number;
-  pad: number;
-  cx: number;
-  /** Drawable capsule per bone; null for positioning-only bones. */
-  art: (SkPath | null)[];
-  headR: number;
-  depth: number;
-  /** Draw order, back to front. */
-  legs: number[];
-  arms: number[];
-  spine: number[];
-}
-
-function indicesWhere(rig: Rig, test: (name: string) => boolean): number[] {
-  const out: number[] = [];
-  rig.bones.forEach((b, i) => {
-    if (test(b.name) && b.draw) out.push(i);
-  });
-  return out;
-}
-
-function buildGeometry(
-  view: FigureView,
-  motion: FigureMotion,
-  size: number,
-): PanelGeometry {
-  const rig = view === "side" ? buildSideRig(motion) : buildFrontRig(motion);
-  const pad = size * 0.08;
-  const panelW = size * (view === "side" ? 0.78 : 0.94);
-  // Shrink the drawing scale rather than let a wide pose (a jumping jack) run
-  // off the edge of its panel.
-  const k = Math.min(
-    (size - pad * 2) / 100,
-    (panelW / 2 - size * 0.03) / (rig.reach + 9),
-  );
-
-  const art = rig.bones.map((b) =>
-    b.draw
-      ? capsule(
-          (b.length - b.drawInset) * k,
-          b.w0 * k,
-          b.w1 * k,
-          b.tip * k,
-        )
-      : null,
-  );
-
-  return {
-    rig,
-    panelW,
-    k,
-    pad,
-    cx: panelW / 2,
-    art,
-    headR: rig.headR * k,
-    depth: 3.2 * k,
-    legs: indicesWhere(rig, (n) => /^(thigh|shin|foot)/.test(n)),
-    arms: indicesWhere(rig, (n) => /^(upArm|foreArm)/.test(n)),
-    spine: indicesWhere(rig, (n) => n.endsWith("Spine")),
-  };
-}
-
-/* ──────────────────────────────── Bone ─────────────────────────────────── */
-
-/**
- * One bone. Its own derived transform reads the shared pose array, so the whole
- * body costs a handful of tiny matrices per frame and not one allocation.
- */
 const Bone = React.memo(function Bone({
   pose,
   index,
@@ -168,16 +341,7 @@ const Bone = React.memo(function Bone({
   path: SkPath;
   color: string;
 }) {
-  const transform = useDerivedValue<Transforms3d>(() => {
-    "worklet";
-    const p = pose.value;
-    return [
-      { translateX: p[index * 3] },
-      { translateY: p[index * 3 + 1] },
-      { rotate: p[index * 3 + 2] },
-    ];
-  }, [pose, index]);
-
+  const transform = useBoneTransform(pose, index);
   return (
     <Group transform={transform}>
       <Path path={path} color={color} />
@@ -185,7 +349,15 @@ const Bone = React.memo(function Bone({
   );
 });
 
-/* ──────────────────────────────── Panel ────────────────────────────────── */
+function indicesWhere(rig: Rig, test: (name: string) => boolean): number[] {
+  const out: number[] = [];
+  rig.bones.forEach((b, i) => {
+    if (test(b.name) && b.draw) out.push(i);
+  });
+  return out;
+}
+
+/* ──────────────────────────────── Panel ──────────────────────────────────── */
 
 export function SkiaFigurePanel({
   view,
@@ -193,113 +365,251 @@ export function SkiaFigurePanel({
   size,
   color,
   progress,
+  look = "character",
+  fit,
 }: SkiaFigurePanelProps) {
-  const geo = useMemo(() => buildGeometry(view, motion, size), [view, motion, size]);
-  const { rig, art, cx, pad, k, panelW, headR } = geo;
+  const character = look === "character";
+  const model = useMemo(() => {
+    const rig = view === "side" ? buildSideRig(motion) : buildFrontRig(motion);
+    const kit = buildMotionKit(motion, view, look);
+    const bounds = motionBounds(kit, rig);
+    return { rig, kit, bounds };
+  }, [view, motion, look]);
+  const { rig, kit, bounds } = model;
+  const frame = useMemo(() => framePanel(bounds, view, size, fit), [bounds, view, size, fit]);
 
-  // The whole skeleton, walked once per frame on the UI thread. Every bone
-  // transform below reads this one array.
-  const boneCount = rig.bones.length;
-  const parents = useMemo(() => rig.bones.map((b) => b.parent), [rig]);
-  const lengths = useMemo(() => rig.bones.map((b) => b.length * k), [rig, k]);
-  const lags = useMemo(() => rig.bones.map((b) => b.depth * FOLLOW_LAG), [rig]);
-  const { anglesA, anglesB } = rig;
-  const rootAx = cx + (rig.rootA[0] - 50) * k;
-  const rootAy = pad + rig.rootA[1] * k;
-  const rootBx = cx + (rig.rootB[0] - 50) * k;
-  const rootBy = pad + rig.rootB[1] * k;
-
+  // The whole skeleton and the whole face, solved once per frame on the UI
+  // thread. Every transform below reads one of these two arrays.
   const pose = useDerivedValue<number[]>(() => {
     "worklet";
-    // smootherstep over a ping-pong — the athlete decelerates into the bottom
-    // of the movement instead of snapping between the two authored poses.
-    const ease = (raw: number) => {
-      "worklet";
-      const tri = raw < 0.5 ? raw * 2 : (1 - raw) * 2;
-      const c = tri < 0 ? 0 : tri > 1 ? 1 : tri;
-      return c * c * c * (c * (c * 6 - 15) + 10);
-    };
+    return solvePose(kit, repPhase(kit, progress.value));
+  }, [kit, progress]);
+  const fx = useDerivedValue<number[]>(() => {
+    "worklet";
+    return solveLife(kit, progress.value);
+  }, [kit, progress]);
 
-    const p = progress.value;
-    const tRoot = ease(p);
-    const rootX = rootAx + (rootBx - rootAx) * tRoot;
-    const rootY = rootAy + (rootBy - rootAy) * tRoot;
+  // Equipment: the bench / box / wall / bar the movement rests on, placed once.
+  const props = useMemo(() => propsFor(motion, view), [motion, view]);
 
-    const out = new Array<number>(boneCount * 3);
-    const tipX = new Array<number>(boneCount);
-    const tipY = new Array<number>(boneCount);
-    for (let i = 0; i < boneCount; i++) {
-      // Each level of the chain runs slightly behind the one above it, so the
-      // limbs whip and settle instead of moving as one rigid piece.
-      let lagged = p - lags[i];
-      if (lagged < 0) lagged += 1;
-      const t = ease(lagged);
+  // The body squashes about its feet on a landing and stretches in the air.
+  const squash = useDerivedValue<Transforms3d>(() => {
+    "worklet";
+    const s = fx.value[FX.SQUASH];
+    return [
+      { translateX: bounds.shadowX },
+      { translateY: bounds.floorY },
+      { scaleX: 1 - 0.7 * s },
+      { scaleY: 1 + s },
+      { translateX: -bounds.shadowX },
+      { translateY: -bounds.floorY },
+    ];
+  }, [fx, bounds]);
+  // The shadow's width is the frame's, not the bounds': a fitted figure holds it
+  // inside the ring.
+  const shadowRx = frame.shadowRx;
+  const shadow = useDerivedValue<Transforms3d>(() => {
+    "worklet";
+    const s = fx.value[FX.SHADOW] * shadowRx;
+    return [
+      { translateX: bounds.shadowX },
+      { translateY: bounds.floorY - 0.4 },
+      { scaleX: s },
+      { scaleY: s * 0.16 },
+    ];
+  }, [fx, bounds, shadowRx]);
 
-      const parent = parents[i];
-      const a = anglesA[i] + (anglesB[i] - anglesA[i]) * t;
-      const sx = parent < 0 ? rootX : tipX[parent];
-      const sy = parent < 0 ? rootY : tipY[parent];
-      tipX[i] = sx + lengths[i] * Math.cos(a);
-      tipY[i] = sy + lengths[i] * Math.sin(a);
-      out[i * 3] = sx;
-      out[i * 3 + 1] = sy;
-      out[i * 3 + 2] = a;
-    }
-    return out;
-  }, [
-    progress,
-    boneCount,
-    parents,
-    lengths,
-    lags,
-    anglesA,
-    anglesB,
-    rootAx,
-    rootAy,
-    rootBx,
-    rootBy,
-  ]);
+  const placement: Transforms3d = useMemo(
+    () => [{ translateX: frame.tx }, { translateY: frame.ty }, { scale: frame.k }],
+    [frame],
+  );
 
-  // Head rides the tip of the (undrawn) neck bone.
-  const headBone = rig.headBone;
+  const scene = character ? (
+    <CharacterScene
+      rig={rig}
+      kit={kit}
+      view={view}
+      motion={motion}
+      pose={pose}
+      fx={fx}
+      squash={squash}
+    />
+  ) : (
+    <PictogramScene rig={rig} kit={kit} view={view} pose={pose} color={color} />
+  );
+
+  return (
+    <Canvas style={{ width: frame.panelW, height: size }}>
+      <Group transform={placement}>
+        {/* Equipment sits furthest back, at the far-limb opacity: the setting,
+            not part of the body. */}
+        {props.length > 0 && (
+          <Group opacity={FAR_OPACITY}>
+            {props.map((p, i) => (
+              <RoundedRect
+                key={`prop${i}`}
+                x={p.x}
+                y={p.y}
+                width={p.w}
+                height={p.h}
+                r={Math.min(1.5, p.w / 2, p.h / 2)}
+                color={character ? PROP_COLOR : color}
+              />
+            ))}
+          </Group>
+        )}
+        {character && (
+          <Group transform={shadow}>
+            <Circle cx={0} cy={0} r={1} color={color} opacity={SHADOW_OPACITY} />
+          </Group>
+        )}
+        {scene}
+      </Group>
+    </Canvas>
+  );
+}
+
+/* ────────────────────────────── The scenes ───────────────────────────────── */
+
+function CharacterScene({
+  rig,
+  kit,
+  view,
+  motion,
+  pose,
+  fx,
+  squash,
+}: {
+  rig: Rig;
+  kit: MotionKit;
+  view: FigureView;
+  motion: FigureMotion;
+  pose: SharedValue<number[]>;
+  fx: SharedValue<number[]>;
+  squash: SharedValue<Transforms3d>;
+}) {
+  const art: CharacterArt = useMemo(() => buildCharacterArt(rig, view), [rig, view]);
+  const bones = useMemo(() => art.bones.map(prepare), [art]);
+  const behind = useMemo(() => art.behind.map(prepare), [art]);
+  const shoes = useMemo(() => art.shoes.map((s) => ({ bone: s.bone, shapes: prepare(s.shapes) })), [art]);
+  const head = useMemo(() => prepareHead(art.head), [art]);
+  const r = headRadius(rig);
+  const mirror = faceMirrored(motion, view) ? -1 : 1;
+
+  const headXf = useDerivedValue<Transforms3d>(() => {
+    "worklet";
+    const h = headFrame(kit, pose.value, r, fx.value[FX.TILT]);
+    return [
+      { translateX: h.x },
+      { translateY: h.y },
+      { rotate: h.rot },
+      { scaleX: h.r * mirror },
+      { scaleY: h.r },
+    ];
+  }, [kit, pose, fx, r, mirror]);
+
+  const wear = (indices: number[], prefix: string) =>
+    indices.map((i) => <DressedBone key={`${prefix}${i}`} pose={pose} index={i} shapes={bones[i]} />);
+  const caps = (indices: number[], prefix: string) =>
+    indices.map((i) => <DressedBone key={`${prefix}${i}`} pose={pose} index={i} shapes={behind[i]} />);
+
+  return (
+    <Group transform={squash}>
+      {/* Far side, set back — opaque and a shade darker, not see-through: on a
+          body of several colours, transparency shows every overlap. */}
+      {art.layers.far.length > 0 && (
+        <Group transform={[{ translateX: -FAR_SHIFT }]}>
+          {art.layers.far.flatMap((i) => [
+            <DressedBone key={`fb${i}`} pose={pose} index={i} shapes={behind[i]} />,
+            <DressedBone key={`ff${i}`} pose={pose} index={i} shapes={bones[i]} />,
+          ])}
+        </Group>
+      )}
+      {wear(art.layers.legs, "leg")}
+      {shoes.map((s) => (
+        <FrontShoe
+          key={`shoe${s.bone}`}
+          pose={pose}
+          index={s.bone}
+          length={rig.bones[s.bone].length}
+          out={/L$/.test(rig.bones[s.bone].name) ? -art.shoeOut : art.shoeOut}
+          drop={art.shoeDrop}
+          shapes={s.shapes}
+        />
+      ))}
+      {art.layers.torso.map((i) =>
+        rig.bones[i].name === "upperSpine" ? (
+          <Chest key={`torso${i}`} pose={pose} fx={fx} index={i} shapes={bones[i]} />
+        ) : (
+          <DressedBone key={`torso${i}`} pose={pose} index={i} shapes={bones[i]} />
+        ),
+      )}
+      {/* The shoulders' caps sit under the head, so the big head rests ON them. */}
+      {caps(art.layers.caps, "cap")}
+      {wear(art.layers.collar, "collar")}
+      <CharacterHead head={head} fx={fx} frame={headXf} />
+      {wear(art.layers.arms, "arm")}
+    </Group>
+  );
+}
+
+function PictogramScene({
+  rig,
+  kit,
+  view,
+  pose,
+  color,
+}: {
+  rig: Rig;
+  kit: MotionKit;
+  view: FigureView;
+  pose: SharedValue<number[]>;
+  color: string;
+}) {
+  const art = useMemo(
+    () =>
+      rig.bones.map((b) =>
+        b.draw ? capsule(b.length - b.drawInset, b.w0, b.w1, b.tip) : null,
+      ),
+    [rig],
+  );
+  const legs = useMemo(() => indicesWhere(rig, (n) => /^(thigh|shin|foot)/.test(n)), [rig]);
+  const arms = useMemo(() => indicesWhere(rig, (n) => /^(upArm|foreArm)/.test(n)), [rig]);
+  const spine = useMemo(() => indicesWhere(rig, (n) => n.endsWith("Spine")), [rig]);
+  const farBones = view === "side" ? [...SIDE_FAR_BONES].filter((i) => art[i]) : [];
+  const headBone = kit.headBone;
+  const headLen = kit.lengths[headBone];
   const headXf = useDerivedValue<Transforms3d>(() => {
     "worklet";
     const p = pose.value;
     const a = p[headBone * 3 + 2];
     return [
-      { translateX: p[headBone * 3] + lengths[headBone] * Math.cos(a) },
-      { translateY: p[headBone * 3 + 1] + lengths[headBone] * Math.sin(a) },
+      { translateX: p[headBone * 3] + headLen * Math.cos(a) },
+      { translateY: p[headBone * 3 + 1] + headLen * Math.sin(a) },
     ];
-  }, [pose, headBone, lengths]);
+  }, [pose, headBone, headLen]);
 
-  const draw = (indices: number[], keyPrefix: string) =>
+  const draw = (indices: number[], prefix: string) =>
     indices.map((i) => {
       const path = art[i];
-      if (!path) return null;
-      return (
-        <Bone key={`${keyPrefix}${i}`} pose={pose} index={i} path={path} color={color} />
-      );
+      return path ? <Bone key={`${prefix}${i}`} pose={pose} index={i} path={path} color={color} /> : null;
     });
 
-  const farBones = view === "side" ? [...SIDE_FAR_BONES].filter((i) => art[i]) : [];
-
   return (
-    <Canvas style={{ width: panelW, height: size }}>
-      {/* Far side (side view only) — the same silhouette set back, so a profile
+    <>
+      {/* Far side (side view only) — the far arm and leg set back, so a profile
           figure doesn't read as a person missing an arm and a leg. */}
       {farBones.length > 0 && (
-        <Group transform={[{ translateX: -geo.depth }]} opacity={FAR_OPACITY}>
+        <Group transform={[{ translateX: -FAR_SHIFT }]} opacity={FAR_OPACITY}>
           {draw(farBones, "far")}
         </Group>
       )}
-
-      {draw(geo.legs, "leg")}
-      {draw(geo.spine, "spine")}
-      {draw(geo.arms, "arm")}
-
+      {draw(legs, "leg")}
+      {draw(spine, "spine")}
+      {draw(arms, "arm")}
       <Group transform={headXf}>
-        <Circle cx={0} cy={0} r={headR} color={color} />
+        <Circle cx={0} cy={0} r={rig.headR} color={color} />
       </Group>
-    </Canvas>
+    </>
   );
 }

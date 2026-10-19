@@ -13,6 +13,7 @@
 import { parseLocalDate, readJSON, writeJSON, remove } from "../OfflineStorage";
 import { deriveConversationTitle } from "./conversationTitle";
 import { EXPERIENCE_KEYS, announceExperiences } from "./ExperienceStore";
+import { INSIGHT_LEDGER_KEY, announceLedger } from "./InsightLedger";
 import type {
   GozlinCheckin,
   GozlinEpisode,
@@ -36,6 +37,8 @@ const G_KEYS = {
   // and the care flags (./ExperienceStore). Listed here so "Clear memory"
   // cannot leave them behind — it clears exactly what is in this table.
   ...EXPERIENCE_KEYS,
+  // Which insights they have opened, and the archive of them (./InsightLedger).
+  INSIGHT_LEDGER: INSIGHT_LEDGER_KEY,
 } as const;
 
 const EPISODE_CAP = 100;
@@ -347,4 +350,5 @@ export async function clearGozlinMemory(): Promise<void> {
   await Promise.all(Object.values(G_KEYS).map((k) => remove(k)));
   // A coach screen still mounted holds the questions and memories just wiped.
   announceExperiences();
+  announceLedger();
 }

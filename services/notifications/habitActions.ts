@@ -21,6 +21,7 @@
  */
 import { computeStats, loadHabits, updateLogs } from "../HabitService";
 import { toLocalDateString } from "../OfflineStorage";
+import { creditCommitment } from "../StreakService";
 import { emitExternalWrite, subscribeExternalWrites } from "./externalWrites";
 import { fireDateOf } from "./fireTime";
 import { patchWidgetHabitDone, refreshWidgets } from "./widgets";
@@ -95,6 +96,8 @@ export async function markHabitDoneFromNotification(
       await patchWidgetHabitDone(habitId, date, currentStreak);
       await refreshWidgets();
       emitExternalWrite({ kind: "habit", date });
+      // A habit done keeps the day — today's only, as the meal button does.
+      await creditCommitment(date);
     }
 
     return {

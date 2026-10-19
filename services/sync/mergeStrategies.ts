@@ -240,6 +240,32 @@ export const MERGE_STRATEGIES: Record<string, MergeStrategy> = {
     order: "desc",
     cap: 50,
   },
+  // InsightEntry[] (services/gozlin/InsightLedger) — the insights the user has
+  // opened. `key` is the insight's identity and `openedAt` never changes, so the
+  // two phones' lists simply union: an insight read on one is read on the other,
+  // instead of one device's copy erasing the other's. Newest first, capped to
+  // match the ledger's own cap.
+  "@gozlin_insight_ledger": {
+    kind: "mergeById",
+    idField: "key",
+    tsField: "openedAt",
+    order: "desc",
+    cap: 100,
+  },
+  // PeriodEpisode[] (services/cycle/types) — `id` + `updatedAt`. Removing a
+  // period leaves a TOMBSTONE with a newer stamp, so the removal beats the full
+  // copy still on another phone instead of being merged back out of it — the
+  // same rule as @gozlin_experiences. Ordered the way the cycle store writes it.
+  "@welliva_cycle_periods": {
+    kind: "mergeById",
+    idField: "id",
+    tsField: "updatedAt",
+    order: "asc",
+  },
+  // Record<date, CycleDayLog> — a day logged on two phones resolves to the
+  // LATER edit (its ISO `updatedAt`), and a cleared day is an empty log with a
+  // newer stamp, so clearing one on the phone beats the old entry on the tablet.
+  "@welliva_cycle_days": { kind: "mergeByDate", preferField: "updatedAt" },
 };
 
 export function strategyFor(key: string): MergeStrategy {
@@ -262,6 +288,10 @@ function preferRicher(a: unknown, b: unknown, preferField?: string): unknown {
     const av = a[preferField];
     const bv = b[preferField];
     if (typeof av === "number" && typeof bv === "number" && av !== bv) {
+      return av > bv ? a : b;
+    }
+    // ISO timestamps order correctly as strings: the later edit wins.
+    if (typeof av === "string" && typeof bv === "string" && av !== bv) {
       return av > bv ? a : b;
     }
   }

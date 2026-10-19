@@ -32,9 +32,12 @@ import {
 import {
   Celebration,
   celebrationForChapter,
+  celebrationForCommitment,
   celebrationFromAchievement,
   celebrationFromMoment,
 } from "../../services/CelebrationService";
+import { readCommitment } from "../../services/commitment";
+import { subscribeExternalWrites } from "../../services/notifications/externalWrites";
 import {
   goalSignature,
   isGoalReached,
@@ -58,7 +61,11 @@ import {
   todayDate,
   writeJSON,
 } from "../../services/OfflineStorage";
-import { StreakData, loadStreakData } from "../../services/StreakService";
+import {
+  StreakData,
+  loadStreakData,
+  onCommitmentKept,
+} from "../../services/StreakService";
 
 /** Human label per goal — used in chapter celebrations + Gozlin memory. */
 const GOAL_LABEL: Record<PrimaryGoal, string> = {
@@ -151,6 +158,41 @@ export function useGamificationState({
         }).catch(() => {});
       }
     },
+    [setCelebrations],
+  );
+
+  /**
+   * THE DAY'S FLAME. Queued the moment today turns kept — StreakService
+   * announces it from the write itself, so a record that merely ARRIVES (the
+   * launch load, a sign-in re-hydrate, a cloud copy) can never light it.
+   *
+   * Queued NEXT, not last: finishing a workout can unlock a badge and keep the
+   * day in one tap, and the day comes first — the way a streak screen follows
+   * the lesson before any trophy does. Index 0 may already be on screen, so it
+   * is never displaced.
+   *
+   * Not written into Gozlin's memory day by day: a "kept today" episode every
+   * day would bury the wins that matter. Only a milestone run is remembered.
+   */
+  useEffect(
+    () =>
+      onCommitmentKept((data) => {
+        const today = todayDate();
+        if (data.lastActiveDate !== today) return;
+        const c = celebrationForCommitment(readCommitment(data, today), today);
+        setCelebrations((prev) => {
+          if (prev.some((p) => p.id === c.id)) return prev;
+          return prev.length === 0 ? [c] : [prev[0], c, ...prev.slice(1)];
+        });
+        if (c.commitment?.milestone) {
+          addEpisode({
+            id: c.id,
+            date: today,
+            summary: `kept a ${c.commitment.streak}-day streak`,
+            kind: "milestone",
+          }).catch(() => {});
+        }
+      }),
     [setCelebrations],
   );
 
@@ -486,6 +528,18 @@ export function useGamificationState({
     const s = await loadStreakData();
     setStreakData(s);
   }, []);
+
+  // A day kept from outside this provider — the food log, a weigh-in, a
+  // check-in, a habit — re-reads the record, so Home's flame lights at once
+  // rather than at the next launch. (Declared after `refreshStreak`: its deps
+  // array is read during render.)
+  useEffect(
+    () =>
+      subscribeExternalWrites((w) => {
+        if (w.kind === "streak") void refreshStreak();
+      }),
+    [refreshStreak],
+  );
 
   return {
     achievementStats,

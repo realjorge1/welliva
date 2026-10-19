@@ -29,7 +29,8 @@ import {
   type ViewStyle,
 } from "react-native";
 
-const APP_ICON = require("@/assets/images/welliva-48.jpg");
+// The launcher icon at banner size: the gold wordmark on black.
+const APP_ICON = require("@/assets/images/icon-wordmark-96.png");
 
 export interface NotificationBannerPreviewProps {
   title: string;

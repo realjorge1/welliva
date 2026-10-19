@@ -247,16 +247,22 @@ export default function LogsScreen() {
    */
 
   const header = (
-    <>
-      <ScreenTopBar
-        title="Logs"
-        style={styles.topBar}
-        titleRight={
-          <AppText variant="footnote" color="tertiary">
-            {counts.all} {counts.all === 1 ? "entry" : "entries"}
-          </AppText>
-        }
-      />
+    <ScreenTopBar
+      title="Logs"
+      style={styles.topBar}
+      titleRight={
+        <AppText variant="footnote" color="tertiary">
+          {counts.all} {counts.all === 1 ? "entry" : "entries"}
+        </AppText>
+      }
+    />
+  );
+
+  return (
+    <Screen header={header} floatingHeader>
+      {/* The filters ride the list. They used to be pinned under the title,
+          which made the header a wall the page was cut off against; the
+          header floats and folds now, and the filters are one flick back. */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -306,11 +312,6 @@ export default function LogsScreen() {
           );
         })}
       </ScrollView>
-    </>
-  );
-
-  return (
-    <Screen header={header}>
       {/* Last seven days, at a glance. It sits above the ledger because the
           question people bring to a log screen is "how has my week gone", and
           a list of rows makes you do that arithmetic yourself. */}

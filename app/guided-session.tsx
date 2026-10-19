@@ -31,8 +31,8 @@
  */
 
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
-import { Confetti } from "@/components/Confetti";
-import { enterFade, enterHero, enterRise, exitFade } from "@/components/motion";
+import { Flame } from "@/components/celebration/Flame";
+import { Ease, enterFade, enterHero, enterRise, exitFade } from "@/components/motion";
 import {
   AmbientCanvas,
   AppText,
@@ -43,7 +43,7 @@ import {
   useColors,
 } from "@/components/ui";
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
-import { Gradients, Palette, Radius, Spacing, alpha, type ThemeColors } from "@/constants/theme";
+import { Gradients, Motion, Palette, Radius, Spacing, alpha, type ThemeColors } from "@/constants/theme";
 import { useWorkout } from "@/contexts/AppContext";
 import {
   resolveFigureMotion,
@@ -51,12 +51,13 @@ import {
 } from "@/fitness/animation/movementProfiles";
 import {
   ExerciseFigure,
+  FigureStill,
   primaryView,
   secondaryView,
+  stillFrame,
   useFigureClock,
 } from "@/fitness/components/ExerciseFigure";
 import { ExerciseGuideSheet } from "@/fitness/components/ExerciseGuideSheet";
-import { SessionCore } from "@/fitness/components/SessionCore";
 import { RestingFace } from "@/fitness/components/RestingFace";
 import { SessionRing } from "@/fitness/components/SessionRing";
 import { rememberSessionEffort } from "@/fitness/services/FitnessProfileStore";
@@ -101,6 +102,8 @@ const service = SessionService.getInstance();
 
 /** Triumphant gold ramp for overtime, the final push and completion. */
 const GOLD_GRADIENT = ["#FFE39A", "#F5C451", "#E39B2E"] as const;
+/** Ink on the gold slab — white on that gold is mush. */
+const GOLD_INK = "#2A1D01";
 
 /** The 3-2-1-GO the player runs itself, so it never rides the 1Hz session tick. */
 const COUNT_FROM = 3;
@@ -122,11 +125,19 @@ const GLOW_REST_MS = 4000;
 
 /** Anything above the stage: the header row plus the exercise segments. */
 const HEADER_ZONE = 68;
-/** The dock's primary action: a compact square-cornered button, not a slab. */
-const PRIMARY_HEIGHT = 44;
-/** The dock: one primary button, the four-slot icon row, and the gap between —
- *  8 top pad + 44 button + 12 gap + 62 row (42 disc, 5 gap, 15 label). */
-const DOCK_ZONE = 126;
+/** The primary slab's face — its height ABOVE the bottom inset it runs on under. */
+const SLAB_HEIGHT = 60;
+/** The dock: the four-slot icon row, then the slab on the floor —
+ *  8 top pad + 62 row (42 disc, 5 gap, 15 label) + 12 gap + 60 slab face.
+ *  (The slab's inset share is already in `insets.bottom`.) Re-sum it whenever
+ *  the dock changes: the hero is sized from what this leaves. */
+const DOCK_ZONE = 142;
+/**
+ * The live stage handles the bottom inset itself — the slab runs on under the
+ * gesture bar to the very bottom of the glass — so the safe area only pads the
+ * other three sides while it's up.
+ */
+const LIVE_EDGES = ["top", "left", "right"] as const;
 
 /**
  * The stage's fixed zones, in two sizes.
@@ -367,15 +378,22 @@ export default function GuidedSessionScreen() {
     DOCK_ZONE -
     metrics.caption -
     metrics.readout -
-    metrics.hint -
-    Spacing.lg;
+    metrics.hint;
   // The ring gives back a sliver of that room so the second camera angle has a
   // corner to live in that is genuinely OUTSIDE the circle — a small panel laid
   // over the graduation band would read as a mistake.
   const heroSize = Math.max(150, Math.min(width - 52, heroRoom * 0.8, 300));
-  // Air between the figure and the ring: at 0.62 even the wide front-view pose
-  // clears the graduation band, so the two never read as one crowded object.
-  const figureSize = Math.round(heroSize * 0.62);
+  // The figure is as BIG as the ring lets it be, not a fixed fraction of it: its
+  // panel is generous and the figure is fitted INSIDE a circle a little under
+  // the band's inner edge (ExerciseFigure's `fit`), so a compact pose — a stand,
+  // a squat — fills the ring and a wide one — a jumping jack — shrinks just
+  // enough to clear it. The sliver of air left is what stops the two reading as
+  // one crowded object.
+  const figureSize = Math.round(heroSize * 0.8);
+  const figureFit = heroSize * 0.36;
+  // The sleeping face has no silhouette to fit; it keeps its own size.
+  const restSize = Math.round(heroSize * 0.62);
+  const countScrim = Math.round(heroSize * 0.7);
   const stageWidth = width - Spacing.screen * 2;
 
   // Map every plan exercise by id so AI-generated moves (not in the local DB)
@@ -744,12 +762,13 @@ export default function GuidedSessionScreen() {
   const mainAngle = primaryView(exerciseMotion);
   const auxAngle = secondaryView(exerciseMotion);
   const auxCorner = auxCornerFor(figureExercise?.exerciseId ?? "");
-  const auxSize = secondAngleSize(
-    stageWidth,
-    heroRoom,
-    heroSize,
-    auxAngle === "side" ? 0.78 : 0.94,
-  );
+  // The corner panel is ALWAYS filled. When there is a second honest camera it
+  // shows that; when there isn't (see `aux` below) it shows the key position of
+  // the movement instead, which is the still the rest of the app identifies the
+  // exercise by.
+  const auxView = auxAngle ?? mainAngle;
+  const auxSize = secondAngleSize(stageWidth, heroRoom, heroSize, auxView === "side" ? 0.78 : 0.94);
+  const auxLabel = auxAngle ?? (stillFrame(exerciseMotion) === 0 ? "top" : "bottom");
 
   // While a resumed session is being restored, hold a quiet placeholder.
   if (!state) {
@@ -856,19 +875,29 @@ export default function GuidedSessionScreen() {
       ? currentEx.coachCues[(state.currentSet - 1) % currentEx.coachCues.length]
       : getCountdownLine(countdown).text;
 
-  const primary =
+  /** How much of the rest has gone — the slab's fuse. */
+  const restElapsed = restTotal > 0 ? Math.max(0, Math.min(1, 1 - timer / restTotal)) : 0;
+
+  const primary: {
+    label: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    tone: SlabTone;
+    progress?: number;
+    onPress: () => void;
+  } =
     phase === "COUNTDOWN"
-      ? { label: "Start now", icon: "flash" as const, variant: "tonal" as const, onPress: handleBeginFirstSet }
+      ? { label: "Start now", icon: "flash", tone: "tonal", onPress: handleBeginFirstSet }
       : phase === "ACTIVE_SET"
         ? {
             label: `Done ${lapWord.toLowerCase()}`,
-            icon: "checkmark" as const,
-            variant: "primary" as const,
+            icon: "checkmark",
+            // Gold the moment the box is spent: the set is waiting on this tap.
+            tone: overtime > 0 ? "gold" : "brand",
             onPress: handleCompleteSet,
           }
         : isTransition
-          ? { label: "Start next", icon: "flash" as const, variant: "primary" as const, onPress: handleSkipRest }
-          : { label: "Skip rest", icon: "play-forward" as const, variant: "primary" as const, onPress: handleSkipRest };
+          ? { label: "Start next", icon: "flash", tone: "brand", progress: restElapsed, onPress: handleSkipRest }
+          : { label: "Skip rest", icon: "play-forward", tone: "water", progress: restElapsed, onPress: handleSkipRest };
 
   // Slot two of the dock carries whatever this phase actually needs there —
   // never a dead button.
@@ -887,7 +916,7 @@ export default function GuidedSessionScreen() {
   return (
     <View style={styles.flex}>
       <AmbientCanvas />
-      <SafeAreaView style={styles.flex}>
+      <SafeAreaView style={styles.flex} edges={isLivePhase && !isPaused ? LIVE_EDGES : undefined}>
         {isLivePhase && (
           <Reanimated.View style={chromeStyle} pointerEvents={dimmed ? "none" : "auto"}>
             <SessionHeader
@@ -986,11 +1015,12 @@ export default function GuidedSessionScreen() {
                   gradient={ringGradient}
                   overtimeSeconds={overtime}
                   pulse={ringPulse}
+                  beat={hot}
                   linear={ringLinear}
                   duration={ringDuration}
                 >
                   {resting ? (
-                    <RestingFace size={figureSize} playing />
+                    <RestingFace size={restSize} playing />
                   ) : (
                     figureExercise && (
                       <ExerciseFigure
@@ -998,9 +1028,12 @@ export default function GuidedSessionScreen() {
                         motion={figureMotion}
                         views={[mainAngle]}
                         size={figureSize}
+                        fit={figureFit}
                         // At ease the body reads as standing by, not as the
-                        // demonstration — same figure, one step back.
-                        color={idling ? alpha(colors.text, 0.55) : colors.text}
+                        // demonstration — same figure, one step back. (Faded,
+                        // not re-coloured: the character wears its own kit.)
+                        color={colors.text}
+                        opacity={idling ? 0.55 : 1}
                         bare
                         clock={figureClock}
                       />
@@ -1012,9 +1045,9 @@ export default function GuidedSessionScreen() {
                         style={[
                           styles.countScrim,
                           {
-                            width: figureSize * 1.12,
-                            height: figureSize * 1.12,
-                            borderRadius: figureSize * 0.56,
+                            width: countScrim,
+                            height: countScrim,
+                            borderRadius: countScrim / 2,
                             backgroundColor: alpha(colors.background, 0.62),
                           },
                         ]}
@@ -1037,26 +1070,50 @@ export default function GuidedSessionScreen() {
                   )}
                 </SessionRing>
 
-                {/* The other camera angle — small, unframed, in a stage corner
-                    the ring's circle leaves empty, and beating on the SAME
-                    clock as the figure inside the ring. Sized to fit rather
-                    than gated on fitting: see secondAngleSize. */}
+                {/* The second panel — small, unframed, in a stage corner the
+                    ring's circle leaves empty. Sized to fit rather than gated on
+                    fitting: see secondAngleSize.
+
+                    IT IS NEVER EMPTY. It used to hold the other camera angle and
+                    nothing else, so when the catalogue stopped claiming a front
+                    view for floor and all-fours work — the rig cannot foreshorten,
+                    and a "front" plank drew a person standing up — the panel
+                    silently vanished for every push-up, plank, bridge and crawl,
+                    which is most of a session. A movement with one honest camera
+                    still has two positions worth seeing, so it shows the one the
+                    live figure passes through too fast to study, frozen: the
+                    lockout of a push-up, the bottom of a squat. Captioned with
+                    which it is, so the small panel is never mistaken for the
+                    exercise itself. */}
                 {!resting && figureExercise && (
                   <View
                     style={[styles.auxFigure, auxCorner === "left" ? { left: 0 } : { right: 0 }]}
                     pointerEvents="none"
                   >
-                    <ExerciseFigure
-                      key={`${figureExercise.exerciseId}-aux-${idling ? "idle" : "work"}`}
-                      motion={figureMotion}
-                      views={[auxAngle]}
-                      size={auxSize}
-                      color={alpha(colors.text, idling ? 0.4 : 0.82)}
-                      bare
-                      clock={figureClock}
-                    />
+                    {auxAngle ? (
+                      <ExerciseFigure
+                        key={`${figureExercise.exerciseId}-aux-${idling ? "idle" : "work"}`}
+                        motion={figureMotion}
+                        views={[auxAngle]}
+                        size={auxSize}
+                        color={colors.text}
+                        opacity={idling ? 0.4 : 0.82}
+                        bare
+                        clock={figureClock}
+                      />
+                    ) : (
+                      <View style={{ opacity: idling ? 0.4 : 0.82 }}>
+                        <FigureStill
+                          motion={exerciseMotion}
+                          view={auxView}
+                          size={auxSize}
+                          at={stillFrame(exerciseMotion)}
+                          color={colors.text}
+                        />
+                      </View>
+                    )}
                     <AppText variant="caption" color="tertiary" uppercase align="center">
-                      {auxAngle}
+                      {auxLabel}
                     </AppText>
                   </View>
                 )}
@@ -1114,19 +1171,6 @@ export default function GuidedSessionScreen() {
                 style={[styles.dock, chromeStyle]}
                 pointerEvents={dimmed ? "none" : "auto"}
               >
-                {/* Half the stage wide, spanning the two middle dock slots, and
-                    the same width in every phase so the target never moves. */}
-                <View style={styles.primaryWrap}>
-                  <Button
-                    label={primary.label}
-                    icon={primary.icon}
-                    variant={primary.variant}
-                    size="md"
-                    fullWidth={false}
-                    onPress={primary.onPress}
-                    style={[styles.primaryBtn, { width: Math.round(stageWidth / 2) }]}
-                  />
-                </View>
                 <View
                   style={[styles.dockRow, phase === "COUNTDOWN" && styles.dockRowHidden]}
                   pointerEvents={phase === "COUNTDOWN" ? "none" : "auto"}
@@ -1158,6 +1202,18 @@ export default function GuidedSessionScreen() {
                     colors={colors}
                   />
                 </View>
+                {/* The one big action, on the floor of the screen and the
+                    full width of it — the same slab in every phase, so the
+                    target never moves; only its colour and words change. */}
+                <SessionSlab
+                  label={primary.label}
+                  icon={primary.icon}
+                  tone={primary.tone}
+                  progress={primary.progress}
+                  onPress={primary.onPress}
+                  bottomInset={insets.bottom}
+                  colors={colors}
+                />
               </Reanimated.View>
             </View>
           )}
@@ -1568,6 +1624,123 @@ function HintPill({
   );
 }
 
+/** What the slab is for — which decides its colour. */
+type SlabTone = "brand" | "gold" | "water" | "tonal";
+
+/**
+ * THE SESSION'S ONE BIG BUTTON — "Done set", "Skip rest", "Start next".
+ *
+ * Owner, 2026-10-16: the compact button centred over the dock was "awful" —
+ * make it much better, and spread it to the edges of the screen. So it is a
+ * SLAB: the full width of the phone and flush with the bottom of the glass (it
+ * runs on under the gesture bar / home indicator, its label sitting above it).
+ * Square, as the owner asked on 2026-10-03 ("pointed edges, not a curved
+ * edge") — and a slab that meets three edges of the screen has no corners to
+ * round anyway.
+ *
+ *   · One flat colour per phase, the ring's language: brand while you work,
+ *     GOLD the moment the box runs into overtime (the set is waiting for this
+ *     tap), water at rest.
+ *   · One stroke of light along its top edge — the shine the flame, the badges
+ *     and the ring carry. At rest that stroke is a FUSE: it burns across the
+ *     slab as the rest elapses, so "Skip rest" shows how much there is left to
+ *     skip without putting another number on screen.
+ *   · A bold uppercase label with its icon — a game's CONTINUE, not a form's
+ *     Submit.
+ *   · It presses: the face darkens and the label sinks a point and a half.
+ */
+function SessionSlab({
+  label,
+  icon,
+  tone,
+  progress,
+  onPress,
+  bottomInset,
+  colors,
+}: {
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  tone: SlabTone;
+  /** 0–1 of the rest elapsed — the fuse along the top edge. Omit outside rest. */
+  progress?: number;
+  onPress: () => void;
+  /** The slab runs on under the bottom inset; the face stays above it. */
+  bottomInset: number;
+  colors: ThemeColors;
+}) {
+  const reduced = useReducedMotion();
+  const fill =
+    tone === "gold"
+      ? GOLD_GRADIENT[1]
+      : tone === "water"
+        ? Gradients.water[1]
+        : tone === "tonal"
+          ? colors.surfaceMuted
+          : colors.primary;
+  const ink =
+    tone === "gold"
+      ? GOLD_INK
+      : tone === "water"
+        ? "#FFFFFF"
+        : tone === "tonal"
+          ? colors.text
+          : colors.onPrimary;
+
+  // The fuse glides between the 1Hz ticks, like the ring does.
+  const fuse = useSharedValue(progress ?? 0);
+  useEffect(() => {
+    const to = progress ?? 0;
+    // Backwards means a new rest has begun: jump there, don't rewind the fuse.
+    if (reduced || to < fuse.value) {
+      cancelAnimation(fuse);
+      fuse.value = to;
+      return;
+    }
+    fuse.value = withTiming(to, { duration: 1000, easing: Easing.linear });
+  }, [progress, reduced, fuse]);
+  const fuseStyle = useAnimatedStyle(() => ({ transform: [{ scaleX: fuse.value }] }));
+
+  const handlePress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    onPress();
+  };
+
+  return (
+    <Pressable
+      onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={[styles.slab, { backgroundColor: fill, paddingBottom: bottomInset }]}
+    >
+      {({ pressed }) => (
+        <>
+          {progress != null ? (
+            <>
+              <View style={[styles.slabEdge, styles.slabFuseTrack]} />
+              <Reanimated.View style={[styles.slabEdge, styles.slabFuse, fuseStyle]} />
+            </>
+          ) : (
+            <View style={[styles.slabEdge, styles.slabShine]} />
+          )}
+          {pressed ? <View style={[StyleSheet.absoluteFill, styles.slabPressed]} /> : null}
+          <View style={[styles.slabFace, pressed && styles.slabFaceDown]}>
+            <Ionicons name={icon} size={22} color={ink} />
+            <AppText
+              variant="headline"
+              weight="800"
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.3}
+              style={[styles.slabLabel, { color: ink }]}
+            >
+              {label}
+            </AppText>
+          </View>
+        </>
+      )}
+    </Pressable>
+  );
+}
+
 /**
  * A dock slot. With `attention`, its disc glows brand colour for two seconds,
  * then sits dark for four — the "How to" is the only way to reach the deep
@@ -1960,13 +2133,27 @@ const EFFORT_OPTIONS: {
 }[] = [
   { key: "easy", icon: "leaf-outline", label: "Easy" },
   { key: "right", icon: "checkmark-circle-outline", label: "Just right" },
-  { key: "hard", icon: "flame-outline", label: "Hard" },
+  // Not a flame: the flame is the app's celebration now (it is the hero of this
+  // very screen), and a second one under it would read as "hard = good".
+  { key: "hard", icon: "pulse-outline", label: "Hard" },
 ];
 
 /**
- * The core floods gold and locks at full around a checkmark while confetti
- * flies — then ONE question, already answered. Tapping a different card is the
- * only reason to touch it; Continue takes the pre-filled answer.
+ * THE FLAME CATCHES — and that is the whole celebration (owner, 2026-10-15:
+ * the gold medallion and the confetti read as noisy and amateur). It sprouts
+ * out of the floor, settles and flickers; the words arrive once it has landed.
+ * Then ONE question, already answered. Tapping a different card is the only
+ * reason to touch it; Continue takes the pre-filled answer.
+ *
+ * THE ANSWER SITS ON THE FLOOR (owner, 2026-10-15). The screen used to be one
+ * centred stack, so on a tall phone Continue floated mid-screen over a band of
+ * empty black. Now the celebration is centred in the room ABOVE the answer, and
+ * the question, its three cards and Continue are pinned to the bottom edge, in
+ * the thumb's reach.
+ *
+ * The answer block is laid out from the first frame and revealed IN PLACE after
+ * the 1.5s beat. Mounting it late, as before, would shrink the hero's room the
+ * moment it arrived and jolt the medallion upward mid-celebration.
  */
 function CompletionView({
   state,
@@ -1981,9 +2168,12 @@ function CompletionView({
 }) {
   const doneCount = state.results.filter((r) => !r.skipped).length;
   const totalReps = state.results.reduce((sum, r) => sum + r.totalReps, 0);
-  const coreSize = Math.round(size * 0.6);
+  // Width of the drawing; it stands 1.25× as tall. Half the hero room keeps it
+  // the clear focus on a tall phone without crowding the TECNO's short stage.
+  const flameSize = Math.round(Math.min(168, size * 0.52));
   const [effort, setEffort] = useState<SessionEffort>("right");
   const [asking, setAsking] = useState(false);
+  const reveal = useSharedValue(0);
 
   // Let the celebration land before anything asks for an answer.
   useEffect(() => {
@@ -1991,67 +2181,81 @@ function CompletionView({
     return () => clearTimeout(id);
   }, []);
 
+  // The entrance the block used to mount with (enterRise: a 25pt drop on the
+  // slow decelerate), played where the block already stands.
+  useEffect(() => {
+    if (!asking) return;
+    reveal.value = withTiming(1, { duration: Motion.duration.slow, easing: Ease.decelerate });
+  }, [asking, reveal]);
+  const revealStyle = useAnimatedStyle(() => ({
+    opacity: reveal.value,
+    transform: [{ translateY: (1 - reveal.value) * -25 }],
+  }));
+
   return (
     <View style={styles.complete}>
-      <Reanimated.View entering={enterHero()} style={styles.completeHero}>
-        <View style={{ width: coreSize, height: coreSize }}>
-          <SessionCore progress={1} size={coreSize} gradient={GOLD_GRADIENT} pulse duration={900} />
-          <View style={[StyleSheet.absoluteFill, styles.centerAll]} pointerEvents="none">
-            <Ionicons name="checkmark-sharp" size={Math.round(coreSize * 0.34)} color={colors.gold} />
-          </View>
+      <View style={styles.completeStage}>
+        <View style={styles.completeHero}>
+          <Flame size={flameSize} entrance="ignite" />
+          {/* The words wait for the flame to land — one thing at a time. */}
+          <Reanimated.View entering={enterRise(4)} style={styles.completeHero}>
+            <Text style={[styles.completeHeadline, { color: colors.text }]}>Session complete</Text>
+            <AppText variant="subhead" color="secondary" align="center">
+              {doneCount} exercise{doneCount === 1 ? "" : "s"}
+              {totalReps > 0 ? ` · ${totalReps} reps` : ""} · {formatTime(state.elapsedSeconds)}
+            </AppText>
+          </Reanimated.View>
         </View>
-        <Text style={[styles.completeHeadline, { color: colors.text }]}>Session complete</Text>
-        <AppText variant="subhead" color="secondary" align="center">
-          {doneCount} exercise{doneCount === 1 ? "" : "s"}
-          {totalReps > 0 ? ` · ${totalReps} reps` : ""} · {formatTime(state.elapsedSeconds)}
-        </AppText>
-      </Reanimated.View>
+      </View>
 
-      {asking && (
-        <Reanimated.View entering={enterRise()} style={styles.effortBlock}>
-          <AppText variant="callout" align="center">
-            How did that feel?
-          </AppText>
-          <View style={styles.effortRow}>
-            {EFFORT_OPTIONS.map((opt) => {
-              const active = opt.key === effort;
-              return (
-                <Pressable
-                  key={opt.key}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                    setEffort(opt.key);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  accessibilityLabel={opt.label}
-                  style={({ pressed }) => [
-                    styles.effortTile,
-                    {
-                      borderColor: active ? colors.primary : colors.border,
-                      backgroundColor: active
-                        ? alpha(colors.primary, 0.12)
-                        : alpha(colors.primary, 0),
-                    },
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Ionicons
-                    name={opt.icon}
-                    size={22}
-                    color={active ? colors.primary : colors.textTertiary}
-                  />
-                  <AppText variant="footnote" color={active ? "brand" : "tertiary"}>
-                    {opt.label}
-                  </AppText>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Button label="Continue" icon="arrow-forward" size="lg" onPress={() => onFinish(effort)} />
-        </Reanimated.View>
-      )}
-      <Confetti tierColor={colors.gold} intensity={0.9} />
+      <Reanimated.View
+        style={[styles.effortBlock, revealStyle]}
+        // Invisible until asked: not tappable, and not read out either.
+        pointerEvents={asking ? "auto" : "none"}
+        accessibilityElementsHidden={!asking}
+        importantForAccessibility={asking ? "auto" : "no-hide-descendants"}
+      >
+        <AppText variant="callout" align="center">
+          How did that feel?
+        </AppText>
+        <View style={styles.effortRow}>
+          {EFFORT_OPTIONS.map((opt) => {
+            const active = opt.key === effort;
+            return (
+              <Pressable
+                key={opt.key}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  setEffort(opt.key);
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={opt.label}
+                style={({ pressed }) => [
+                  styles.effortTile,
+                  {
+                    borderColor: active ? colors.primary : colors.border,
+                    backgroundColor: active
+                      ? alpha(colors.primary, 0.12)
+                      : alpha(colors.primary, 0),
+                  },
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Ionicons
+                  name={opt.icon}
+                  size={22}
+                  color={active ? colors.primary : colors.textTertiary}
+                />
+                <AppText variant="footnote" color={active ? "brand" : "tertiary"}>
+                  {opt.label}
+                </AppText>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Button label="Continue" icon="arrow-forward" size="lg" onPress={() => onFinish(effort)} />
+      </Reanimated.View>
     </View>
   );
 }
@@ -2278,10 +2482,10 @@ const styles = StyleSheet.create({
   // Fixed zones. Three of them have a hard height and hold their content
   // absolutely, so a crossfading caption, clock or hint can never nudge the
   // figure or the dock by a single pixel.
+  // No bottom padding: the dock's slab sits flush on the floor of the glass.
   stage: {
     flex: 1,
     paddingHorizontal: Spacing.screen,
-    paddingBottom: Spacing.lg,
   },
   captionZone: {},
   readoutZone: {},
@@ -2356,10 +2560,6 @@ const styles = StyleSheet.create({
   },
 
   dock: { gap: Spacing.md, paddingTop: Spacing.sm },
-  // Centred so the button's touch area is only the button itself — a stretched
-  // wrapper would take taps from the empty space either side of it.
-  primaryWrap: { alignItems: "center" },
-  primaryBtn: { height: PRIMARY_HEIGHT, paddingHorizontal: Spacing.md, borderRadius: 0 },
   dockRow: { flexDirection: "row", alignItems: "flex-start" },
   dockRowHidden: { opacity: 0 },
   dockBtn: { flex: 1, alignItems: "center", gap: 5 },
@@ -2372,6 +2572,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   dockDisabled: { opacity: 0.4 },
+
+  // The primary slab: out through the stage's side padding to the glass.
+  slab: { marginHorizontal: -Spacing.screen, overflow: "hidden" },
+  slabFace: {
+    height: SLAB_HEIGHT,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  slabFaceDown: { transform: [{ translateY: 1.5 }] },
+  slabLabel: { fontSize: 17, lineHeight: 22, letterSpacing: 1.4, textTransform: "uppercase" },
+  slabEdge: { position: "absolute", left: 0, right: 0, top: 0, height: 3 },
+  slabShine: { height: 2, backgroundColor: "rgba(255,255,255,0.28)" },
+  slabFuseTrack: { backgroundColor: "rgba(255,255,255,0.18)" },
+  slabFuse: { backgroundColor: "rgba(255,255,255,0.8)", transformOrigin: "0% 50%" },
+  slabPressed: { backgroundColor: "rgba(0,0,0,0.14)" },
 
   // Prescription
   intro: { flex: 1 },
@@ -2440,11 +2657,12 @@ const styles = StyleSheet.create({
   // Complete
   complete: {
     flex: 1,
-    justifyContent: "center",
     paddingHorizontal: Spacing.screen,
     paddingBottom: Spacing.lg,
     gap: Spacing.lg,
   },
+  /** Everything above the answer. The hero centres in it, on any phone. */
+  completeStage: { flex: 1, justifyContent: "center" },
   completeHero: { alignItems: "center" },
   completeHeadline: {
     fontSize: 30,

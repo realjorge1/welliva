@@ -62,6 +62,7 @@ describe("no tier gates the diet catalog", () => {
       "generic",
       "habits",
       "history",
+      "insight-history",
       "insights",
       "photo-log",
       "sync",

@@ -76,7 +76,7 @@ export function BriefingCard({ data }: { data: GozlinBriefing }) {
                 { backgroundColor: alpha(tint, 0.12), borderColor: alpha(tint, 0.28) },
               ]}
             >
-              <AILogoIcon size={16} color={tint} />
+              <AILogoIcon size={16} />
             </View>
 
             <View style={styles.mastheadText}>
@@ -167,7 +167,7 @@ export function BriefingCard({ data }: { data: GozlinBriefing }) {
         {/* ── Gozlin Insight (motivation) ── */}
         <View style={[styles.insight, { backgroundColor: alpha(colors.primary, 0.08), borderColor: alpha(colors.primary, 0.2) }]}>
           <View style={styles.insightHead}>
-            <AILogoIcon size={14} color={colors.primary} />
+            <AILogoIcon size={14} />
             <MonoLabel text="Gozlin insight" color={colors.primary} />
           </View>
           <AppText variant="callout" style={{ lineHeight: 21 }}>

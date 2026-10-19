@@ -177,7 +177,7 @@ export const EXERCISE_FAMILY: Readonly<Record<string, string>> = {
   flex_17: "deep-squat-hold", // Deep Squat Hold
   flex_18: "hip-flexor-stretch", // Couch Stretch
   flex_19: "glute-stretch", // 90/90 Hip Stretch
-  flex_20: "bridge-pose", // Bridge Pose
+  flex_20: "bridge-pose", // Full Bridge (Wheel)
   flex_21: "neck-rolls", // Neck Rolls
 };
 

@@ -3,6 +3,7 @@
  * catalogued exercise and that no keyframe pose leaves the drawable box.
  */
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
+import { motionCameras } from "@/fitness/animation/cameras";
 import { EXERCISE_MOTIONS } from "@/fitness/animation/exerciseMotions";
 import { FRONT_PROFILES } from "@/fitness/animation/frontProfiles";
 import { SIDE_PROFILES } from "@/fitness/animation/sideProfiles";
@@ -36,9 +37,16 @@ describe("movement profiles", () => {
   it("resolves a drawable movement for every exercise in the catalog", () => {
     for (const ex of EXERCISE_DATABASE) {
       const motion = resolveFigureMotion(ex.id, ex.category);
-      // Whatever it resolves to, it must be drawable from BOTH cameras.
-      expect(FRONT_PROFILES[motion], `${ex.id} → ${motion}`).toBeDefined();
-      expect(SIDE_PROFILES[motion], `${ex.id} → ${motion}`).toBeDefined();
+      // Whatever it resolves to, it must be drawable from at least one camera,
+      // and every camera it claims must really have a profile behind it.
+      const cameras = motionCameras(motion);
+      expect(cameras.length, `${ex.id} → ${motion}`).toBeGreaterThan(0);
+      if (cameras.includes("front")) {
+        expect(FRONT_PROFILES[motion], `${ex.id} → ${motion}`).toBeDefined();
+      }
+      if (cameras.includes("side")) {
+        expect(SIDE_PROFILES[motion], `${ex.id} → ${motion}`).toBeDefined();
+      }
       // ...and every authored movement still collapses to one of the seven
       // patterns, so nothing downstream has to learn a second taxonomy.
       expect(MOVEMENT_PROFILES[baseMotionOf(motion)], `${ex.id} → ${motion}`).toBeDefined();
@@ -60,8 +68,10 @@ describe("movement profiles", () => {
     const knees = resolveFigureMotion("cardio_02", "cardio");
     const kicks = resolveFigureMotion("cardio_03", "cardio");
     expect(new Set([jack, knees, kicks]).size).toBe(3);
+    // A crunch is a crunch now, not the standing knee tuck of the core family.
+    expect(resolveFigureMotion("core_02", "core")).toBe("crunch");
     // An exercise with nothing authored still falls back to its pattern.
-    expect(resolveFigureMotion("core_02", "core")).toBe("core");
+    expect(resolveFigureMotion("legs_01", "legs")).toBe("squat");
   });
 
   it("falls back to category, then to neutral", () => {

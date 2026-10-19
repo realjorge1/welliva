@@ -63,10 +63,10 @@ export const TERMS_URL = `${LEGAL_SITE_URL}/terms/`;
 export const DATA_DELETION_URL = `${LEGAL_SITE_URL}/data-deletion/`;
 
 /** Bump on any material change → every user re-accepts. */
-export const LEGAL_VERSION = 2;
+export const LEGAL_VERSION = 3;
 
 /** Shown in each document header. Update alongside LEGAL_VERSION. */
-export const LEGAL_LAST_UPDATED = "26 September 2026";
+export const LEGAL_LAST_UPDATED = "15 October 2026";
 
 /** Minimum age to hold an account (the onboarding age field enforces it too). */
 export const MINIMUM_AGE = 13;
@@ -147,6 +147,7 @@ const PRIVACY: LegalDoc = {
         "Food: dietary style, cuisine preference, meals per day, allergies and foods you dislike",
         "Health context: medical conditions (including pregnancy and trimester, diabetes, kidney, liver, thyroid, digestive and hormonal conditions), injuries or pain areas, and medications or medication categories",
         "Your logs: meals and foods eaten, water, workouts and sessions completed, body measurements and weigh-ins, habits, streaks, and mood/energy/sleep check-ins",
+        "Your cycle log, only if you switch cycle tracking on: the dates your periods start and end, flow, symptoms you note (such as cramps or headache), mood and energy, how long your cycle usually is, and ovulation-test results if you turn on the fertile-window estimate. Cycle tracking is off until you enable it",
         "Photos, if you add them: a profile picture, progress photos, and meal photos you ask the coach to analyse",
         "Messages you send to the AI coach",
       ],
@@ -170,12 +171,14 @@ const PRIVACY: LegalDoc = {
       bullets: [
         "To create your nutrition targets, meal plan and training plan — this is the service you asked for (performance of a contract)",
         "To keep you safe: allergies, conditions, injuries and medications are used to filter foods and exercises out of your plan",
+        "To track your cycle, estimate when your next period is likely and, on days you log cramps or heavy flow, ease your workout — only if you switch cycle tracking on",
         "To sync your account across your devices and restore it if you change phone",
         "To send reminders you have enabled",
         "To keep the service secure and to diagnose faults",
       ],
       body: [
         "Health data is a special category of personal data. Where the law requires it, we rely on your explicit consent — given at sign-up and revocable at any time — to process it. Withdrawing consent means we can no longer personalise your plan; you can delete your account at the same time.",
+        "Your cycle log is health data too. You give your explicit consent for it by switching cycle tracking on, and you withdraw that consent by switching it off or by deleting the log, both in Cycle settings.",
       ],
     },
     {
@@ -183,6 +186,7 @@ const PRIVACY: LegalDoc = {
       body: [
         "On your device. Your timeline, logs, summaries and the coach's memory are stored locally on your phone.",
         "In your private cloud account. So your account survives a lost phone, your profile and logs are synced to our hosted database (Supabase). Rows are protected by per-user row-level security: your account can only read and write its own data. Photos and voice notes go to private storage buckets scoped to your user id, and are served through short-lived signed links — never public URLs.",
+        "Your cycle log. It is stored on your phone and, by default, included in your account backup — the same sync that carries your other logs. Switch the backup off in Cycle settings and the log stays on your phone only; the copy in your cloud account is erased. It reaches the AI coach only if you switch on \"Let Gozlin see your cycle\" in Cycle settings, which is off by default; the coach then sees your cycle day, when your next period is likely and what you logged today, and nothing else. \"Delete all cycle data\" erases the log from your phone and from your backup, and you can export it first.",
         "With the AI coach, only if enabled. When you use Gozlin's cloud features, a minimised summary of the relevant context — not your full history — is sent over an encrypted connection to our backend, which uses Anthropic's Claude models to generate the reply. It is used to answer you, and not to train third-party models.",
         "Weather. If you enable weather, coarse coordinates are sent to Open-Meteo to fetch a forecast. No account identifier is attached.",
       ],
@@ -408,6 +412,12 @@ const DISCLAIMER: LegalDoc = {
       body: [
         "Calorie, macronutrient, hydration and sodium targets are estimates produced by population-level formulas (Mifflin–St Jeor for energy, with WHO/AHA/ADA-informed adjustments). They are starting points for a typical adult, not a prescription calculated for your physiology.",
         "The app applies conservative safety limits — for example it will not put a pregnant or postpartum user into a calorie deficit, and it caps protein for users who report kidney issues. These limits exist so the default is cautious, not because they are correct for your case. If a clinician has given you targets, theirs are the ones to follow.",
+      ],
+    },
+    {
+      heading: "Cycle tracking and the fertile window",
+      body: [
+        "Period and fertile-window predictions are statistical estimates drawn from the dates you log, and cycles vary from month to month. The fertile-window estimate is not birth control: never rely on it to prevent a pregnancy, and it does not protect against sexually transmitted infections. If you want to avoid or plan a pregnancy, talk to a clinician about methods that suit you.",
       ],
     },
     {

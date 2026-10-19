@@ -34,7 +34,7 @@ export interface BadgeFinish {
   accent: string;
   /** The glyph cut into the lit face. Dark on bright metal, light on deep. */
   ink: string;
-  /** The light the badge throws — halo, sparks, confetti. */
+  /** The light the badge throws — the still pool behind the medallion. */
   glow: string;
 }
 
@@ -204,15 +204,6 @@ export function lockedFinish(muted: string, faint: string): BadgeFinish {
     ink: muted,
     glow: muted,
   };
-}
-
-/**
- * The confetti/spark palette for one badge: its own three stops plus a little
- * white foil, so a burst reads as that material catching the light rather than
- * as a bag of party colours.
- */
-export function badgePalette(f: BadgeFinish): string[] {
-  return [f.ramp[0], f.ramp[1], f.ramp[1], f.ramp[2], "#FFFFFF"];
 }
 
 /* ── Deriving a finish where there isn't a badge ─────────────────────────── */

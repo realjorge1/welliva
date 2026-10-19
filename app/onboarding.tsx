@@ -157,6 +157,7 @@ import {
   UserBio,
 } from "../models/user";
 import { Equipment } from "../models/workout";
+import { equipmentSummary as summarizeEquipment, toggleEquipment as nextEquipment } from "../models/equipment";
 
 type Step =
   | "welcome"
@@ -269,16 +270,6 @@ const EQUIPMENT_OPTIONS: GridOption<Equipment>[] = [
   { value: "pull_up_bar", label: "Pull-up bar", subtitle: "Doorway or wall-mounted", glyph: "bar" },
   { value: "bench", label: "Bench", subtitle: "Flat or adjustable", glyph: "bench" },
 ];
-
-/** Short label for the equipment summary on the reveal. */
-const EQUIPMENT_SHORT: Record<Equipment, string> = {
-  none: "Bodyweight",
-  dumbbells: "Dumbbells",
-  resistance_bands: "Bands",
-  pull_up_bar: "Pull-up bar",
-  bench: "Bench",
-  kettlebell: "Kettlebell",
-};
 
 /**
  * The bounds the About step accepts. They are shown in the field as a faint
@@ -995,10 +986,7 @@ export default function OnboardingScreen() {
       library: catalog ? (id) => catalog.getWorkout(id) ?? undefined : undefined,
     });
     const sessions = wp.sessions.filter((s) => !s.isRestDay);
-    const equipmentSummary =
-      bio.equipment && bio.equipment.some((e) => e !== "none")
-        ? bio.equipment.filter((e) => e !== "none").map((e) => EQUIPMENT_SHORT[e]).join(" · ")
-        : "Bodyweight";
+    const equipmentSummary = summarizeEquipment(bio.equipment, " · ");
     const lengthLabel = MENU_LENGTHS.find((l) => l.days === menuLength)?.label ?? `${menuLength} days`;
 
     return {
@@ -1169,15 +1157,10 @@ export default function OnboardingScreen() {
       advanceFrom("activity");
     }, Pace.advance);
   };
+  // Shared rule (models/equipment): Bodyweight combines with gear, up to three
+  // in all, never an empty list. A fourth tap is refused; the selector says why.
   const toggleEquipment = (value: Equipment) => {
-    setEquipment((prev) => {
-      if (value === "none") return ["none"];
-      const withoutNone = prev.filter((e) => e !== "none");
-      const next = withoutNone.includes(value)
-        ? withoutNone.filter((e) => e !== value)
-        : [...withoutNone, value];
-      return next.length ? next : ["none"];
-    });
+    setEquipment((prev) => nextEquipment(prev, value).next);
   };
   const toggleAllergy = (allergy: string) => {
     setAllergies((prev) =>

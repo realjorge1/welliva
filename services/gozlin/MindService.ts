@@ -38,6 +38,7 @@
  */
 import { buildEvent, timeline, ulidFromSeed, type CheckinPayload } from "@/health-os";
 
+import { creditCommitment } from "../StreakService";
 import { addCheckin, removeCheckin } from "./GozlinMemoryStore";
 import type { GozlinCheckin } from "./gozlin.types";
 import { clampValence, type MindKind } from "./mind";
@@ -163,6 +164,8 @@ export async function recordMindEntry(
   }
 
   announce(list);
+  // A check-in keeps the day (a back-dated one doesn't — checked inside).
+  void creditCommitment(entry.date);
   return list;
 }
 

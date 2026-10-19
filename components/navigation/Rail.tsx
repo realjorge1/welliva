@@ -19,8 +19,8 @@
  * IT IS OPAQUE, AND THAT IS A DECISION. The first build floated the tabs on a
  * BlurView over a 5%-white fill, which on an OLED-black canvas is very nearly
  * nothing: the bar read as a hairline outline with content sliding through it.
- * Glass is right for the dock — a card that arrives over your content and
- * leaves again — and wrong for furniture that is always there and has to be
+ * Glass is right for something that arrives over your content and leaves
+ * again, and wrong for furniture that is always there and has to be
  * findable without being looked for. So the rail is a real surface, with a real
  * edge and a real shadow, and no blur at all (which also drops a compositing
  * layer that was buying nothing on Android, where BlurView degrades anyway).
@@ -53,7 +53,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { usePathname, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import Animated, {
   type SharedValue,
   Easing,
@@ -79,9 +79,34 @@ const ACTION = 54;
 const ACTION_FOLDED = 48;
 /** The glyph box. Fixed, so the labels leaving cannot move the icons. */
 const GLYPH = 30;
-/** The label's own line box, collapsed to nothing by the fold. */
-const LABEL_H = 13;
+/** The label's line height at 100% system text size. */
+const LABEL_LINE = 13;
 const LABEL_GAP = 4;
+/**
+ * How far the labels follow the phone's font-size setting. Tab labels are
+ * capped (as iOS's own tab bar is) because they share a fixed-height pill:
+ * at this cap the tallest tab is glyph 30 + gap 4 + line 18 = 52pt inside the
+ * 62pt rail.
+ */
+const LABEL_MAX_SCALE = 1.3;
+
+/**
+ * The label's line box at the CURRENT system text size.
+ *
+ * THIS WAS THE "TAB NAMES CUT OFF AT THE BOTTOM" BUG, and it had two halves.
+ * The box was a fixed 13pt with `overflow: hidden` (it has to clip — the fold
+ * collapses it to zero) AND it carried the 4pt gap as `paddingTop`, which in
+ * React Native sits INSIDE `height`: the text only ever had 9pt for a 13pt
+ * line. At 100% text size that shaved the foot off the letters; with the
+ * phone's font size turned up — the shipped default on many recent Android
+ * skins — the line grows past 17pt and the bottom third of every label went.
+ * The box is now the gap PLUS a line that grows with the text, up to the same
+ * cap the text itself obeys, plus a point for pixel rounding.
+ */
+function labelLineHeight(fontScale: number): number {
+  const scale = Math.min(Math.max(fontScale, 1), LABEL_MAX_SCALE);
+  return Math.ceil(LABEL_LINE * scale) + 1;
+}
 
 const TIMING = {
   duration: Motion.duration.base,
@@ -92,7 +117,7 @@ export interface RailProps {
   /** Scrolled away from the top: labels drop and the row narrows. */
   folded: boolean;
   /**
-   * The cue, when the rail is folded and should carry it instead of the dock.
+   * The cue, when the rail is folded and should carry it.
    * This is the whole trick of the folded state: the space three labels gave
    * up is exactly the space one prompt needs.
    */
@@ -121,11 +146,14 @@ function Tab({
 }) {
   const { colors } = useColors();
   const tint = active ? colors.primary : colors.textTertiary;
+  const { fontScale } = useWindowDimensions();
+  // Gap + line: the gap is padding, and padding lives inside `height`.
+  const labelHeight = LABEL_GAP + labelLineHeight(fontScale);
 
   // Height AND opacity, not opacity alone: a label that keeps its box while
   // invisible leaves the glyphs sitting high in a shorter bar.
   const labelStyle = useAnimatedStyle(() => ({
-    height: interpolate(fold.value, [0, 1], [LABEL_H, 0]),
+    height: interpolate(fold.value, [0, 1], [labelHeight, 0]),
     paddingTop: interpolate(fold.value, [0, 1], [LABEL_GAP, 0]),
     opacity: 1 - fold.value,
   }));
@@ -141,10 +169,10 @@ function Tab({
     >
       <View style={styles.glyph}>
         {item.mark === "gozlin" ? (
-          // Gozlin keeps its own mark and does NOT keep its own colour:
-          // monochrome, tinted exactly like every other glyph, so the rail
-          // holds its one rule — gold means "you are here".
-          <AILogoIcon size={21} color={tint} />
+          // Gozlin's mark is the diamond artwork itself, in its own colours —
+          // the owner's call ("exactly as is"), which retired the monochrome
+          // bolt. "You are here" is still said in gold, by the label below.
+          <AILogoIcon size={21} />
         ) : (
           <Ionicons name={active ? item.activeIcon : item.icon} size={21} color={tint} />
         )}
@@ -154,6 +182,7 @@ function Tab({
           variant="caption"
           weight={active ? "700" : "600"}
           numberOfLines={1}
+          maxFontSizeMultiplier={LABEL_MAX_SCALE}
           style={[styles.label, { color: tint }]}
         >
           {item.label}
@@ -286,12 +315,7 @@ export function Rail({ folded, inlineCue, onCue, onAction, onActionHold }: RailP
             ]}
           >
             {activeItem.mark === "gozlin" ? (
-              <AILogoIcon
-                size={21}
-                color={
-                  activeItem.href === pathname ? colors.primary : colors.textTertiary
-                }
-              />
+              <AILogoIcon size={21} />
             ) : (
               <Ionicons
                 name={
@@ -321,7 +345,7 @@ export function Rail({ folded, inlineCue, onCue, onAction, onActionHold }: RailP
             ]}
           >
             {shownCue?.voice === "gozlin" ? (
-              <AILogoIcon size={17} color={colors.primary} />
+              <AILogoIcon size={17} />
             ) : (
               <Ionicons
                 name={shownCue?.icon ?? "ellipse-outline"}
@@ -443,7 +467,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   labelBox: { overflow: "hidden", justifyContent: "flex-start" },
-  label: { fontSize: 10, lineHeight: LABEL_H, letterSpacing: 0 },
+  label: { fontSize: 10, lineHeight: LABEL_LINE, letterSpacing: 0 },
 
   action: {
     width: "100%",

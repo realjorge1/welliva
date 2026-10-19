@@ -91,7 +91,7 @@ export const LYING_DOWN: ReadonlySet<string> = new Set([
   "core_23", // Heel Taps
   "flex_06", // Cobra Stretch
   "flex_07", // Figure-4 Stretch
-  "flex_20", // Bridge Pose
+  "flex_20", // Full Bridge (Wheel)
 ]);
 
 /** Moves that travel — what open space outdoors is good for. */

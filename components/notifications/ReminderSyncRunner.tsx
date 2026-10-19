@@ -14,7 +14,7 @@
  * that works. So on launch, on every return to the foreground and the moment
  * permission turns on, this re-lays each module from its stored settings:
  *
- *   meals · water · fitness — converging REPLACEs (cancel own ids, re-lay)
+ *   meals · water · fitness · cycle — converging REPLACEs (cancel own ids, re-lay)
  *   habits — a compare-and-repair (HabitsContext.reconcileReminders), which
  *            only touches a habit whose reminders are actually missing
  *
@@ -46,6 +46,7 @@ import {
   writeNotificationFormat,
 } from "@/services/notifications/format";
 import { syncWaterReminders } from "@/services/notifications/waterReminders";
+import { relayCycleReminders } from "@/services/cycle/reminders";
 import * as Notifications from "expo-notifications";
 import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
@@ -100,6 +101,9 @@ export function ReminderSyncRunner(): null {
         await syncMealReminders();
         await syncWaterReminders();
         await refreshFitnessReminders();
+        // Cycle: read straight from storage, so it holds even when the cycle
+        // screen hasn't been opened in weeks (services/cycle/reminders).
+        await relayCycleReminders();
         await reconcileRef.current({ force });
         if (force) await writeNotificationFormat(NOTIFICATION_FORMAT);
         await commitExactAlarmStatus(exact);

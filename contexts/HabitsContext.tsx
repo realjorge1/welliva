@@ -46,6 +46,7 @@ import {
   updateLogs,
 } from "../services/HabitService";
 import { subscribeHabitLogsChanged } from "../services/notifications/habitActions";
+import { creditCommitment } from "../services/StreakService";
 import { writeWidgetSnapshot } from "../services/notifications/widgets";
 import {
   getWaterHistory,
@@ -280,6 +281,9 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
         applyToggle(stored, id, currentDate, completing),
       );
       setLogs(next);
+      // Doing a habit keeps the day. Un-ticking one does not un-keep it: the
+      // day was kept the moment something counted, the same as a meal.
+      if (completing) void creditCommitment(currentDate);
     },
     [habits, logs, currentDate],
   );

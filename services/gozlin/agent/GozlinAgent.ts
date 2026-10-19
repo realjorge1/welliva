@@ -274,6 +274,8 @@ export async function runAgentTurn(
     habits: habitFacts.habits,
     habitLink: habitFacts.link,
     experiences: experience.facts,
+    // Her cycle, when she shares it — the same object the state block renders.
+    cycle: ctx.cycle ?? null,
   });
   // The same evidence, indexed by WHERE each figure came from. Built in
   // lockstep with the allowed-set above so that anything grounding lets
@@ -286,6 +288,7 @@ export async function runAgentTurn(
     collectWithProvenance(habitFacts.link, "habit-tracker", ledger);
   }
   collectWithProvenance(experience.facts, "experience-log", ledger);
+  if (ctx.cycle) collectWithProvenance(ctx.cycle, "cycle-log", ledger);
   addDerivedGaps(allowed, [
     ctx.twin.today.calories,
     ctx.twin.today.protein,

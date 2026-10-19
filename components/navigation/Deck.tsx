@@ -12,8 +12,9 @@
  *     detail screen, the auth flow, the consent gate and a running guided
  *     session own their own bottom edge; the same rule the drawer's swipe and
  *     the hamburger already follow, so all three agree about where "the app
- *     proper" is.
- *   · KEYBOARD — the rail and dock leave while a keyboard is up, everywhere.
+ *     proper" is. Inside it, the coach (`RAILLESS_PATHS`) gets nothing at all:
+ *     its composer owns the bottom edge.
+ *   · KEYBOARD — the rail leaves while a keyboard is up, everywhere.
  *     Nobody wants navigation furniture stacked under a composer, and this is
  *     one rule in one place rather than an opt-out each text-entry screen has
  *     to remember. The SHEETS stay mounted through it, because a weigh-in field
@@ -37,12 +38,8 @@ import {
   useQuickLog,
   type ActionSheetOption,
 } from "@/components/gozlin";
-import { AppText } from "@/components/ui/Text";
-import { Sheet } from "@/components/ui/Sheet";
 import { useColors } from "@/components/ui/useColors";
-import { Radius, Spacing, alpha } from "@/constants/theme";
 import * as Haptics from "@/utils/haptics";
-import { Ionicons } from "@expo/vector-icons";
 import { usePathname, useRouter } from "expo-router";
 import React, {
   useCallback,
@@ -51,9 +48,8 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Keyboard, Platform, Pressable, StyleSheet, View } from "react-native";
+import { Keyboard, Platform, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Dock } from "./Dock";
 import {
   DECK_BASE_GAP,
   DECK_GUTTER,
@@ -62,7 +58,8 @@ import {
   type DeckApi,
 } from "./DeckContext";
 import { Rail } from "./Rail";
-import { COMPACT_RAIL_PATHS, SWIPEABLE_PATHS } from "./menu";
+import { Receipt } from "./Receipt";
+import { COMPACT_RAIL_PATHS, RAILLESS_PATHS, SWIPEABLE_PATHS } from "./menu";
 import { WATER_TAP_ML, type NextMove } from "./nextMove";
 import { useDeckState } from "./useDeckState";
 
@@ -211,12 +208,7 @@ function DeckBody({
   const {
     live,
     cue,
-    agenda,
-    more,
     finished,
-    progress,
-    dismissedCount,
-    dismissals,
     todaySession,
     addWater,
     waterMl,
@@ -229,7 +221,6 @@ function DeckBody({
   } = useDeckState(pathname, quickLog.todayCount > 0);
 
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [agendaOpen, setAgendaOpen] = useState(false);
   const [checkinOpen, setCheckinOpen] = useState(false);
   const [weighInOpen, setWeighInOpen] = useState(false);
 
@@ -280,7 +271,7 @@ function DeckBody({
   }, [todaySession, router]);
 
   const runMove = useCallback(
-    (move: NextMove, fromSheet = false) => {
+    (move: NextMove) => {
       const action = move.action;
       switch (action.kind) {
         case "resume":
@@ -301,26 +292,15 @@ function DeckBody({
           addWater(action.ml);
           confirm(`${action.ml} ml logged`);
           return;
-        // These present a Modal, so from inside a sheet they have to wait.
         case "checkin":
-          if (fromSheet) queue(() => setCheckinOpen(true));
-          else setCheckinOpen(true);
+          setCheckinOpen(true);
           return;
         case "weighin":
-          if (fromSheet) queue(() => setWeighInOpen(true));
-          else setWeighInOpen(true);
+          setWeighInOpen(true);
           return;
       }
     },
-    [router, addWater, startTodaySession, confirm, queue],
-  );
-
-  const dismiss = useCallback(
-    (move: NextMove) => {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-      dismissals.dismiss(move);
-    },
-    [dismissals],
+    [router, addWater, startTodaySession, confirm],
   );
 
   /**
@@ -441,30 +421,28 @@ function DeckBody({
   );
 
   /**
-   * The cue rides in the rail while folded, and in the dock while not — one
-   * prompt, never two. This is the whole reason the folded rail has a middle:
-   * the space three labels give up is exactly the space one sentence needs.
+   * The cue lives in the rail's middle, and only while the rail is folded. At
+   * rest the rail is four tabs and says nothing; scroll and the three labels'
+   * space becomes the one sentence the day wants. That pill is the Deck's only
+   * voice now — there is no card above the rail.
    */
   //
   // On the compact destinations (Habits, Logs, Upgrade, Settings, Profile) the
   // rail is held in that folded shape — Home, prompt, action — and never shows
   // its tabs. Its middle must always say something, so the prompt falls back
   // to a session in flight, then to the finished-day sentence, which is total.
-  // The sentence ignores its "not now" lease here: that lease quiets the dock
-  // card, and a blank pill in the middle of the rail would read as broken.
+  //
+  // On a railless destination (the coach) there is nothing to draw at all: its
+  // composer owns the bottom edge.
+  const railless = RAILLESS_PATHS.has(pathname);
   const compact = COMPACT_RAIL_PATHS.has(pathname);
   const railFolded = compact || folded;
   const inlineCue = compact ? (cue ?? live ?? finished) : folded ? cue : null;
-  const dockCue = railFolded ? null : cue;
-  // A session carried by the rail's pill is not also drawn as a controller.
-  const dockLive = live && inlineCue === live ? null : live;
-  // The finished-day sentence only ever stands alone, and only until waved away.
-  const dockFinished =
-    !compact && !live && !cue && !dismissals.isDismissed(finished.id) ? finished : null;
+  const receipt = localConfirm ?? confirmation;
 
   return (
     <>
-      {!keyboardUp && (
+      {!keyboardUp && !railless && (
         <View
           style={[
             styles.deck,
@@ -472,19 +450,7 @@ function DeckBody({
           ]}
           pointerEvents="box-none"
         >
-          <Dock
-            live={dockLive}
-            cue={dockCue}
-            finished={dockFinished}
-            more={more}
-            confirmation={localConfirm ?? confirmation}
-            onRun={runMove}
-            onDismiss={dismiss}
-            onExpand={() => {
-              Haptics.selectionAsync().catch(() => {});
-              setAgendaOpen(true);
-            }}
-          />
+          {receipt ? <Receipt message={receipt} /> : null}
           <Rail
             folded={railFolded}
             inlineCue={inlineCue}
@@ -501,26 +467,10 @@ function DeckBody({
       <GozlinActionSheet
         visible={sheetOpen}
         title="Quick log"
-        subtitle="Everything Welliva keeps track of, in one place."
+        subtitle="Everything welliva keeps track of, in one place."
         options={quickOptions}
         onClose={() => setSheetOpen(false)}
         onClosed={runQueued}
-      />
-
-      <AgendaSheet
-        visible={agendaOpen}
-        moves={agenda}
-        done={progress.done}
-        total={progress.total}
-        dismissedCount={dismissedCount}
-        onClose={() => setAgendaOpen(false)}
-        onClosed={runQueued}
-        onPick={(move) => {
-          setAgendaOpen(false);
-          runMove(move, true);
-        }}
-        onDismiss={dismiss}
-        onRestoreAll={() => void dismissals.clear()}
       />
 
       <MindSheet
@@ -541,148 +491,6 @@ function DeckBody({
   );
 }
 
-/* ─────────────────────────────── the agenda ───────────────────────────── */
-
-/**
- * The cue, pulled up.
- *
- * WHAT IT IS FOR. The ladder always knew there were four things open and only
- * ever said one of them, which is what made a correct suggestion read as bossy.
- * This is the app showing its working: here is everything today still wants,
- * in the order it would do them, and you may take any of them or none.
- *
- * THE HEADER PRINTS THE RING'S NUMBER IN WORDS. "3 of 6 done today" is exactly
- * `resolveDayProgress`, the same two numbers the Home tab's ring draws — so the
- * one counter in the Deck that has no label gets one, here, and the standing
- * rule that anything claiming to count must count exactly that is satisfied in
- * the place a person would go to check.
- *
- * DISMISSAL IS A BUTTON HERE, NOT A SWIPE. Inside a sheet that already drags to
- * close, a horizontal swipe on a row is a coin toss; an explicit control is not.
- */
-function AgendaSheet({
-  visible,
-  moves,
-  done,
-  total,
-  dismissedCount,
-  onClose,
-  onClosed,
-  onPick,
-  onDismiss,
-  onRestoreAll,
-}: {
-  visible: boolean;
-  moves: NextMove[];
-  done: number;
-  total: number;
-  dismissedCount: number;
-  onClose: () => void;
-  onClosed: () => void;
-  onPick: (move: NextMove) => void;
-  onDismiss: (move: NextMove) => void;
-  onRestoreAll: () => void;
-}) {
-  const { colors } = useColors();
-
-  const header = (
-    <View style={styles.agendaHeader}>
-      <AppText variant="headline">Today</AppText>
-      <AppText variant="footnote" color="tertiary" style={styles.agendaSub}>
-        {total > 0
-          ? `${done} of ${total} done · ${moves.length} still open`
-          : `${moves.length} open`}
-      </AppText>
-    </View>
-  );
-
-  return (
-    <Sheet visible={visible} onClose={onClose} onClosed={onClosed} header={header}>
-      <View style={styles.agendaList}>
-        {moves.map((move) => (
-          <View key={move.id} style={styles.agendaRow}>
-            <Pressable
-              onPress={() => onPick(move)}
-              accessibilityRole="button"
-              accessibilityLabel={
-                move.caption ? `${move.label}. ${move.caption}` : move.label
-              }
-              style={({ pressed }) => [
-                styles.agendaMain,
-                pressed && { backgroundColor: alpha(colors.text, 0.06) },
-              ]}
-            >
-              <View
-                style={[
-                  styles.agendaPlate,
-                  { backgroundColor: alpha(colors.primary, 0.14) },
-                ]}
-              >
-                <Ionicons name={move.icon} size={18} color={colors.primary} />
-              </View>
-              <View style={styles.flex}>
-                <AppText variant="bodyLg" weight="600" numberOfLines={1}>
-                  {move.label}
-                </AppText>
-                {move.caption ? (
-                  <AppText variant="footnote" color="tertiary" numberOfLines={1}>
-                    {move.caption}
-                  </AppText>
-                ) : null}
-              </View>
-              <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-            </Pressable>
-
-            {move.dismissible ? (
-              <Pressable
-                onPress={() => onDismiss(move)}
-                accessibilityRole="button"
-                accessibilityLabel={`Put off ${move.label}`}
-                hitSlop={8}
-                style={({ pressed }) => [
-                  styles.agendaDismiss,
-                  { borderColor: colors.border },
-                  pressed && { backgroundColor: alpha(colors.text, 0.06) },
-                ]}
-              >
-                <AppText variant="caption" weight="700" color="tertiary">
-                  Not now
-                </AppText>
-              </Pressable>
-            ) : null}
-          </View>
-        ))}
-
-        {moves.length === 0 ? (
-          <View style={styles.agendaEmpty}>
-            <AppText variant="body" color="secondary">
-              Nothing open. That is the whole list.
-            </AppText>
-          </View>
-        ) : null}
-
-        {dismissedCount > 0 ? (
-          <Pressable
-            onPress={onRestoreAll}
-            accessibilityRole="button"
-            accessibilityLabel={`Bring back ${dismissedCount} put off today`}
-            style={({ pressed }) => [
-              styles.agendaRestore,
-              { borderColor: colors.border },
-              pressed && { backgroundColor: alpha(colors.text, 0.06) },
-            ]}
-          >
-            <Ionicons name="arrow-undo-outline" size={15} color={colors.textTertiary} />
-            <AppText variant="footnote" color="tertiary">
-              {dismissedCount} put off today · bring back
-            </AppText>
-          </Pressable>
-        ) : null}
-      </View>
-    </Sheet>
-  );
-}
-
 const styles = StyleSheet.create({
   flex: { flex: 1 },
 
@@ -692,54 +500,5 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     paddingHorizontal: DECK_GUTTER,
-  },
-
-  agendaHeader: {
-    paddingHorizontal: Spacing.md,
-    paddingTop: Spacing.xs,
-    paddingBottom: Spacing.md,
-  },
-  agendaSub: { marginTop: 2 },
-
-  agendaList: { gap: 2 },
-  agendaRow: { flexDirection: "row", alignItems: "center", gap: Spacing.xs },
-  agendaMain: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm + 2,
-    borderRadius: Radius.lg,
-  },
-  agendaPlate: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  agendaDismiss: {
-    paddingHorizontal: Spacing.sm + 2,
-    paddingVertical: 8,
-    marginRight: Spacing.md,
-    borderRadius: Radius.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  agendaEmpty: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.lg,
-    alignItems: "center",
-  },
-  agendaRestore: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 7,
-    marginTop: Spacing.sm,
-    marginHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm + 2,
-    borderRadius: Radius.pill,
-    borderWidth: StyleSheet.hairlineWidth,
   },
 });

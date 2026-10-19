@@ -37,13 +37,19 @@ import {
 } from "@/components/ui";
 import { ActivityRings, type ActivityRingMetric } from "@/components/charts";
 import { GozlinButton, useReadinessSignals } from "@/components/gozlin";
-import { ScreenTopBar, useDeck } from "@/components/navigation";
+import {
+  FloatingHeader,
+  ScreenTopBar,
+  useDeck,
+  useFloatingHeader,
+} from "@/components/navigation";
 import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useProfile, useSystem, useWorkout } from "@/contexts/AppContext";
 import { useAllows, useBilling } from "@/contexts/BillingContext";
+import { useCycleOptional } from "@/contexts/CycleContext";
 import { ArtTile } from "@/fitness/components/ArtTile";
 import { recoveryCopy } from "@/fitness/components/recoveryCopy";
 import { PlanReasons } from "@/fitness/components/PlanReasons";
@@ -86,7 +92,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // Weekly-rings config. Vivid, distinct hues that read on both light + dark cards
 // (outer → inner). The active-minutes goal follows the WHO 150-min/week guide.
@@ -140,6 +146,12 @@ export default function ExerciseScreen() {
   const [savedSession, setSavedSession] = useState<SessionState | null>(null);
   /** The date the user chose the full session over the lighter one. */
   const [fullOn, setFullOn] = useState<string | null>(null);
+  /** The date she chose the lighter session when it was only offered. */
+  const [lighterOn, setLighterOn] = useState<string | null>(null);
+  // Free for everyone tracking a cycle: a day she logged cramps or a heavy flow
+  // eases today's session (services/cycle/care). Null when she doesn't track.
+  const cycle = useCycleOptional();
+  const cycleEase = cycle?.view.ease ?? null;
 
   /* ── the plan ─────────────────────────────────────────────────────── */
 
@@ -201,21 +213,40 @@ export default function ExerciseScreen() {
     [workoutLog, todaySession, userBio?.exerciseLevel, wearable, checkins, now],
   );
 
-  // Pro on an amber or red day: the lighter version of today's session, with
-  // every change listed. The full session stays one tap away.
-  const lighter = useMemo(
-    () =>
-      adaptiveTraining && todaySession && userBio && recovery.level !== "green"
-        ? lightenSession(
-            todaySession,
-            { level: recovery.level, score: recovery.score },
-            EXERCISE_DATABASE,
-            userBio,
-          )
-        : null,
-    [adaptiveTraining, todaySession, userBio, recovery.level, recovery.score],
-  );
-  const eased = lighter !== null && fullOn !== currentDate;
+  // The lighter version of today's session, for one of two reasons: Pro on an
+  // amber or red recovery day, or — free — a day she logged cramps or a heavy
+  // flow. A red recovery outranks the cycle (it's the bigger cut); otherwise
+  // her own log names the reason. Every change is listed, and the full session
+  // stays one tap away.
+  const lighter = useMemo(() => {
+    if (!todaySession || !userBio) return null;
+    const recoveryLow = adaptiveTraining && recovery.level !== "green";
+    const readiness = { level: recovery.level, score: recovery.score };
+    if (recoveryLow && recovery.level === "red") {
+      const l = lightenSession(todaySession, readiness, EXERCISE_DATABASE, userBio);
+      return l ? { ...l, source: "recovery" as const } : null;
+    }
+    if (cycleEase) {
+      const l = lightenSession(
+        todaySession,
+        { level: "amber", score: recovery.score },
+        EXERCISE_DATABASE,
+        userBio,
+        { headline: cycleEase.headline, dose: cycleEase.dose },
+      );
+      return l ? { ...l, source: "cycle" as const } : null;
+    }
+    if (recoveryLow) {
+      const l = lightenSession(todaySession, readiness, EXERCISE_DATABASE, userBio);
+      return l ? { ...l, source: "recovery" as const } : null;
+    }
+    return null;
+  }, [adaptiveTraining, todaySession, userBio, recovery.level, recovery.score, cycleEase]);
+  // Eased by default — unless she chose the full session on her last cramp or
+  // heavy days; then the lighter one is offered and waits for her tap.
+  const easeByDefault = lighter?.source !== "cycle" || !!cycleEase?.auto;
+  const eased =
+    lighter !== null && (easeByDefault ? fullOn !== currentDate : lighterOn === currentDate);
   const shownSession = eased && lighter ? lighter.session : todaySession;
 
   const handleStartSession = useCallback(() => {
@@ -395,13 +426,20 @@ export default function ExerciseScreen() {
   // for the elastic ends — AND report its scroll position to the Deck — the same
   // way Screen does for everyone else. Without the second half the rail simply
   // never folds here, which on one of the four rail destinations would read as
-  // the fold being broken rather than as this screen opting out.
+  // the fold being broken rather than as this screen opting out. The same goes
+  // for the header, which floats over the page and folds as the page passes
+  // under it (FloatingHeader) — the page is never cut off at its foot.
   const deck = useDeck();
+  const insets = useSafeAreaInsets();
+  const chrome = useFloatingHeader(insets.top);
+  const track = chrome.track;
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      deck.reportScroll(e.nativeEvent.contentOffset.y);
+      const y = e.nativeEvent.contentOffset.y;
+      track(y);
+      deck.reportScroll(y);
     },
-    [deck],
+    [deck, track],
   );
   const elastic = useElasticScroll({ onScroll });
 
@@ -418,40 +456,15 @@ export default function ExerciseScreen() {
   return (
     <View style={[styles.flex, { backgroundColor: colors.background }]}>
       <AmbientCanvas />
-      <SafeAreaView style={styles.flex} edges={["top"]}>
-        {/* Header */}
-        <ScreenTopBar
-          style={styles.header}
-          title={
-            <>
-              <AppText variant="title">Fitness</AppText>
-              {/* Only ever visible when something hasn't reached the cloud. */}
-              <SyncStatusPill style={styles.syncPill} />
-            </>
-          }
-          trailing={<GozlinButton />}
-          right={
-            weekStats.streak > 0 ? (
-              <View
-                style={[
-                  styles.streakChip,
-                  { backgroundColor: alpha(colors.calories, 0.14) },
-                ]}
-              >
-                <Ionicons name="flame" size={14} color={colors.calories} />
-                <AppText variant="callout" color="calories">
-                  {weekStats.streak}
-                </AppText>
-              </View>
-            ) : undefined
-          }
-        />
-
+      <View style={styles.flex}>
         {elastic.wrap(
         <ScrollView
           showsVerticalScrollIndicator={false}
           {...elastic.scrollProps}
-          contentContainerStyle={styles.content}
+          // Hidden for the one frame before the header is measured: until then
+          // the page doesn't know where it starts, and would jump.
+          style={chrome.ready ? undefined : styles.hidden}
+          contentContainerStyle={[{ paddingTop: chrome.contentTop }, styles.content]}
         >
           {/* First-run setup invitation */}
           {profileReady && !profile.setupComplete && (
@@ -541,7 +554,13 @@ export default function ExerciseScreen() {
                           </AppText>
                         ))}
                         <Pressable
-                          onPress={() => setFullOn(currentDate)}
+                          onPress={() => {
+                            setFullOn(currentDate);
+                            setLighterOn(null);
+                            // Teaches the cycle engine: two of these on her last
+                            // three cramp/heavy days and it stops easing by default.
+                            if (lighter.source === "cycle") void cycle?.recordFullSession(currentDate);
+                          }}
                           hitSlop={8}
                           accessibilityRole="button"
                           accessibilityLabel="Do the full session instead"
@@ -553,17 +572,27 @@ export default function ExerciseScreen() {
                         </Pressable>
                       </View>
                     ) : lighter ? (
-                      <Pressable
-                        onPress={() => setFullOn(null)}
-                        hitSlop={8}
-                        accessibilityRole="button"
-                        accessibilityLabel="Use the lighter version for today"
-                        style={styles.lighterToggle}
-                      >
-                        <AppText variant="footnote" color="brand" weight="600">
-                          Use the lighter version for today
-                        </AppText>
-                      </Pressable>
+                      <>
+                        {lighter.source === "cycle" && cycleEase?.learnedNote ? (
+                          <AppText variant="footnote" color="tertiary" style={styles.lighterToggle}>
+                            {cycleEase.learnedNote}
+                          </AppText>
+                        ) : null}
+                        <Pressable
+                          onPress={() => {
+                            setFullOn(null);
+                            setLighterOn(currentDate);
+                          }}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel="Use the lighter version for today"
+                          style={styles.lighterToggle}
+                        >
+                          <AppText variant="footnote" color="brand" weight="600">
+                            Use the lighter version for today
+                          </AppText>
+                        </Pressable>
+                      </>
                     ) : null}
 
                     <View style={styles.reasonList}>
@@ -891,7 +920,39 @@ export default function ExerciseScreen() {
           )}
         </ScrollView>,
         )}
-      </SafeAreaView>
+
+        {/* Header — after the list, so it draws over the page that now runs
+            under it. */}
+        <FloatingHeader state={chrome}>
+          <ScreenTopBar
+            style={styles.header}
+            compactTitle="Fitness"
+            title={
+              <>
+                <AppText variant="title">Fitness</AppText>
+                {/* Only ever visible when something hasn't reached the cloud. */}
+                <SyncStatusPill style={styles.syncPill} />
+              </>
+            }
+            trailing={<GozlinButton />}
+            right={
+              weekStats.streak > 0 ? (
+                <View
+                  style={[
+                    styles.streakChip,
+                    { backgroundColor: alpha(colors.calories, 0.14) },
+                  ]}
+                >
+                  <Ionicons name="flame" size={14} color={colors.calories} />
+                  <AppText variant="callout" color="calories">
+                    {weekStats.streak}
+                  </AppText>
+                </View>
+              ) : undefined
+            }
+          />
+        </FloatingHeader>
+      </View>
 
       {/* The Deck used to be docked here by hand, because this screen paints
           its own canvas rather than using `Screen`. It is mounted once in
@@ -903,6 +964,7 @@ export default function ExerciseScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  hidden: { opacity: 0 },
   block: { marginBottom: Spacing.xl },
   /**
    * A CARD-LESS section. Content sits straight on the ambient canvas, so the

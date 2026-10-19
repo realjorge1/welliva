@@ -55,6 +55,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import { MindPanel, useMindLog } from "@/components/mind";
+import { InsightArchive } from "@/components/home/InsightArchive";
+import { useInsightLedger } from "@/components/home/useInsightLedger";
+import { useBilling } from "@/contexts/BillingContext";
+import { equipmentSummary } from "@/models/equipment";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 
 /* ───────────────────────────────── Model ───────────────────────────────── */
@@ -108,6 +112,9 @@ export default function KnowsScreen() {
   const intel = useIntelligence();
   const mindLog = useMindLog();
   const [addPreset, setAddPreset] = useState<AddPreset | null>(null);
+  const [insightsOpen, setInsightsOpen] = useState(false);
+  const { ledger: insightLedger } = useInsightLedger();
+  const { allows } = useBilling();
 
   // This is a (tabs) screen: it mounts once and is then shown and hidden, so a
   // mount-only load would leave the mood panel frozen at whatever was true the
@@ -257,7 +264,7 @@ export default function KnowsScreen() {
         key: "equipment",
         icon: "fitness-outline",
         title: "Equipment",
-        subtitle: bio.equipment.join(", "),
+        subtitle: equipmentSummary(bio.equipment),
         tone: colors.fat,
       });
     }
@@ -289,7 +296,7 @@ export default function KnowsScreen() {
 
   if (m.loading) {
     return (
-      <Screen header={header}>
+      <Screen header={header} floatingHeader>
         <Card style={styles.block}>
           <AppText color="tertiary">Reading your memory…</AppText>
         </Card>
@@ -299,7 +306,7 @@ export default function KnowsScreen() {
 
   return (
     <>
-      <Screen header={header}>
+      <Screen header={header} floatingHeader>
         {/* The marquee: what the learning models currently believe. */}
         <Reveal index={0}>
           <IntelligenceHero snap={intel.snapshot} loading={intel.loading} />
@@ -615,6 +622,20 @@ export default function KnowsScreen() {
                 onPress={() => router.push("/memory-center" as never)}
               />
               <ListRow
+                icon="bulb-outline"
+                title="Insight history"
+                subtitle={
+                  allows("insight-history")
+                    ? insightLedger.length === 0
+                      ? "Insights you open are kept here"
+                      : "Every insight you've opened"
+                    : "Pro keeps every insight you open"
+                }
+                value={insightLedger.length > 0 ? String(insightLedger.length) : undefined}
+                chevron
+                onPress={() => setInsightsOpen(true)}
+              />
+              <ListRow
                 icon="chatbubbles-outline"
                 title="Conversations with Gozlin"
                 subtitle={`${conversationCount} message${conversationCount === 1 ? "" : "s"} kept on this device`}
@@ -675,6 +696,8 @@ export default function KnowsScreen() {
           </View>
         </Reveal>
       </Screen>
+
+      <InsightArchive visible={insightsOpen} onClose={() => setInsightsOpen(false)} />
 
       <AddSheet
         visible={addPreset !== null}

@@ -130,7 +130,7 @@ export default function SignUpScreen() {
   };
 
   return (
-    <AuthScreen title="welliva">
+    <AuthScreen>
       <AuthSheetTitle
         title="Create your account"
         subtitle="Pick how you'd like to sign up — it takes a moment"

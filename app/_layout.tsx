@@ -40,6 +40,7 @@ import { setRetentionCompactor } from "@/services/sync/retention";
 import { memory } from "@/health-os";
 import { AppProvider } from "@/contexts/AppContext";
 import { BillingProvider } from "@/contexts/BillingContext";
+import { CycleProvider } from "@/contexts/CycleContext";
 import { HabitsProvider } from "@/contexts/HabitsContext";
 import { MealPlanProvider } from "@/contexts/MealPlanContext";
 
@@ -164,6 +165,9 @@ function RootLayoutContent() {
             custom menus, food logging and tracking mode. */}
         <MealPlanProvider>
         <HabitsProvider>
+        {/* The cycle tracker's state. Inside the account-keyed subtree like every
+            data provider, so a switch of account or "Reset data" re-reads it. */}
+        <CycleProvider>
         {/* Owns "has this account accepted the current policies?". Sits above
             AuthWrapper because the answer is a routing decision, and inside
             AppProvider because it waits on the login-time profile reconcile. */}
@@ -221,6 +225,10 @@ function RootLayoutContent() {
             <Stack.Screen name="session-summary" />
             <Stack.Screen name="habit/[id]" />
             <Stack.Screen name="habit/new" options={{ presentation: "modal" }} />
+            {/* Cycle tracking, reached from Home's cycle card and from Settings. */}
+            <Stack.Screen name="cycle/index" />
+            <Stack.Screen name="cycle/setup" />
+            <Stack.Screen name="cycle/settings" />
             {/* The purchase surface is `/upgrade`, a menu destination inside
                 (tabs) — not a modal stacked over whatever you were doing. A lock
                 navigates there; the menu is always one tap away, so the ask can
@@ -251,6 +259,7 @@ function RootLayoutContent() {
           </IntroRevealProvider>
         </AuthWrapper>
         </LegalGateProvider>
+        </CycleProvider>
         </HabitsProvider>
         </MealPlanProvider>
       </AppProvider>
@@ -267,6 +276,11 @@ export default function RootLayout() {
   // degradation — RN falls back to the system face.
   const [loaded, error] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
+    // The app icon's face. Every "welliva" on screen is set in it — see
+    // components/ui/Wordmark.tsx. The key is the family name AppText asks for.
+    Pacifico: require("../assets/fonts/Pacifico-Regular.ttf"),
+    // Digital-display numerals — see constants/RetroFont.ts.
+    Orbitron: require("../assets/fonts/Orbitron.ttf"),
   });
 
   useEffect(() => {

@@ -11,6 +11,7 @@ import {
   Animated,
   type LayoutChangeEvent,
   type StyleProp,
+  type ViewProps,
   type ViewStyle,
 } from "react-native";
 
@@ -28,6 +29,12 @@ export interface RevealProps {
    * for scroll-driven effects.
    */
   onLayout?: (e: LayoutChangeEvent) => void;
+  /**
+   * `box-none` when the Reveal wraps a floating header: the page scrolls under
+   * a header now, and a wrapper that takes touches would stop a drag that
+   * starts on the page showing through it.
+   */
+  pointerEvents?: ViewProps["pointerEvents"];
 }
 
 export function Reveal({
@@ -37,6 +44,7 @@ export function Reveal({
   distance = 16,
   style,
   onLayout,
+  pointerEvents,
 }: RevealProps) {
   const progress = useRef(new Animated.Value(0)).current;
 
@@ -54,6 +62,7 @@ export function Reveal({
   return (
     <Animated.View
       onLayout={onLayout}
+      pointerEvents={pointerEvents}
       style={[
         {
           opacity: progress,

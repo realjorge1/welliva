@@ -227,6 +227,11 @@ export const PLAN_IDENTITY: Record<Tier, PlanIdentity> = {
         feature: "insights",
       },
       {
+        text: "Insight history — every insight you've opened, kept to read again",
+        icon: "albums-outline",
+        feature: "insight-history",
+      },
+      {
         /* Worded to match the poster in components/gozlin/DeepDiveReader, which
            is where someone who tapped this and hit the lock has just been.
            Deliberately NOT in quotation marks: the affordance in the thread is

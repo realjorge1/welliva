@@ -13,6 +13,8 @@ import { Spacing } from "@/constants/theme";
 // pulls in sheets built on this very component. DeckContext imports nothing
 // but React, so reaching for it directly keeps the graph acyclic.
 import { useDeckOptional } from "@/components/navigation/DeckContext";
+// Same reasoning: the file, which imports nothing of ours.
+import { FloatingHeader, useFloatingHeader } from "@/components/navigation/FloatingHeader";
 import React, { useCallback, useEffect } from "react";
 import {
   RefreshControl,
@@ -41,12 +43,12 @@ import { useElasticScroll } from "./useElasticScroll";
  * WHAT IT HAS TO CLEAR. The rail's own height plus its gap from the home
  * indicator (`DECK_BLOCK`, 74) on top of the device's bottom inset — 108 on an
  * iPhone with a home indicator. 120 leaves that its breathing room on the worst
- * case and more on a device without one. The dock is deliberately NOT in the
- * figure: it is occasional, and sizing every page for a card that is usually
- * absent would leave a permanent hole at the bottom of the app.
+ * case and more on a device without one. The receipt pill above the rail is
+ * deliberately NOT in the figure: it is occasional, and sizing every page for
+ * something usually absent would leave a permanent hole at the bottom of the app.
  *
- * A screen that genuinely owns its bottom edge (there is one — Gozlin) reads
- * `DECK_BLOCK` directly instead.
+ * A screen that genuinely owns its bottom edge (there is one — Gozlin, which has
+ * no rail) ignores it and sits on the safe area.
  */
 export const NAV_CLEARANCE = 120;
 
@@ -71,6 +73,19 @@ export interface ScreenProps {
    * the page reads as one continuous surface.
    */
   header?: React.ReactNode;
+  /**
+   * Float the header over the page instead of stacking it above the page.
+   *
+   * The page then runs to the top of the glass and the header folds into an
+   * island as content passes under it — nothing is ever sliced at the header's
+   * foot (see components/navigation/FloatingHeader). At rest the layout is the
+   * same as without it.
+   *
+   * ONLY for a header that knows how to fold, i.e. a `ScreenTopBar`. Any other
+   * header has no plate to put under itself, and the page would scroll straight
+   * through its text. Scroll mode only.
+   */
+  floatingHeader?: boolean;
   /**
    * Pinned over the bottom edge, outside the scroll region — the Action Bar's
    * home. Passing one also raises the default `bottomInset` to `NAV_CLEARANCE`,
@@ -103,6 +118,7 @@ export function Screen({
   gutter = true,
   gradient = true,
   header,
+  floatingHeader = false,
   footer,
   edges = ["top"],
   contentStyle,
@@ -137,12 +153,21 @@ export function Screen({
    * consent gate), where there is no Deck to tell.
    */
   const deck = useDeckOptional();
+
+  // The header that floats over the page, and folds as the page passes under
+  // it. It sits under the top inset, so the page has to clear both.
+  const floating = scroll && header != null && floatingHeader;
+  const chrome = useFloatingHeader(edges.includes("top") ? insets.top : 0);
+  const track = chrome.track;
+
   const handleScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      deck?.reportScroll(e.nativeEvent.contentOffset.y);
+      const y = e.nativeEvent.contentOffset.y;
+      if (floating) track(y);
+      deck?.reportScroll(y);
       onScroll?.(e);
     },
-    [deck, onScroll],
+    [deck, onScroll, floating, track],
   );
 
   // A page that cannot scroll can never fold the rail, and must not inherit a
@@ -157,37 +182,55 @@ export function Screen({
 
   const stickyHeader = header ? <View style={padding}>{header}</View> : null;
 
+  const list = elastic.wrap(
+    <ScrollView
+      showsVerticalScrollIndicator={false}
+      {...elastic.scrollProps}
+      // Hidden for the one frame before a floating header has been measured:
+      // until then the page doesn't know where it starts, and would jump.
+      style={floating && !chrome.ready ? styles.hidden : undefined}
+      contentContainerStyle={[
+        floating && { paddingTop: chrome.contentTop },
+        { paddingBottom: Math.max(inset, insets.bottom + MIN_BOTTOM_GAP) },
+        padding,
+        contentStyle,
+      ]}
+      refreshControl={
+        onRefresh ? (
+          <RefreshControl
+            refreshing={!!refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+            // Android draws the spinner at the list's top edge, which is the
+            // top of the glass under a floating header.
+            progressViewOffset={floating ? chrome.contentTop : undefined}
+          />
+        ) : undefined
+      }
+    >
+      {children}
+    </ScrollView>,
+  );
+
   const body = !scroll ? (
     <SafeAreaView style={styles.flex} edges={edges}>
       {stickyHeader}
       <View style={[styles.flex, padding, contentStyle]}>{children}</View>
     </SafeAreaView>
+  ) : floating ? (
+    // The top inset is the page's to clear now, not the SafeAreaView's: the
+    // page runs to the top of the glass, under the status bar and the header.
+    <SafeAreaView style={styles.flex} edges={edges.filter((e) => e !== "top")}>
+      {list}
+      <FloatingHeader state={chrome} style={padding}>
+        {header}
+      </FloatingHeader>
+    </SafeAreaView>
   ) : (
     <SafeAreaView style={styles.flex} edges={edges}>
       {stickyHeader}
-      {elastic.wrap(
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          {...elastic.scrollProps}
-          contentContainerStyle={[
-            { paddingBottom: Math.max(inset, insets.bottom + MIN_BOTTOM_GAP) },
-            padding,
-            contentStyle,
-          ]}
-          refreshControl={
-            onRefresh ? (
-              <RefreshControl
-                refreshing={!!refreshing}
-                onRefresh={onRefresh}
-                tintColor={colors.primary}
-                colors={[colors.primary]}
-              />
-            ) : undefined
-          }
-        >
-          {children}
-        </ScrollView>,
-      )}
+      {list}
     </SafeAreaView>
   );
 
@@ -219,6 +262,7 @@ export function Screen({
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  hidden: { opacity: 0 },
   footer: {
     position: "absolute",
     left: 0,

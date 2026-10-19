@@ -32,9 +32,10 @@ export interface MenuItem {
   activeIcon: IconName;
   /**
    * Render Gozlin's own mark instead of an Ionicon. The coach has an identity
-   * and a generic glyph throws it away — but the mark is drawn MONOCHROME here,
-   * tinted exactly like every other row (white at rest, gold when active), so
-   * it keeps the menu's one rule: gold means "you are here".
+   * and a generic glyph throws it away. Since 2026-10-15 the mark is the gold
+   * and cyan diamond (the old app icon) in its own colours — the owner wanted
+   * it "exactly as is", so it is never tinted; the label still carries the
+   * gold that means "you are here".
    */
   mark?: "gozlin";
 }
@@ -242,6 +243,26 @@ export const COMPACT_RAIL_PATHS: ReadonlySet<string> = new Set(
     const item = ALL_MENU_ITEMS.find((i) => i.route === route);
     if (!item) {
       throw new Error(`COMPACT_RAIL_ROUTES names "${route}", which the menu does not have`);
+    }
+    return item.href;
+  }),
+);
+
+/**
+ * Destinations with NO rail at all — the Deck draws nothing there.
+ *
+ * The coach is the one screen whose bottom edge is a composer. With the rail
+ * under it as well, the composer and the rail were stacked bars at the base
+ * (owner, 2026-10-15). The rail is the thing that goes: the hamburger and the
+ * drawer's swipe are still the way out.
+ */
+export const RAILLESS_ROUTES: readonly string[] = ["gozlin"];
+
+export const RAILLESS_PATHS: ReadonlySet<string> = new Set(
+  RAILLESS_ROUTES.map((route) => {
+    const item = ALL_MENU_ITEMS.find((i) => i.route === route);
+    if (!item) {
+      throw new Error(`RAILLESS_ROUTES names "${route}", which the menu does not have`);
     }
     return item.href;
   }),

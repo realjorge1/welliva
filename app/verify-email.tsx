@@ -66,7 +66,7 @@ export default function VerifyEmailScreen() {
   };
 
   return (
-    <AuthScreen title="welliva">
+    <AuthScreen>
       <AuthSheetTitle
         title="Check your email"
         subtitle={

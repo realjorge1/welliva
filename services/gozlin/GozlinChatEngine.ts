@@ -20,6 +20,7 @@ import { buildForecast } from "./GozlinForecastEngine";
 import { buildHabitReport } from "./GozlinHabitEngine";
 import type { HabitTrackerBrief } from "./GozlinTrackerHabits";
 import type { ExperienceBrief } from "./novelty/types";
+import type { CycleBrief } from "../cycle/brief";
 import { closer } from "./GozlinPersona";
 import {
   buildWeeklyReview,
@@ -66,6 +67,12 @@ export interface GozlinChatContext {
    * `habits`: absent means "say nothing", never an invented memory.
    */
   experiences?: ExperienceBrief;
+  /**
+   * Her cycle, ONLY when she switched on "Let Gozlin see your cycle" (consent
+   * `cycle_gozlin`): cycle day, the next-period window, today's cycle log.
+   * Absent means say nothing about it — never infer one.
+   */
+  cycle?: CycleBrief;
   weekStart: string;
   weeklyWorkoutTarget: number;
   /**

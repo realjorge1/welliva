@@ -160,7 +160,7 @@ export default function HabitsScreen() {
   );
 
   return (
-    <Screen header={header}>
+    <Screen header={header} floatingHeader>
       {/* Today summary */}
       {totalToday > 0 && (
         <Card padding="lg" style={styles.summaryCard}>

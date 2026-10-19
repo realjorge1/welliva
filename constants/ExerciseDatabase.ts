@@ -134,7 +134,7 @@ export const EXERCISE_DATABASE: ExerciseDBEntry[] = [
     },
     frequency: "3–5x/week",
     modifications: {
-      easier: "Wall Push-ups",
+      easier: "Wall Push-ups (push_10)",
       harder: "Standard Push-ups (push_01)",
     },
     coachCues: [
@@ -1026,7 +1026,7 @@ export const EXERCISE_DATABASE: ExerciseDBEntry[] = [
     },
     frequency: "3–4x/week",
     modifications: {
-      easier: "Standard Glute Bridge (hinge_01)",
+      easier: "Glute Bridges (hinge_01)",
       harder: "Elevated Single-Leg Glute Bridge",
     },
     coachCues: [
@@ -1431,7 +1431,7 @@ export const EXERCISE_DATABASE: ExerciseDBEntry[] = [
     frequency: "3–5x/week",
     modifications: {
       easier: "Slow Mountain Climbers",
-      harder: "Cross-body Mountain Climbers",
+      harder: "Cross-Body Mountain Climbers (cardio_15)",
     },
     coachCues: [
       "Hips stay level",
@@ -1474,7 +1474,7 @@ export const EXERCISE_DATABASE: ExerciseDBEntry[] = [
     frequency: "Daily",
     modifications: {
       easier: "Step-out Jacks (no jumping)",
-      harder: "Star Jumps",
+      harder: "Star Jumps (cardio_10)",
     },
     coachCues: [
       "Soft landings",
@@ -1630,7 +1630,7 @@ export const EXERCISE_DATABASE: ExerciseDBEntry[] = [
     },
     frequency: "3–5x/week",
     modifications: {
-      easier: "March in place",
+      easier: "March in Place (cardio_08)",
       harder: "Double-unders (fast wrist rotation)",
     },
     coachCues: [
@@ -2326,7 +2326,7 @@ export const EXERCISE_DATABASE: ExerciseDBEntry[] = [
     frequency: "3–5x/week",
     modifications: {
       easier: "Hold a wall with both hands",
-      harder: "Single-leg calf raises",
+      harder: "Single-Leg Calf Raises (legs_20)",
     },
     coachCues: [
       "All the way up",
@@ -3222,7 +3222,7 @@ export const EXERCISE_DATABASE: ExerciseDBEntry[] = [
     frequency: "2–4x/week",
     modifications: {
       easier: "Bend knees or raise legs higher",
-      harder: "Hollow body rocks",
+      harder: "Hollow Body Rocks (core_20)",
     },
     coachCues: [
       "Lower back stays down",
@@ -5663,7 +5663,7 @@ export const EXERCISE_DATABASE: ExerciseDBEntry[] = [
   },
   {
     id: "flex_20",
-    name: "Bridge Pose",
+    name: "Full Bridge (Wheel)",
     category: "flexibility",
     movementPattern: "flexibility",
     difficulty: "advanced",
@@ -5713,16 +5713,16 @@ export const EXERCISE_DATABASE: ExerciseDBEntry[] = [
     defaultReps: "5 each direction",
     restSeconds: 15,
     equipment: [],
-    description: "Gentle neck circles to release tension from the neck and traps.",
+    description: "Gentle half neck rolls to release tension from the neck and traps.",
     icon: "sync",
     exerciseType: "reps",
     setupPosition:
       "Sit or stand tall, shoulders relaxed and down, arms loose at your sides.",
     instructions: [
       "Drop your chin toward your chest.",
-      "Slowly roll your ear toward one shoulder, then back and around.",
-      "Make smooth, small circles — never force the range.",
-      "Complete the circles one way, then reverse.",
+      "Slowly roll one ear toward its shoulder, then back through the centre toward the other shoulder.",
+      "Keep the roll in front — don't drop your head back, which pinches the neck.",
+      "Count each shoulder-to-shoulder pass as one, in both directions.",
     ],
     effectiveness: {
       rating: 3,
@@ -5731,7 +5731,7 @@ export const EXERCISE_DATABASE: ExerciseDBEntry[] = [
     },
     frequency: "Daily",
     modifications: {
-      easier: "Half circles, front only",
+      easier: "Smaller arcs, staying close to chin-down",
       harder: "Add a gentle hand-assisted side stretch",
     },
     coachCues: [

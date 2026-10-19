@@ -1,30 +1,45 @@
 /**
  * SessionRing.skia — the workout player's instrument (Skia impl).
  *
- * The demoted, rebuilt SessionCore. The old cell was the hero of the stage, and
- * an abstract shape cannot carry a stage; the demonstration figure can. So the
- * instrument became the FRAME around the figure — and in exchange for the
- * centre of the screen it got sharper, because a ring that only shows one
- * number is decoration.
+ * The FRAME around the demonstration figure. It carries the shape of the
+ * exercise at a glance — one arc per set, banked sets lit, the live set filling,
+ * the sets to come sitting in the track — and when the box runs out, a gold
+ * OVERTIME hand sweeps the outside on a 60-second loop, so "+0:24" is something
+ * you can read from the floor.
  *
- * This one carries the shape of the exercise at a glance:
+ * ── REBUILT 2026-10-16: A CHUNKY OBJECT, NOT A HAIRLINE ─────────────────────
  *
- *   · the ring is cut into ONE ARC PER SET, with real gaps between them —
- *     finished sets stay lit, the live set fills, the sets to come sit dim, so
- *     "set 3 of 5" is legible without reading a word;
- *   · a comet rides the leading edge of the live arc — where you are, right now;
- *   · a machined graduation band inside the arcs gives the thing its precision;
- *   · four reticle brackets turn slowly, so the instrument is alive at rest;
- *   · a halo behind it brightens with the charge and breathes on rest;
- *   · and when the box runs out, a gold OVERTIME hand sweeps the outside on a
- *     60-second loop, so "+0:24" is something you can read from the floor.
+ * The owner: "the ring that circles while exercise progress seems rather
+ * basic." It was: a 2.6%-of-size stroke (≈7pt), and everything that was meant
+ * to give it depth — a graduation band, reticle brackets, a bloom — drawn at
+ * 13–28% opacity, so on the phone it read as one thin line. It now speaks the
+ * language the flame, the badges and the session button speak:
  *
- * Colour is still the phase language inherited from the cell: brand while you
- * work, gold on overtime and completion, water on rest.
+ *   · CHUNKY, FLAT, WITH A LIP. A thick band in one flat colour, sitting on a
+ *     darker LIP offset below it — so the ring reads as a raised object, the
+ *     way the struck badges and the primary button do — and ONE stroke of
+ *     shine along it. No gradients, no glow on the band.
+ *   · A KNOB rides the leading edge of the live set: white, with the phase
+ *     colour at its heart and a soft light under it. Where you are, now.
+ *   · THE SETS YOU'VE BANKED POP IN, one after another, every time a set
+ *     starts — a beat of "look how far you've come" before the work, rather
+ *     than a ring that simply redraws.
+ *   · A BEAT in the last seconds of the box: the knob (or, in overtime, the
+ *     gold hand's tip) thumps once a second. The clock says how long; the ring
+ *     says NOW.
+ *   · A still plate behind the figure, in place of the hairline, so the figure
+ *     stands ON something.
  *
- * Every path is built ONCE per (size, sets) and animated with trims, matrices
- * and opacities. There is no per-frame path construction in this file — that is
- * what keeps the player at 60fps while the JS thread services a session tick.
+ * Colour is still the phase language: brand while you work, gold on overtime
+ * and the final push, water on rest.
+ *
+ * MEMORY. Every path is built ONCE per (size, sets) and animated with
+ * matrices, trims and opacities — except the live arc and its shine, rebuilt
+ * on the UI thread each frame and marked VOLATILE. That is not optional: a
+ * path whose geometry changes every frame gets a new GPU cache entry every
+ * frame unless it is volatile, and with a blur on it that filled the GPU
+ * cache and got the app killed a minute into a session (2026-10-16). Nothing
+ * blurred here changes shape per frame; the only blurs are on circles.
  *
  * Loaded lazily (only when isSkiaAvailable), so the static Skia import here is
  * never evaluated on a surface without the native module.
@@ -38,7 +53,6 @@ import {
   Path,
   RadialGradient,
   Skia,
-  SweepGradient,
   vec,
 } from "@shopify/react-native-skia";
 import React, { useEffect, useMemo } from "react";
@@ -49,9 +63,12 @@ import {
   useReducedMotion,
   useSharedValue,
   withRepeat,
+  withSequence,
   withTiming,
   type EasingFunction,
+  type SharedValue,
 } from "react-native-reanimated";
+import { ringGeometry, ringPalette } from "./sessionRingStyle";
 
 export interface SkiaSessionRingProps {
   /** 0–1 through the CURRENT segment. */
@@ -62,23 +79,25 @@ export interface SkiaSessionRingProps {
   currentSegment: number;
   size: number;
   colors: readonly [string, string, ...string[]];
+  /** The page the ring sits on — the track and its lip are mixed against it. */
+  ground: string;
   /** Seconds past the work box. Drives the gold hand on the outside. */
   overtimeSeconds?: number;
   /** Breathe the halo (rest / final push). */
   pulse?: boolean;
+  /** Thump the knob once a second (the last seconds of the box, overtime). */
+  beat?: boolean;
   duration?: number;
   /** Linear travel for clock-driven phases; eased for discrete jumps. */
   linear?: boolean;
 }
 
-const TWO_PI = Math.PI * 2;
 const DEG = Math.PI / 180;
-/** One full turn of the reticle. */
-const SPIN_MS = 18000;
 /** One full sweep of the overtime hand. */
 const OVERTIME_LOOP_SEC = 60;
-/** Graduations in the machined band. */
-const TICKS = 60;
+/** Banked sets pop in this far apart, then each takes POP_MS to land. */
+const POP_STAGGER_MS = 110;
+const POP_MS = 300;
 
 export function SkiaSessionRing({
   progress,
@@ -86,38 +105,19 @@ export function SkiaSessionRing({
   currentSegment,
   size,
   colors,
+  ground,
   overtimeSeconds = 0,
   pulse = false,
+  beat = false,
   duration = 560,
   linear = false,
 }: SkiaSessionRingProps) {
   const reduced = useReducedMotion();
   const clamped = Math.max(0, Math.min(1, progress || 0));
-  const count = Math.max(1, Math.round(segments));
+  const g = useMemo(() => ringGeometry(size, segments), [size, segments]);
+  const { count, cx, cy, R, arcR, arcW, lip, handR, shineR, shineW, plateR } = g;
   const liveIndex = Math.max(0, Math.min(count - 1, Math.round(currentSegment) - 1));
-
-  const cx = size / 2;
-  const cy = size / 2;
-  const R = size / 2;
-  const arcR = R * 0.93;
-  const handR = R * 0.995;
-  const tickOuter = R * 0.865;
-  const tickInner = R * 0.835;
-  const innerR = R * 0.8;
-  const arcW = size * 0.026;
-
-  const c0 = colors[0];
-  const cMid = colors[Math.floor(colors.length / 2)] ?? c0;
-  const cDeep = colors[colors.length - 1];
-
-  /* ── Segment geometry ────────────────────────────────────────────────── */
-
-  const step = 360 / count;
-  // The gap has to stay visible on a two-set ring and stay out of the way on a
-  // six-set one, so it shrinks with the segment instead of being a constant.
-  const gapDeg = count > 1 ? Math.min(7, 34 / count) : 0;
-  const sweepDeg = step - gapDeg;
-  const startDeg = (i: number) => -90 + i * step + gapDeg / 2;
+  const pal = useMemo(() => ringPalette(colors, ground), [colors, ground]);
 
   /* ── Clocks ──────────────────────────────────────────────────────────── */
 
@@ -145,19 +145,7 @@ export function SkiaSessionRing({
     over.value = withTiming(overtimeFrac, { duration: 1000, easing: Easing.linear });
   }, [overtimeFrac, reduced, over]);
 
-  const spin = useSharedValue(0);
   const breath = useSharedValue(0);
-
-  useEffect(() => {
-    if (reduced) return;
-    spin.value = withRepeat(
-      withTiming(1, { duration: SPIN_MS, easing: Easing.linear }),
-      -1,
-      false,
-    );
-    return () => cancelAnimation(spin);
-  }, [reduced, spin]);
-
   useEffect(() => {
     if (reduced || !pulse) {
       cancelAnimation(breath);
@@ -172,73 +160,130 @@ export function SkiaSessionRing({
     return () => cancelAnimation(breath);
   }, [pulse, reduced, breath]);
 
+  // The beat: one thump per second while it's on. Keyed to the values that
+  // change once a second, so it lands with the clock rather than beside it.
+  const thump = useSharedValue(0);
+  useEffect(() => {
+    if (reduced || !beat) return;
+    thump.value = withSequence(
+      withTiming(1, { duration: 90, easing: Easing.out(Easing.quad) }),
+      withTiming(0, { duration: 460, easing: Easing.out(Easing.cubic) }),
+    );
+  }, [clamped, overtimeSeconds, beat, reduced, thump]);
+
+  // The banked sets pop in, one after another, whenever the layout changes —
+  // which is the start of every set (rest is drawn as a ring of its own).
+  const popMs = useSharedValue(reduced ? 1e6 : 0);
+  useEffect(() => {
+    if (reduced) return;
+    const total = liveIndex * POP_STAGGER_MS + POP_MS;
+    popMs.value = 0;
+    popMs.value = withTiming(total, { duration: total, easing: Easing.linear });
+  }, [count, liveIndex, reduced, popMs]);
+
   /* ── Static geometry, built once per (size, segment count) ───────────── */
 
-  const geo = useMemo(() => {
-    const arcRect = Skia.XYWHRect(cx - arcR, cy - arcR, arcR * 2, arcR * 2);
-    const handRect = Skia.XYWHRect(cx - handR, cy - handR, handR * 2, handR * 2);
+  const paths = useMemo(() => {
+    const oval = Skia.XYWHRect(cx - arcR, cy - arcR, arcR * 2, arcR * 2);
+    const shineOval = Skia.XYWHRect(cx - shineR, cy - shineR, shineR * 2, shineR * 2);
+    const handOval = Skia.XYWHRect(cx - handR, cy - handR, handR * 2, handR * 2);
 
-    // One path per set. Built separately (rather than as subpaths of a single
-    // path) because the live one has to be trimmed on its own.
+    // One path per set — the track — and its shine. Separate paths (rather
+    // than subpaths of one) because each banked set pops on its own.
     const segs = Array.from({ length: count }, (_, i) => {
       const p = Skia.Path.Make();
-      p.addArc(arcRect, startDeg(i), count === 1 ? 359.9 : sweepDeg);
+      p.addArc(oval, g.startDeg(i), g.sweepDeg);
+      return p;
+    });
+    const shines = Array.from({ length: count }, (_, i) => {
+      const p = Skia.Path.Make();
+      if (g.sweepDeg > g.shineInsetDeg * 2) {
+        p.addArc(shineOval, g.startDeg(i) + g.shineInsetDeg, g.sweepDeg - g.shineInsetDeg * 2);
+      }
       return p;
     });
 
-    const ticks = Skia.Path.Make();
-    for (let i = 0; i < TICKS; i++) {
-      const a = -Math.PI / 2 + (i / TICKS) * TWO_PI;
-      const c = Math.cos(a);
-      const s = Math.sin(a);
-      const major = i % 5 === 0;
-      const rIn = major ? tickInner - size * 0.018 : tickInner;
-      ticks.moveTo(cx + rIn * c, cy + rIn * s);
-      ticks.lineTo(cx + tickOuter * c, cy + tickOuter * s);
-    }
-
-    const reticle = Skia.Path.Make();
-    for (let i = 0; i < 4; i++) reticle.addArc(handRect, -68 + i * 90, 26);
-
     const hand = Skia.Path.Make();
-    hand.addArc(handRect, -90, 359.9);
+    hand.addArc(handOval, -90, 359.9);
 
-    const inner = Skia.Path.Make();
-    inner.addCircle(cx, cy, innerR);
-
-    return { segs, ticks, reticle, hand, inner };
+    return { segs, shines, hand };
+    // `g` is derived from exactly these two.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size, count]);
 
   /* ── Animated bindings ───────────────────────────────────────────────── */
 
-  // A trimmed path is only ever asked for a non-degenerate slice, and the arc
-  // above it fades out — so an empty set shows nothing at all rather than a
-  // round stroke-cap dot parked at the segment's start.
-  const trim = useDerivedValue(() => {
-    "worklet";
-    return Math.max(0.004, charge.value);
-  }, [charge]);
+  const liveStart = g.startDeg(liveIndex);
+  const liveSweep = g.sweepDeg;
+  const shineInset = g.shineInsetDeg;
+
   const liveOpacity = useDerivedValue(() => {
     "worklet";
     return Math.min(1, Math.max(0, charge.value / 0.02));
   }, [charge]);
 
-  const liveStart = startDeg(liveIndex);
-  const liveSweep = count === 1 ? 359.9 : sweepDeg;
+  /**
+   * THE LIVE ARC IS REBUILT EVERY FRAME, AND IT IS VOLATILE — see the header.
+   * On a circle a fraction of the length is the same fraction of the sweep,
+   * so this is exactly the old trim. The floor keeps a non-degenerate sliver,
+   * and the group fades it out below that — so an empty set shows nothing
+   * rather than a round stroke-cap dot parked at the segment's start.
+   */
+  const liveOval = useMemo(
+    () => ({ x: cx - arcR, y: cy - arcR, width: arcR * 2, height: arcR * 2 }),
+    [cx, cy, arcR],
+  );
+  const liveArc = useDerivedValue(() => {
+    "worklet";
+    const p = Skia.Path.Make();
+    p.setIsVolatile(true);
+    p.addArc(liveOval, liveStart, liveSweep * Math.max(0.004, charge.value));
+    return p;
+  }, [charge, liveOval, liveStart, liveSweep]);
 
-  const cometX = useDerivedValue(() => {
+  // The shine runs inside the fill: it starts after the fill's rounded start
+  // and stops short of the knob, so it never pokes past the colour.
+  const shineOvalRect = useMemo(
+    () => ({ x: cx - shineR, y: cy - shineR, width: shineR * 2, height: shineR * 2 }),
+    [cx, cy, shineR],
+  );
+  const liveShine = useDerivedValue(() => {
     "worklet";
-    return cx + arcR * Math.cos((liveStart + charge.value * liveSweep) * DEG);
-  }, [charge, cx, arcR, liveStart, liveSweep]);
-  const cometY = useDerivedValue(() => {
+    const p = Skia.Path.Make();
+    p.setIsVolatile(true);
+    const sweep = liveSweep * charge.value - shineInset * 2.6;
+    if (sweep > 0.5) p.addArc(shineOvalRect, liveStart + shineInset, sweep);
+    return p;
+  }, [charge, shineOvalRect, liveStart, liveSweep, shineInset]);
+
+  const headAngle = useDerivedValue(() => {
     "worklet";
-    return cy + arcR * Math.sin((liveStart + charge.value * liveSweep) * DEG);
-  }, [charge, cy, arcR, liveStart, liveSweep]);
-  const cometOpacity = useDerivedValue(() => {
+    return (liveStart + charge.value * liveSweep) * DEG;
+  }, [charge, liveStart, liveSweep]);
+  const knobX = useDerivedValue(() => {
+    "worklet";
+    return cx + arcR * Math.cos(headAngle.value);
+  }, [headAngle, cx, arcR]);
+  const knobY = useDerivedValue(() => {
+    "worklet";
+    return cy + arcR * Math.sin(headAngle.value);
+  }, [headAngle, cy, arcR]);
+  const knobOpacity = useDerivedValue(() => {
     "worklet";
     return charge.value > 0.02 && charge.value < 0.995 ? 1 : 0;
   }, [charge]);
+  const knobR = useDerivedValue(() => {
+    "worklet";
+    return arcW * 0.62 * (1 + 0.3 * thump.value);
+  }, [thump, arcW]);
+  const knobCoreR = useDerivedValue(() => {
+    "worklet";
+    return arcW * 0.28 * (1 + 0.3 * thump.value);
+  }, [thump, arcW]);
+  const knobGlowR = useDerivedValue(() => {
+    "worklet";
+    return arcW * (1.05 + 0.7 * thump.value);
+  }, [thump, arcW]);
 
   const handTrim = useDerivedValue(() => {
     "worklet";
@@ -252,15 +297,14 @@ export function SkiaSessionRing({
     "worklet";
     return cy + handR * Math.sin((-90 + over.value * 360) * DEG);
   }, [over, cy, handR]);
-
-  const reticleXf = useDerivedValue(() => {
+  const handDotR = useDerivedValue(() => {
     "worklet";
-    return [{ rotate: spin.value * TWO_PI }];
-  }, [spin]);
+    return size * 0.02 * (1 + 0.45 * thump.value);
+  }, [thump, size]);
 
   const haloOpacity = useDerivedValue(() => {
     "worklet";
-    return Math.min(1, (0.24 + 0.4 * charge.value) * (0.82 + 0.18 * breath.value));
+    return Math.min(1, (0.3 + 0.45 * charge.value) * (0.8 + 0.2 * breath.value));
   }, [charge, breath]);
   const haloXf = useDerivedValue(() => {
     "worklet";
@@ -269,112 +313,160 @@ export function SkiaSessionRing({
 
   const center = vec(cx, cy);
   const showHand = overtimeSeconds > 0;
+  const lipXf = useMemo(() => [{ translateY: lip }], [lip]);
 
   return (
     <Canvas style={{ width: size, height: size }}>
       {/* Halo — the field the figure stands in, brightening with the charge. */}
       <Group transform={haloXf} origin={center} opacity={haloOpacity}>
-        <Circle cx={cx} cy={cy} r={R * 0.84}>
+        <Circle cx={cx} cy={cy} r={R * 0.8}>
           <RadialGradient
             c={center}
-            r={R * 0.84}
-            colors={[alpha(cMid, 0.2), alpha(cMid, 0.07), "transparent"]}
+            r={R * 0.8}
+            colors={[alpha(pal.fill, 0.22), alpha(pal.fill, 0.08), "transparent"]}
             positions={[0, 0.62, 1]}
           />
           <BlurMask blur={size * 0.05} style="normal" />
         </Circle>
       </Group>
 
-      {/* The stage the figure occupies — one hairline, nothing more. */}
-      <Path
-        path={geo.inner}
-        style="stroke"
-        strokeWidth={Math.max(0.6, size * 0.0028)}
-        color={alpha(cMid, 0.16)}
-      />
+      {/* The plate the figure stands on. */}
+      <Circle cx={cx} cy={cy} r={plateR} color={pal.plate} />
 
-      {/* Machined graduation band — texture, not a second signal. */}
-      <Path
-        path={geo.ticks}
-        style="stroke"
-        strokeWidth={size * 0.0075}
-        strokeCap="round"
-        color={alpha(cMid, 0.16)}
-      />
-
-      {/* One arc per set: the track, and the sets already banked. */}
-      {geo.segs.map((p, i) => (
+      {/* The track: every set, lip first, then the band. */}
+      <Group transform={lipXf}>
+        {paths.segs.map((p, i) => (
+          <Path
+            key={`tl-${i}`}
+            path={p}
+            style="stroke"
+            strokeWidth={arcW}
+            strokeCap="round"
+            color={pal.trackLip}
+          />
+        ))}
+      </Group>
+      {paths.segs.map((p, i) => (
         <Path
-          key={`track-${i}`}
+          key={`t-${i}`}
           path={p}
           style="stroke"
           strokeWidth={arcW}
           strokeCap="round"
-          color={alpha(cMid, i < liveIndex ? 0.9 : 0.13)}
+          color={pal.track}
         />
       ))}
 
-      {/* The live set — a soft bloom under a crisp edge. */}
+      {/* The sets already banked — popping in, one after another. */}
+      {paths.segs.slice(0, liveIndex).map((p, i) => (
+        <BankedSet
+          key={`b-${count}-${i}`}
+          index={i}
+          path={p}
+          shine={paths.shines[i]}
+          popMs={popMs}
+          arcW={arcW}
+          shineW={shineW}
+          lip={lip}
+          fill={pal.fill}
+          fillLip={pal.fillLip}
+          shineColor={pal.shine}
+        />
+      ))}
+
+      {/* The live set: lip, band, shine. */}
       <Group opacity={liveOpacity}>
+        <Group transform={lipXf}>
+          <Path path={liveArc} style="stroke" strokeWidth={arcW} strokeCap="round" color={pal.fillLip} />
+        </Group>
+        <Path path={liveArc} style="stroke" strokeWidth={arcW} strokeCap="round" color={pal.fill} />
         <Path
-          path={geo.segs[liveIndex]}
+          path={liveShine}
           style="stroke"
-          strokeWidth={arcW * 1.8}
+          strokeWidth={shineW}
           strokeCap="round"
-          start={0}
-          end={trim}
-          opacity={0.4}
-        >
-          <SweepGradient c={center} start={-90} end={270} colors={[c0, cMid, cDeep, c0]} />
-          <BlurMask blur={size * 0.03} style="normal" />
-        </Path>
-        <Path
-          path={geo.segs[liveIndex]}
-          style="stroke"
-          strokeWidth={arcW}
-          strokeCap="round"
-          start={0}
-          end={trim}
-        >
-          <SweepGradient c={center} start={-90} end={270} colors={[c0, cMid, cDeep, c0]} />
-        </Path>
+          color={pal.shine}
+        />
       </Group>
 
-      {/* Comet on the leading edge — where the set is, right now. */}
-      <Group opacity={cometOpacity}>
-        <Circle cx={cometX} cy={cometY} r={size * 0.042} color={alpha(c0, 0.5)}>
-          <BlurMask blur={size * 0.024} style="normal" />
+      {/* The knob on the leading edge — where the set is, right now. */}
+      <Group opacity={knobOpacity}>
+        <Circle cx={knobX} cy={knobY} r={knobGlowR} color={alpha(pal.fill, 0.45)}>
+          <BlurMask blur={arcW * 0.7} style="normal" />
         </Circle>
-        <Circle cx={cometX} cy={cometY} r={size * 0.02} color="#FFFFFF" />
-        <Circle cx={cometX} cy={cometY} r={size * 0.011} color={cDeep} />
+        <Circle cx={knobX} cy={knobY} r={knobR} color="#FFFFFF" />
+        <Circle cx={knobX} cy={knobY} r={knobCoreR} color={pal.fillLip} />
       </Group>
 
       {/* Overtime hand — the box is spent and the clock is still running. */}
       {showHand && (
         <Group>
           <Path
-            path={geo.hand}
+            path={paths.hand}
             style="stroke"
-            strokeWidth={size * 0.009}
+            strokeWidth={size * 0.012}
             strokeCap="round"
             start={0}
             end={handTrim}
-            color={alpha(c0, 0.85)}
+            color={alpha(colors[0], 0.9)}
           />
-          <Circle cx={handX} cy={handY} r={size * 0.016} color={c0} />
+          <Circle cx={handX} cy={handY} r={handDotR} color={colors[0]} />
         </Group>
       )}
-
-      {/* Reticle — a slow turn that keeps the instrument alive at rest. */}
-      <Group transform={reticleXf} origin={center} opacity={0.28}>
-        <Path
-          path={geo.reticle}
-          style="stroke"
-          strokeWidth={Math.max(1, size * 0.005)}
-          strokeCap="round"
-          color={alpha(c0, 0.75)}
-        />
-      </Group>
     </Canvas>
+  );
+}
+
+/**
+ * One banked set. It lands with a little pop — fades in fat and settles to the
+ * band's width — `index` beats after the first, so a ring of four sets fills
+ * in as three quick knocks before the fourth starts.
+ */
+function BankedSet({
+  index,
+  path,
+  shine,
+  popMs,
+  arcW,
+  shineW,
+  lip,
+  fill,
+  fillLip,
+  shineColor,
+}: {
+  index: number;
+  path: ReturnType<typeof Skia.Path.Make>;
+  shine: ReturnType<typeof Skia.Path.Make>;
+  popMs: SharedValue<number>;
+  arcW: number;
+  shineW: number;
+  lip: number;
+  fill: string;
+  fillLip: string;
+  shineColor: string;
+}) {
+  const local = useDerivedValue(() => {
+    "worklet";
+    const t = (popMs.value - index * POP_STAGGER_MS) / POP_MS;
+    return t <= 0 ? 0 : t >= 1 ? 1 : t;
+  }, [popMs, index]);
+  const opacity = useDerivedValue(() => {
+    "worklet";
+    return Math.min(1, local.value * 2.5);
+  }, [local]);
+  const width = useDerivedValue(() => {
+    "worklet";
+    return arcW * (1 + 0.38 * Math.sin(Math.PI * local.value));
+  }, [local, arcW]);
+  const lipXf = useMemo(() => [{ translateY: lip }], [lip]);
+
+  return (
+    <Group opacity={opacity}>
+      <Group transform={lipXf}>
+        <Path path={path} style="stroke" strokeWidth={width} strokeCap="round" color={fillLip} />
+      </Group>
+      <Path path={path} style="stroke" strokeWidth={width} strokeCap="round" color={fill} />
+      <Path path={shine} style="stroke" strokeWidth={shineW} strokeCap="round" color={shineColor} />
+    </Group>
   );
 }

@@ -23,6 +23,8 @@ export { MenuButton } from "./MenuButton";
 export type { MenuButtonProps } from "./MenuButton";
 export { ScreenTopBar } from "./ScreenTopBar";
 export type { ScreenTopBarProps } from "./ScreenTopBar";
+export { FloatingHeader, useFloatingHeader, useHeaderFold } from "./FloatingHeader";
+export type { FloatingHeaderState, HeaderFold } from "./FloatingHeader";
 export { useDrawer, useDrawerOptional } from "./DrawerContext";
 export type { DrawerApi } from "./DrawerContext";
 export {

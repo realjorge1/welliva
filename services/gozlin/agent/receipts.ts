@@ -255,6 +255,8 @@ const ORIGIN_LABEL: Record<string, string> = {
   log_food: "What was just logged",
   // Something new they did, and what they said about things they tried.
   "experience-log": "What you told me about trying things",
+  // Her cycle, only when she shares it with Gozlin (consent cycle_gozlin).
+  "cycle-log": "Your cycle log",
   note_experience: "What you just told me",
 };
 

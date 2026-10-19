@@ -93,6 +93,8 @@ export function Button({
         <AppText
           variant="callout"
           color={fg}
+          // On a gold fill the icon's gold would vanish ("See welliva Pro").
+          wordmarkColor={variant === "primary" || variant === "danger" ? fg : undefined}
           style={{ fontSize: s.font, fontWeight: "700", letterSpacing: 0.1 }}
         >
           {label}

@@ -26,6 +26,7 @@
 import { AppText, Card, IconBadge, Screen, useColors } from "@/components/ui";
 import { ScreenTopBar } from "@/components/navigation";
 import { useConsent, type ConsentRow } from "@/components/privacy/useConsent";
+import { useCycleOptional } from "@/contexts/CycleContext";
 import { useLegalGate } from "@/components/legal";
 import { LEGAL_DOCS, LEGAL_DOC_ORDER, LEGAL_VERSION } from "@/constants/legal";
 import {
@@ -57,9 +58,16 @@ export default function PrivacyScreen() {
   const future = c.rows.filter((r) => r.group === "future");
   /** How Gozlin acts on what it already sees — the one group that starts on. */
   const coaching = c.rows.filter((r) => r.group === "coaching");
+  /** Her cycle in Gozlin chats — shown only to someone who tracks one. */
+  const cycle = useCycleOptional();
+  const cycleRow = c.rows.find((r) => r.category === "cycle_gozlin");
+  const cycleShare =
+    cycle?.settings.enabled && cycleRow
+      ? { row: cycleRow, granted: cycle.shareWithGozlin, onToggle: cycle.setShareWithGozlin }
+      : undefined;
 
   return (
-    <Screen header={header}>
+    <Screen header={header} floatingHeader>
       {/* "Everything below is off" stopped being true the day a coaching
         behaviour defaulted on (docs/gozlin/11, D1). The promise that matters is
         narrower and still whole: nothing NEW is read and nothing goes OUT
@@ -135,7 +143,7 @@ export default function PrivacyScreen() {
       <ConsentGroupCard title="Senses" rows={senses} onToggle={c.toggle} />
 
       {/* What goes out — cloud chat and out-of-app reach are the same question. */}
-      <ReachCard notif={notif} cloudAi={cloudAi} onToggle={c.toggle} />
+      <ReachCard notif={notif} cloudAi={cloudAi} onToggle={c.toggle} cycleShare={cycleShare} />
 
       {/* What Gozlin does with what it already has. On until you say otherwise,
         and the note under it says so — a default-on switch that doesn't admit
@@ -271,10 +279,17 @@ function ReachCard({
   notif,
   cloudAi,
   onToggle,
+  cycleShare,
 }: {
   notif: UseNotificationSettings;
   cloudAi?: ConsentRow;
   onToggle: (category: ConsentRow["category"], granted: boolean) => Promise<void>;
+  /**
+   * Whether her cycle rides along in Gozlin chats (consent `cycle_gozlin`).
+   * Only passed while she tracks a cycle — and toggled through the cycle
+   * provider, which owns the live value the coach reads.
+   */
+  cycleShare?: { row: ConsentRow; granted: boolean; onToggle: (on: boolean) => Promise<void> };
 }) {
   const { colors } = useColors();
   const unavailable = notif.status?.permission === "unavailable";
@@ -301,6 +316,26 @@ function ReachCard({
               value={cloudAi.granted}
               disabled={cloudAi.disabled}
               onValueChange={(v) => onToggle(cloudAi.category, v)}
+              trackColor={{ true: colors.primary, false: alpha(colors.text, 0.18) }}
+            />
+          </View>
+          <View style={[styles.divider, { backgroundColor: alpha(colors.text, 0.08) }]} />
+        </>
+      ) : null}
+
+      {cycleShare ? (
+        <>
+          <View style={styles.consentRow}>
+            <IconBadge name={cycleShare.row.icon as never} tone={colors.primary} size={40} />
+            <View style={styles.flex}>
+              <AppText variant="callout">{cycleShare.row.label}</AppText>
+              <AppText variant="footnote" color="tertiary" style={styles.consentBlurb}>
+                {cycleShare.row.blurb}
+              </AppText>
+            </View>
+            <Switch
+              value={cycleShare.granted}
+              onValueChange={(v) => void cycleShare.onToggle(v)}
               trackColor={{ true: colors.primary, false: alpha(colors.text, 0.18) }}
             />
           </View>

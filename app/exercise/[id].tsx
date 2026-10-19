@@ -74,6 +74,14 @@ interface ExView {
   isAi: boolean;
 }
 
+/**
+ * The authored "(push_02)" suffix links a modification to its exercise for the
+ * progression engines; it is plumbing, not copy, so the reader never sees it.
+ */
+function modLabel(text?: string): string | undefined {
+  return text?.replace(/\s*\([a-z]+_\d+\)/gi, "").trim() || undefined;
+}
+
 function fromDB(e: ExerciseDBEntry): ExView {
   return {
     name: e.name,
@@ -91,7 +99,10 @@ function fromDB(e: ExerciseDBEntry): ExView {
     description: e.description,
     effectiveness: e.effectiveness,
     frequency: e.frequency,
-    modifications: e.modifications,
+    modifications: e.modifications && {
+      easier: modLabel(e.modifications.easier),
+      harder: modLabel(e.modifications.harder),
+    },
     equipment: e.equipment,
     isAi: false,
   };

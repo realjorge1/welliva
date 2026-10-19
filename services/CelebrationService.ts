@@ -1,18 +1,21 @@
 /**
  * CELEBRATION SERVICE — one unlock moment, many sources.
  *
- * Achievements, coach-noticed moments, and goal/chapter milestones all deserve
- * a celebration, but they're different data shapes. This normalizes each
- * into one `Celebration` the global host (components/AchievementCelebration)
- * renders — so a new celebratable event is one builder away, not a new modal.
+ * Achievements, coach-noticed moments, goal/chapter milestones and the day's
+ * kept commitment all deserve a moment, but they're different data shapes.
+ * This normalizes each into one `Celebration` the global host
+ * (components/AchievementCelebration) renders — so a new celebratable event is
+ * one builder away, not a new modal.
  *
- * It also owns the MATURITY DIAL. A years-long product can't pop full confetti
- * for every bronze badge forever — celebration is a currency, and over-printing
- * it makes the big moments feel cheap. So fanfare `intensity` scales with the
- * event's weight AND the user's maturity: a newcomer's first water badge roars;
- * a seasoned user's bronze gets a tasteful flourish, while their platinum,
- * mythic, challenge, and chapter moments still go all-in. Veterans also get a
- * little more *data* (a quiet meta line) in place of the spectacle.
+ * ── WHAT CHANGED 2026-10-15 ─────────────────────────────────────────────────
+ *
+ * The confetti cannon is gone, and with it the "maturity dial" (`intensity`)
+ * that existed only to decide how much confetti to fire. The owner's verdict on
+ * the old moment was "too noisy, too amateur — and boring"; the brief was
+ * Duolingo — one simple object, beautifully timed. So a celebration is now ONE
+ * hero: the badge you earned (struck in its own metal) for an achievement, a
+ * moment or a chapter, and the flame for a kept day. Veterans still get the
+ * quiet `meta` data line — more data, never more spectacle.
  */
 
 import { Ionicons } from "@expo/vector-icons";
@@ -23,9 +26,15 @@ import {
   TIER_META,
   type AchievementDef,
   type AchievementSummary,
-  type AchievementTier,
 } from "./AchievementService";
-export type CelebrationKind = "achievement" | "chapter" | "moment";
+import {
+  commitmentLine,
+  isMilestone,
+  type CommitmentDay,
+  type CommitmentState,
+} from "./commitment";
+
+export type CelebrationKind = "achievement" | "chapter" | "moment" | "commitment";
 
 export interface CelebrationCTA {
   label: string;
@@ -33,16 +42,30 @@ export interface CelebrationCTA {
   icon: keyof typeof Ionicons.glyphMap;
 }
 
+/** The day a commitment was kept — what the flame screen shows. */
+export interface CommitmentMoment {
+  /** The run after today. */
+  streak: number;
+  /** The run the count rolls up FROM (0 on a first day or after a break). */
+  previous: number;
+  /** Mon → Sun, today kept. */
+  week: CommitmentDay[];
+  /** The one line under the count. */
+  line: string;
+  /** A run length with its own words (7, 14, 30, 100 …). */
+  milestone: boolean;
+}
+
 export interface Celebration {
-  /** Unique per event so the queue de-dupes and the burst re-keys. */
+  /** Unique per event so the queue de-dupes and the entrance re-plays. */
   id: string;
   kind: CelebrationKind;
-  /** Small uppercase label above the medallion. */
+  /** Small uppercase label above the hero. */
   eyebrow: string;
   title: string;
   description: string;
   icon: keyof typeof Ionicons.glyphMap;
-  /** Drives the medallion gradient, glow, confetti palette, and border. */
+  /** The single colour that stands for this moment (pill, accents). */
   accent: string;
   /**
    * The material the medallion is struck in — a three-stop ramp plus the ink
@@ -52,12 +75,12 @@ export interface Celebration {
   finish: BadgeFinish;
   badgeIcon: keyof typeof Ionicons.glyphMap;
   badgeLabel: string;
-  /** 0–1 fanfare — the maturity dial. Scales confetti volume + the shockwave. */
-  intensity: number;
-  /** A quiet stat line shown to mature users ("more data, less confetti"). */
+  /** A quiet stat line shown to mature users ("more data, less spectacle"). */
   meta?: string;
   /** Optional next step (the chapter pivot). */
   cta?: CelebrationCTA;
+  /** Present on `commitment` celebrations only. */
+  commitment?: CommitmentMoment;
 }
 
 /**
@@ -69,21 +92,6 @@ export function userMaturity(summary: AchievementSummary): number {
   const byLevel = (summary.level - 1) / 8; // ~level 9 → 1
   const byBreadth = summary.earnedCount / 24; // ~24 unlocks → 1
   return Math.max(0, Math.min(1, (byLevel + byBreadth) / 2));
-}
-
-const TIER_BASE: Record<AchievementTier, number> = {
-  bronze: 0.55,
-  silver: 0.7,
-  gold: 0.92,
-  platinum: 1,
-  mythic: 1,
-};
-
-function achievementIntensity(tier: AchievementTier, maturity: number): number {
-  const base = TIER_BASE[tier];
-  // Only the everyday tiers dial down for veterans; the rare ones always roar.
-  const damp = tier === "bronze" || tier === "silver" ? 1 - 0.55 * maturity : 1;
-  return Math.max(0.3, base * damp);
 }
 
 export function celebrationFromAchievement(
@@ -106,7 +114,6 @@ export function celebrationFromAchievement(
     finish,
     badgeIcon: "medal",
     badgeLabel: `${tier.label} · +${tier.points} pts`,
-    intensity: achievementIntensity(def.tier, maturity),
     meta:
       maturity > 0.45
         ? `${summary.earnedCount} of ${summary.total} unlocked · Level ${summary.level}`
@@ -130,20 +137,12 @@ export function celebrationForChapter(opts: {
     finish: finishFromAccent(opts.accent),
     badgeIcon: "sparkles",
     badgeLabel: "A new chapter awaits",
-    intensity: 1,
     cta: { label: "Begin next chapter", route: "/new-chapter", icon: "arrow-forward" },
   };
 }
 
 /**
  * A coach-noticed moment → a celebration.
- *
- * Deliberately quieter than an achievement (0.72 rather than a tier base), and
- * deliberately NOT dialled down by maturity. The maturity dial exists because a
- * veteran has seen the same bronze badge a hundred times — but a moment is
- * defined against that user's own history, so a seasoned user's moment is by
- * construction rarer and more meaningful than a newcomer's, not less. Damping
- * it would silence exactly the people it is most true for.
  *
  * The eyebrow is the coach speaking rather than the system announcing, which is
  * the whole difference between this and a badge: "GOZLIN NOTICED" is somebody
@@ -167,6 +166,42 @@ export function celebrationFromMoment(moment: Moment): Celebration {
     finish: finishFromAccent(TONE[moment.tone]),
     badgeIcon: "eye",
     badgeLabel: "From your own history",
-    intensity: 0.72,
+  };
+}
+
+/** The flame's own orange — fixed, like the flame (see components/celebration/Flame). */
+const FLAME_ACCENT = "#FF8A1C";
+
+/**
+ * Today was kept → the flame screen. Fired once per day, the moment the first
+ * thing that counts is logged (see useGamificationState).
+ *
+ * `previous` is what the count rolls up FROM: yesterday's run when today
+ * extends it, 0 when today starts a new one — so a first day reads 0 → 1, and a
+ * comeback never pretends to have continued anything.
+ */
+export function celebrationForCommitment(
+  state: CommitmentState,
+  today: string,
+): Celebration {
+  const streak = Math.max(1, state.streak);
+  return {
+    id: `commit:${today}`,
+    kind: "commitment",
+    eyebrow: "KEPT TODAY",
+    title: `${streak} day streak`,
+    description: commitmentLine(streak, state.totalDays, today),
+    icon: "flame",
+    accent: FLAME_ACCENT,
+    finish: finishFromAccent(FLAME_ACCENT),
+    badgeIcon: "flame",
+    badgeLabel: `Best ${Math.max(state.best, streak)}`,
+    commitment: {
+      streak,
+      previous: streak - 1,
+      week: state.week,
+      line: commitmentLine(streak, state.totalDays, today),
+      milestone: isMilestone(streak),
+    },
   };
 }

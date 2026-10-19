@@ -32,7 +32,7 @@ export function HabitCard({ data }: { data: GozlinHabitReport }) {
   return (
     <Card padding="lg" elevated style={{ marginTop: Spacing.sm }}>
       <View style={{ gap: Spacing.lg }}>
-        <CardHeader iconNode={<AILogoIcon size={13} color={colors.primary} />} label="Habit awareness" color={colors.primary} />
+        <CardHeader iconNode={<AILogoIcon size={13} />} label="Habit awareness" color={colors.primary} />
 
         {/* ── Overall behavior score ── */}
         <View style={styles.heroRow}>

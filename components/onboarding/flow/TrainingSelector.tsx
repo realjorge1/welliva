@@ -19,12 +19,15 @@
  * action bar has to know whether "Continue" means "show me the next question"
  * or "I'm done with training" — and the step owns the action bar.
  *
- * The equipment rule is untouched: "Bodyweight & mat" is the `none` value and
- * selecting it clears everything else; clearing the last item falls back to it.
- * That logic stays in the step's `toggleEquipment`, where it already lived.
+ * Equipment follows the shared rule in models/equipment: "Bodyweight & mat" is
+ * the `none` value and combines with gear like any other choice (it used to
+ * clear everything else, which read as "bodyweight OR dumbbells"), up to three
+ * in all; clearing the last item falls back to it. The step applies the rule;
+ * this component only shows the cap.
  */
 import { AppText, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
+import { MAX_EQUIPMENT } from "@/models/equipment";
 import React, { useEffect, useState } from "react";
 import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import Animated, {
@@ -279,6 +282,7 @@ export function TrainingSelector<E extends string, Q extends string, M extends s
   const { colors } = useColors();
   const [touchedExperience, setTouchedExperience] = useState(false);
   const [touchedMode, setTouchedMode] = useState(false);
+  const equipmentFull = equipment.length >= MAX_EQUIPMENT;
 
   return (
     <View style={styles.phases}>
@@ -314,9 +318,14 @@ export function TrainingSelector<E extends string, Q extends string, M extends s
             if (revealed < 3) setTimeout(onRevealNext, Pace.handover + 100);
           }}
           delay={revealed >= 2 ? Stagger.layer * 1.5 : 0}
+          // A full list sets the rest back; they stay tappable, the line below
+          // says why a fourth won't go in.
+          recedeUnselected={equipmentFull}
         />
         <AppText variant="footnote" color="tertiary">
-          Pick everything you can reach. Bodyweight is always enough on its own.
+          {equipmentFull
+            ? `That's ${MAX_EQUIPMENT} — untick one to swap in another.`
+            : `Pick up to ${MAX_EQUIPMENT}. Bodyweight moves are always part of your plan.`}
         </AppText>
       </Phase>
 

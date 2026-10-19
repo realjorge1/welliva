@@ -32,6 +32,18 @@ export interface LighterSession {
   changes: string[];
 }
 
+/**
+ * Why the session is lighter, when it isn't recovery. The cycle tracker passes
+ * one when she logs cramps or a heavy flow (services/cycle/care): the session
+ * eases exactly as an amber day would, and every line says it was HER log.
+ */
+export interface LightenReason {
+  /** Replaces the recovery headline — the first line of `changes`. */
+  headline: string;
+  /** Replaces the per-exercise "Eased for today's recovery" note. */
+  dose: string;
+}
+
 function rating(ex: ExerciseDBEntry): number {
   return ex.effectiveness?.rating ?? 3;
 }
@@ -71,6 +83,7 @@ export function lightenSession(
   readiness: Readiness,
   pool: ExerciseDBEntry[],
   bio: UserBio,
+  reason?: LightenReason,
 ): LighterSession | null {
   if (readiness.level === "green") return null;
   const red = readiness.level === "red";
@@ -106,7 +119,9 @@ export function lightenSession(
           movementPattern: alt.movementPattern,
           difficulty: alt.difficulty,
           reps: alt.defaultReps,
-          reason: `${alt.name} in place of ${ex.name} — no jumping on a low-recovery day`,
+          reason: reason
+            ? `${alt.name} in place of ${ex.name} — no jumping today`
+            : `${alt.name} in place of ${ex.name} — no jumping on a low-recovery day`,
         };
         ex = alt;
         swaps += 1;
@@ -117,16 +132,18 @@ export function lightenSession(
       setsCut += 1;
     }
     next.restSeconds = Math.min(240, next.restSeconds + restDelta);
-    next.doseReason = `Eased for today's recovery (${readiness.score}/100)`;
+    next.doseReason = reason?.dose ?? `Eased for today's recovery (${readiness.score}/100)`;
     next.durationMinutes = Math.max(1, Math.round(secondsFor(next, ex) / 60));
     exercises.push(next);
   }
 
   const total = exercises.reduce((sum, p) => sum + secondsFor(p, byId.get(p.exerciseId)), 0);
   const changes = [
-    red
-      ? `Recovery ${readiness.score}/100 — a recovery version of today's session`
-      : `Recovery ${readiness.score}/100 — a lighter version of today's session`,
+    reason
+      ? reason.headline
+      : red
+        ? `Recovery ${readiness.score}/100 — a recovery version of today's session`
+        : `Recovery ${readiness.score}/100 — a lighter version of today's session`,
     setsCut > 0 ? (red ? "One set less on every move" : "One set less on supporting moves") : null,
     `${restDelta} s more rest between sets`,
     swaps > 0 ? `${swaps} jumping ${swaps === 1 ? "move" : "moves"} swapped for low-impact ones` : null,

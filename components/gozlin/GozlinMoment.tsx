@@ -13,6 +13,7 @@
 
 import { AppText } from "@/components/ui";
 import { useColors } from "@/components/ui/useColors";
+import { insightTitle } from "@/constants/RetroFont";
 import { alpha, Radius, Spacing } from "@/constants/theme";
 import type { GozlinMoment as Moment, GozlinMomentKind, GozlinSurface } from "@/services/gozlin";
 import { Ionicons } from "@expo/vector-icons";
@@ -118,7 +119,7 @@ export function GozlinMomentCard({
           other card on the page. The tone now lives where the eye already is:
           the kind badge, the tinted border, and the CTA. */}
       <View style={styles.head}>
-        <GozlinAvatar size={34} pulsing={celebratory} />
+        <GozlinAvatar size={34} />
         <View style={styles.flex}>
           {/* Icon and label as one pill, so the eyebrow is a single object
               rather than a square chip with a word floating beside it. */}
@@ -128,7 +129,7 @@ export function GozlinMomentCard({
               {meta.eyebrow}
             </AppText>
           </View>
-          <AppText variant="callout" style={styles.title}>
+          <AppText variant="callout" style={[styles.title, insightTitle]}>
             {moment.title}
           </AppText>
         </View>

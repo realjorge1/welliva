@@ -4,7 +4,7 @@
     "slug": "welliva",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/welliva-1024.jpg",
+    "icon": "./assets/images/icon-wordmark.png",
     "scheme": "welliva",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
@@ -34,7 +34,7 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/welliva-48.jpg"
+      "favicon": "./assets/images/icon-wordmark-96.png"
     },
     "plugins": [
       "expo-router",

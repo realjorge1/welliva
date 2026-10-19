@@ -56,6 +56,7 @@ import {
   type AppTextProps,
 } from "@/components/ui";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
+import { BADGE_FACE_OFFSET, BadgeArt } from "@/components/celebration/Badge";
 import { TrendCard, buildAdherenceTrend, type TrendSeries } from "@/components/charts";
 import { GozlinMoment } from "@/components/gozlin";
 import { ScreenTopBar, useAccountIdentity } from "@/components/navigation";
@@ -85,6 +86,7 @@ import {
   lockedFinish,
   type BadgeFinish,
 } from "@/services/achievementBadges";
+import { equipmentSummary as summarizeEquipment } from "@/models/equipment";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
@@ -109,7 +111,6 @@ import Animated, {
   useReducedMotion,
   useSharedValue,
   withDelay,
-  withRepeat,
   withSpring,
   withTiming,
   type SharedValue,
@@ -202,28 +203,12 @@ const GOLD_GRADIENT = [GOLD_LIGHT, GOLD, GOLD_DEEP] as const;
  * card is black in both themes, so a theme-aware grey would be answering a
  * question nobody asked.
  */
+/** The badge inside the detail sheet's progress ring. */
+const DETAIL_BADGE = 96;
 const LOCKED_TONE = "#7C838F";
 const LOCKED_PLATE = "#2A2E36";
 /** The unearned trophy's progress arc — pewter, still legible on black. */
 const LOCKED_RING = ["#9AA2AE", LOCKED_TONE, "#5A616B"] as const;
-
-/** Sparks around the detail medallion. Offsets are from its centre. */
-const MEDAL_SPARKLES = [
-  { x: -84, y: -50, size: 12, delay: 0 },
-  { x: 70, y: -62, size: 9, delay: 260 },
-  { x: 84, y: 34, size: 13, delay: 520 },
-  { x: -74, y: 52, size: 10, delay: 180 },
-  { x: 4, y: -84, size: 8, delay: 700 },
-  { x: -92, y: 4, size: 7, delay: 420 },
-  { x: 90, y: -8, size: 8, delay: 860 },
-];
-
-/** The same idea at row scale — three sparks, tight to the medal. */
-const ROW_SPARKLES = [
-  { x: -19, y: -16, size: 8, delay: 0 },
-  { x: 12, y: -19, size: 6, delay: 380 },
-  { x: 14, y: 10, size: 7, delay: 720 },
-];
 
 /** Which of the three body numbers a tap opened the editor on. */
 type BodyField = "age" | "height" | "weight";
@@ -235,15 +220,6 @@ const BODY_LIMITS: Record<BodyField, { min: number; max: number; unit: string; l
   weight: { min: 30, max: 300, unit: "kg", label: "Weight" },
 };
 
-/** Short, human label per equipment value for the setup summary. */
-const EQUIPMENT_SHORT: Record<string, string> = {
-  none: "Bodyweight",
-  dumbbells: "Dumbbells",
-  resistance_bands: "Bands",
-  pull_up_bar: "Pull-up bar",
-  bench: "Bench",
-  kettlebell: "Kettlebell",
-};
 
 export default function ProfileScreen() {
   const { colors } = useColors();
@@ -453,13 +429,7 @@ export default function ProfileScreen() {
       ]
     : [];
 
-  const equipmentSummary =
-    userBio?.equipment && userBio.equipment.some((e) => e !== "none")
-      ? userBio.equipment
-          .filter((e) => e !== "none")
-          .map((e) => EQUIPMENT_SHORT[e] ?? titleCase(e))
-          .join(", ")
-      : "Bodyweight";
+  const equipmentSummary = summarizeEquipment(userBio?.equipment);
 
   const setup = userBio
     ? [
@@ -485,7 +455,7 @@ export default function ProfileScreen() {
     : [];
 
   const header = (
-    <Reveal index={0}>
+    <Reveal index={0} pointerEvents="box-none">
       {/* A menu destination, not a pushed screen — there is nothing behind it
           to go back to, so the hamburger is the control here. */}
       <ScreenTopBar title="Profile" style={styles.headerRow} />
@@ -500,7 +470,7 @@ export default function ProfileScreen() {
           trade: the history is local storage, and the focus effect above
           already reloads it every time you arrive. A pull-to-refresh would be
           theatre costing a real interaction. */}
-      <Screen header={header}>
+      <Screen header={header} floatingHeader>
         {/* Identity — who this is, front and center */}
         <Reveal index={1}>
           <Card style={styles.block}>
@@ -1063,55 +1033,6 @@ function GlitterChar({
   );
 }
 
-/**
- * A twinkling speck. Placed absolutely around a medallion, each on its own
- * offset beat so the set never pulses in unison — which would read as one
- * flashing object rather than as glitter.
- */
-function Sparkle({
-  x,
-  y,
-  size,
-  delay,
-  color,
-}: {
-  x: number;
-  y: number;
-  size: number;
-  delay: number;
-  color: string;
-}) {
-  const reduceMotion = useReducedMotion();
-  const v = useSharedValue(0);
-
-  useEffect(() => {
-    if (reduceMotion) return;
-    v.value = withDelay(
-      delay,
-      withRepeat(
-        withTiming(1, { duration: 1400, easing: Easing.inOut(Easing.quad) }),
-        -1,
-        true,
-      ),
-    );
-    return () => cancelAnimation(v);
-  }, [v, delay, reduceMotion]);
-
-  const style = useAnimatedStyle(() => ({
-    opacity: 0.15 + v.value * 0.85,
-    transform: [{ scale: 0.5 + v.value * 0.7 }, { rotate: `${v.value * 90}deg` }],
-  }));
-
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={[styles.sparkle, { left: "50%", top: "50%", marginLeft: x, marginTop: y }, style]}
-    >
-      <Ionicons name="sparkles" size={size} color={color} />
-    </Animated.View>
-  );
-}
-
 /* ───────────────────────────── Sub-components ──────────────────────────── */
 
 /**
@@ -1120,7 +1041,7 @@ function Sparkle({
  * IT HAD TO STOP LOOKING LIKE A LIST ROW. An icon, a bold line and a caption
  * is the same shape as "Equipment · Dumbbells" two cards down — correct
  * information, no occasion. What separates them here is that this one ARRIVES:
- * a gold wash, sparks around the medal, and the name struck letter by letter
+ * a gold wash behind the medal and the name struck letter by letter
  * (see GlitterText), with the cheer coming in only once the name has landed.
  * You watch it happen, which is the entire difference between being told you
  * achieved something and being congratulated for it.
@@ -1181,12 +1102,10 @@ function LatestAchievementRow({
 
       {/* The glyph alone — no disc behind it. A filled plate made this the
           same object as the IconBadge on every setup and target row; bare, it
-          reads as a mark rather than as a list bullet, and the sparks have
-          somewhere to go. */}
+          reads as a mark rather than as a list bullet. (The twinkling sparks
+          that used to circle it went with the confetti, 2026-10-15: the
+          owner called the celebrations noisy and amateur.) */}
       <View style={styles.latestMedalWrap}>
-        {ROW_SPARKLES.map((s, i) => (
-          <Sparkle key={i} {...s} color={finish.ramp[0]} />
-        ))}
         <Ionicons name={item.def.icon} size={26} color={finish.accent} />
       </View>
 
@@ -1702,10 +1621,10 @@ function AchievementCard({
 }
 
 /**
- * A struck disc: rim, three-stop metal, a lit corner, and the glyph cut into
- * it. The grid's medal at 42pt and the detail screen's at 96 are the same
- * object at two sizes — which is what makes the trophy you tap and the trophy
- * that fills the screen read as one thing.
+ * The struck badge on the shelf — components/celebration/Badge, the same
+ * object the unlock moment drops onto the screen and the detail sheet holds
+ * up. One drawing at three sizes is what makes the trophy you tap and the
+ * trophy that filled the screen read as one thing.
  */
 function StruckBadge({
   finish,
@@ -1716,36 +1635,7 @@ function StruckBadge({
   icon: keyof typeof Ionicons.glyphMap;
   size: number;
 }) {
-  return (
-    <View
-      style={[
-        styles.struckRim,
-        {
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          backgroundColor: finish.ramp[2],
-        },
-      ]}
-    >
-      <LinearGradient
-        colors={finish.ramp}
-        locations={[0, 0.52, 1]}
-        start={{ x: 0.12, y: 0 }}
-        end={{ x: 0.88, y: 1 }}
-        style={[
-          styles.struckFace,
-          {
-            width: size - 3,
-            height: size - 3,
-            borderRadius: (size - 3) / 2,
-          },
-        ]}
-      >
-        <Ionicons name={icon} size={Math.round(size * 0.5)} color={finish.ink} />
-      </LinearGradient>
-    </View>
-  );
+  return <BadgeArt finish={finish} icon={icon} size={size} />;
 }
 
 /**
@@ -1837,23 +1727,11 @@ function AchievementDetail({
     ],
   }));
 
-  // The halo breathes only on something you actually earned. A locked
-  // achievement glowing would be the screen congratulating you for nothing.
-  const glow = useSharedValue(0);
-  useEffect(() => {
-    if (!unlocked || reduceMotion) return;
-    glow.value = withRepeat(
-      withTiming(1, { duration: 1900, easing: Easing.inOut(Easing.quad) }),
-      -1,
-      true,
-    );
-    return () => cancelAnimation(glow);
-  }, [glow, unlocked, reduceMotion]);
-
-  const haloStyle = useAnimatedStyle(() => ({
-    opacity: 0.3 + glow.value * 0.35,
-    transform: [{ scale: 1 + glow.value * 0.1 }],
-  }));
+  // A pool of the badge's own light, only on something you actually earned —
+  // a locked achievement glowing would be the screen congratulating you for
+  // nothing. Still, not breathing: the 2026-10-15 celebration rebuild retired
+  // every halo loop, and a trophy you're holding up doesn't pulse.
+  const haloStyle = { opacity: unlocked ? 0.55 : 0 };
 
   return (
     <Pressable
@@ -1886,7 +1764,7 @@ function AchievementDetail({
           style={styles.detailVignette}
         />
 
-        {/* Medallion — halo, sparks, ring, disc, glyph. */}
+        {/* Medallion — halo, ring, disc, glyph. */}
         <View style={styles.medallionWrap}>
           <Animated.View
             style={[
@@ -1895,9 +1773,6 @@ function AchievementDetail({
               haloStyle,
             ]}
           />
-          {unlocked
-            ? MEDAL_SPARKLES.map((s, i) => <Sparkle key={i} {...s} color={ramp[0]} />)
-            : null}
           <Ring
             progress={unlocked ? 1 : progress}
             size={140}
@@ -1907,21 +1782,15 @@ function AchievementDetail({
             gradient={unlocked ? ramp : LOCKED_RING}
             track={alpha(unlocked ? finish.accent : LOCKED_TONE, 0.16)}
           >
-            <LinearGradient
-              colors={ramp}
-              locations={[0, 0.52, 1]}
-              start={{ x: 0.1, y: 0 }}
-              end={{ x: 0.9, y: 1 }}
-              style={styles.medallion}
-            >
-              <Ionicons
-                name={def.icon}
-                size={44}
-                // Ink chosen against the LIT face — white on bright gold is
-                // mush, dark on obsidian is a hole. See achievementBadges.
-                color={unlocked ? finish.ink : alpha(LOCKED_TONE, 0.75)}
-              />
-            </LinearGradient>
+            {/* The struck badge (components/celebration/Badge) — locked, an
+                unstruck coin in the plate's grey. Its FACE, not its box, sits
+                in the ring's centre: the lip hangs below. */}
+            <BadgeArt
+              finish={finish}
+              icon={def.icon}
+              size={DETAIL_BADGE}
+              style={{ transform: [{ translateY: (BADGE_FACE_OFFSET / 100) * DETAIL_BADGE }] }}
+            />
           </Ring>
         </View>
 
@@ -2213,8 +2082,6 @@ const styles = StyleSheet.create({
   /** The badge's own light, pooled in the top-left of an unlocked tile. */
   achWash: { position: "absolute", top: 0, left: 0, right: 0, height: 96 },
   /** A struck disc: the ramp's shadow stop showing as a rim under the face. */
-  struckRim: { alignItems: "center", justifyContent: "center" },
-  struckFace: { alignItems: "center", justifyContent: "center" },
   achTop: {
     flexDirection: "row",
     alignItems: "center",
@@ -2287,13 +2154,6 @@ const styles = StyleSheet.create({
     height: 140,
     borderRadius: 70,
   },
-  medallion: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   detailTier: {
     flexDirection: "row",
     alignItems: "center",
@@ -2327,10 +2187,9 @@ const styles = StyleSheet.create({
   detailProgressValue: { fontWeight: "800" },
   detailHint: { marginTop: Spacing.xxxl },
 
-  // Glitter typography + sparks
+  // Glitter typography
   glitterRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end" },
   glitterHot: { color: GLITTER_HOT },
-  sparkle: { position: "absolute" },
 
   // Latest achievement row
   latestMedalWrap: {

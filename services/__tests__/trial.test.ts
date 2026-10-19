@@ -88,7 +88,9 @@ describe("scope — it opens Gozlin, not the tier", () => {
   it("accounts for every gated feature, on one side of the line or the other", () => {
     // adaptive-training is outside: it spends no inference — it eases a
     // session the engine already built, on the phone.
-    const OUTSIDE: readonly FeatureId[] = ["habits", "foods", "sync", "history", "adaptive-training", "generic"];
+    // insight-history is outside: it is an archive of data the user already
+    // has, and a first-launch user has opened no insights to keep.
+    const OUTSIDE: readonly FeatureId[] = ["habits", "foods", "sync", "history", "insight-history", "adaptive-training", "generic"];
     const all = (Object.keys(FEATURE_MIN_TIER) as FeatureId[]).sort();
     expect([...TRIAL_FEATURES, ...OUTSIDE].sort()).toEqual(all);
   });

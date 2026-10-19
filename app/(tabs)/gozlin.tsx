@@ -57,9 +57,11 @@ import {
   type DeepDiveState,
 } from "@/components/gozlin";
 import { enterFade, exitFade } from "@/components/motion";
-import { DECK_BLOCK, MenuButton } from "@/components/navigation";
+import { MenuButton } from "@/components/navigation";
 import { AmbientCanvas, AppText, useKeyboardInset } from "@/components/ui";
 import { useColors } from "@/components/ui/useColors";
+import { InsightArchive } from "@/components/home/InsightArchive";
+import { useInsightLedger } from "@/components/home/useInsightLedger";
 import { useBilling } from "@/contexts/BillingContext";
 import { COACH_DISCLAIMER } from "@/constants/legal";
 import { Radius, Spacing } from "@/constants/theme";
@@ -103,7 +105,8 @@ export default function GozlinScreen() {
   const { colors } = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { openUpgrade } = useBilling();
+  const { openUpgrade, allows } = useBilling();
+  const { ledger: insightLedger } = useInsightLedger();
   const {
     twin,
     briefing,
@@ -148,6 +151,7 @@ export default function GozlinScreen() {
     if (answering && curiosity.chip) setAnsweringEntry(curiosity.chip);
   }, [answering, curiosity.chip]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [insightsOpen, setInsightsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [forgetOpen, setForgetOpen] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(64);
@@ -156,16 +160,13 @@ export default function GozlinScreen() {
   const toast = useToast();
 
   /**
-   * The composer sits ON TOP of the rail, not under it.
-   *
-   * This is the one screen in the app that owns its own bottom edge, so it is
-   * the one screen that has to know the Deck's height. `restingStyle` spends
-   * this inset down as the keyboard rises — and the Deck takes itself off the
-   * screen entirely while a keyboard is up — so by the time the field is in
-   * use, the composer is sitting on the keyboard with nothing under it.
+   * The composer sits on the bottom edge: this is the one screen in the app
+   * that owns it, and it has no rail (owner, 2026-10-15), so the only thing
+   * under the composer is the device's own safe area. `restingStyle` spends
+   * that inset down as the keyboard rises.
    */
   const keyboard = useKeyboardInset({
-    bottomInset: insets.bottom + DECK_BLOCK,
+    bottomInset: insets.bottom,
     gap: Spacing.sm,
   });
 
@@ -361,6 +362,22 @@ export default function GozlinScreen() {
         onPress: () => setHistoryOpen(true),
       },
       {
+        // The insights the user has opened on Home. Opening one is free and it
+        // leaves Home until there is a new one; this is where it went. The row
+        // is always here, so the place to look is never a secret — what Pro
+        // adds is the list behind it, and the caption says so rather than
+        // letting a free user tap into a surprise.
+        key: "insights",
+        label: "Insight history",
+        caption: allows("insight-history")
+          ? "Every insight you've opened"
+          : "Pro keeps every insight you open",
+        icon: "bulb-outline",
+        badge: insightLedger.length > 0 ? String(insightLedger.length) : undefined,
+        navigates: true,
+        onPress: () => setInsightsOpen(true),
+      },
+      {
         // Used to be its own header icon. The header is the coach's identity —
         // a second destination up there competed with it for attention and,
         // being icon-only, never said where it went. As a menu row it gets a
@@ -406,7 +423,7 @@ export default function GozlinScreen() {
         onPress: () => setForgetOpen(true),
       },
     ],
-    [archive.length, threadCount, hasSaidSomething, resetConversation, router, toast],
+    [archive.length, threadCount, hasSaidSomething, resetConversation, router, toast, allows, insightLedger.length],
   );
 
   /** The conversation in three figures, above the menu's verbs. */
@@ -631,7 +648,7 @@ export default function GozlinScreen() {
             so this is the hamburger, not a way back to where you came from. */}
           <MenuButton size={36} />
           <View style={styles.identity}>
-            <GozlinAvatar size={34} pulsing={isThinking} />
+            <GozlinAvatar size={34} />
             <View style={styles.headerText}>
               <AppText variant="headline" numberOfLines={1}>
                 Gozlin
@@ -767,18 +784,20 @@ export default function GozlinScreen() {
                 onDismiss={() => void curiosity.dismiss()}
               />
             ) : null}
-            <GozlinSuggestionBar
-              suggestions={suggestions}
-              onPick={onSend}
-              disabled={isThinking}
-              style={styles.suggestionBleed}
-            />
+            {focused ? null : (
+              <GozlinSuggestionBar
+                suggestions={suggestions}
+                onPick={onSend}
+                disabled={isThinking}
+                style={styles.suggestionBleed}
+              />
+            )}
             <View style={styles.composer}>
               <View
                 style={[
                   styles.inputWrap,
                   {
-                    backgroundColor: colors.surface,
+                    backgroundColor: "transparent",
                     borderColor: focused ? colors.primary : colors.border,
                   },
                 ]}
@@ -898,6 +917,8 @@ export default function GozlinScreen() {
           onOpen={openArchived}
           onDelete={deleteArchived}
         />
+
+        <InsightArchive visible={insightsOpen} onClose={() => setInsightsOpen(false)} />
 
         <EditMessageSheet
           visible={!!editing}

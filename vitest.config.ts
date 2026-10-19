@@ -29,6 +29,7 @@ export default defineConfig({
       "services/api/**/*.test.ts",
       "services/catalogs/**/*.test.ts",
       "services/training/**/*.test.ts",
+      "services/cycle/**/*.test.ts",
       "services/__tests__/**/*.test.ts",
       "services/account/**/*.test.ts",
       "models/__tests__/**/*.test.ts",

@@ -111,7 +111,7 @@ Answers implied by the current code. "Collected" = leaves the device;
 | --- | --- | --- | --- | --- |
 | Email address | Yes | No | Account management | Required |
 | Name, profile photo | Yes (Google sign-in / avatar upload) | No | Account management | Optional |
-| Health info (conditions, pregnancy, medications, injuries, allergies) | Yes (synced to the user's private row) | No | App functionality | Optional |
+| Health info (conditions, pregnancy, medications, injuries, allergies — and, if cycle tracking is on, period dates, flow, symptoms, mood) | Yes (synced to the user's private row) | No — see "Sharing" below | App functionality | Optional |
 | Fitness info (workouts, sessions, body metrics) | Yes | No | App functionality | Optional |
 | Photos (progress photos, meal photos) | Yes (private bucket) | No | App functionality | Optional |
 | Voice / audio | Yes, only if voice is enabled | No | App functionality | Optional |
@@ -123,6 +123,36 @@ Answers implied by the current code. "Collected" = leaves the device;
 
 Also declare: data is encrypted in transit (yes); users can request deletion
 (yes); no data is sold.
+
+**Cycle tracking (added 15 October 2026).** The form has no menstrual-health
+data type: Google defines *Health info* as "information about a user's health,
+such as medical records or symptoms", and a cycle log is that. So there is no new
+row — the existing *Health info* row already says Collected, and the cycle log
+rides inside it. What to check when you next open the form:
+
+- *Health info* stays **Optional** — true, because cycle tracking is off until the
+  user enables it, and Google only allows "optional" if every user can decline.
+- *Purposes* stay **App functionality**; add **Personalization** only if you want
+  the lighter-session feature counted separately (not required).
+- *Deletion*: the in-app "Delete all cycle data" and account deletion both erase it.
+- **Sharing.** The cycle day, predicted next period and today's log leave the
+  phone for the AI coach ONLY when the user switches on "Let Gozlin see your
+  cycle" (off by default). Anthropic is a service provider processing on our
+  behalf, which Google's definition does NOT count as "sharing". The table above
+  already declares coach messages as shared (the conservative reading) while
+  health info is "No", even though a minimised health summary already reaches the
+  coach. **Pick one rule and apply it to both rows** — the owner's decision, not
+  something to leave inconsistent.
+
+**Health apps declaration (separate from Data safety).** Play Console → Policy →
+App content → Health apps. Tick **Period Tracking** (listed under *Health and
+fitness*, described as menstrual cycle tracking, ovulation tracking and
+prediction) alongside whatever is already ticked. Do NOT tick *Reproductive and
+Sexual Health* (that is under *Medical*) or *Medical Device*: welliva is a
+wellness tracker and the fertile window is an opt-in estimate. The store
+description needs the line Play requires of non-medical-device health apps:
+"not a medical device and does not diagnose, treat, cure, or prevent any medical
+condition", plus a reminder to consult a healthcare professional.
 
 On the Play **Data deletion** question, give the in-app route — Settings → Danger zone →
 **Delete account** — not only an email address. Play accepts an email-only route
@@ -141,8 +171,10 @@ device, and to point at the medical disclaimer.
 
 Label mapping (App Store Connect → App Privacy):
 
-- **Data linked to you**: Contact Info (email, name), Health & Fitness, User
-  Content (photos, audio, messages), Identifiers (user ID)
+- **Data linked to you**: Contact Info (email, name), Health & Fitness (this
+  already covers the cycle log — Apple's *Health* type is any user-provided health
+  data, with no separate reproductive entry), User Content (photos, audio,
+  messages), Identifiers (user ID)
 - **Data not collected**: Advertising data, browsing history, search history,
   purchases, contacts, precise location
 - **Tracking**: none — no ATT prompt, no advertising SDKs

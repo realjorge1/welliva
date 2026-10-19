@@ -58,6 +58,9 @@ import {
   ReauthenticationError,
 } from "@/services/account/AccountDeletion";
 import { useBilling } from "@/contexts/BillingContext";
+import { useCycle } from "@/contexts/CycleContext";
+import { useCyclePalette } from "@/components/cycle";
+import { cycleHeadline } from "@/services/cycle";
 import { TIER_NAME } from "@/services/billing";
 import { bumpDataEpoch } from "@/services/sync/dataEpoch";
 import { fullPushSweep } from "@/services/sync/SyncEngine";
@@ -72,6 +75,7 @@ import {
   PregnancyTrimester,
 } from "@/models/user";
 import { Equipment } from "@/models/workout";
+import { MAX_EQUIPMENT, equipmentFull, toggleEquipment } from "@/models/equipment";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import Constants from "expo-constants";
@@ -452,6 +456,16 @@ export default function SettingsScreen() {
   // whether backup is on and, when it isn't, point at the one screen that can
   // change that.
   const billing = useBilling();
+  // Cycle tracking: open to anyone from here (women are also offered it once on
+  // Home). The row's subtitle is the live state, never a promise.
+  const cycle = useCycle();
+  const cyclePalette = useCyclePalette();
+  const cycleSubtitle = cycle.settings.enabled
+    ? (() => {
+        const h = cycleHeadline(cycle.view, cycle.settings.showFertileWindow);
+        return `${h.eyebrow} · ${h.title}`;
+      })()
+    : "Predictions that learn your rhythm, and a plan that eases off on hard days";
   // Meals-per-day writes through updateUserBio, which regenerates the day's
   // meals before it resolves. Hold the tapped value locally so the control moves
   // under the finger instead of sitting on the old number until the plan lands.
@@ -899,7 +913,7 @@ export default function SettingsScreen() {
 
   return (
     <>
-      <Screen header={header}>
+      <Screen header={header} floatingHeader>
         {/* ── Masthead. The three questions this page exists to answer, read
             off the same state the sections below let you change. */}
         <Reveal index={0} stagger={45}>
@@ -1245,6 +1259,24 @@ export default function SettingsScreen() {
           </View>
         </Reveal>
 
+        {/* Cycle tracking — private, free, and here for anyone to switch on. */}
+        <Reveal index={5} stagger={45}>
+          <View style={styles.section}>
+            <GroupLabel label="Cycle" hint="Private, and free" />
+            <ListGroup>
+              <ListRow
+                icon="water"
+                tone={cyclePalette.period}
+                title="Cycle tracking"
+                subtitle={cycleSubtitle}
+                onPress={() =>
+                  router.push((cycle.settings.enabled ? "/cycle" : "/cycle/setup") as never)
+                }
+              />
+            </ListGroup>
+          </View>
+        </Reveal>
+
         {/* Account — the plan signpost, the backup state, your body details and
             the way out. The Plan row is a SIGNPOST, not a second storefront:
             everything transactional (prices, restore, manage, cancel) lives
@@ -1284,7 +1316,7 @@ export default function SettingsScreen() {
                   icon="cloud-offline-outline"
                   tone={colors.gold}
                   title="Cloud backup is off"
-                  subtitle="Your data is saved on this device. Plus backs it up and syncs every device you sign in on."
+                  subtitle={`Your data is saved on this device. ${TIER_NAME.pro} backs it up and syncs every device you sign in on.`}
                   onPress={() => billing.openUpgrade("sync")}
                 />
               ) : (
@@ -1575,21 +1607,18 @@ export default function SettingsScreen() {
                 <FormCard title="Training setup">
                   <ChipGroup
                     label="Equipment"
+                    hint={
+                      equipmentFull(editingBio.equipment)
+                        ? `That's ${MAX_EQUIPMENT} — untick one to swap in another.`
+                        : `Up to ${MAX_EQUIPMENT}. Bodyweight moves are always part of your plan.`
+                    }
                     options={EQUIPMENT}
                     selected={(v) => (editingBio.equipment ?? ["none"]).includes(v as Equipment)}
                     onToggle={(v) => {
-                      const eq = v as Equipment;
-                      const cur = editingBio.equipment ?? ["none"];
-                      let next: Equipment[];
-                      if (eq === "none") {
-                        next = ["none"];
-                      } else if (cur.includes(eq)) {
-                        next = cur.filter((e) => e !== eq);
-                      } else {
-                        next = [...cur.filter((e) => e !== "none"), eq];
-                      }
-                      if (next.length === 0) next = ["none"];
-                      setEditingBio({ ...editingBio, equipment: next });
+                      // Shared rule (models/equipment): Bodyweight combines with
+                      // gear, up to three in all, never an empty list.
+                      const { next, capped } = toggleEquipment(editingBio.equipment, v as Equipment);
+                      if (!capped) setEditingBio({ ...editingBio, equipment: next });
                     }}
                   />
                   <ChipGroup

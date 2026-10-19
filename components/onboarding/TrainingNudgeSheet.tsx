@@ -16,6 +16,7 @@ import AILogoBadge from "@/components/gozlin/AILogoBadge";
 import { Radius, Spacing } from "@/constants/theme";
 import { useProfile } from "@/contexts/AppContext";
 import type { ExerciseLevel } from "@/models/user";
+import { MAX_EQUIPMENT, equipmentFull, toggleEquipment } from "@/models/equipment";
 import type { Equipment } from "@/models/workout";
 import { snoozeTrainingNudge } from "@/utils/trainingNudge";
 import * as Haptics from "@/utils/haptics";
@@ -59,17 +60,13 @@ export function TrainingNudgeSheet({
   const [days, setDays] = useState(3);
   const [saving, setSaving] = useState(false);
 
+  // Shared rule (models/equipment): Bodyweight combines with gear, up to three
+  // in all, and the list is never empty.
   const toggleEquip = (value: Equipment) => {
     tap();
-    setEquipment((prev) => {
-      if (value === "none") return ["none"];
-      const withoutNone = prev.filter((e) => e !== "none");
-      const next = withoutNone.includes(value)
-        ? withoutNone.filter((e) => e !== value)
-        : [...withoutNone, value];
-      return next.length ? next : ["none"];
-    });
+    setEquipment((prev) => toggleEquipment(prev, value).next);
   };
+  const equipFull = equipmentFull(equipment);
 
   const dismiss = async () => {
     await snoozeTrainingNudge();
@@ -153,11 +150,17 @@ export function TrainingNudgeSheet({
                       <Pressable
                         key={e.value}
                         onPress={() => toggleEquip(e.value)}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: selected }}
+                        accessibilityLabel={e.label}
                         style={[
                           styles.equipCard,
                           {
                             backgroundColor: selected ? colors.primarySoft : colors.surface,
                             borderColor: selected ? colors.primary : colors.border,
+                            // A full list sets the rest back — still tappable, the
+                            // line below says why nothing happens.
+                            opacity: equipFull && !selected ? 0.45 : 1,
                           },
                         ]}
                       >
@@ -174,6 +177,11 @@ export function TrainingNudgeSheet({
                     );
                   })}
                 </View>
+                <AppText variant="caption" color="tertiary">
+                  {equipFull
+                    ? `That's ${MAX_EQUIPMENT} — untick one to swap in another.`
+                    : `Pick up to ${MAX_EQUIPMENT}. Bodyweight moves are always part of your plan.`}
+                </AppText>
 
                 <Section icon="calendar-outline" text="Days per week" colors={colors} />
                 <View style={styles.wrapRow}>

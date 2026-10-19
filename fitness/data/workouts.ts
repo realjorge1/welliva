@@ -143,7 +143,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
     tags: ["home", "no equipment", "full body", "quiet"],
     goalFit: ["build_muscle", "improve_fitness", "better_health"],
     warmup: [
-      { exerciseId: "cardio_01", sets: 1, reps: "30 sec" },
+      { exerciseId: "cardio_08", sets: 1, reps: "45 sec" },
       { exerciseId: "flex_03", sets: 1, reps: "8 cycles" },
     ],
     main: [
@@ -233,7 +233,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
     tags: ["glutes", "no equipment", "posture", "low impact"],
     goalFit: ["build_muscle", "better_health", "improve_fitness"],
     warmup: [
-      { exerciseId: "cardio_03", sets: 1, reps: "30 sec" },
+      { exerciseId: "cardio_08", sets: 1, reps: "45 sec" },
       { exerciseId: "flex_03", sets: 1, reps: "6 cycles" },
     ],
     main: [
@@ -384,7 +384,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
     goalFit: ["improve_fitness", "better_health"],
     warmup: [
       { exerciseId: "flex_03", sets: 1, reps: "8 cycles" },
-      { exerciseId: "cardio_01", sets: 1, reps: "30 sec" },
+      { exerciseId: "cardio_08", sets: 1, reps: "45 sec" },
     ],
     main: [
       { exerciseId: "core_01" },
@@ -458,7 +458,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
     name: "Steady Burner",
     tagline: "Twenty conversational minutes that add up.",
     description:
-      "Low-skill, steady-state cardio blocks you can do in socks — shadow jump-rope, marches and squats at a pace you could hum along to.",
+      "Low-skill, steady-state cardio blocks you can do in socks — shadow jump-rope, butt kicks, squats and jacks at a pace you could hum along to.",
     style: "endurance",
     focus: "full_body",
     difficulty: "beginner",
@@ -504,6 +504,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "core_04" },
       { exerciseId: "cardio_05", sets: 3, reps: "60 sec" },
       { exerciseId: "legs_02" },
+      { exerciseId: "hinge_01" },
     ],
     cooldown: [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
@@ -637,7 +638,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
   {
     id: "mobility-reset",
     name: "Mobility Reset",
-    tagline: "Ten minutes your joints will thank you for.",
+    tagline: "Seven minutes your joints will thank you for.",
     description:
       "The world's greatest stretch, hamstring and hip openers and a long exhale in child's pose. Do it on rest days; feel it on training days.",
     style: "mobility",
@@ -930,7 +931,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
     name: "The Daily Dozen",
     tagline: "Twelve stations. One circuit. No excuses.",
     description:
-      "A full-body circuit in the spirit of the ACSM high-intensity circuit protocol: twelve thirty-second stations that alternate pushing, squatting, core and cardio so you never stall.",
+      "A full-body circuit in the spirit of the ACSM high-intensity circuit protocol: twelve quick stations that alternate pushing, squatting, core and cardio so you never stall.",
     style: "hiit",
     focus: "full_body",
     difficulty: "intermediate",
@@ -1050,9 +1051,9 @@ export const WORKOUTS: WorkoutDefinition[] = [
   {
     id: "lunch-crunch",
     name: "Lunch Crunch",
-    tagline: "Fifteen minutes between meetings. Fully spent.",
+    tagline: "Twelve minutes between meetings. Fully spent.",
     description:
-      "A no-setup interval block sized exactly for a lunch break: quick warm-up, four hard-working supersets, quick stretch, back at your desk glowing.",
+      "A no-setup interval block sized exactly for a lunch break: quick warm-up, four hard-working stations, quick stretch, back at your desk glowing.",
     style: "hiit",
     focus: "full_body",
     difficulty: "intermediate",
@@ -1075,7 +1076,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
     name: "No-Jump HIIT",
     tagline: "Downstairs neighbours will never know.",
     description:
-      "All the interval intensity with both feet on the floor: bear crawls, fast marches, squats and plank work. Proof that quiet and hard are not opposites.",
+      "All the interval intensity with both feet on the floor: bear crawls, shadow boxing, squats and plank work. Proof that quiet and hard are not opposites.",
     style: "hiit",
     focus: "full_body",
     difficulty: "intermediate",
@@ -1577,6 +1578,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "push_02", sets: 3, reps: "12" },
       { exerciseId: "cardio_02", sets: 3, reps: "30 sec" },
       { exerciseId: "core_02", sets: 2, reps: "15" },
+      { exerciseId: "hinge_01", sets: 3, reps: "15" },
     ],
     cooldown: [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
@@ -1617,7 +1619,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
     name: "Stamina Stack",
     tagline: "Layer on layer until quitting isn't a thought.",
     description:
-      "A long, patiently built session stacking cardio blocks between strength stations. The one to book when you have forty minutes and something to prove to nobody but yourself.",
+      "A long, patiently built session stacking cardio blocks between strength stations. The one to book when you have half an hour and something to prove to nobody but yourself.",
     style: "endurance",
     focus: "full_body",
     difficulty: "advanced",
@@ -1881,7 +1883,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
     name: "Full-Range Flow",
     tagline: "Every joint, its whole range, one session.",
     description:
-      "A complete mobility circuit from neck to ankles: rotations, hinges, deep squat holds and long stretches that audit and restore your full movement vocabulary.",
+      "A complete mobility circuit from shoulders to ankles: rotations, hinges, hip openers and long stretches that audit and restore your full movement vocabulary.",
     style: "mobility",
     focus: "full_body",
     difficulty: "intermediate",
@@ -1975,7 +1977,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
       { exerciseId: "flex_07", sets: 2 },
       { exerciseId: "flex_02", sets: 2 },
     ],
-    cooldown: [{ exerciseId: "flex_04", sets: 1, reps: "45 sec" }],
+    cooldown: [{ exerciseId: "flex_10", sets: 1, reps: "45 sec" }],
     art: { icon: "walk", hue: "sky", pattern: "beams" },
   },
   {
@@ -2006,7 +2008,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
     name: "Breathe & Bend",
     tagline: "Long holds. Longer exhales. Nowhere to be.",
     description:
-      "The deep flexibility session: two-minute territory holds for hips, hamstrings and spine where each exhale buys another degree. Best after training or before bed.",
+      "The deep flexibility session: long, repeated holds for hips, hamstrings and spine where each exhale buys another degree. Best after training or before bed.",
     style: "recovery",
     focus: "full_body",
     difficulty: "beginner",
@@ -2048,9 +2050,9 @@ export const WORKOUTS: WorkoutDefinition[] = [
     main: [
       { exerciseId: "cardio_21", sets: 3, reps: "30 sec" },
       { exerciseId: "legs_01", sets: 3, reps: "12" },
-      { exerciseId: "cardio_02", sets: 3, reps: "30 sec" },
+      { exerciseId: "cardio_22", sets: 3, reps: "30 sec" },
       { exerciseId: "core_07", sets: 2, reps: "15 each side" },
-      { exerciseId: "cardio_05", sets: 2, reps: "45 sec" },
+      { exerciseId: "cardio_09", sets: 2, reps: "45 sec" },
     ],
     cooldown: [
       { exerciseId: "flex_01", sets: 1, reps: "30 sec each leg" },
@@ -2093,7 +2095,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
     name: "Gentle Tabata",
     tagline: "The famous format, dialed way down.",
     description:
-      "Twenty-on, plenty-off intervals using stable, no-jump moves — Tabata's structure without the impact, perfect for building a base.",
+      "Short-on, plenty-off intervals using stable, no-jump moves — Tabata's structure without the impact, perfect for building a base.",
     style: "hiit",
     focus: "full_body",
     difficulty: "beginner",
@@ -2151,7 +2153,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
   {
     id: "morning-quick-hiit",
     name: "Morning Quick HIIT",
-    tagline: "Ten minutes to a wide-awake body.",
+    tagline: "Twenty minutes to a wide-awake body.",
     description:
       "A brisk, beginner-safe interval wake-up that leaves you buzzing for the day — simple footwork, squats and light core.",
     style: "hiit",
@@ -3051,7 +3053,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
     name: "Stillness & Length",
     tagline: "Be still. Get long.",
     description:
-      "Two-minute-territory holds that reward patience with real range — a deep restorative practice for the well-stretched.",
+      "Minute-long holds that reward patience with real range — a deep restorative practice for the well-stretched.",
     style: "recovery",
     focus: "full_body",
     difficulty: "advanced",
@@ -3075,7 +3077,7 @@ export const WORKOUTS: WorkoutDefinition[] = [
     name: "Total Surrender",
     tagline: "Give the whole body permission to rest.",
     description:
-      "A deeply restorative flow of long, supported holds — the advanced wind-down that leaves nothing tense from head to heel.",
+      "A deeply restorative flow of long, unhurried holds — the advanced wind-down that leaves nothing tense from head to heel.",
     style: "recovery",
     focus: "full_body",
     difficulty: "advanced",

@@ -100,6 +100,8 @@ export const DEVICE_LOCAL_KEYS: readonly string[] = [
   "@welliva_sync_telemetry",
   // THIS device's caught-render-crash black box (services/telemetry/CrashLog)
   "@welliva_crash_log",
+  // the cycle reminders pending in THIS phone's OS queue (services/cycle/reminders)
+  "@welliva_cycle_reminder_ids",
   ACTIVE_USER_KEY,
   WATERMARKS_KEY,
   OUTBOX_KEY,
@@ -110,6 +112,11 @@ export const DEVICE_LOCAL_KEYS: readonly string[] = [
 /** Prefix-matched device-local families (versioned caches, etc.). */
 export const DEVICE_LOCAL_PREFIXES: readonly string[] = [
   "@welliva_exercise_media_", // ExerciseMediaService media cache (regenerable)
+  // The cycle log while its backup is switched OFF. Not a cache — her own
+  // choice to keep it on this phone. Turning backup off MOVES the documents
+  // here from `@welliva_cycle_*`, and the removal of those keys is what makes
+  // the sweep tombstone the cloud copy (services/cycle/store).
+  "@welliva_cycle_local_",
 ];
 
 /** True when a key belongs to the app (either namespace). */

@@ -278,6 +278,7 @@ export type FeatureId =
   | "sync"
   | "history"
   | "insights"
+  | "insight-history"
   | "habits"
   | "foods"
   | "photo-log"
@@ -294,6 +295,10 @@ export const FEATURE_MIN_TIER: Record<FeatureId, Tier> = {
   "photo-log": "pro", // none on free, 30/day on Pro
 
   /* ── Depth over data the user already owns. Cents a month to serve. ────────*/
+  // The archive of insights already opened. Getting an insight and opening it
+  // are free; keeping every one to come back to is the depth. Recording is
+  // never gated, so the history is waiting for anyone who upgrades.
+  "insight-history": "pro",
   habits: "pro", // "Suggested for you" + custom; the linked three stay free
   foods: "pro", // the searchable whole-foods catalog
   sync: "pro",
