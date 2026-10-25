@@ -6,21 +6,47 @@
  *   2. one tap — "Period started" / "Period ended", and "Log today"
  *   3. anything that needs an answer — an unended period, a gap that looks
  *      like a missed log
- *   4. today — her own heads-ups, what she logged, what changed in her plan
+ *   4. today — her own heads-ups, what she logged, what changed in her plan,
+ *      and, on a hard day she has not answered, the one ask that lets the
+ *      coach see her cycle
  *   5. the next period — the window, the most likely day, and WHY (the
  *      cycles it was built from), plus the fertile window if she chose it
  *   6. iron, on heavy days — from foods she already eats
  *   7. what her cycle shows — her patterns, across mood, sleep and training
- *   8. worth mentioning to a doctor — only when something is
- *   9. the calendar and her cycles side by side
- *  10. where the data lives, in one honest line
+ *   8. worth mentioning to a doctor — only when something is, each note now
+ *      carrying the page that says WHAT is being mentioned
+ *   9. worth reading — three pages from where she is today, and the library
+ *  10. the calendar and her cycles side by side
+ *  11. where the data lives, in one honest line
  *
  * Paused in pregnancy; waiting after a birth; logging-only with menopause on
  * the profile. Not set up → the setup invitation, never a dead end.
+ *
+ * IT LIVES IN `(tabs)` — a swipe-menu destination, not a pushed screen.
+ * It used to hang off Home's cycle card and a Settings row, which were the only
+ * two doors to it: a daily surface reachable only by first going somewhere else.
+ * Moving it here is what let the drawer carry a Cycle row (the drawer SWITCHES
+ * between (tabs) children and never pushes — see app/(tabs)/_layout), and it is
+ * why the header is a ScreenTopBar with the hamburger instead of a back arrow.
+ *
+ * `/cycle/setup`, `/cycle/settings` and `/cycle/learn` stay pushed screens at
+ * the app root, exactly as `/exercise/[id]` sits beside the Fitness tab. The URL
+ * did not move: `(tabs)` is a route GROUP, so this file is still `/cycle`, and
+ * every `router.push("/cycle")`, deep link and notification route still
+ * resolves.
  */
-import { CycleCalendar, CycleDial, CycleHistory, DayLogSheet, PickDateSheet, useCyclePalette } from "@/components/cycle";
+import {
+  CycleCalendar,
+  CycleDial,
+  CycleGozlinAsk,
+  CycleHistory,
+  DayLogSheet,
+  PickDateSheet,
+  useCyclePalette,
+} from "@/components/cycle";
 import { useCyclePatterns, useIronPicks } from "@/components/cycle/useCycleInsights";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
+import { ScreenTopBar } from "@/components/navigation";
 import { AppText, Button, Card, IconBadge, Reveal, Screen, SectionHeader, useColors } from "@/components/ui";
 import { useSyncStatus } from "@/services/sync/useSyncStatus";
 import { Radius, Spacing, alpha } from "@/constants/theme";
@@ -29,6 +55,7 @@ import {
   addDays,
   confidenceLine,
   cycleHeadline,
+  CYCLE_LIBRARY,
   dialModel,
   doctorSummary,
   ENERGY_LABEL,
@@ -39,7 +66,9 @@ import {
   MOOD_LABEL,
   openEpisode,
   paintDays,
+  READING_FOR_NOTE,
   shiftMonthCursor,
+  suggestedReading,
   SYMPTOM_LABEL,
   windowLine,
   type CycleDayLog,
@@ -83,45 +112,57 @@ export default function CycleScreen() {
     [data.periods, data.days, view, today, settings.showFertileWindow],
   );
   const open = useMemo(() => openEpisode(data.periods), [data.periods]);
+  /** The three pages that bear on today — see the "Worth reading" section. */
+  const reading = useMemo(() => suggestedReading(view, settings), [view, settings]);
 
   const dialSize = Math.min(300, Math.round(width - Spacing.screen * 2 - 48));
   const headline = cycleHeadline(view, settings.showFertileWindow);
 
+  /**
+   * The menu's own top bar, not a back arrow. This screen is a root destination
+   * now — the drawer switches to it with no push — so a back arrow would point
+   * at whatever happened to be behind it, which is nothing. Learn and Settings
+   * sit on line 1 so they ride the fold.
+   */
   const header = (
-    <View style={styles.headerRow}>
-      <Pressable
-        hitSlop={12}
-        onPress={() => router.back()}
-        accessibilityRole="button"
-        accessibilityLabel="Back"
-        style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
-      >
-        <Ionicons name="chevron-back" size={20} color={colors.text} />
-      </Pressable>
-      <AppText variant="title" style={styles.headerTitle}>
-        Cycle
-      </AppText>
-      {settings.enabled ? (
-        <Pressable
-          hitSlop={12}
-          onPress={() => router.push("/cycle/settings" as never)}
-          accessibilityRole="button"
-          accessibilityLabel="Cycle settings"
-          style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
-        >
-          <Ionicons name="options-outline" size={19} color={colors.text} />
-        </Pressable>
-      ) : (
-        <View style={styles.iconBtn} />
-      )}
-    </View>
+    <ScreenTopBar
+      title="Cycle"
+      style={styles.topBar}
+      right={
+        <View style={styles.headerActions}>
+          {/* Learn is here even before she has set anything up: the library
+              explains cycles, not her log, and it is a fair thing to read while
+              deciding whether to track at all. */}
+          <Pressable
+            hitSlop={12}
+            onPress={() => router.push("/cycle/learn" as never)}
+            accessibilityRole="button"
+            accessibilityLabel="Learn about your cycle"
+            style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
+          >
+            <Ionicons name="book-outline" size={18} color={colors.text} />
+          </Pressable>
+          {settings.enabled ? (
+            <Pressable
+              hitSlop={12}
+              onPress={() => router.push("/cycle/settings" as never)}
+              accessibilityRole="button"
+              accessibilityLabel="Cycle settings"
+              style={[styles.iconBtn, { backgroundColor: alpha(colors.text, 0.07) }]}
+            >
+              <Ionicons name="options-outline" size={19} color={colors.text} />
+            </Pressable>
+          ) : null}
+        </View>
+      }
+    />
   );
 
-  if (!cycle.ready) return <Screen header={header}>{null}</Screen>;
+  if (!cycle.ready) return <Screen header={header} floatingHeader>{null}</Screen>;
 
   if (!settings.enabled) {
     return (
-      <Screen header={header}>
+      <Screen header={header} floatingHeader>
         <Card padding="xl" style={styles.block}>
           <IconBadge name="water" tone={palette.period} size={48} />
           <AppText variant="title" style={styles.setupTitle}>
@@ -168,7 +209,7 @@ export default function CycleScreen() {
 
   return (
     <>
-      <Screen header={header}>
+      <Screen header={header} floatingHeader>
         {/* ── 1. The dial ─────────────────────────────────────────────── */}
         <Reveal index={0}>
           <View style={styles.hero}>
@@ -378,6 +419,14 @@ export default function CycleScreen() {
           </Reveal>
         ) : null}
 
+        {/* ── 4b. "Let Gozlin see your cycle?" ────────────────────────────
+            Directly under what she logged, because that is what makes it a
+            question with an obvious point. It renders nothing unless today is
+            the moment and she has neither agreed nor declined — the predicate
+            is services/cycle/brief's `gozlinAsk`, and it gives up after three
+            days rather than becoming furniture. */}
+        <CycleGozlinAsk style={styles.askCard} />
+
         {/* ── 5. The next period ──────────────────────────────────────── */}
         {p && s.predicting && !s.inPeriod ? (
           <Reveal index={4}>
@@ -505,6 +554,28 @@ export default function CycleScreen() {
                     {note.body}
                   </AppText>
                   <View style={styles.noteActions}>
+                    {/* THE ANSWER TO "WORTH MENTIONING WHAT?". This used to be
+                        the end of it: the app named something, said to raise it
+                        with a doctor, and went quiet. Every note now has a page
+                        that says what is being mentioned, what a doctor can
+                        check and where the line is — services/cycle/library
+                        owns the mapping so this and the Learn section below can
+                        never offer different pages for the same note. */}
+                    <Pressable
+                      onPress={() =>
+                        router.push({
+                          pathname: "/cycle/learn/[id]",
+                          params: { id: READING_FOR_NOTE[note.id] },
+                        } as never)
+                      }
+                      accessibilityRole="button"
+                      accessibilityLabel={`Read about this: ${CYCLE_LIBRARY[READING_FOR_NOTE[note.id]].title}`}
+                      hitSlop={8}
+                    >
+                      <AppText variant="footnote" color="brand" weight="700">
+                        Read about this
+                      </AppText>
+                    </Pressable>
                     <Pressable
                       onPress={() =>
                         void Share.share({
@@ -546,8 +617,61 @@ export default function CycleScreen() {
           </Reveal>
         ) : null}
 
-        {/* ── 9. Calendar and history ─────────────────────────────────── */}
+        {/* ── 8b. Worth reading ───────────────────────────────────────────
+            Three pages, picked from the flags already raised and from what she
+            logged today (services/cycle/library). The whole library is one tap
+            further on, and the picks never interpret her log — they decide
+            which page to OFFER, which is the difference between a shelf and a
+            symptom checker. */}
         <Reveal index={8}>
+          <View style={styles.section}>
+            <SectionHeader
+              title="Worth reading"
+              subtitle="Plain answers, chosen for where you are"
+              actionLabel="All"
+              onAction={() => router.push("/cycle/learn" as never)}
+              weight="700"
+            />
+            <Card padding="none">
+              {reading.map((article, i) => (
+                <Pressable
+                  key={article.id}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/cycle/learn/[id]",
+                      params: { id: article.id },
+                    } as never)
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={article.title}
+                  accessibilityHint={article.blurb}
+                  style={({ pressed }) => [
+                    styles.readRow,
+                    i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider },
+                    pressed && { backgroundColor: alpha(colors.text, 0.05) },
+                  ]}
+                >
+                  <IconBadge name={article.icon as never} tone={palette.period} size={34} />
+                  <View style={styles.flex}>
+                    <AppText variant="subhead" weight="600">
+                      {article.title}
+                    </AppText>
+                    <AppText variant="caption" color="tertiary" numberOfLines={2}>
+                      {article.blurb}
+                    </AppText>
+                  </View>
+                  <AppText variant="caption" color="tertiary">
+                    {article.minutes}m
+                  </AppText>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                </Pressable>
+              ))}
+            </Card>
+          </View>
+        </Reveal>
+
+        {/* ── 9. Calendar and history ─────────────────────────────────── */}
+        <Reveal index={9}>
           <View style={styles.section}>
             <SectionHeader title="Calendar" subtitle="Tap a day to log or edit it" weight="700" />
             <Card padding="lg">
@@ -565,7 +689,7 @@ export default function CycleScreen() {
         </Reveal>
 
         {view.cycles.length > 0 || s.cycleDay !== null ? (
-          <Reveal index={9}>
+          <Reveal index={10}>
             <View style={styles.section}>
               <SectionHeader title="Your cycles" weight="700" />
               <Card padding="lg">
@@ -662,14 +786,8 @@ function todaySummary(log: CycleDayLog): string {
 }
 
 const styles = StyleSheet.create({
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.sm,
-    gap: Spacing.md,
-  },
-  headerTitle: { flex: 1 },
+  topBar: { paddingTop: Spacing.sm, paddingBottom: Spacing.sm },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
   iconBtn: {
     width: 36,
     height: 36,
@@ -678,6 +796,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   flex: { flex: 1 },
+  askCard: { marginBottom: Spacing.xl },
+  readRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+  },
   block: { marginTop: Spacing.lg },
   setupTitle: { marginTop: Spacing.lg, marginBottom: Spacing.sm },
   setupCta: { marginTop: Spacing.xl },

@@ -7,6 +7,10 @@
  * that FOLLOWS the list rather than sitting on the floor — how a tall phone's
  * spare height is spent is menuRhythm.ts's whole job.
  *
+ * ONE ROW IS CONDITIONAL: Cycle, shown only while she is tracking. That makes
+ * the row COUNT a variable, which is why the rhythm's shape is derived here
+ * instead of being the module constant it used to be — see `shape` below.
+ *
  * EVERYTHING MOVES OFF `progress`, not off mount. The panel's parallax, its
  * scale and fade, and each row's own staggered slide are all interpolations of
  * the drawer's shared value — so they play in reverse, at your speed, while your
@@ -73,16 +77,17 @@ import {
   type DrawerOpenIntent,
 } from "./DrawerContext";
 import {
-  PRIMARY_ITEMS,
   PROFILE_ITEM,
   SECONDARY_ITEMS,
   SETTINGS_ITEM,
   isRailItem,
+  primaryItems,
   UPGRADE_ITEM,
   type MenuItem,
 } from "./menu";
 import { ROW_GAP, ROW_MIN, menuRhythm, type MenuShape } from "./menuRhythm";
 import { useAccountIdentity } from "./useAccountIdentity";
+import { useCycleOptional } from "@/contexts/CycleContext";
 
 export interface SideMenuProps {
   progress: SharedValue<number>;
@@ -176,6 +181,22 @@ export function SideMenu({
   }));
 
   const insets = useSafeAreaInsets();
+
+  /**
+   * THE ONE DESTINATION THAT COMES AND GOES. Cycle is in the list while she is
+   * tracking, and absent otherwise — the owner's rule for it: a daily surface
+   * for the people who keep a cycle log, and a row about periods in the menu of
+   * everyone who doesn't.
+   *
+   * It reads the live provider rather than a prop, so turning tracking on in
+   * Settings puts the row there before the drawer is next opened, and turning it
+   * off takes it away. `useCycleOptional` because the panel must still render if
+   * it is ever mounted outside the cycle provider.
+   */
+  const cycle = useCycleOptional();
+  const showCycle = !!cycle?.ready && cycle.settings.enabled;
+  const primary = useMemo(() => primaryItems({ cycle: showCycle }), [showCycle]);
+
   /**
    * The height the list and the footer share: everything under the profile
    * header. Measured rather than derived from the window, because the header's
@@ -184,9 +205,23 @@ export function SideMenu({
    * opens it, so the one re-render this costs is never seen.
    */
   const [bodyHeight, setBodyHeight] = useState(0);
+  /**
+   * What the rhythm has to fit. Derived, not a constant: the row count moves
+   * with Cycle, and a shape that still claimed the old count would spend a tall
+   * phone's slack on rows that aren't there — and, on a short one, size the list
+   * to fit a row it no longer has.
+   */
+  const shape = useMemo<MenuShape>(
+    () => ({
+      listRows: primary.length + SECONDARY_ITEMS.length,
+      footerRows: 2,
+      hairline: StyleSheet.hairlineWidth,
+    }),
+    [primary.length],
+  );
   const rhythm = useMemo(
-    () => menuRhythm(bodyHeight, insets.bottom, MENU_SHAPE),
-    [bodyHeight, insets.bottom],
+    () => menuRhythm(bodyHeight, insets.bottom, shape),
+    [bodyHeight, insets.bottom, shape],
   );
 
   // One running index across all three groups, so the stagger reads as a single
@@ -218,7 +253,7 @@ export function SideMenu({
             contentContainerStyle={[styles.list, { paddingBottom: rhythm.gap }]}
             showsVerticalScrollIndicator={false}
           >
-            {PRIMARY_ITEMS.map((item) => (
+            {primary.map((item) => (
               <Row
                 key={item.route}
                 item={item}
@@ -549,13 +584,6 @@ function Row({
 /** Mark at rest, and the same mark on the screen you're actually looking at. */
 const MARK_REST = 21;
 const MARK_ACTIVE = 30;
-
-/** What the rhythm has to fit: the scrolling list, and the two footer rows. */
-const MENU_SHAPE: MenuShape = {
-  listRows: PRIMARY_ITEMS.length + SECONDARY_ITEMS.length,
-  footerRows: 2,
-  hairline: StyleSheet.hairlineWidth,
-};
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },

@@ -8,6 +8,7 @@
  *     which day, and — just as visibly — a press that could NOT be counted, and
  *     why. A button that fails silently teaches people the buttons don't work.
  */
+import { useCyclePalette } from "@/components/cycle";
 import { AppText, Card, Divider, useColors } from "@/components/ui";
 import { Spacing, alpha } from "@/constants/theme";
 import type { JournalEntry } from "@/services/notifications/journal";
@@ -23,17 +24,23 @@ const KIND_ICON: Record<QueueKind, keyof typeof Ionicons.glyphMap> = {
   water: "water",
   workout: "barbell",
   coach: "sparkles",
+  cycle: "water",
   other: "notifications",
 };
 
 function useKindTone(): Record<QueueKind, string> {
   const { colors } = useColors();
+  const palette = useCyclePalette();
   return {
     habit: colors.warning,
     meal: colors.success,
     water: colors.water,
     workout: colors.primary,
     coach: colors.gold,
+    // The cycle's own rose — the same one the dial, the calendar and the Home
+    // card use — so a receipt for "Started today" reads as a cycle entry at a
+    // glance rather than as one more habit.
+    cycle: palette.period,
     other: colors.textTertiary,
   };
 }

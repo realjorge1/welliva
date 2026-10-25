@@ -13,12 +13,27 @@
  * showing the app. The write itself goes straight to storage (see
  * ./pipeline and the *Actions modules), so it survives the app not running.
  *
- * There are THREE categories, not one, and the split is deliberate. A habit
+ * There are FIVE categories, not one, and the split is deliberate. A habit
  * reminder's button says "Mark as Done"; a meal reminder's says "Ate it"; a
  * water reminder's says how much it will add. Same mechanism, different
  * sentence — and the sentence matters, because it is the only text on the button
  * and the user is deciding whether to press it from a locked screen. One shared
  * category would have forced one shared verb.
+ *
+ * THE CYCLE HAS TWO OF ITS OWN, for the same reason. Its reminders ask a
+ * question — "has your period started?", "has it ended?" — and a question that
+ * cannot take an answer is the worst kind of notification: it moves the work
+ * into the app and leaves the user to find the screen. The two questions have
+ * opposite answers ("Started today" / "Not yet" against "It ended today" /
+ * "Still going"), so they get a category each, and the ANSWER actions are shared
+ * between them: the handler reads `data.kind` to know which question it is
+ * answering (services/notifications/cycleActions).
+ *
+ * Those buttons also have to hold the cycle's discretion rule
+ * (services/cycle/reminderPlan): the lock screen must not name her period
+ * unless she switched discreet wording off. None of the four words below does —
+ * "Started today" beside "Quick check-in" says nothing to someone reading over
+ * her shoulder, and says everything to her.
  *
  * WORKOUTS DELIBERATELY HAVE NO CATEGORY HERE. A meal, a glass or a habit is a
  * yes/no fact the user can answer from a lock screen; a session is a thing with
@@ -40,11 +55,20 @@ export const MEAL_REMINDER_CATEGORY = "welliva.meal-reminder";
 /** Category carried by every water reminder. */
 export const WATER_REMINDER_CATEGORY = "welliva.water-reminder";
 
+/** The cycle check-in: "has your period started?" */
+export const CYCLE_REMINDER_CATEGORY = "welliva.cycle-reminder";
+
+/** The other cycle question: "has your period ended?" */
+export const CYCLE_ENDED_CATEGORY = "welliva.cycle-ended";
+
 /** Action ids — matched against `response.actionIdentifier`. */
 export const ACTION_MARK_DONE = "MARK_DONE";
 export const ACTION_SNOOZE = "SNOOZE";
 export const ACTION_LOG_MEAL = "LOG_MEAL";
 export const ACTION_LOG_WATER = "LOG_WATER";
+/** Yes/no for both cycle questions — `data.kind` says which one was asked. */
+export const ACTION_CYCLE_YES = "CYCLE_YES";
+export const ACTION_CYCLE_NO = "CYCLE_NO";
 
 /** How long "Later" pushes a reminder out. */
 export const SNOOZE_MINUTES = 60;
@@ -112,6 +136,39 @@ async function register(): Promise<void> {
     {
       identifier: ACTION_SNOOZE,
       buttonTitle: `Later (${WATER_SNOOZE_MINUTES}m)`,
+      options: { opensAppToForeground: false },
+    },
+  ]);
+
+  // NO SNOOZE on either cycle category. "Later" exists for a reminder whose
+  // answer stays true for an hour ("have you eaten"); the answer to "has it
+  // started" is a fact about a day, and "Not yet" already carries it. A snooze
+  // would also re-ask a question the app can answer itself: a period that has
+  // not been logged by its predicted day is what "Late by 2 days" on Home is.
+  await Notifications.setNotificationCategoryAsync(CYCLE_REMINDER_CATEGORY, [
+    {
+      // Past tense, like "Ate it": a statement she can make from a locked
+      // screen, which is the honest description of what the button records.
+      identifier: ACTION_CYCLE_YES,
+      buttonTitle: "Started today",
+      options: { opensAppToForeground: false },
+    },
+    {
+      identifier: ACTION_CYCLE_NO,
+      buttonTitle: "Not yet",
+      options: { opensAppToForeground: false },
+    },
+  ]);
+
+  await Notifications.setNotificationCategoryAsync(CYCLE_ENDED_CATEGORY, [
+    {
+      identifier: ACTION_CYCLE_YES,
+      buttonTitle: "It ended today",
+      options: { opensAppToForeground: false },
+    },
+    {
+      identifier: ACTION_CYCLE_NO,
+      buttonTitle: "Still going",
       options: { opensAppToForeground: false },
     },
   ]);

@@ -15,10 +15,12 @@
  *
  *  · NO BACK STACK between destinations. The hamburger is the top-left control
  *    everywhere, always, because there is never anything to go back to.
- *  · `freezeOnBlur` + lazy mounting, for eleven screens instead of four. A
+ *  · `freezeOnBlur` + lazy mounting, for thirteen screens instead of four. A
  *    destination you've never opened has never mounted; one you've left stops
- *    re-rendering. This is what makes an eleven-screen shell cheaper than the
- *    old four-tab one plus a stack of pushed screens.
+ *    re-rendering. This is what makes a thirteen-screen shell cheaper than the
+ *    old four-tab one plus a stack of pushed screens — and it is what makes
+ *    Cycle free to sit here for everyone while the menu shows it to the people
+ *    who track one.
  *  · ANDROID BACK still retraces the destinations you actually visited
  *    (`backBehavior="history"`), which is what the gesture means to a person.
  *  · URLS DIDN'T MOVE. `(tabs)` is a route GROUP — it never appears in a path —
@@ -62,6 +64,12 @@ export default function TabLayout() {
       <Tabs.Screen name="exercise" options={{ title: "Fitness" }} />
       <Tabs.Screen name="gozlin" options={{ title: "Gozlin" }} />
       <Tabs.Screen name="habits" options={{ title: "Habits" }} />
+      {/* Only in the menu while she's tracking (see navigation/menu.ts) — but
+          always a screen here. A navigator whose screen list changed with a
+          setting would unmount the live screen the moment she turned tracking
+          off from it, and `/cycle` has to keep resolving for the deep link a
+          cycle reminder carries whatever the menu is showing. */}
+      <Tabs.Screen name="cycle" options={{ title: "Cycle" }} />
       <Tabs.Screen name="logs" options={{ title: "Logs" }} />
       <Tabs.Screen name="privacy" options={{ title: "Trust" }} />
 

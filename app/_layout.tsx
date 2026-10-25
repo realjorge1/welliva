@@ -225,10 +225,12 @@ function RootLayoutContent() {
             <Stack.Screen name="session-summary" />
             <Stack.Screen name="habit/[id]" />
             <Stack.Screen name="habit/new" options={{ presentation: "modal" }} />
-            {/* Cycle tracking, reached from Home's cycle card and from Settings. */}
-            <Stack.Screen name="cycle/index" />
+            {/* Cycle tracking. The screen itself is a menu destination inside
+                (tabs); these three are pushed over it. */}
             <Stack.Screen name="cycle/setup" />
             <Stack.Screen name="cycle/settings" />
+            <Stack.Screen name="cycle/learn/index" />
+            <Stack.Screen name="cycle/learn/[id]" />
             {/* The purchase surface is `/upgrade`, a menu destination inside
                 (tabs) — not a modal stacked over whatever you were doing. A lock
                 navigates there; the menu is always one tap away, so the ask can

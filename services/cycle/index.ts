@@ -2,7 +2,7 @@
  * services/cycle — the cycle tracker's engine.
  *
  * Pure modules (dates, episodes, predict, flags, patterns, care, brief, view,
- * reminderPlan, exportData) plus the two that touch the device: `store`
+ * reminderPlan, exportData, library) plus the two that touch the device: `store`
  * (AsyncStorage, through OfflineStorage) and `reminders` (expo-notifications).
  * Tests import the pure files directly; app code imports from here.
  */
@@ -18,6 +18,7 @@ export * from "./brief";
 export * from "./view";
 export * from "./reminderPlan";
 export * from "./exportData";
+export * from "./library";
 export * from "./visual";
 export * from "./copy";
 export * from "./store";

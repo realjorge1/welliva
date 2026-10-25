@@ -19,7 +19,7 @@ import { readJSON, writeJSON } from "../OfflineStorage";
 export const JOURNAL_KEY = "@welliva_notif_journal";
 export const JOURNAL_MAX = 40;
 
-export type JournalKind = "habit" | "meal" | "water";
+export type JournalKind = "habit" | "meal" | "water" | "cycle";
 
 export interface JournalEntry {
   /** Stable id — the response key that produced it. */
@@ -29,9 +29,9 @@ export interface JournalEntry {
   at: string;
   /** Local YYYY-MM-DD the write was FOR — the reminder's fire date. */
   date: string;
-  /** "Meditate", "Grilled chicken salad", "Water". */
+  /** "Meditate", "Grilled chicken salad", "Water", "Period". */
   title: string;
-  /** "Marked done · 6-day streak", "Logged to lunch", "+250 ml". */
+  /** "Marked done · 6-day streak", "Logged to lunch", "+250 ml", "Started Tue 20 Oct". */
   detail: string;
   /** False when the press could not be counted; `detail` says why. */
   ok: boolean;

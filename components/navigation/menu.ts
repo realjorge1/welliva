@@ -40,7 +40,32 @@ export interface MenuItem {
   mark?: "gozlin";
 }
 
-/** The main list — Home through Private, in the order the menu shows them. */
+/**
+ * THE ONE CONDITIONAL ROW. Cycle is a daily surface for the people who track
+ * one and noise for everyone else, so it is the only destination the menu shows
+ * or hides — see {@link primaryItems}.
+ *
+ * It is a `(tabs)` child like every other row (app/(tabs)/cycle.tsx). That move
+ * is the whole reason this row can exist: the drawer SWITCHES between (tabs)
+ * children and never pushes, so a row pointing at a pushed screen would hand
+ * the next destination a back arrow instead of a hamburger. Before it moved,
+ * the cycle screen was reachable only from Home's card and a Settings row.
+ */
+export const CYCLE_ITEM: MenuItem = {
+  route: "cycle",
+  href: "/cycle",
+  label: "Cycle",
+  icon: "water-outline",
+  activeIcon: "water",
+};
+
+/**
+ * The main list — Home through Logs, in the order the menu shows them.
+ *
+ * STILL THE SPEC, STILL STATIC. Use {@link primaryItems} to render the menu;
+ * this is the fixed spine, and the navigator, SWIPEABLE_PATHS and the rail all
+ * read from the full set below rather than from what is currently visible.
+ */
 export const PRIMARY_ITEMS: MenuItem[] = [
   {
     route: "index",
@@ -88,6 +113,22 @@ export const PRIMARY_ITEMS: MenuItem[] = [
     activeIcon: "reader",
   },
 ];
+
+/**
+ * The primary list as the menu should draw it right now.
+ *
+ * Cycle slots in after Habits and before Logs — with the other things you keep
+ * rather than with the record you read. The order of everything else is
+ * untouched, so a row never moves under someone's thumb between launches:
+ * a destination appearing is a change she made, a destination shuffling is a
+ * bug she can feel.
+ */
+export function primaryItems(options: { cycle: boolean }): MenuItem[] {
+  if (!options.cycle) return PRIMARY_ITEMS;
+  const at = PRIMARY_ITEMS.findIndex((i) => i.route === "logs");
+  const insert = at === -1 ? PRIMARY_ITEMS.length : at;
+  return [...PRIMARY_ITEMS.slice(0, insert), CYCLE_ITEM, ...PRIMARY_ITEMS.slice(insert)];
+}
 
 /**
  * THE FOUR ON THE RAIL — a pinned SUBSET of the list above, not a second list.
@@ -202,9 +243,19 @@ export const PROFILE_ITEM: MenuItem = {
   activeIcon: "person",
 };
 
-/** Every root screen the menu can reach, in navigator order. */
+/**
+ * Every root screen the menu can reach, in navigator order.
+ *
+ * CYCLE IS IN HERE UNCONDITIONALLY, even though the list may not be showing it.
+ * This set is what the gesture, the rail's altitudes and the navigator are
+ * derived from, and all three are about the screen you are ON, not about what
+ * the panel currently lists. A `/cycle` that fell out of SWIPEABLE_PATHS when
+ * the row was hidden would strand someone who arrived from a notification with
+ * no swipe out.
+ */
 export const ALL_MENU_ITEMS: MenuItem[] = [
   ...PRIMARY_ITEMS,
+  CYCLE_ITEM,
   ...SECONDARY_ITEMS,
   UPGRADE_ITEM,
   SETTINGS_ITEM,

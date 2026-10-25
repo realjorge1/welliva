@@ -29,6 +29,7 @@ export { useDrawer, useDrawerOptional } from "./DrawerContext";
 export type { DrawerApi } from "./DrawerContext";
 export {
   ALL_MENU_ITEMS,
+  CYCLE_ITEM,
   PRIMARY_ITEMS,
   PROFILE_ITEM,
   RAIL_ITEMS,
@@ -37,6 +38,7 @@ export {
   SETTINGS_ITEM,
   SWIPEABLE_PATHS,
   isRailItem,
+  primaryItems,
 } from "./menu";
 export type { MenuItem } from "./menu";
 export {

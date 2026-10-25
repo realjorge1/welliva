@@ -19,7 +19,7 @@
  */
 
 /** What moved. Subscribers re-read only what they hold. */
-export type ExternalWriteKind = "habit" | "meal" | "water" | "streak";
+export type ExternalWriteKind = "habit" | "meal" | "water" | "streak" | "cycle";
 
 export interface ExternalWrite {
   kind: ExternalWriteKind;

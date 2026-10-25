@@ -16,9 +16,11 @@ import type { CycleMode, CycleToday, Phase, Prediction } from "./predict";
 import {
   ENERGY_LABEL,
   FLOW_LABEL,
+  GOZLIN_ASK_LIMIT,
   MOOD_LABEL,
   SYMPTOM_LABEL,
   type CycleDayLog,
+  type CycleSettings,
 } from "./types";
 
 export interface CycleBrief {
@@ -110,4 +112,126 @@ export function cycleStateLines(brief: CycleBrief | null | undefined): string[] 
     "HER CYCLE (she chose to share this; bring it up only where it bears on what she asked, never diagnose, and treat predictions as estimates, never as contraception):",
     ...facts.map((f) => `- ${f}`),
   ];
+}
+
+/* ────────────────────────── asking for permission ──────────────────────────
+ * THE ASK, AND WHY IT IS NOT A SETTINGS TOGGLE.
+ *
+ * `cycle_gozlin` is off by default and nothing ever surfaced it, so the coach
+ * was blind to her cycle for everyone except the handful of people who went
+ * looking through Cycle settings. For a paying user that is the worst version
+ * of the feature: she is paying for a coach that knows nothing about the one
+ * thing shaping her day.
+ *
+ * So it is asked ONCE, WELL-TIMED, AND EASILY DECLINED:
+ *
+ *  · WELL-TIMED. Only on a day the answer would obviously change something —
+ *    cramps or a heavy flow logged today, a period that is late, the first
+ *    couple of days of one, a low mood or flat energy. Not on an ordinary day
+ *    nine days out, where the honest answer to "why does it want this?" is
+ *    "no reason yet".
+ *  · NEVER ON THE DAY SHE TURNED TRACKING ON. She has just answered two
+ *    questions about her body; a third about sending it somewhere, in the same
+ *    minute, reads as the app taking advantage of momentum.
+ *  · EASILY DECLINED. "Not now" is permanent (`gozlinAskDismissed`), and the
+ *    toggle stays in Cycle settings for anyone who changes her mind.
+ *  · AND IT GIVES UP. Scrolling past a card is not declining it — it may never
+ *    have been seen — so an unanswered ask returns on another hard day, at most
+ *    {@link GOZLIN_ASK_LIMIT} days in total, then never again.
+ *
+ * Pure, so the timing and the words are testable. Whether she CAN use the coach
+ * is a billing question and belongs to the card, not here — the permission is
+ * worth having in place either way, which is what the Settings toggle has
+ * always said.
+ */
+
+/** What made today the moment. The card leads with it. */
+export type GozlinAskReason = "cramps" | "heavy" | "late" | "period" | "mood" | "energy";
+
+export interface GozlinAsk {
+  reason: GozlinAskReason;
+  /** Names what she logged, so the ask is obviously about today. */
+  headline: string;
+  /** What the coach would be able to do with it. */
+  detail: string;
+}
+
+const ASK_COPY: Record<GozlinAskReason, { headline: string; detail: string }> = {
+  cramps: {
+    headline: "You logged cramps today",
+    detail:
+      "Gozlin can't see your cycle unless you say so. Switch it on and it knows the day you're on when you ask it anything — today's session, what to eat, why you feel like this.",
+  },
+  heavy: {
+    headline: "A heavy day",
+    detail:
+      "Gozlin can't see your cycle unless you say so. Switch it on and it can answer about today knowing where you are — iron, training, how long this usually runs for you.",
+  },
+  late: {
+    headline: "Your period is later than usual",
+    detail:
+      "Gozlin can't see your cycle unless you say so. Switch it on and you can ask about this without explaining it first.",
+  },
+  period: {
+    headline: "Day one or two",
+    detail:
+      "Gozlin can't see your cycle unless you say so. Switch it on and it knows where you are when you ask about training, food or how you're feeling.",
+  },
+  mood: {
+    headline: "A low day, logged",
+    detail:
+      "Gozlin can't see your cycle unless you say so. Switch it on and it can take the day you're on into account instead of guessing.",
+  },
+  energy: {
+    headline: "Low energy today",
+    detail:
+      "Gozlin can't see your cycle unless you say so. Switch it on and it knows the day you're on when you ask what to do about it.",
+  },
+};
+
+/**
+ * Should the ask be in front of her today, and in what words? Null for no.
+ *
+ * @param input.sharing  consent `cycle_gozlin` — already granted means nothing to ask
+ */
+export function gozlinAsk(input: {
+  settings: Pick<
+    CycleSettings,
+    "enabled" | "enabledAt" | "gozlinAskDismissed" | "gozlinAskDays"
+  >;
+  sharing: boolean;
+  mode: CycleMode;
+  status: CycleToday;
+  todayLog?: CycleDayLog;
+  today: string;
+}): GozlinAsk | null {
+  const { settings, sharing, mode, status, todayLog, today } = input;
+  if (!settings.enabled || sharing || settings.gozlinAskDismissed) return null;
+  // Nothing to share, and nothing the coach could do with it.
+  if (mode === "pregnancy") return null;
+
+  // Out of asks — unless today is one she has already been counted for, in
+  // which case the card she is looking at should not vanish under her.
+  const asked = settings.gozlinAskDays;
+  if (asked.length >= GOZLIN_ASK_LIMIT && !asked.includes(today)) return null;
+
+  // Not in the same breath as setting it up.
+  const since = settings.enabledAt?.slice(0, 10);
+  if (since && since >= today) return null;
+
+  const reason = askReason(status, todayLog);
+  return reason ? { reason, ...ASK_COPY[reason] } : null;
+}
+
+/** The moment, in priority order: the hardest fact about today wins. */
+function askReason(status: CycleToday, log: CycleDayLog | undefined): GozlinAskReason | null {
+  if (log?.symptoms?.includes("cramps")) return "cramps";
+  if (log?.flow === "heavy") return "heavy";
+  if (status.lateBy > 0) return "late";
+  if (status.inPeriod && status.periodDay !== null && status.periodDay <= 2 && !status.periodStale) {
+    return "period";
+  }
+  if (log?.mood === "low" || log?.mood === "irritable" || log?.mood === "anxious") return "mood";
+  if (log?.energy === "low") return "energy";
+  return null;
 }

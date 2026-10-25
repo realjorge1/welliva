@@ -14,6 +14,14 @@
  * DISCREET BY DEFAULT. A lock screen is the most public surface a phone has, so
  * unless she turns discreet wording off, no reminder names her period: it says
  * there's something to check, and the app says what.
+ *
+ * THE TWO QUESTIONS CAN BE ANSWERED WHERE THEY'RE ASKED. The check-in and the
+ * "ended?" reminder carry lock-screen buttons (services/notifications/categories
+ * registers them; ./reminders attaches them), so the copy below says "answer
+ * below" rather than "tap to open your log" — a body that sends her into the app
+ * past two buttons that would have done it is the reminder lying about itself.
+ * The button words hold the discretion rule too: "Started today" and "Not yet"
+ * name nothing.
  */
 
 import { addDays, formatRange } from "./dates";
@@ -48,7 +56,9 @@ export function reminderCopy(
     if (kind === "headsup") {
       return { title: "A gentle heads-up", body: "Something to plan around in the next few days. Tap to see." };
     }
-    return { title: "Quick check-in", body: "Tap to update your log. It takes a second." };
+    // Deliberately says nothing about WHAT started or ended — the buttons do
+    // the same. Either answer lands without the app opening.
+    return { title: "Quick check-in", body: "Answer below, or tap to open your log." };
   }
   switch (kind) {
     case "headsup":
@@ -59,9 +69,12 @@ export function reminderCopy(
           : "It's likely in the next few days.",
       };
     case "checkin":
-      return { title: "Has your period started?", body: "One tap logs it, and your predictions re-tune." };
+      return {
+        title: "Has your period started?",
+        body: "Answer below and your predictions re-tune. No need to open the app.",
+      };
     case "ended":
-      return { title: "Has your period ended?", body: "Tap to log the last day." };
+      return { title: "Has your period ended?", body: "Answer below to log the last day." };
   }
 }
 

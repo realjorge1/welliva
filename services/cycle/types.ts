@@ -141,12 +141,31 @@ export interface CycleSettings {
   postpartumSince: string | null;
   /** The Home invitation was answered "not now". */
   offerDismissed: boolean;
+  /**
+   * "Let Gozlin see your cycle" was answered "not now". Once and for all — the
+   * Settings toggle is always there, and a consent question that keeps coming
+   * back is not a question.
+   */
+  gozlinAskDismissed: boolean;
+  /**
+   * The days the ask was PUT IN FRONT OF HER, capped at {@link GOZLIN_ASK_LIMIT}.
+   * Scrolling past a card is not declining it — it may never have been seen —
+   * so an unanswered ask is allowed to come back on another hard day. This is
+   * what stops it coming back forever. Newest last.
+   */
+  gozlinAskDays: string[];
   updatedAt: string;
 }
 
 export const USUAL_CYCLE_RANGE = { min: 18, max: 60 } as const;
 export const USUAL_PERIOD_RANGE = { min: 1, max: 12 } as const;
 export const FULL_SESSION_MEMORY = 12;
+/**
+ * How many separate days the "let Gozlin see your cycle" ask may appear on
+ * before it gives up for good. Three: the one well-timed ask, and two more in
+ * case the first two were below the fold on a day she was not reading.
+ */
+export const GOZLIN_ASK_LIMIT = 3;
 
 export const DEFAULT_CYCLE_SETTINGS: CycleSettings = {
   enabled: false,
@@ -162,6 +181,8 @@ export const DEFAULT_CYCLE_SETTINGS: CycleSettings = {
   fullSessionDays: [],
   postpartumSince: null,
   offerDismissed: false,
+  gozlinAskDismissed: false,
+  gozlinAskDays: [],
   updatedAt: "",
 };
 
@@ -206,6 +227,9 @@ export function normalizeSettings(raw: unknown): CycleSettings {
   const fullSessionDays = Array.isArray(raw.fullSessionDays)
     ? [...new Set(raw.fullSessionDays.filter(isIsoDate))].sort().slice(-FULL_SESSION_MEMORY)
     : [];
+  const gozlinAskDays = Array.isArray(raw.gozlinAskDays)
+    ? [...new Set(raw.gozlinAskDays.filter(isIsoDate))].sort().slice(-GOZLIN_ASK_LIMIT)
+    : [];
   const bool = (v: unknown, fallback: boolean) => (typeof v === "boolean" ? v : fallback);
   const d = DEFAULT_CYCLE_SETTINGS;
   return {
@@ -222,6 +246,8 @@ export function normalizeSettings(raw: unknown): CycleSettings {
     fullSessionDays,
     postpartumSince: isIsoDate(raw.postpartumSince) ? raw.postpartumSince : null,
     offerDismissed: bool(raw.offerDismissed, d.offerDismissed),
+    gozlinAskDismissed: bool(raw.gozlinAskDismissed, d.gozlinAskDismissed),
+    gozlinAskDays,
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
   };
 }

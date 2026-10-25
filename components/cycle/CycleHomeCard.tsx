@@ -51,7 +51,10 @@ export function CycleHomeCard({ style }: { style?: StyleProp<ViewStyle> }) {
     <Card
       style={style}
       padding="lg"
-      onPress={() => router.push("/cycle" as never)}
+      // A tab switch, not a push: the cycle screen is a menu destination, and
+      // pushing one from Home would hand it a back arrow where the hamburger
+      // belongs.
+      onPress={() => router.navigate("/cycle" as never)}
       accessibilityLabel={`Your cycle. ${copy.title}. ${copy.detail}`}
       accessibilityHint="Opens your cycle"
     >

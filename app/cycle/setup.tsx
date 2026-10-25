@@ -46,7 +46,16 @@ export default function CycleSetupScreen() {
         usualCycleDays: cycleDays,
         usualPeriodDays: periodDays,
       });
-      router.replace("/cycle" as never);
+      // /cycle is a (tabs) destination now, not a pushed screen, so it is
+      // SWITCHED to rather than replaced onto the stack — the same two steps
+      // the drawer takes (components/navigation/AppDrawer). A replace would
+      // have stacked a second copy of the whole tab navigator.
+      try {
+        if (router.canDismiss()) router.dismissAll();
+      } catch {
+        // nothing pushed to dismiss
+      }
+      router.navigate("/cycle" as never);
     } finally {
       setSaving(false);
     }

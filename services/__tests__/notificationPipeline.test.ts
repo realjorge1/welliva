@@ -49,13 +49,24 @@ import type { DaySchedule, ScheduledMeal } from "../../models/diet";
 import { loadLogs, saveHabits, saveLogs, updateLogs } from "../HabitService";
 import { markMealConsumedOnce } from "../ScheduleService";
 import {
+  ACTION_CYCLE_NO,
+  ACTION_CYCLE_YES,
   ACTION_LOG_MEAL,
   ACTION_LOG_WATER,
   ACTION_MARK_DONE,
   ACTION_SNOOZE,
+  CYCLE_ENDED_CATEGORY,
+  CYCLE_REMINDER_CATEGORY,
   MEAL_REMINDER_CATEGORY,
   MEAL_SNOOZE_MINUTES,
 } from "../notifications/categories";
+import {
+  DEFAULT_CYCLE_SETTINGS,
+  liveEpisodes,
+  loadCycleData,
+  savePeriods,
+  saveSettings,
+} from "../cycle";
 import { subscribeExternalWrites } from "../notifications/externalWrites";
 import { fireDateOf, fireTimeMs } from "../notifications/fireTime";
 import { JOURNAL_KEY, readJournal } from "../notifications/journal";
@@ -486,6 +497,110 @@ describe("taps, tests and snoozes", () => {
     expect(req.content.categoryIdentifier).toBe(MEAL_REMINDER_CATEGORY);
     expect(req.trigger.seconds).toBe(MEAL_SNOOZE_MINUTES * 60);
     expect(req.content.data).toMatchObject({ slot: "lunch", snoozed: true });
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+
+describe("the cycle's two questions", () => {
+  const CYCLE_SETTINGS = {
+    ...DEFAULT_CYCLE_SETTINGS,
+    enabled: true,
+    usualCycleDays: 28,
+    usualPeriodDays: 5,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  beforeEach(async () => {
+    await saveSettings(CYCLE_SETTINGS);
+    await savePeriods([], true);
+  });
+
+  it('logs the period from "Started today" and leaves a receipt', async () => {
+    const out = await processNotificationResponse(
+      mapped(
+        ACTION_CYCLE_YES,
+        { type: "cycle-reminder", kind: "checkin", uid: OWNER },
+        { category: CYCLE_REMINDER_CATEGORY, title: "Quick check-in" },
+      ),
+    );
+
+    expect(out).toMatchObject({ kind: "cycle", ok: true });
+    expect(liveEpisodes((await loadCycleData()).periods)).toMatchObject([{ start: today() }]);
+    expect(await readJournal()).toMatchObject([{ kind: "cycle", date: today(), ok: true }]);
+  });
+
+  it('writes nothing for "Not yet", but still says it was answered', async () => {
+    const out = await processNotificationResponse(
+      mapped(
+        ACTION_CYCLE_NO,
+        { type: "cycle-reminder", kind: "checkin", uid: OWNER },
+        { category: CYCLE_REMINDER_CATEGORY },
+      ),
+    );
+
+    expect(out).toMatchObject({ kind: "cycle", ok: true, detail: "Answered: not yet" });
+    expect(liveEpisodes((await loadCycleData()).periods)).toEqual([]);
+  });
+
+  it("refuses a press that does not say which question it answers", async () => {
+    const out = await processNotificationResponse(
+      mapped(ACTION_CYCLE_YES, { type: "cycle-reminder", uid: OWNER }),
+    );
+
+    expect(out).toMatchObject({ kind: "ignored", reason: "malformed" });
+    expect(liveEpisodes((await loadCycleData()).periods)).toEqual([]);
+  });
+
+  it("never writes another account's cycle reminder", async () => {
+    const out = await processNotificationResponse(
+      mapped(ACTION_CYCLE_YES, { type: "cycle-reminder", kind: "checkin", uid: "user-b" }, { id: "stale" }),
+    );
+
+    expect(out).toMatchObject({ kind: "ignored", reason: "not-owner" });
+    expect(liveEpisodes((await loadCycleData()).periods)).toEqual([]);
+    expect(N.cancelScheduledNotificationAsync).toHaveBeenCalledWith("stale");
+  });
+
+  it("applies the same press once when it arrives by two doors", async () => {
+    const press = { id: "cyc-1", date: firedMs() };
+    await processNotificationResponse(
+      mapped(ACTION_CYCLE_YES, { type: "cycle-reminder", kind: "checkin", uid: OWNER }, press),
+      "task",
+    );
+    const second = await processNotificationResponse(
+      mapped(ACTION_CYCLE_YES, { type: "cycle-reminder", kind: "checkin", uid: OWNER }, press),
+      "listener",
+    );
+
+    expect(second).toMatchObject({ kind: "ignored", reason: "duplicate" });
+    expect(liveEpisodes((await loadCycleData()).periods)).toHaveLength(1);
+  });
+
+  it('tells her when "It ended today" had no period to close, and links to the screen', async () => {
+    const out = await processNotificationResponse(
+      mapped(
+        ACTION_CYCLE_YES,
+        { type: "cycle-reminder", kind: "ended", uid: OWNER },
+        { category: CYCLE_ENDED_CATEGORY },
+      ),
+    );
+
+    expect(out).toMatchObject({ kind: "cycle", ok: false });
+    const req = N.scheduleNotificationAsync.mock.calls.at(-1)![0];
+    expect(req.content.data).toMatchObject({ route: "/cycle" });
+    expect(await readJournal()).toMatchObject([{ kind: "cycle", ok: false }]);
+  });
+
+  it("refuses to write once tracking has been switched off, and sends her nowhere", async () => {
+    await saveSettings({ ...CYCLE_SETTINGS, enabled: false });
+
+    const out = await processNotificationResponse(
+      mapped(ACTION_CYCLE_YES, { type: "cycle-reminder", kind: "checkin", uid: OWNER }),
+    );
+
+    expect(out).toMatchObject({ kind: "cycle", ok: false, detail: "Cycle tracking is off — nothing was logged" });
+    expect(N.scheduleNotificationAsync).not.toHaveBeenCalled();
   });
 });
 

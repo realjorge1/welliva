@@ -12,6 +12,14 @@
  * the login reconcile finishes (`isProfileReconciled`), because on a fresh
  * device the backed-up log lands AFTER this has mounted.
  *
+ * AND WHEN SOMETHING WROTE BEHIND ITS BACK. "Started today" on a lock-screen
+ * reminder writes the episode straight to storage with no React tree involved
+ * (services/notifications/cycleActions). Two doors bring that back here: the
+ * in-process announcement, for a press handled while this tree was alive, and a
+ * foreground re-read, for the half an in-process event cannot cross — the app
+ * was suspended or killed when the button was pressed. Without both, the dial
+ * would keep showing the old day until the next remount.
+ *
  * Every write is serialized (withCycleLock) and reads the latest state from a
  * ref, so two quick taps on the day sheet can't overwrite each other.
  */
@@ -24,6 +32,8 @@ import {
   episodeOn,
   eraseCycleData,
   FULL_SESSION_MEMORY,
+  gozlinAsk as computeGozlinAsk,
+  GOZLIN_ASK_LIMIT,
   isEmptyDayLog,
   loadCycleData,
   moveCycleData,
@@ -44,11 +54,13 @@ import {
   type CycleSettings,
   type CycleView,
   type Energy,
+  type GozlinAsk,
   type Flow,
   type GapNote,
   type OvulationTest,
   type Symptom,
 } from "@/services/cycle";
+import { subscribeCycleLogChanged } from "@/services/notifications/cycleActions";
 import React, {
   createContext,
   useCallback,
@@ -58,6 +70,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { AppState } from "react-native";
 import { useProfile, useSystem } from "./AppContext";
 
 /** A change to one day's log. `null` clears a field; `undefined` leaves it alone. */
@@ -99,6 +112,17 @@ interface CycleContextValue {
   dismissNote: (id: string, signature: string) => Promise<void>;
   recordFullSession: (date: string) => Promise<void>;
   dismissOffer: () => Promise<void>;
+  /**
+   * "Let Gozlin see your cycle", today, in words about today — or null when
+   * this is not the moment. The predicate and the copy are pure
+   * (services/cycle/brief); the card that renders it is
+   * components/cycle/CycleGozlinAsk.
+   */
+  gozlinAsk: GozlinAsk | null;
+  /** Count today against the ask's budget — the card calls it when it appears. */
+  noteGozlinAsk: () => Promise<void>;
+  /** "Not now", for good. */
+  dismissGozlinAsk: () => Promise<void>;
   /** Stop tracking. The log is kept and comes back if she turns it on again. */
   turnOff: () => Promise<void>;
   /** Erase the log everywhere: this phone, and (through the sync sweep) the backup. */
@@ -168,6 +192,21 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
     reconciledOnce.current = true;
     void load();
   }, [isProfileReconciled, load]);
+
+  // A lock-screen answer, while this tree was alive. `load` goes through the
+  // same lock the write did, so it can only ever read the post-write log.
+  useEffect(() => subscribeCycleLogChanged(() => void load()), [load]);
+
+  // The other half: the press was handled with the app suspended or killed, so
+  // no in-process event could reach us. Re-read on the way back to the
+  // foreground. Three AsyncStorage reads, and `remindersKey` is built from
+  // primitives, so an unchanged log costs no re-lay.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") void load();
+    });
+    return () => sub.remove();
+  }, [load]);
 
   /* ── write ────────────────────────────────────────────────────────── */
 
@@ -421,6 +460,46 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
 
   const dismissOffer = useCallback(() => patchSettings({ offerDismissed: true }), [patchSettings]);
 
+  /* ── the Gozlin ask ───────────────────────────────────────────────── */
+
+  // Whether she CAN use the coach is a billing question and belongs to the
+  // card; the permission is worth having either way (see brief.ts).
+  const gozlinAsk = useMemo(
+    () =>
+      computeGozlinAsk({
+        settings: data.settings,
+        sharing: shareWithGozlin,
+        mode: view.mode,
+        status: view.status,
+        todayLog: view.todayLog,
+        today,
+      }),
+    [data.settings, shareWithGozlin, view.mode, view.status, view.todayLog, today],
+  );
+
+  const noteGozlinAsk = useCallback(
+    () =>
+      commit((d) =>
+        d.settings.gozlinAskDays.includes(todayRef.current)
+          ? d
+          : {
+              ...d,
+              settings: {
+                ...d.settings,
+                gozlinAskDays: [...d.settings.gozlinAskDays, todayRef.current]
+                  .sort()
+                  .slice(-GOZLIN_ASK_LIMIT),
+              },
+            },
+      ),
+    [commit],
+  );
+
+  const dismissGozlinAsk = useCallback(
+    () => patchSettings({ gozlinAskDismissed: true }),
+    [patchSettings],
+  );
+
   const turnOff = useCallback(() => patchSettings({ enabled: false }), [patchSettings]);
 
   const eraseAll = useCallback(
@@ -474,6 +553,9 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
       dismissNote,
       recordFullSession,
       dismissOffer,
+      gozlinAsk,
+      noteGozlinAsk,
+      dismissGozlinAsk,
       turnOff,
       eraseAll,
     }),
@@ -497,6 +579,9 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
       dismissNote,
       recordFullSession,
       dismissOffer,
+      gozlinAsk,
+      noteGozlinAsk,
+      dismissGozlinAsk,
       turnOff,
       eraseAll,
     ],

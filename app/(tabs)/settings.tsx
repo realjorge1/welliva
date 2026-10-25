@@ -1269,8 +1269,12 @@ export default function SettingsScreen() {
                 tone={cyclePalette.period}
                 title="Cycle tracking"
                 subtitle={cycleSubtitle}
+                // Cycle is a sibling tab; setup is a pushed screen. One is
+                // navigated to, the other pushed.
                 onPress={() =>
-                  router.push((cycle.settings.enabled ? "/cycle" : "/cycle/setup") as never)
+                  cycle.settings.enabled
+                    ? router.navigate("/cycle" as never)
+                    : router.push("/cycle/setup" as never)
                 }
               />
             </ListGroup>

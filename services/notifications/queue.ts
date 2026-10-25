@@ -18,7 +18,7 @@
  */
 import * as Notifications from "expo-notifications";
 
-export type QueueKind = "habit" | "meal" | "water" | "workout" | "coach" | "other";
+export type QueueKind = "habit" | "meal" | "water" | "workout" | "coach" | "cycle" | "other";
 
 export interface QueuedNotification {
   id: string;
@@ -45,6 +45,8 @@ export function kindOf(data: unknown): QueueKind {
       return "water";
     case "fitness-reminder":
       return d.kind === "hydration" ? "water" : "workout";
+    case "cycle-reminder":
+      return "cycle";
     default:
       return typeof d.route === "string" && !d.type ? "coach" : "other";
   }

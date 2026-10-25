@@ -21,6 +21,7 @@
  *   • The widget bridge's native host (the only place allowed to touch
  *     NativeModules for widgets).
  */
+import { SWIPEABLE_PATHS } from "@/components/navigation/menu";
 import { useAuth } from "@/components/SupabaseAuthProvider";
 import { installNotificationResponseHandling } from "@/services/notifications/boot";
 import {
@@ -73,7 +74,13 @@ export function NotificationActionRunner() {
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       try {
-        router.push(route as never);
+        // A MENU DESTINATION IS SWITCHED TO, NOT PUSHED. Those screens live in
+        // the (tabs) navigator, which is already mounted under everything; a
+        // push would stack a second copy of the whole shell, and the tapped
+        // screen would arrive with a back arrow where the hamburger belongs.
+        // Anything else (a habit, a food log, a modal) is a real push.
+        if (SWIPEABLE_PATHS.has(route)) router.navigate(route as never);
+        else router.push(route as never);
       } catch {
         // navigator not ready / unknown route — opening the app is enough
       }

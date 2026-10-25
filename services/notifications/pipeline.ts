@@ -25,8 +25,9 @@
  * response is keyed (`identifier:date:action`), the key is recorded in a small
  * persisted ledger BEFORE the write, and every response runs through one
  * serialized queue. The writes underneath are idempotent where they can be (a
- * habit day is a set member; a meal tick is checked under the schedule lock); a
- * glass of water cannot be, which is why the ledger is recorded first.
+ * habit day is a set member; a meal tick is checked under the schedule lock; a
+ * period that already covers that day is reported as already logged); a glass of
+ * water cannot be, which is why the ledger is recorded first.
  *
  * ── WHOSE DATA ──────────────────────────────────────────────────────────────
  * A write only happens when the notification belongs to the account whose data
@@ -47,11 +48,19 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import type { MealType } from "../../models/diet";
 import {
+  ACTION_CYCLE_NO,
+  ACTION_CYCLE_YES,
   ACTION_LOG_MEAL,
   ACTION_LOG_WATER,
   ACTION_MARK_DONE,
   ACTION_SNOOZE,
 } from "./categories";
+import {
+  declineCycleQuestion,
+  logPeriodEndFromNotification,
+  logPeriodStartFromNotification,
+  type CycleAnswerKind,
+} from "./cycleActions";
 import { markHabitDoneFromNotification } from "./habitActions";
 import { appendJournal, type JournalEntry } from "./journal";
 import { logMealFromNotification } from "./mealActions";
@@ -227,7 +236,7 @@ function raiseRoute(route: string): void {
 
 export type PipelineOutcome =
   | { kind: "ignored"; reason: "not-a-response" | "duplicate" | "not-owner" | "unknown-action" | "malformed" }
-  | { kind: "habit" | "meal" | "water"; ok: boolean; title: string; detail: string }
+  | { kind: "habit" | "meal" | "water" | "cycle"; ok: boolean; title: string; detail: string }
   | { kind: "snooze" }
   | { kind: "open"; route: string | null }
   | { kind: "test" };
@@ -436,6 +445,73 @@ async function onLogWater(n: NormalizedResponse): Promise<PipelineOutcome> {
   return report({ kind: "water", ok: false, title: "Water", detail });
 }
 
+/**
+ * The cycle's two questions, answered from the lock screen.
+ *
+ * `data.kind` says which was asked ("checkin" or "ended") — the two categories
+ * share these action ids precisely so one handler can serve both (see
+ * ./categories). A response with neither is malformed and writes nothing: a
+ * button that guessed which question it was answering could open a period when
+ * she meant to close one.
+ */
+async function onCycleAnswer(n: NormalizedResponse, yes: boolean): Promise<PipelineOutcome> {
+  await dismiss(n.identifier);
+  if (n.data.test === true) return answerTest();
+
+  const kind: CycleAnswerKind | null =
+    n.data.kind === "checkin" ? "checkin" : n.data.kind === "ended" ? "ended" : null;
+  if (!kind) return report({ kind: "ignored", reason: "malformed" });
+
+  // The receipt's own title. Inside the app, so it can say the word: discretion
+  // is a lock-screen rule, and this screen is behind her unlock.
+  const title = "Period";
+
+  // "Not yet" / "Still going": acknowledged, nothing written — see cycleActions.
+  if (!yes) {
+    const { date } = declineCycleQuestion(effectiveFiredAt(n));
+    const detail = kind === "checkin" ? "Answered: not yet" : "Answered: still going";
+    await journal(n, { kind: "cycle", date, title, detail, ok: true });
+    return report({ kind: "cycle", ok: true, title, detail });
+  }
+
+  const result =
+    kind === "checkin"
+      ? await logPeriodStartFromNotification(effectiveFiredAt(n))
+      : await logPeriodEndFromNotification(effectiveFiredAt(n));
+
+  if (result.ok) {
+    const when = prettyDay(result.date);
+    const verb = kind === "checkin" ? "Started" : "Ended";
+    const detail = result.already ? `Already logged — ${verb.toLowerCase()} ${when}` : `${verb} ${when}`;
+    await journal(n, { kind: "cycle", date: result.date, title, detail, ok: true });
+    return report({ kind: "cycle", ok: true, title, detail });
+  }
+
+  // Tracking was switched off while the reminder sat on the lock screen. There
+  // is nothing to write to and nothing to fix, so say so and don't send her
+  // into a screen that would only offer to set it up again.
+  if (result.reason === "disabled") {
+    const detail = "Cycle tracking is off — nothing was logged";
+    await journal(n, { kind: "cycle", date: "", title, detail, ok: false });
+    return report({ kind: "cycle", ok: false, title, detail });
+  }
+
+  await presentFollowUp({
+    title: "That didn't save",
+    body:
+      result.reason === "no-period"
+        ? "There's no period open to end. Tap to check your log."
+        : "Tap to log it in welliva — it takes a second.",
+    route: "/cycle",
+  });
+  const detail =
+    result.reason === "no-period"
+      ? "No period was open — sent a link to check"
+      : "Couldn't save — sent a link to log it";
+  await journal(n, { kind: "cycle", date: result.date ?? "", title, detail, ok: false });
+  return report({ kind: "cycle", ok: false, title, detail });
+}
+
 async function onSnooze(n: NormalizedResponse): Promise<PipelineOutcome> {
   // The snoozed copy fires later — possibly after midnight — but it is still
   // about the day the original was sent for. Stamp that day so its button logs
@@ -487,7 +563,12 @@ export function processNotificationResponse(
     const writes =
       n.actionIdentifier === ACTION_MARK_DONE ||
       n.actionIdentifier === ACTION_LOG_MEAL ||
-      n.actionIdentifier === ACTION_LOG_WATER;
+      n.actionIdentifier === ACTION_LOG_WATER ||
+      // ACTION_CYCLE_NO writes nothing, but it is checked with its sibling on
+      // purpose: a leftover reminder from a signed-out account must not leave a
+      // receipt in THIS account's journal either.
+      n.actionIdentifier === ACTION_CYCLE_YES ||
+      n.actionIdentifier === ACTION_CYCLE_NO;
     if (writes && n.data.test !== true && !(await mayWriteFor(n.data))) {
       // Somebody else's reminder. Never apply it; stop it coming back.
       await dismiss(n.identifier);
@@ -504,6 +585,10 @@ export function processNotificationResponse(
         return onLogMeal(n);
       case ACTION_LOG_WATER:
         return onLogWater(n);
+      case ACTION_CYCLE_YES:
+        return onCycleAnswer(n, true);
+      case ACTION_CYCLE_NO:
+        return onCycleAnswer(n, false);
       case ACTION_SNOOZE:
         return onSnooze(n);
       default:

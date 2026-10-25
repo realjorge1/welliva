@@ -7,6 +7,7 @@ export type { CycleCalendarProps } from "./CycleCalendar";
 export { CycleDial } from "./CycleDial";
 export type { CycleDialProps } from "./CycleDial";
 export { CycleHistory } from "./CycleHistory";
+export { CycleGozlinAsk } from "./CycleGozlinAsk";
 export { CycleHomeCard, CycleOfferCard } from "./CycleHomeCard";
 export { DateStrip } from "./DateStrip";
 export { DayLogSheet } from "./DayLogSheet";
