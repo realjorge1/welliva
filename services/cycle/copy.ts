@@ -8,8 +8,9 @@
  * window, and the fertile window is always called an estimate.
  */
 
+import { HORMONAL_LINE } from "./contraception";
 import { formatDay, formatRange } from "./dates";
-import type { Prediction } from "./predict";
+import type { CycleMode, Prediction } from "./predict";
 import type { CycleView } from "./view";
 
 export interface CycleHeadline {
@@ -19,6 +20,29 @@ export interface CycleHeadline {
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** How every surface names the bleeding it logs. */
+export interface BleedWords {
+  /** Mid-sentence: "period" / "bleed". */
+  noun: string;
+  /** A label on its own: "Period" / "Bleeding". */
+  label: string;
+  /** The one-tap buttons. */
+  started: string;
+  ended: string;
+  /** The dial's eyebrow while it lasts: "Period day" / "Bleeding day". */
+  day: string;
+}
+
+/**
+ * On hormonal contraception there is no period, only bleeding that follows the
+ * method — the contraception page says so, and the screens say it the same way.
+ */
+export function bleedWords(mode: CycleMode): BleedWords {
+  return mode === "hormonal"
+    ? { noun: "bleed", label: "Bleeding", started: "Bleeding started", ended: "Bleeding stopped", day: "Bleeding day" }
+    : { noun: "period", label: "Period", started: "Period started", ended: "Period ended", day: "Period day" };
+}
 
 export function phaseLabel(view: CycleView, showFertile: boolean): string | null {
   switch (view.status.phase) {
@@ -54,6 +78,16 @@ export function cycleHeadline(view: CycleView, showFertile: boolean): CycleHeadl
 
   if (s.mode === "pregnancy") {
     return { eyebrow: "Cycle", title: "Paused during pregnancy", detail: "Your history is kept safe here." };
+  }
+  if (s.mode === "hormonal") {
+    if (s.inPeriod && s.periodDay !== null && !s.periodStale) {
+      return {
+        eyebrow: "Bleeding logged",
+        title: `Day ${s.periodDay}`,
+        detail: "Logging only. I don't predict bleeding on hormonal contraception.",
+      };
+    }
+    return { eyebrow: "Cycle", title: "Logging only", detail: HORMONAL_LINE };
   }
   if (s.cycleDay === null) {
     return s.mode === "postpartum"
@@ -106,6 +140,37 @@ export function cycleHeadline(view: CycleView, showFertile: boolean): CycleHeadl
       .filter(Boolean)
       .join(" · "),
   };
+}
+
+/**
+ * The same judgement as {@link confidenceLine}, in two words, for a glance.
+ * Every message that names a window (the Home card, the coach, the trip and
+ * late and hungry-week lines) speaks with THESE words, so no surface sounds
+ * surer than the cycle screen does.
+ */
+export type ConfidenceWord = "Fairly sure" | "Still learning" | "Varies for you";
+
+export function confidenceWord(p: Prediction): ConfidenceWord {
+  switch (p.confidence) {
+    case "confident":
+      return "Fairly sure";
+    case "variable":
+      return "Varies for you";
+    case "told":
+    case "learning":
+      return "Still learning";
+  }
+}
+
+/**
+ * The word a glance surface shows beside the next-period window — or null when
+ * it shows no window: logging-only and paused modes, during a period (the
+ * window is about the next one), and once she's late (the window has passed).
+ */
+export function glanceConfidence(view: Pick<CycleView, "status" | "prediction">): ConfidenceWord | null {
+  const s = view.status;
+  if (!view.prediction || !s.predicting || s.inPeriod || s.lateBy > 0) return null;
+  return confidenceWord(view.prediction);
 }
 
 /** How sure the prediction is, and why — the line that makes it trustworthy. */

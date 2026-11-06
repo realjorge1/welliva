@@ -25,6 +25,11 @@ import {
 import { buildBriefing, buildNotificationCandidates } from "@/services/gozlin";
 import { listArchivedStories, storyNotification } from "@/services/StoryService";
 import { hasPaidAccess } from "@/services/billing";
+import {
+  notificationsPaused,
+  quietDate,
+  subscribeNotificationPause,
+} from "@/services/notifications/pause";
 import { buildWeeklyDigest } from "@/services/WeeklyDigestService";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -80,6 +85,19 @@ export function useProactiveDelivery(): void {
   const { twin } = useGozlinSnapshot();
   const ant = useAnticipation();
   const plannedFor = useRef<string | null>(null);
+  // Bumped on resume (services/notifications/pause), so a day that was paused
+  // when it was planned gets planned again the moment it isn't.
+  const [resumes, setResumes] = useState(0);
+
+  useEffect(
+    () =>
+      subscribeNotificationPause((paused) => {
+        if (paused) return;
+        plannedFor.current = null;
+        setResumes((n) => n + 1);
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (ant.loading) return;
@@ -88,6 +106,15 @@ export function useProactiveDelivery(): void {
 
     let cancelled = false;
     void (async () => {
+      // Paused: plan nothing and record nothing, so nothing counts as "sent".
+      if (await notificationsPaused()) return;
+      // A rough day: the coach goes quiet for the rest of it — anything already
+      // laid for today is taken back, and nothing new is planned. Unmarked
+      // ("I'm OK actually") or a new day, and this plans as normal again.
+      if (await quietDate()) {
+        await notificationScheduler.cancelPending().catch(() => {});
+        return;
+      }
       const briefing = twin.hasProfile
         ? buildBriefing({
             twin,
@@ -168,6 +195,7 @@ export function useProactiveDelivery(): void {
     app.workoutLog,
     app.userGoals?.journeyStartedAt,
     app.userBio?.primaryGoal,
+    resumes,
   ]);
 }
 

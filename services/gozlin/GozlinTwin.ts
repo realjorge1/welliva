@@ -64,7 +64,9 @@ function buildBodyState(
   const current = latestWeight(input.bodyLogs) ?? onboardWeight;
   const start = earliestWeight(input.bodyLogs) ?? onboardWeight;
   const goal = input.goals.targetWeightKg ?? null;
-  const trend = computeWeightTrend(input.bodyLogs, today);
+  // The trend reads `trendBodyLogs` (see the type); today's weight and the last
+  // weigh-in above still read every reading, because those are simply what happened.
+  const trend = computeWeightTrend(input.trendBodyLogs ?? input.bodyLogs, today);
 
   let goalProgress: number | null = null;
   if (goal != null && start != null && current != null) {
@@ -112,7 +114,9 @@ export function buildTwin(input: GozlinSnapshotInput): GozlinTwin {
   const goal: PrimaryGoal | null = input.bio?.primaryGoal ?? null;
 
   // ── Today metrics ──
-  const calories = metric(input.consumed.calories, input.targets?.calories ?? 0);
+  // Today's own target, if today has one (services/nutrition/dayTargets): the
+  // coach has to agree with what Home and Diet are showing her.
+  const calories = metric(input.consumed.calories, input.dayCalorieTarget ?? input.targets?.calories ?? 0);
   const protein = metric(input.consumed.proteinG, input.targets?.proteinG ?? 0);
   const water = metric(input.consumed.waterMl, input.waterGoalMl);
 
@@ -151,8 +155,10 @@ export function buildTwin(input: GozlinSnapshotInput): GozlinTwin {
   if (!hasPlan && hasProfile && hour >= 8) flags.push("NO_PLAN");
 
   if (hasPlan && calories.target > 0) {
-    if (calories.pct > 1.08) flags.push("OVER_CALORIES");
-    else if (hour >= 19 && calories.pct < 0.6) flags.push("BEHIND_CALORIES");
+    if (calories.pct > 1.08) {
+      // Going over on a day she chose to plan extra for is never told off.
+      if (!input.easyOnCalories) flags.push("OVER_CALORIES");
+    } else if (hour >= 19 && calories.pct < 0.6) flags.push("BEHIND_CALORIES");
     else if (calories.pct >= progress - 0.2 && calories.pct <= 1.05 && calories.pct > 0.1)
       flags.push("ON_TRACK");
 

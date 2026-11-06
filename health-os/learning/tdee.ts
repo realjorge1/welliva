@@ -40,6 +40,15 @@ const Q_TDEE = 4;
 /** Observation noise: daily scale reading variance (kg²). σ = 0.5 kg. */
 const R_SCALE = 0.25;
 
+/**
+ * On a day the caller knows the scale is unreliable, its variance is this many
+ * times larger (σ = 1 kg). A reading still counts; it just can't move the
+ * estimate much. Why it's noisy is the caller's business (for now, water a
+ * person's own history shows arrives before a period): nothing here subtracts
+ * an invented number, because nobody knows the true size of the water that day.
+ */
+export const NOISY_SCALE_FACTOR = 4;
+
 /** Initial uncertainty. σ_w = 1 kg; σ_e = 300 kcal ≈ Mifflin's real error bar. */
 const P0_WEIGHT = 1;
 const P0_TDEE = 300 * 300;
@@ -74,11 +83,13 @@ export function initKalman(weightKg: number, mifflinTdee: number): KalmanState {
  *
  * @param intakeKcal logged intake, or null if they didn't log
  * @param scaleKg    scale reading, or null if they didn't weigh in
+ * @param noisy      this day's reading is known to be unreliable (see {@link NOISY_SCALE_FACTOR})
  */
 export function step(
   state: KalmanState,
   intakeKcal: number | null,
   scaleKg: number | null,
+  noisy = false,
 ): KalmanState {
   const f = -1 / KCAL_PER_KG; // ∂w_{t+1} / ∂e_t
   let { w, e } = state;
@@ -103,7 +114,7 @@ export function step(
 
   // ── UPDATE — only when they actually weighed in ──
   if (scaleKg !== null) {
-    const innovationVar = P[0][0] + R_SCALE;
+    const innovationVar = P[0][0] + (noisy ? R_SCALE * NOISY_SCALE_FACTOR : R_SCALE);
     const k0 = P[0][0] / innovationVar;
     const k1 = P[1][0] / innovationVar;
     const innovation = scaleKg - w;
@@ -125,9 +136,9 @@ export function step(
 /** Replay a whole history. Days are consumed in order; gaps are fine. */
 export function runFilter(
   initial: KalmanState,
-  days: { intakeKcal: number | null; scaleKg: number | null }[],
+  days: { intakeKcal: number | null; scaleKg: number | null; noisy?: boolean }[],
 ): KalmanState {
-  return days.reduce((s, d) => step(s, d.intakeKcal, d.scaleKg), initial);
+  return days.reduce((s, d) => step(s, d.intakeKcal, d.scaleKg, d.noisy ?? false), initial);
 }
 
 export interface TdeeReading {

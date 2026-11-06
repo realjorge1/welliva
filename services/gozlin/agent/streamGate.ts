@@ -24,11 +24,20 @@
  * every delta.
  */
 
-import { isGrounded, isProseNumber, numberSpans } from "./grounding";
+import { isProseNumber, isSpanGrounded, numberSpans } from "./grounding";
 import { screenOutput } from "./outputSafety";
 
 /** After a spelled-out number, what may still be the same number arriving. */
 const WORD_NUMBER_MAY_CONTINUE = /^[\s-]*(?:a(?:n(?:d)?)?[\s-]*)?$/i;
+
+/**
+ * Digits followed by a no-break, thin or narrow no-break space, at the very
+ * end: "1 " that may be the front of "1 840". These spaces end a TOKEN, so
+ * rule 1's hold-back lets them through; they don't end a NUMBER.
+ */
+const GROUP_STILL_OPEN = new RegExp(
+  `\\d{1,3}(?:[${String.fromCharCode(0x00a0, 0x2009, 0x202f)}]\\d{3})*[${String.fromCharCode(0x00a0, 0x2009, 0x202f)}]$`,
+);
 
 /**
  * How many leading characters of `draft` are safe to display, given the
@@ -40,6 +49,8 @@ export function safeDisplayLength(draft: string, allowed: Set<number>): number {
   const stableEnd = trailing ? trailing.index : draft.length;
   const stable = draft.slice(0, stableEnd);
   let limit = stableEnd;
+  const open = GROUP_STILL_OPEN.exec(stable);
+  if (open) limit = Math.min(limit, open.index);
 
   // 2. The first figure that is not (yet) backed. A spelled-out number whose
   //    next words have not arrived is held too: "three hundred " could still
@@ -50,7 +61,7 @@ export function safeDisplayLength(draft: string, allowed: Set<number>): number {
       break;
     }
     if (isProseNumber(span.value)) continue;
-    if (!isGrounded(span.value, allowed)) {
+    if (!isSpanGrounded(span, allowed)) {
       limit = Math.min(limit, span.start);
       break;
     }

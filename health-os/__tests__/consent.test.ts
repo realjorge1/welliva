@@ -19,17 +19,39 @@ import { MemoryStore } from "./helpers/MemoryStore";
 const NOW = new Date("2026-06-29T09:00:00");
 
 describe("consent (pure)", () => {
-  it("defaults: every sense and every way out is off; only on-device and coaching are on", () => {
+  it("defaults: every sense and every way out is off; only on-device, coaching and measurement are on", () => {
     const rec = defaultConsent(NOW);
     expect(rec.version).toBe(CONSENT_VERSION);
     expect(isGrantedIn(rec, "local_processing")).toBe(true);
     // Default-on is reserved for behaviours over data the app already holds
-    // (the owner's call for follow-ups, docs/gozlin/11 D1). Nothing that reads
-    // a new sense or sends anything out may ever default on.
+    // (the owner's call for follow-ups, docs/gozlin/11 D1)...
     expect(isGrantedIn(rec, "experience_followups")).toBe(true);
+    // ...and, since 31 October 2026, for MEASUREMENT. This used to read "nothing
+    // that reads a new sense or sends anything out may ever default on", and the
+    // second half of that is now a deliberate exception rather than a rule:
+    // product_analytics and crash_diagnostics do send, to our own Supabase,
+    // because opt-in measurement is answered only by a self-selected minority and
+    // a health app whose crash rate and drop-off nobody can see is its own harm.
+    // The exception is paid for in the open — the privacy policy was rewritten to
+    // disclose it and LEGAL_VERSION went to 4, so everyone re-accepts once.
+    //
+    // It stays narrow by being enumerated, not by being skipped: the assertion
+    // below pins the measurement group to EXACTLY these two, so a third
+    // default-on sender cannot be added to the group and inherit the exemption.
+    expect(isGrantedIn(rec, "product_analytics")).toBe(true);
+    expect(isGrantedIn(rec, "crash_diagnostics")).toBe(true);
+    expect(
+      CONSENT_CATEGORIES.filter((c) => CONSENT_CATEGORY_META[c].group === "measurement").sort(),
+      "A new category joined the `measurement` group. That group is exempt from " +
+        "the default-off rule, so adding to it is a privacy decision: it needs a " +
+        "policy change and a LEGAL_VERSION bump, not just a line here.",
+    ).toEqual(["crash_diagnostics", "product_analytics"]);
+
+    // Everything else — every sense, every reach — is off until asked.
     for (const c of CONSENT_CATEGORIES) {
-      if (c === "local_processing" || CONSENT_CATEGORY_META[c].group === "coaching") continue;
-      expect(isGrantedIn(rec, c)).toBe(false);
+      const group = CONSENT_CATEGORY_META[c].group;
+      if (c === "local_processing" || group === "coaching" || group === "measurement") continue;
+      expect(isGrantedIn(rec, c), `${c} must default to off`).toBe(false);
     }
   });
 

@@ -33,6 +33,7 @@ import { ensureDietLibraryLoaded } from "@/constants/DietDatabase";
 import { ensureFoodDictionaryLoaded } from "@/constants/FoodDictionary";
 import { ensureWorkoutExercisesLoaded } from "@/services/WorkoutGenerator";
 import { installBackendWarmup } from "@/services/api/warmup";
+import { installAnalytics } from "@/services/telemetry/boot";
 import { initNotifications } from "@/services/notifications/init";
 import { useDataEpoch } from "@/services/sync/dataEpoch";
 import { installNetworkProbe } from "@/services/sync/networkProbe";
@@ -128,7 +129,15 @@ function RootLayoutContent() {
     initNotifications();
     // Wake the backend now (and on every foreground) so its 30-50s cold start
     // has already happened by the time someone opens the coach. Fire-and-forget.
-    return installBackendWarmup();
+    const stopWarmup = installBackendWarmup();
+    // Start counting: one app_open now, one per foreground, and a flush of the
+    // pending queue on background. Consent-gated inside (services/telemetry) —
+    // this call is unconditional, what it does is not.
+    const stopAnalytics = installAnalytics();
+    return () => {
+      stopWarmup();
+      stopAnalytics();
+    };
   }, []);
 
   // Match the navigator's base background to the ambient canvas so screen

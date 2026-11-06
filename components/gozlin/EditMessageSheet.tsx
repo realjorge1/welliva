@@ -103,7 +103,7 @@ export function EditMessageSheet({ visible, onClose, value, replacing, onSubmit 
         ) : null}
 
         <View style={styles.actions}>
-          <Button label="Cancel" variant="ghost" onPress={onClose} />
+          <Button label="Cancel" variant="ghost" fullWidth={false} onPress={onClose} />
           <View style={styles.grow}>
             <Button
               label="Ask again"

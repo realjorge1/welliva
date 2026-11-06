@@ -39,6 +39,7 @@
  */
 import { visibleProviders } from "@/components/auth/signInMethods";
 import { useSocialProviders } from "@/components/auth/socialProviders";
+import { useWarmBrowser } from "@/components/auth/useWarmBrowser";
 import { OrbField, useOrbTouch } from "@/components/OrbField";
 import { enterFade, exitFade } from "@/components/motion";
 import { useKeyboardInset } from "@/components/ui";
@@ -474,7 +475,10 @@ export function SocialSignInRow({
 }) {
   const providers = visibleProviders(useSocialProviders());
   const showApple = providers.apple && !!onApple;
-  if (!providers.google && !showApple && !providers.facebook) return null;
+  const anyProvider = providers.google || showApple || providers.facebook;
+  // Each of these rows opens Chrome; start it now, not when the finger lands.
+  useWarmBrowser(anyProvider);
+  if (!anyProvider) return null;
 
   return (
     <View style={styles.providerStack}>

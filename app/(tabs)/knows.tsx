@@ -55,6 +55,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import { MindPanel, useMindLog } from "@/components/mind";
+import { WhySheet } from "@/components/smart/WhySheet";
+import { GoodDaysSheet } from "@/components/smart/GoodDaysSheet";
+import { useGoodDays } from "@/components/smart/useGoodDays";
+import { PATTERN_NOT_CAUSE, goodDaySentence } from "@/services/smart/goodDays";
 import { InsightArchive } from "@/components/home/InsightArchive";
 import { useInsightLedger } from "@/components/home/useInsightLedger";
 import { useBilling } from "@/contexts/BillingContext";
@@ -81,6 +85,8 @@ interface Fact {
   tone?: string;
   /** Present when the fact can be taken back. */
   onRemove?: () => void;
+  /** Present when the fact can be changed. */
+  onPress?: () => void;
 }
 
 const MONTH = [
@@ -113,6 +119,11 @@ export default function KnowsScreen() {
   const mindLog = useMindLog();
   const [addPreset, setAddPreset] = useState<AddPreset | null>(null);
   const [insightsOpen, setInsightsOpen] = useState(false);
+  // "In one sentence: why now?" — added or changed from "Who you are".
+  const [whyOpen, setWhyOpen] = useState(false);
+  // What their best days have in common, listed with the rest of what's noticed.
+  const goodDays = useGoodDays();
+  const [goodDaysOpen, setGoodDaysOpen] = useState(false);
   const { ledger: insightLedger } = useInsightLedger();
   const { allows } = useBilling();
 
@@ -143,9 +154,10 @@ export default function KnowsScreen() {
         key: "why",
         icon: "heart-outline",
         title: identity.motivation,
-        subtitle: "Your why",
+        subtitle: "Your why · tap to change",
         tone: colors.error,
         onRemove: () => void clearMotivation(),
+        onPress: () => setWhyOpen(true),
       });
     }
     if (bio?.primaryGoal) {
@@ -317,7 +329,10 @@ export default function KnowsScreen() {
           <View style={styles.strip}>
             <StatCell value={String(you.length + setup.length)} label={"things\nknown"} />
             <Rule />
-            <StatCell value={String(patterns.length)} label={"patterns\nspotted"} />
+            <StatCell
+              value={String(patterns.length + goodDays.findings.length)}
+              label={"patterns\nspotted"}
+            />
             <Rule />
             <StatCell value={String(m.days.length)} label={"days\nremembered"} />
             <Rule />
@@ -353,23 +368,22 @@ export default function KnowsScreen() {
         <Reveal index={3}>
           <View style={styles.block}>
             <SectionHeader title="Who you are" subtitle="What you've told welliva, and what it's aiming at" />
-            {you.length === 0 ? (
-              <ListGroup>
+            <ListGroup>
+              {/* An invitation, not a fact: kept out of `you`, which the "things
+                  known" figure above counts. */}
+              {!identity.motivation ? (
                 <ListRow
-                  icon="chatbubbles-outline"
+                  icon="heart-outline"
                   tone={colors.textTertiary}
-                  title="Nothing yet"
-                  subtitle="Tell Gozlin why you're here and it'll remember it here."
-                  onPress={() => router.push("/gozlin" as never)}
+                  title="Why now?"
+                  subtitle="In one sentence, if you like. Kept word for word."
+                  onPress={() => setWhyOpen(true)}
                 />
-              </ListGroup>
-            ) : (
-              <ListGroup>
-                {you.map((f) => (
-                  <FactRow key={f.key} fact={f} />
-                ))}
-              </ListGroup>
-            )}
+              ) : null}
+              {you.map((f) => (
+                <FactRow key={f.key} fact={f} />
+              ))}
+            </ListGroup>
           </View>
         </Reveal>
 
@@ -401,7 +415,23 @@ export default function KnowsScreen() {
               subtitle="Patterns Gozlin spotted in your behaviour — dismiss any that aren't you"
             />
             <ListGroup>
-              {patterns.length === 0 ? (
+              {goodDays.findings.map((f) => (
+                <ListRow
+                  key={f.id}
+                  icon="sunny-outline"
+                  tone={colors.carbs}
+                  title={goodDaySentence(f)}
+                  subtitle={f.scope ? `${f.scope} ${PATTERN_NOT_CAUSE}` : PATTERN_NOT_CAUSE}
+                  onPress={() => setGoodDaysOpen(true)}
+                  right={
+                    <RemoveButton
+                      label={`Dismiss: ${goodDaySentence(f)}`}
+                      onPress={() => goodDays.dismiss(f)}
+                    />
+                  }
+                />
+              ))}
+              {patterns.length === 0 && goodDays.findings.length === 0 ? (
                 <ListRow
                   icon="bulb-outline"
                   tone={colors.textTertiary}
@@ -699,6 +729,25 @@ export default function KnowsScreen() {
 
       <InsightArchive visible={insightsOpen} onClose={() => setInsightsOpen(false)} />
 
+      <GoodDaysSheet
+        visible={goodDaysOpen}
+        report={goodDays.report}
+        findings={goodDays.findings}
+        onClose={() => {
+          setGoodDaysOpen(false);
+          goodDays.file(goodDays.findings);
+        }}
+      />
+      <WhySheet
+        visible={whyOpen}
+        initial={identity.motivation ?? ""}
+        onClose={() => setWhyOpen(false)}
+        onSave={(text) => {
+          setWhyOpen(false);
+          void m.setMotivation(text);
+        }}
+      />
+
       <AddSheet
         visible={addPreset !== null}
         presetKind={addPreset?.kind}
@@ -737,6 +786,7 @@ function FactRow({ fact }: { fact: Fact }) {
       title={fact.title}
       subtitle={fact.subtitle}
       value={fact.value}
+      onPress={fact.onPress}
       right={
         fact.onRemove ? (
           <RemoveButton label={`Forget: ${fact.title}`} onPress={fact.onRemove} />

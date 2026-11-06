@@ -7,9 +7,17 @@
  * At most three, all one-off and dated:
  *   heads-up   09:00, two days before the predicted window opens
  *   check-in   09:00, the day after the most likely start, if nothing's logged
+ *   trip       09:00, two days before a trip a predicted period is likely to
+ *              meet (./upcoming) — and it replaces a heads-up due the same morning
  *   ended?     19:00, the day after her period would usually end, while one
  *              is still open
  * Re-planned after every change, so a period logged today cancels the check-in.
+ * (The heads-up and the check-in need her not to be bleeding and "ended?" needs
+ * her to be, so three is the most that can ever be pending at once.)
+ *
+ * THE TRIP REMINDER NEVER NAMES THE PERIOD, with discreet wording on or off
+ * (owner's decision): it says there's something to plan around, and the app says
+ * what. It carries no buttons, because it asks nothing.
  *
  * DISCREET BY DEFAULT. A lock screen is the most public surface a phone has, so
  * unless she turns discreet wording off, no reminder names her period: it says
@@ -27,8 +35,9 @@
 import { addDays, formatRange } from "./dates";
 import type { CycleToday, Prediction } from "./predict";
 import type { CycleSettings } from "./types";
+import { nextTripOverlap, TRIP_REMINDER_DAYS, type LifeMoment } from "./upcoming";
 
-export type CycleReminderKind = "headsup" | "checkin" | "ended";
+export type CycleReminderKind = "headsup" | "checkin" | "ended" | "trip";
 
 export interface PlannedReminder {
   id: string;
@@ -52,6 +61,9 @@ export function reminderCopy(
   discreet: boolean,
   prediction: Prediction | null,
 ): { title: string; body: string } {
+  if (kind === "trip") {
+    return { title: "A heads-up for your trip", body: "Something to plan around. Open welliva to see." };
+  }
   if (discreet) {
     if (kind === "headsup") {
       return { title: "A gentle heads-up", body: "Something to plan around in the next few days. Tap to see." };
@@ -83,10 +95,14 @@ export function planCycleReminders(input: {
   status: CycleToday;
   prediction: Prediction | null;
   now: Date;
+  /** Her trips and events (./lifeMoments). Absent: no trip reminder. */
+  moments?: readonly LifeMoment[];
 }): PlannedReminder[] {
   const { settings, status, prediction, now } = input;
   if (!settings.enabled || !settings.remindersOn) return [];
-  if (status.mode === "pregnancy" || status.mode === "menopause") return [];
+  // Logging-only modes have nothing to remind about: no likely day to check in
+  // after, and no usual length to ask "has it ended?" against.
+  if (status.mode === "pregnancy" || status.mode === "menopause" || status.mode === "hormonal") return [];
 
   const out: PlannedReminder[] = [];
   const push = (kind: CycleReminderKind, at: Date) => {
@@ -94,12 +110,18 @@ export function planCycleReminders(input: {
     out.push({ id: CYCLE_REMINDER_ID(kind), kind, at, ...reminderCopy(kind, settings.discreet, prediction) });
   };
 
+  const trip = nextTripOverlap({ prediction, status, moments: input.moments ?? [] });
+  const tripDay = trip ? addDays(trip.start, -TRIP_REMINDER_DAYS) : null;
+
   if (status.predicting && prediction && !status.inPeriod) {
-    push("headsup", atLocal(addDays(prediction.earliest, -2), 9));
+    // Two cycle reminders on one morning is one too many; the trip's is the specific one.
+    const headsUpDay = addDays(prediction.earliest, -2);
+    if (headsUpDay !== tripDay) push("headsup", atLocal(headsUpDay, 9));
     push("checkin", atLocal(addDays(prediction.likely, 1), 9));
   }
   if (status.inPeriod && status.periodOpen && !status.periodStale && status.expectedEnd) {
     push("ended", atLocal(addDays(status.expectedEnd, 1), 19));
   }
+  if (tripDay) push("trip", atLocal(tripDay, 9));
   return out;
 }

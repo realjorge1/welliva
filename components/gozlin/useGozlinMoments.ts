@@ -17,6 +17,7 @@ import {
   type GozlinMoment,
   type GozlinSurface,
 } from "@/services/gozlin";
+import { useRoughToday } from "@/components/smart/useRoughDay";
 import { useMemo } from "react";
 import { useGozlinSnapshot } from "./useGozlinSnapshot";
 import { useRetiredBeat } from "./useHabitTracker";
@@ -31,10 +32,13 @@ export interface UseGozlinMoments {
 export function useGozlinMoments(surface: GozlinSurface): UseGozlinMoments {
   const { twin } = useGozlinSnapshot();
   const retired = useRetiredBeat();
+  // A rough day: the coach's cards step aside for the rest of it — every one
+  // of them is a nudge of some kind (services/smart/roughDay).
+  const quiet = useRoughToday() !== null;
 
   const moments = useMemo(
-    () => buildMoments({ twin, surface, retired }),
-    [twin, surface, retired],
+    () => (quiet ? [] : buildMoments({ twin, surface, retired })),
+    [twin, surface, retired, quiet],
   );
 
   return { moments, top: moments[0] ?? null };

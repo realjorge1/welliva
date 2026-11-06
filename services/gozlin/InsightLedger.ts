@@ -30,6 +30,11 @@
  *
  *  • A RETIRED-HABIT beat already carries its fact's id, which is permanent.
  *
+ *  • A FINDING WITH NUMBERS ("in 7 of your 10 best days…") rewrites its own
+ *    sentence every time a day is added, so its words can't be its identity. It
+ *    names what it is ABOUT in `identity`, and that is what is fingerprinted: 8
+ *    of 11 next week is the same finding, not a new one.
+ *
  * ── THE CAP IS A TRADE-OFF, STATED ─────────────────────────────────────────
  *
  * 100 entries, newest kept. Eviction also forgets "already opened" for a
@@ -68,6 +73,8 @@ export interface LedgerCard {
   message: string;
   priority: number;
   isHabit?: boolean;
+  /** What a counted finding is about, however its numbers read today. */
+  identity?: string;
 }
 
 export interface InsightEntry {
@@ -87,11 +94,17 @@ function fingerprint(text: string): string {
   return (h >>> 0).toString(36);
 }
 
+/** The identity of a counted finding: what it is about, never how it reads. */
+export function findingKey(identity: string): string {
+  return `finding:${fingerprint(identity)}`;
+}
+
 /**
  * The identity of an insight. `today` is the caller's local YYYY-MM-DD — passed
  * in so this stays pure and agrees with the app's own clock.
  */
 export function insightKey(card: LedgerCard, today: string): string {
+  if (card.identity) return findingKey(card.identity);
   if (card.id.startsWith(RETIRED_PREFIX)) return card.id;
   if (card.isHabit) return `habit:${fingerprint(`${card.title}|${card.message}`)}`;
   return `${card.id}:${today}`;
@@ -142,6 +155,8 @@ export function recordOpened(
       message: card.message,
       priority: card.priority,
       ...(card.isHabit ? { isHabit: true } : {}),
+      // Kept so reopening it from the archive reaches the same key, not a copy.
+      ...(card.identity ? { identity: card.identity } : {}),
     },
     openedAt: now.toISOString(),
   };

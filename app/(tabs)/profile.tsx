@@ -46,7 +46,6 @@ import {
   Divider,
   IconBadge,
   Pill,
-  ProgressBar,
   Reveal,
   Ring,
   Screen,
@@ -56,7 +55,7 @@ import {
   type AppTextProps,
 } from "@/components/ui";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
-import { BADGE_FACE_OFFSET, BadgeArt } from "@/components/celebration/Badge";
+import { BadgeArt } from "@/components/celebration/Badge";
 import { TrendCard, buildAdherenceTrend, type TrendSeries } from "@/components/charts";
 import { GozlinMoment } from "@/components/gozlin";
 import { ScreenTopBar, useAccountIdentity } from "@/components/navigation";
@@ -82,9 +81,10 @@ import {
   TIER_META,
 } from "@/services/AchievementService";
 import {
+  TIER_RIBBON,
   badgeFinish,
-  lockedFinish,
-  type BadgeFinish,
+  badgeShape,
+  bareFinish,
 } from "@/services/achievementBadges";
 import { equipmentSummary as summarizeEquipment } from "@/models/equipment";
 import { Ionicons } from "@expo/vector-icons";
@@ -100,7 +100,11 @@ import {
   StyleSheet,
   TextInput,
   View,
+  useWindowDimensions,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   cancelAnimation,
   Easing,
@@ -194,21 +198,17 @@ const GOLD_DEEP = "#B8862F";
 const GOLD_DIM = "#8A7440";
 const GOLD_GRADIENT = [GOLD_LIGHT, GOLD, GOLD_DEEP] as const;
 
+/** The badge the detail sheet holds up. */
+const DETAIL_BADGE = 124;
 /**
- * An UNEARNED trophy, on the detail screen's black card.
- *
- * A neutral pewter rather than a dimmed copy of the badge's real finish: a
- * greyed-out amethyst still tells you it's amethyst, and the material is the
- * reward. These are literals for the same reason the golds above are — the
- * card is black in both themes, so a theme-aware grey would be answering a
- * question nobody asked.
+ * An UNEARNED trophy, on the detail screen's black card: its bar's track and
+ * its pewter tone (name, pill, edge). Literals for the same reason the golds
+ * above are — the card is black in both themes, so a theme-aware grey would
+ * be answering a question nobody asked. (The badge itself is bareFinish.)
  */
-/** The badge inside the detail sheet's progress ring. */
-const DETAIL_BADGE = 96;
+const DETAIL_BAR = 200;
+const LOCKED_TRACK = "#22252B";
 const LOCKED_TONE = "#7C838F";
-const LOCKED_PLATE = "#2A2E36";
-/** The unearned trophy's progress arc — pewter, still legible on black. */
-const LOCKED_RING = ["#9AA2AE", LOCKED_TONE, "#5A616B"] as const;
 
 /** Which of the three body numbers a tap opened the editor on. */
 type BodyField = "age" | "height" | "weight";
@@ -782,24 +782,18 @@ export default function ProfileScreen() {
               </View>
             </Card>
 
-            {/* EARNED, by category. A category with nothing won in it doesn't
-                appear at all — a heading over an empty row is the crowding this
-                section was built to lose. The count still says how many of that
-                category exist, so the shelf never implies it's all there is. */}
-            {CATEGORY_ORDER.map((cat) => {
-              const g = grouped.get(cat);
-              if (!g || g.earned.length === 0) return null;
-              return (
-                <CategoryBlock
-                  key={cat}
-                  category={cat}
-                  items={g.earned}
-                  count={`${g.earned.length}/${g.earned.length + g.locked.length}`}
-                  colors={colors}
-                  onPick={setDetail}
-                />
-              );
-            })}
+            {/* EARNED — one trophy case, not a heading per category. Three
+                badges a row left most categories as one badge and two empty
+                slots under its own title; a single run in category order (and
+                the bronze→gold ladder inside each) keeps the shelf stable on
+                every unlock without the gaps. The total is in the header above. */}
+            {summary.earnedCount > 0 && (
+              <View style={[styles.tileGrid, styles.shelf]}>
+                {CATEGORY_ORDER.flatMap((cat) => grouped.get(cat)?.earned ?? []).map((a) => (
+                  <BadgeTile key={a.def.id} item={a} onPress={() => setDetail(a)} />
+                ))}
+              </View>
+            )}
 
             {/* Day one: one line, so the level card isn't sitting straight on
                 top of a disclosure row with nothing between them. */}
@@ -1100,13 +1094,12 @@ function LatestAchievementRow({
         style={StyleSheet.absoluteFill}
       />
 
-      {/* The glyph alone — no disc behind it. A filled plate made this the
-          same object as the IconBadge on every setup and target row; bare, it
-          reads as a mark rather than as a list bullet. (The twinkling sparks
-          that used to circle it went with the confetti, 2026-10-15: the
-          owner called the celebrations noisy and amateur.) */}
+      {/* The badge itself, small — its tier's shape and its own metal, the
+          same object as on the shelf. (A tinted plate here read as the
+          IconBadge on every setup row, so this was a bare glyph until the
+          badges got shapes of their own; no ribbon at this size.) */}
       <View style={styles.latestMedalWrap}>
-        <Ionicons name={item.def.icon} size={26} color={finish.accent} />
+        <BadgeArt finish={finish} icon={item.def.icon} shape={badgeShape(item.def)} size={40} />
       </View>
 
       <View style={styles.flex}>
@@ -1483,13 +1476,10 @@ function BodyEditSheet({
 }
 
 /**
- * One category: its header, and a grid of whatever tiles it was handed.
- *
- * Shared by the earned shelf and the folded list so the two read identically —
- * the only difference is which tiles go in, and what the number on the right is
- * measuring. That number is why `count` is a string: "3/8" on the shelf means
- * three of eight earned, "5 left" below means five still counting, and neither
- * may be read as the other.
+ * One category of the folded "Still to earn" list: its header, and its badges
+ * three to a row. (The earned shelf above is one ungrouped trophy case.) The
+ * count is a string because it says what it measures — "5 left" — and may not
+ * be read as a share of anything.
  */
 function CategoryBlock({
   category,
@@ -1516,126 +1506,129 @@ function CategoryBlock({
           {count}
         </AppText>
       </View>
-      <View style={styles.achGrid}>
+      <View style={styles.tileGrid}>
         {items.map((a) => (
-          <AchievementCard
-            key={a.def.id}
-            item={a}
-            colors={colors}
-            onPress={() => onPick(a)}
-          />
+          <BadgeTile key={a.def.id} item={a} onPress={() => onPick(a)} />
         ))}
       </View>
     </View>
   );
 }
 
-function AchievementCard({
-  item,
-  colors,
-  onPress,
-}: {
-  item: EvaluatedAchievement;
-  colors: ReturnType<typeof useColors>["colors"];
-  onPress: () => void;
-}) {
-  const { def, unlocked, value, target, progress } = item;
-  const tier = TIER_META[def.tier];
-  // THE BADGE'S OWN METAL, NOT ITS TIER'S. Tinting by tier made the whole
-  // trophy case one shade of orange — bronze and gold are two thirds of the
-  // ladder. A finish is per-achievement, so no two neighbours match.
-  const finish = badgeFinish(def);
-  const tone = unlocked ? finish.accent : colors.textTertiary;
+/** A badge on the shelf — three to a row on a 320dp phone. */
+const TILE_BADGE = 80;
+/** The bar under a badge still to earn: a little narrower than the badge. */
+const TILE_BAR = 72;
 
+/**
+ * ONE BADGE ON THE SHELF — the badge itself is the tile.
+ *
+ * The old tile was a card: a 42pt coin in its corner, a check, the name, two
+ * lines of description and a tier pill. At that size the badge was an icon on a
+ * form, which is most of why the case read "premium, but poor". Duolingo's
+ * award grid is just the awards, big, with their names — and so is this: the
+ * shape tells the tier, the ribbon says it, the name says what, and the
+ * description waits in the detail sheet a tap away.
+ *
+ * Still to earn, the same badge stands unstruck — grey, its shape already
+ * there, its material not (see bareFinish) — over a bar and the exact count.
+ */
+function BadgeTile({ item, onPress }: { item: EvaluatedAchievement; onPress: () => void }) {
+  const { colors, isDark } = useColors();
+  const { def, unlocked, value, target, progress } = item;
+  const unit = def.unit ? ` ${def.unit}` : "";
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${def.name}. ${unlocked ? `Unlocked. ${finish.material}.` : `${value} of ${target}${def.unit ? ` ${def.unit}` : ""}`}.`}
-      style={[
-        styles.achCard,
-        {
-          backgroundColor: colors.surface,
-          borderColor: unlocked ? alpha(finish.accent, 0.45) : colors.border,
-        },
-      ]}
+      accessibilityLabel={`${def.name}. ${TIER_META[def.tier].label}. ${
+        unlocked ? "Unlocked" : `${value} of ${target}${unit}`
+      }.`}
+      style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]}
     >
-      {/* A pool of the badge's own light, only once it's been won. */}
-      {unlocked ? (
-        <LinearGradient
-          colors={[alpha(finish.ramp[1], 0.16), "#00000000"]}
-          start={{ x: 0.1, y: 0 }}
-          end={{ x: 0.9, y: 1 }}
-          style={styles.achWash}
-        />
-      ) : null}
-
-      <View style={styles.achTop}>
-        {unlocked ? (
-          <StruckBadge finish={finish} icon={def.icon} size={42} />
-        ) : (
-          <IconBadge name={def.icon} tone={tone} size={40} />
-        )}
-        {unlocked ? (
-          <Ionicons name="checkmark-circle" size={18} color={finish.accent} />
-        ) : (
-          <Ionicons name="lock-closed" size={13} color={colors.textTertiary} />
-        )}
-      </View>
-
+      <BadgeArt
+        finish={unlocked ? badgeFinish(def) : bareFinish(isDark)}
+        icon={def.icon}
+        shape={badgeShape(def)}
+        label={TIER_RIBBON[def.tier]}
+        size={TILE_BADGE}
+      />
       <AppText
-        variant="callout"
+        variant="footnote"
+        weight="700"
+        align="center"
         color={unlocked ? "primary" : "secondary"}
-        numberOfLines={1}
-        style={styles.achName}
+        numberOfLines={2}
+        style={styles.tileName}
       >
         {def.name}
       </AppText>
-      <AppText variant="caption" color="tertiary" numberOfLines={2} style={styles.achDesc}>
-        {def.description}
-      </AppText>
-
-      <View style={styles.achFooter}>
-        {unlocked ? (
-          // The pill names the TIER (what it's worth) in the badge's own metal
-          // (what it is) — two facts, one chip, neither fighting the other.
-          <View style={[styles.achTierPill, { backgroundColor: alpha(finish.accent, 0.18) }]}>
-            <AppText variant="caption" style={[styles.achTierText, { color: finish.accent }]}>
-              {tier.label}
-            </AppText>
-          </View>
-        ) : (
-          <>
-            {/* A locked badge is bare, so its bar is too — the material is the
-                prize, and spending it before the unlock gives it away. */}
-            <ProgressBar progress={progress} tone={colors.textTertiary} height={6} />
-            <AppText variant="caption" color="tertiary" style={styles.achProgress}>
-              {value}/{target}
-              {def.unit ? ` ${def.unit}` : ""}
-            </AppText>
-          </>
-        )}
-      </View>
+      {unlocked ? null : (
+        <>
+          <ChunkyBar
+            progress={progress}
+            width={TILE_BAR}
+            track={colors.surfaceSunken}
+            fill={colors.primary}
+            style={styles.tileBar}
+          />
+          <AppText variant="caption" color="tertiary" style={styles.tileCount}>
+            {value}/{target}
+            {unit}
+          </AppText>
+        </>
+      )}
     </Pressable>
   );
 }
 
 /**
- * The struck badge on the shelf — components/celebration/Badge, the same
- * object the unlock moment drops onto the screen and the detail sheet holds
- * up. One drawing at three sizes is what makes the trophy you tap and the
- * trophy that filled the screen read as one thing.
+ * Progress toward a badge, Duolingo-thick: a sunken track, a fill in the app's
+ * own colour, and one stroke of light along the fill's top — the same light the
+ * badges carry, so the bar belongs with them.
+ *
+ * Exact, never padded: 2 of 365 is a sliver because it IS a sliver, and the
+ * count beside it says how much. No clip either — the fill draws its own round
+ * ends, which Android antialiases; an `overflow: hidden` round view it doesn't.
  */
-function StruckBadge({
-  finish,
-  icon,
-  size,
+function ChunkyBar({
+  progress,
+  width,
+  height = 8,
+  track,
+  fill,
+  style,
 }: {
-  finish: BadgeFinish;
-  icon: keyof typeof Ionicons.glyphMap;
-  size: number;
+  progress: number;
+  width: number;
+  height?: number;
+  track: string;
+  fill: string;
+  style?: StyleProp<ViewStyle>;
 }) {
-  return <BadgeArt finish={finish} icon={icon} size={size} />;
+  const w = Math.max(0, Math.min(1, progress)) * width;
+  const r = height / 2;
+  return (
+    <View style={[{ width, height, borderRadius: r, backgroundColor: track }, style]}>
+      {w > 0 ? (
+        <View style={{ width: w, height, borderRadius: Math.min(r, w / 2), backgroundColor: fill }}>
+          {w > height * 1.5 ? (
+            <View
+              style={[
+                styles.barShine,
+                {
+                  left: r * 0.8,
+                  right: r * 0.8,
+                  top: height * 0.2,
+                  height: Math.max(1.5, height * 0.24),
+                },
+              ]}
+            />
+          ) : null}
+        </View>
+      ) : null}
+    </View>
+  );
 }
 
 /**
@@ -1680,6 +1673,12 @@ function AchievementDetail({
 }) {
   const { colors, isDark } = useColors();
   const reduceMotion = useReducedMotion();
+  // The modal is edge-to-edge, so the system bars' room is ours to keep: the
+  // card sits inside the insets, and whatever won't fit there scrolls (a long
+  // description at 1.3x text on a 569dp phone) instead of running under them.
+  const { height: windowH } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const cardMaxH = windowH - insets.top - insets.bottom - Spacing.xl * 2;
   const { def, unlocked, rawValue, target, progress, earnedAt } = item;
   const tier = TIER_META[def.tier];
   /**
@@ -1697,9 +1696,10 @@ function AchievementDetail({
    * every one of these metals reads as metal on.
    *
    * LOCKED STAYS BARE. Not a dimmed version of the real finish: a greyed-out
-   * copper still tells you it's copper, and the reveal is the reward.
+   * copper still tells you it's copper, and the reveal is the reward. The
+   * card is black in both themes, so it is always the dark unstruck grey.
    */
-  const finish = unlocked ? badgeFinish(def) : lockedFinish(LOCKED_TONE, LOCKED_PLATE);
+  const finish = unlocked ? badgeFinish(def) : bareFinish(true);
   const accent = unlocked ? finish.accent : LOCKED_TONE;
   const ramp = finish.ramp;
   const earnedDate = earnedAt
@@ -1735,7 +1735,10 @@ function AchievementDetail({
 
   return (
     <Pressable
-      style={styles.detailScrim}
+      style={[
+        styles.detailScrim,
+        { paddingTop: insets.top + Spacing.xl, paddingBottom: insets.bottom + Spacing.xl },
+      ]}
       onPress={onClose}
       accessibilityRole="button"
       accessibilityLabel="Close"
@@ -1753,7 +1756,11 @@ function AchievementDetail({
           The card shape stays: this is one achievement, held, not a takeover of
           the screen. */}
       <Animated.View
-        style={[styles.detailCard, { borderColor: alpha(accent, 0.35) }, cardStyle]}
+        style={[
+          styles.detailCard,
+          { borderColor: alpha(accent, 0.35), maxHeight: cardMaxH },
+          cardStyle,
+        ]}
       >
         {/* A pool of the badge's own light behind the medallion, so the black
             has a centre and the metal looks lit rather than painted on. Clipped
@@ -1764,7 +1771,18 @@ function AchievementDetail({
           style={styles.detailVignette}
         />
 
-        {/* Medallion — halo, ring, disc, glyph. */}
+        {/* A tap anywhere still closes: the scroll view only takes drags. */}
+        <ScrollView
+          style={styles.detailScroll}
+          contentContainerStyle={styles.detailContent}
+          bounces={false}
+          showsVerticalScrollIndicator={false}
+        >
+
+        {/* The badge, held up — its tier's shape, its ribbon, its metal (or,
+            still to earn, the same badge unstruck). It used to sit inside a
+            progress ring; a ring round a shield or a star is a frame fighting
+            its picture, so progress moved to the bar below, as on the shelf. */}
         <View style={styles.medallionWrap}>
           <Animated.View
             style={[
@@ -1773,25 +1791,13 @@ function AchievementDetail({
               haloStyle,
             ]}
           />
-          <Ring
-            progress={unlocked ? 1 : progress}
-            size={140}
-            strokeWidth={7}
-            // The bare badge's disc is a dark plate, but its RING still has to
-            // be read — it is the only place "62 of 100" becomes a shape.
-            gradient={unlocked ? ramp : LOCKED_RING}
-            track={alpha(unlocked ? finish.accent : LOCKED_TONE, 0.16)}
-          >
-            {/* The struck badge (components/celebration/Badge) — locked, an
-                unstruck coin in the plate's grey. Its FACE, not its box, sits
-                in the ring's centre: the lip hangs below. */}
-            <BadgeArt
-              finish={finish}
-              icon={def.icon}
-              size={DETAIL_BADGE}
-              style={{ transform: [{ translateY: (BADGE_FACE_OFFSET / 100) * DETAIL_BADGE }] }}
-            />
-          </Ring>
+          <BadgeArt
+            finish={finish}
+            icon={def.icon}
+            shape={badgeShape(def)}
+            label={TIER_RIBBON[def.tier]}
+            size={DETAIL_BADGE}
+          />
         </View>
 
         <View style={[styles.detailTier, { backgroundColor: alpha(accent, 0.16) }]}>
@@ -1848,7 +1854,7 @@ function AchievementDetail({
         ) : (
           <View style={styles.detailStatusCol}>
             <View style={styles.detailProgressRow}>
-              <AppText variant="title" style={[styles.detailProgressValue, { color: accent }]}>
+              <AppText variant="title" style={[styles.detailProgressValue, { color: GOLD }]}>
                 {rawValue}
               </AppText>
               <AppText variant="subhead" style={styles.detailMuted}>
@@ -1856,7 +1862,17 @@ function AchievementDetail({
                 {def.unit ? ` ${def.unit}` : ""}
               </AppText>
             </View>
-            <AppText variant="footnote" style={styles.detailMuted}>
+            {/* The trophy shelf's own gold, not the badge's metal — the
+                material stays the prize until it's won. */}
+            <ChunkyBar
+              progress={progress}
+              width={DETAIL_BAR}
+              height={12}
+              track={LOCKED_TRACK}
+              fill={GOLD}
+              style={styles.detailBar}
+            />
+            <AppText variant="footnote" style={[styles.detailMuted, styles.detailToGo]}>
               {Math.max(0, target - rawValue)}
               {def.unit ? ` ${def.unit}` : ""} to go
             </AppText>
@@ -1868,6 +1884,7 @@ function AchievementDetail({
         <AppText variant="caption" align="center" style={[styles.detailHint, styles.detailFaint]}>
           Tap anywhere to close
         </AppText>
+        </ScrollView>
       </Animated.View>
     </Pressable>
   );
@@ -2069,37 +2086,17 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
     paddingHorizontal: Spacing.xs,
   },
-  achGrid: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.md },
-  achCard: {
-    width: "47.5%",
-    flexGrow: 1,
-    borderWidth: 1,
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
-    // Clips the unlocked card's light pool to its corners.
-    overflow: "hidden",
-  },
-  /** The badge's own light, pooled in the top-left of an unlocked tile. */
-  achWash: { position: "absolute", top: 0, left: 0, right: 0, height: 96 },
-  /** A struck disc: the ramp's shadow stop showing as a rim under the face. */
-  achTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  achName: { marginTop: Spacing.sm },
-  achDesc: { marginTop: 2, minHeight: 30 },
-  achFooter: { marginTop: Spacing.sm, gap: 4 },
-  achProgress: { fontWeight: "600" },
-  achTierPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    alignSelf: "flex-start",
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 3,
-    borderRadius: Radius.pill,
-  },
+  /** The trophy case: three badges a row, each centred in its third. */
+  tileGrid: { flexDirection: "row", flexWrap: "wrap", rowGap: Spacing.lg },
+  tile: { width: "33.333%", alignItems: "center", paddingHorizontal: 2 },
+  tilePressed: { transform: [{ scale: 0.95 }] },
+  tileName: { marginTop: Spacing.xs, lineHeight: 16 },
+  tileBar: { marginTop: Spacing.xs },
+  tileCount: { marginTop: 3 },
+  /** The stroke of light along a progress bar's fill. */
+  barShine: { position: "absolute", borderRadius: 1, backgroundColor: "rgba(255,255,255,0.4)" },
+  /** The shelf sits a step below the level card, like a category did. */
+  shelf: { marginTop: Spacing.lg },
   achTierText: { fontWeight: "700" },
 
   /** The badge's own line, under its description. */
@@ -2115,8 +2112,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    padding: Spacing.xl,
+    paddingHorizontal: Spacing.xl,
   },
+  /** Shrinks inside the card's max height; content beyond it scrolls. */
+  detailScroll: { flexGrow: 0, flexShrink: 1, alignSelf: "stretch" },
+  detailContent: { alignItems: "center" },
   detailCard: {
     width: "100%",
     maxWidth: 340,
@@ -2141,10 +2141,10 @@ const styles = StyleSheet.create({
     height: 320,
     borderRadius: 320,
   },
-  /** Sized to the Ring so the halo can bloom past it without moving anything. */
+  /** The halo's width, the badge's height (124 wide, so 134 tall with its lip). */
   medallionWrap: {
     width: 140,
-    height: 140,
+    height: 134,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2185,7 +2185,9 @@ const styles = StyleSheet.create({
   detailStatusCol: { alignItems: "center", marginTop: Spacing.xl },
   detailProgressRow: { flexDirection: "row", alignItems: "baseline", gap: 4 },
   detailProgressValue: { fontWeight: "800" },
-  detailHint: { marginTop: Spacing.xxxl },
+  detailBar: { marginTop: Spacing.sm },
+  detailToGo: { marginTop: Spacing.xs },
+  detailHint: { marginTop: Spacing.xl },
 
   // Glitter typography
   glitterRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end" },
@@ -2193,8 +2195,8 @@ const styles = StyleSheet.create({
 
   // Latest achievement row
   latestMedalWrap: {
-    width: 38,
-    height: 38,
+    width: 40,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },

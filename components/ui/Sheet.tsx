@@ -64,6 +64,17 @@ export interface SheetProps {
   /** Cap the panel's height as a fraction of the screen. Omit to hug content. */
   maxHeightRatio?: number;
   /**
+   * Hold the panel at `maxHeightRatio` instead of hugging its content — for a
+   * flow whose steps differ in length, where a panel that resized on every step
+   * would jump under the finger.
+   */
+  fullHeight?: boolean;
+  /**
+   * The panel's own colour, for a sheet that is a surface of its own (the
+   * mood check-in is black). Its edge turns to a faint white to match.
+   */
+  surface?: string;
+  /**
    * Fired once the close animation has finished AND the panel has unmounted —
    * not when `onClose` was requested.
    *
@@ -98,6 +109,8 @@ export function Sheet({
   children,
   header,
   maxHeightRatio,
+  fullHeight = false,
+  surface,
   onClosed,
   style,
 }: SheetProps) {
@@ -186,10 +199,14 @@ export function Sheet({
             style={[
               styles.sheet,
               {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: alpha(colors.borderStrong, 0.6),
+                backgroundColor: surface ?? colors.surfaceElevated,
+                borderColor: surface ? alpha("#FFFFFF", 0.14) : alpha(colors.borderStrong, 0.6),
               },
-              maxHeightRatio ? { maxHeight: `${Math.round(maxHeightRatio * 100)}%` } : null,
+              maxHeightRatio
+                ? fullHeight
+                  ? { height: `${Math.round(maxHeightRatio * 100)}%` }
+                  : { maxHeight: `${Math.round(maxHeightRatio * 100)}%` }
+                : null,
               sheetStyle,
               style,
             ]}

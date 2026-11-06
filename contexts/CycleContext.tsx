@@ -25,6 +25,7 @@
  */
 import { consent } from "@/health-os";
 import {
+  answerContraception,
   clearCycleReminders,
   computeView,
   DEFAULT_CYCLE_SETTINGS,
@@ -36,6 +37,8 @@ import {
   GOZLIN_ASK_LIMIT,
   isEmptyDayLog,
   loadCycleData,
+  loadLifeMoments,
+  mergeHungryLedger,
   moveCycleData,
   planCycleReminders,
   pruneDays,
@@ -48,6 +51,8 @@ import {
   syncCycleReminders,
   togglePeriodDay as toggleEpisodeDay,
   withCycleLock,
+  withRelief,
+  type ContraceptionAnswer,
   type CycleData,
   type CycleDayLog,
   type CycleMood,
@@ -57,10 +62,17 @@ import {
   type GozlinAsk,
   type Flow,
   type GapNote,
+  type LifeMoment,
   type OvulationTest,
+  type Relief,
+  type ReliefSymptom,
   type Symptom,
 } from "@/services/cycle";
 import { subscribeCycleLogChanged } from "@/services/notifications/cycleActions";
+import { calorieFloor } from "@/services/NutritionService";
+import { publishDayAdjustments } from "@/services/nutrition/dayTargets";
+import { hasRecordedIntake } from "@/services/nutrition/recordedIntake";
+import { forgetSmartFeature } from "@/services/smart/ledger";
 import React, {
   createContext,
   useCallback,
@@ -71,7 +83,7 @@ import React, {
   useState,
 } from "react";
 import { AppState } from "react-native";
-import { useProfile, useSystem } from "./AppContext";
+import { useNutrition, useProfile, useSystem } from "./AppContext";
 
 /** A change to one day's log. `null` clears a field; `undefined` leaves it alone. */
 export interface DayPatch {
@@ -87,6 +99,8 @@ export interface CycleSetup {
   lastStart: string | null;
   usualCycleDays: number | null;
   usualPeriodDays: number | null;
+  /** "Do you use hormonal contraception?" — optional, so null when skipped. */
+  contraception?: ContraceptionAnswer | null;
 }
 
 interface CycleContextValue {
@@ -105,8 +119,14 @@ interface CycleContextValue {
   togglePeriodDay: (date: string, on: boolean) => Promise<void>;
   removePeriod: (id: string) => Promise<void>;
   logDay: (date: string, patch: DayPatch) => Promise<void>;
+  /** "What helped most?" — her answer, onto the symptom day's own log. */
+  answerRelief: (date: string, symptom: ReliefSymptom, helped: Relief) => Promise<void>;
+  /** "Skip" — kept too: three in a row and that symptom isn't asked about again. */
+  skipRelief: (date: string, symptom: ReliefSymptom) => Promise<void>;
   updateSettings: (patch: Partial<CycleSettings>) => Promise<void>;
   setBackup: (on: boolean) => Promise<void>;
+  /** Her answer to the contraception question. Switching away from "yes" restarts her history. */
+  setContraception: (answer: ContraceptionAnswer) => Promise<void>;
   setShareWithGozlin: (on: boolean) => Promise<void>;
   answerGap: (cycleStart: string, answer: GapNote) => Promise<void>;
   dismissNote: (id: string, signature: string) => Promise<void>;
@@ -123,6 +143,14 @@ interface CycleContextValue {
   noteGozlinAsk: () => Promise<void>;
   /** "Not now", for good. */
   dismissGozlinAsk: () => Promise<void>;
+  /** Re-read her trips and events. Life Context has no change signal, so screens call this on focus. */
+  refreshMoments: () => Promise<void>;
+  /** The one-time water note is in front of her: it stays today, and never comes back. */
+  noteWaterSeen: () => Promise<void>;
+  /** "Plan for it", or the off switch. Off leaves the past as it was. */
+  setHungryPlan: (on: boolean) => Promise<void>;
+  /** "No thanks", for good. */
+  declineHungryPlan: () => Promise<void>;
   /** Stop tracking. The log is kept and comes back if she turns it on again. */
   turnOff: () => Promise<void>;
   /** Erase the log everywhere: this phone, and (through the sync sweep) the backup. */
@@ -139,12 +167,14 @@ const nowIso = () => new Date().toISOString();
 const PERIOD_FLOWS: readonly Flow[] = ["light", "medium", "heavy"];
 
 export function CycleProvider({ children }: { children: React.ReactNode }) {
-  const { userBio } = useProfile();
+  const { userBio, bodyLogs, nutritionTargets } = useProfile();
+  const { dietHistory } = useNutrition();
   const { currentDate: today, isProfileReconciled } = useSystem();
 
   const [data, setData] = useState<CycleData>(EMPTY);
   const [ready, setReady] = useState(false);
   const [shareWithGozlin, setShare] = useState(false);
+  const [moments, setMoments] = useState<readonly LifeMoment[]>([]);
   const dataRef = useRef<CycleData>(EMPTY);
   const loadFailed = useRef(false);
   const todayRef = useRef(today);
@@ -152,9 +182,11 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
 
   const age = userBio?.age ?? null;
   const conditionsKey = (userBio?.medicalConditions ?? []).join(",");
+  const heightM = (userBio?.heightCm ?? 0) / 100;
+  const bmi = heightM > 0 && userBio?.weightKg ? Math.round((userBio.weightKg / (heightM * heightM)) * 10) / 10 : null;
   const profile = useMemo(
-    () => ({ age, conditions: conditionsKey ? conditionsKey.split(",") : [] }),
-    [age, conditionsKey],
+    () => ({ age, bmi, conditions: conditionsKey ? conditionsKey.split(",") : [] }),
+    [age, bmi, conditionsKey],
   );
 
   /* ── load ─────────────────────────────────────────────────────────── */
@@ -193,6 +225,17 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
     void load();
   }, [isProfileReconciled, load]);
 
+  // Her trips and events, for "your period meets your calendar". Kept identical
+  // when nothing changed, so an ordinary re-read doesn't recompute the view.
+  const refreshMoments = useCallback(async () => {
+    const next = await loadLifeMoments(todayRef.current);
+    setMoments((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+  }, []);
+
+  useEffect(() => {
+    void refreshMoments();
+  }, [today, isProfileReconciled, refreshMoments]);
+
   // A lock-screen answer, while this tree was alive. `load` goes through the
   // same lock the write did, so it can only ever read the post-write log.
   useEffect(() => subscribeCycleLogChanged(() => void load()), [load]);
@@ -203,10 +246,13 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
   // primitives, so an unchanged log costs no re-lay.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active") void load();
+      if (state === "active") {
+        void load();
+        void refreshMoments();
+      }
     });
     return () => sub.remove();
-  }, [load]);
+  }, [load, refreshMoments]);
 
   /* ── write ────────────────────────────────────────────────────────── */
 
@@ -240,15 +286,53 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const view = useMemo(() => computeView(data, { today, profile }), [data, today, profile]);
+  const weighIns = useMemo(() => bodyLogs.map((b) => ({ date: b.date, kg: b.weightKg })), [bodyLogs]);
+  // Days that recorded food only: a closed day with nothing logged is unknown, not 0 kcal.
+  const intake = useMemo(
+    () => dietHistory.filter(hasRecordedIntake).map((e) => ({ date: e.date, kcal: e.consumedCalories ?? 0 })),
+    [dietHistory],
+  );
+  const usualKcal = nutritionTargets?.calories ?? null;
+  const floorKcal = userBio ? calorieFloor(userBio) : null;
+  const calories = useMemo(
+    () => (usualKcal !== null && floorKcal !== null ? { targetKcal: usualKcal, floorKcal } : null),
+    [usualKcal, floorKcal],
+  );
+  const view = useMemo(
+    () => computeView(data, { today, profile, moments, weighIns, intake, calories }),
+    [data, today, profile, moments, weighIns, intake, calories],
+  );
   const viewRef = useRef(view);
   viewRef.current = view;
+  const momentsRef = useRef(moments);
+  momentsRef.current = moments;
 
   const patchSettings = useCallback(
     (patch: Partial<CycleSettings>) =>
       commit((d) => ({ ...d, settings: { ...d.settings, ...patch } })),
     [commit],
   );
+
+  /* ── the hungrier-week plan ───────────────────────────────────────── */
+
+  // Today and the future follow the plan; the past stays as it was. So the day
+  // her period starts, the prediction moves on and today's extra stops by itself.
+  const hungryLedger = data.settings.hungryLedger;
+  useEffect(() => {
+    if (!ready) return;
+    const next = mergeHungryLedger(hungryLedger, view.hungryPlan, today);
+    if (next !== hungryLedger) void patchSettings({ hungryLedger: next });
+  }, [ready, hungryLedger, view.hungryPlan, today, patchSettings]);
+
+  // The one thing every reader of a day's calorie target goes through.
+  useEffect(() => {
+    publishDayAdjustments(
+      Object.fromEntries(
+        Object.entries(hungryLedger).map(([date, kcal]) => [date, { kcal, reason: "cycle" as const }]),
+      ),
+    );
+  }, [hungryLedger]);
+  useEffect(() => () => publishDayAdjustments({}), []);
 
   /* ── reminders ────────────────────────────────────────────────────── */
 
@@ -270,8 +354,9 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
       p?.earliest,
       p?.likely,
       p?.latest,
+      moments.map((m) => `${m.id}:${m.kind}:${m.start}:${m.end}`).join(","),
     ].join("|");
-  }, [data.settings, view]);
+  }, [data.settings, view, moments]);
 
   useEffect(() => {
     if (!ready) return;
@@ -283,7 +368,13 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       void syncCycleReminders(
-        planCycleReminders({ settings: s, status: v.status, prediction: v.prediction, now: new Date() }),
+        planCycleReminders({
+          settings: s,
+          status: v.status,
+          prediction: v.prediction,
+          now: new Date(),
+          moments: momentsRef.current,
+        }),
       );
     }, 800);
     return () => clearTimeout(t);
@@ -317,6 +408,11 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
             enabledAt: d.settings.enabledAt ?? now,
             usualCycleDays: setup.usualCycleDays,
             usualPeriodDays: setup.usualPeriodDays,
+            // Skipping the question keeps whatever she said before (a log
+            // turned off and on again), never erases it.
+            contraception: setup.contraception
+              ? answerContraception(d.settings.contraception, setup.contraception, todayRef.current)
+              : d.settings.contraception,
             offerDismissed: true,
           },
         };
@@ -389,6 +485,12 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
         apply("mood");
         apply("energy");
         apply("ovulationTest");
+        // An answer about a symptom she has just un-ticked goes with it.
+        if (next.relief) {
+          const kept = next.relief.filter((r) => next.symptoms?.includes(r.symptom));
+          if (kept.length) next.relief = kept;
+          else delete next.relief;
+        }
         // Nothing logged, nothing to clear: don't create an empty day.
         if (isEmptyDayLog(next) && isEmptyDayLog(prev)) return d;
 
@@ -402,6 +504,28 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
     [commit],
   );
 
+  const noteRelief = useCallback(
+    (date: string, symptom: ReliefSymptom, helped: Relief | "skipped") =>
+      commit((d) => {
+        const log = d.days[date];
+        // Only onto a day that still carries the symptom: an answer about
+        // nothing is no answer (and normalizeDayLog would drop it anyway).
+        if (!log?.symptoms?.includes(symptom)) return d;
+        return { ...d, days: { ...d.days, [date]: withRelief(log, symptom, helped, nowIso()) } };
+      }),
+    [commit],
+  );
+
+  const answerRelief = useCallback(
+    (date: string, symptom: ReliefSymptom, helped: Relief) => noteRelief(date, symptom, helped),
+    [noteRelief],
+  );
+
+  const skipRelief = useCallback(
+    (date: string, symptom: ReliefSymptom) => noteRelief(date, symptom, "skipped"),
+    [noteRelief],
+  );
+
   const setBackup = useCallback(
     (on: boolean) =>
       withCycleLock(async () => {
@@ -413,6 +537,19 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
         setData(moved);
       }),
     [],
+  );
+
+  const setContraception = useCallback(
+    (answer: ContraceptionAnswer) =>
+      commit((d) => {
+        const day = todayRef.current;
+        // A bleed going on today is the first day of the first cycle after
+        // stopping a method, so a restart counts from it (services/cycle/contraception).
+        const bleeding = episodeOn(d.periods, day, day, viewRef.current.typicalBleed);
+        const next = answerContraception(d.settings.contraception, answer, day, bleeding?.start ?? null);
+        return next === d.settings.contraception ? d : { ...d, settings: { ...d.settings, contraception: next } };
+      }),
+    [commit],
   );
 
   const setShareWithGozlin = useCallback(async (on: boolean) => {
@@ -500,6 +637,28 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
     [patchSettings],
   );
 
+  const setHungryPlan = useCallback(
+    (on: boolean) =>
+      patchSettings(
+        // Switching it off is an answer too: the offer doesn't come back to ask
+        // again, and the switch in cycle settings is always there.
+        on
+          ? { planHungryWeek: true, hungryPlanFrom: todayRef.current, hungryDeclined: false }
+          : { planHungryWeek: false, hungryPlanFrom: null, hungryDeclined: true },
+      ),
+    [patchSettings],
+  );
+
+  const declineHungryPlan = useCallback(() => patchSettings({ hungryDeclined: true }), [patchSettings]);
+
+  const noteWaterSeen = useCallback(
+    () =>
+      commit((d) =>
+        d.settings.waterNoteOn ? d : { ...d, settings: { ...d.settings, waterNoteOn: todayRef.current } },
+      ),
+    [commit],
+  );
+
   const turnOff = useCallback(() => patchSettings({ enabled: false }), [patchSettings]);
 
   const eraseAll = useCallback(
@@ -508,6 +667,8 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
         await eraseCycleData();
         await clearCycleReminders();
         await consent.set("cycle_gozlin", false).catch(() => undefined);
+        // The day the hungrier-week card appeared says something about her cycle too.
+        await forgetSmartFeature("hungry-week").catch(() => undefined);
         // Kept as a fresh, empty settings record so the Home invitation doesn't
         // come straight back to someone who just deleted their log.
         const fresh: CycleData = {
@@ -546,8 +707,11 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
       togglePeriodDay,
       removePeriod,
       logDay,
+      answerRelief,
+      skipRelief,
       updateSettings: patchSettings,
       setBackup,
+      setContraception,
       setShareWithGozlin,
       answerGap,
       dismissNote,
@@ -556,6 +720,10 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
       gozlinAsk,
       noteGozlinAsk,
       dismissGozlinAsk,
+      refreshMoments,
+      noteWaterSeen,
+      setHungryPlan,
+      declineHungryPlan,
       turnOff,
       eraseAll,
     }),
@@ -572,8 +740,11 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
       togglePeriodDay,
       removePeriod,
       logDay,
+      answerRelief,
+      skipRelief,
       patchSettings,
       setBackup,
+      setContraception,
       setShareWithGozlin,
       answerGap,
       dismissNote,
@@ -582,6 +753,10 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
       gozlinAsk,
       noteGozlinAsk,
       dismissGozlinAsk,
+      refreshMoments,
+      noteWaterSeen,
+      setHungryPlan,
+      declineHungryPlan,
       turnOff,
       eraseAll,
     ],

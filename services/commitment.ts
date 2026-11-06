@@ -33,6 +33,13 @@ export interface StreakLike {
   totalActiveDays: number;
   /** Every kept date, ascending, YYYY-MM-DD. Absent on data written before 2026-10-15. */
   days?: string[];
+  /**
+   * PAUSED days — protected rough days (services/smart/roughDay). A paused day
+   * neither adds to the run nor breaks it (owner, 2026-11-03). Attached when
+   * the record is loaded (StreakService), never stored on it: the rough days
+   * are their own synced record.
+   */
+  paused?: readonly string[];
 }
 
 export interface CommitmentDay {
@@ -40,6 +47,8 @@ export interface CommitmentDay {
   /** "Mo" … "Su". */
   label: string;
   kept: boolean;
+  /** A rough day that paused the streak (and wasn't kept anyway). */
+  paused: boolean;
   isToday: boolean;
   /** Later this week — can't have been kept or missed yet. */
   isFuture: boolean;
@@ -52,6 +61,8 @@ export interface CommitmentState {
   keptToday: boolean;
   /** A run is alive but today hasn't been kept yet — it ends at midnight. */
   atRisk: boolean;
+  /** Today is a paused rough day: the run is safe whatever happens. */
+  pausedToday: boolean;
   /** Longest run ever. */
   best: number;
   /** Every day ever kept. */
@@ -89,13 +100,36 @@ export function weekdayIndex(date: string): number {
  * stored number says.
  */
 export function liveStreak(
-  data: Pick<StreakLike, "currentStreak" | "lastActiveDate">,
+  data: Pick<StreakLike, "currentStreak" | "lastActiveDate" | "paused">,
   today: string,
 ): number {
   if (!data.lastActiveDate || data.currentStreak <= 0) return 0;
   if (data.lastActiveDate === today) return data.currentStreak;
-  if (data.lastActiveDate === shiftDay(today, -1)) return data.currentStreak;
-  return 0;
+  return runReaches(data.lastActiveDate, today, data.paused) ? data.currentStreak : 0;
+}
+
+/** A month and a bit: further back than any run of paused days can reach. */
+const PAUSE_REACH = 62;
+
+/**
+ * Does a run whose last kept day is `lastKept` still reach `today`? Yes when
+ * every day between them — from yesterday back — is paused, which includes
+ * the ordinary case of `lastKept` being yesterday. Today itself is never
+ * needed: it isn't over.
+ */
+export function runReaches(
+  lastKept: string,
+  today: string,
+  paused?: readonly string[],
+): boolean {
+  if (!lastKept) return false;
+  const skip = new Set(paused ?? []);
+  let d = shiftDay(today, -1);
+  for (let i = 0; i < PAUSE_REACH && d > lastKept; i++) {
+    if (!skip.has(d)) return false;
+    d = shiftDay(d, -1);
+  }
+  return d === lastKept;
 }
 
 /**
@@ -118,16 +152,49 @@ export function withKeptDay(days: readonly string[] | undefined, date: string): 
  * user's week strip is right from the first open, without a migration.
  */
 function keptSet(data: StreakLike, horizon: string): Set<string> {
-  const kept = new Set(data.days ?? []);
+  const ledger = new Set(data.days ?? []);
+  const kept = new Set(ledger);
   if (data.lastActiveDate && data.currentStreak > 0) {
-    // Only as far back as anyone will look (the start of this week).
-    for (let i = 0; i < data.currentStreak; i++) {
-      const d = shiftDay(data.lastActiveDate, -i);
+    // Only as far back as anyone will look (the start of this week). A paused
+    // day inside the run was not kept — step over it (unless the ledger says
+    // it was: a kept day beats a rough day).
+    const paused = new Set(data.paused ?? []);
+    let d = data.lastActiveDate;
+    let counted = 0;
+    for (let guard = 0; counted < data.currentStreak && guard < data.currentStreak + PAUSE_REACH; guard++) {
       if (d < horizon) break;
-      kept.add(d);
+      if (!paused.has(d) || ledger.has(d)) {
+        kept.add(d);
+        counted++;
+      }
+      d = shiftDay(d, -1);
     }
   }
   return kept;
+}
+
+/**
+ * Which of `dates` were paused rough days — the quiet mark beside the flames.
+ * A day that was kept anyway is kept, not paused.
+ */
+export function pausedOn(data: StreakLike, dates: readonly string[]): boolean[] {
+  if (dates.length === 0) return [];
+  const paused = new Set(data.paused ?? []);
+  const kept = keptOn(data, dates);
+  return dates.map((d, i) => paused.has(d) && !kept[i]);
+}
+
+/**
+ * Which of `dates` were kept — any dates, in any order, answered from the same
+ * ledger (and the same reconstructed run) as the Monday-to-Sunday week. For a
+ * surface whose days are not this calendar week: Home's "Your week" runs the
+ * last seven days with today on the right.
+ */
+export function keptOn(data: StreakLike, dates: readonly string[]): boolean[] {
+  if (dates.length === 0) return [];
+  const earliest = dates.reduce((a, b) => (b < a ? b : a));
+  const kept = keptSet(data, earliest);
+  return dates.map((d) => kept.has(d));
 }
 
 /** Everything a commitment surface shows, read off the record for `today`. */
@@ -136,6 +203,8 @@ export function readCommitment(data: StreakLike, today: string): CommitmentState
   const keptToday = data.lastActiveDate === today;
   const monday = shiftDay(today, -weekdayIndex(today));
   const kept = keptSet(data, monday);
+  const paused = new Set(data.paused ?? []);
+  const pausedToday = paused.has(today) && !keptToday;
 
   const week: CommitmentDay[] = WEEK_LABELS.map((label, i) => {
     const date = shiftDay(monday, i);
@@ -143,6 +212,7 @@ export function readCommitment(data: StreakLike, today: string): CommitmentState
       date,
       label,
       kept: kept.has(date),
+      paused: paused.has(date) && !kept.has(date),
       isToday: date === today,
       isFuture: date > today,
     };
@@ -151,11 +221,28 @@ export function readCommitment(data: StreakLike, today: string): CommitmentState
   return {
     streak,
     keptToday,
-    atRisk: streak > 0 && !keptToday,
+    // A paused day can't end the run, so there is nothing at risk on it.
+    atRisk: streak > 0 && !keptToday && !pausedToday,
+    pausedToday,
     best: Math.max(data.longestStreak, streak),
     totalDays: data.totalActiveDays,
     week,
   };
+}
+
+/**
+ * The run once today counts — what something that is about to keep the day
+ * lands on. A day already kept is already in the run; otherwise today extends
+ * a live run by one, or starts a new one at 1.
+ *
+ * For a surface that shows the streak BEFORE its own action is saved: the
+ * workout-complete chip reads the record while the session is still unbanked,
+ * so on a day nothing else had kept it showed yesterday's run — and the next
+ * workout that day showed one more, which reads exactly like "each session
+ * counted as a day" (owner, 2026-11-01).
+ */
+export function streakWithToday(state: Pick<CommitmentState, "streak" | "keptToday">): number {
+  return state.keptToday ? state.streak : state.streak + 1;
 }
 
 /* ── What the moment says ───────────────────────────────────────────────── */
@@ -247,6 +334,11 @@ export function isMilestone(streak: number): boolean {
 export function commitmentStatus(state: CommitmentState): string {
   if (state.keptToday) {
     return `Today's kept. Come back tomorrow for day ${state.streak + 1}.`;
+  }
+  if (state.pausedToday) {
+    return state.streak > 0
+      ? `A gentle day. Your ${state.streak}-day streak is paused, not broken.`
+      : "A gentle day. Nothing to keep up today.";
   }
   if (state.atRisk) {
     return `Your ${state.streak}-day streak needs today — log a meal, a workout or a check-in.`;

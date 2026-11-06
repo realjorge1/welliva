@@ -127,7 +127,13 @@ export function CycleGozlinAsk({ style }: { style?: StyleProp<ViewStyle> }) {
           onPress={() => void accept()}
           style={styles.flex}
         />
-        <Button label="Not now" size="sm" variant="ghost" onPress={() => void cycle.dismissGozlinAsk()} />
+        <Button
+          label="Not now"
+          size="sm"
+          variant="ghost"
+          fullWidth={false}
+          onPress={() => void cycle.dismissGozlinAsk()}
+        />
       </View>
 
       {canCoach ? null : (

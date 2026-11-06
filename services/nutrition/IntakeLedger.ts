@@ -43,6 +43,7 @@
 import type { DaySchedule, MealType, ScheduledMeal } from "../../models/diet";
 import { KEYS, readJSON, writeJSON } from "../OfflineStorage";
 import { pruneDatedRecord, RETENTION_DAYS } from "../sync/retention";
+import { markActivated, track, type FoodLogSource } from "../telemetry";
 import { macrosOfMeal } from "./DayTotals";
 
 /** One meal, eaten, with the numbers it had when it was eaten. */
@@ -117,18 +118,32 @@ export async function getIntakeForDate(date: string): Promise<IntakeRecord[]> {
   return Array.isArray(day) ? day : [];
 }
 
-/** Record one meal as eaten. */
+/**
+ * Record one meal as eaten.
+ *
+ * `source` is for analytics only and never touches the ledger. It defaults to
+ * "manual" so no existing caller changes behaviour; the paths that know better
+ * (the menu tick, a barcode scan, a photo, the coach) pass their own. Nothing
+ * about the FOOD is reported — see services/telemetry/events.ts.
+ */
 export async function recordIntake(
   date: string,
   record: IntakeRecord,
+  source: FoodLogSource = "manual",
 ): Promise<void> {
-  return withLock(async () => {
+  await withLock(async () => {
     const ledger = await readLedger();
     const day = Array.isArray(ledger[date]) ? [...ledger[date]] : [];
     day.push(record);
     ledger[date] = day;
     await writeLedger(ledger);
   });
+
+  // After the write, so a logging failure is never counted as a log. This is the
+  // one place every food path converges, which makes it the honest place to ask
+  // "has this install started using the product?".
+  track("food_logged", { source });
+  void markActivated();
 }
 
 /**

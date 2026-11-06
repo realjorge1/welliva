@@ -38,9 +38,11 @@ import { KEYS, currentWeekStart, readJSON, writeJSON } from "../../services/Offl
 import { generateWorkoutWeek } from "../../services/PlanSync";
 import { recordActivity, StreakData } from "../../services/StreakService";
 import { SessionService } from "../../services/SessionService";
+import { recordPlanWeek } from "../../services/smart/hardDay";
 import { resolveTrainingPrefs } from "../../services/training";
 import { shouldRegenerateWorkoutPlan } from "../../services/WorkoutGenerator";
 import type { WorkoutAdaptation } from "../../services/gozlin";
+import { markActivated, track } from "../../services/telemetry";
 
 interface Params {
   userBio: UserBio | null;
@@ -179,6 +181,13 @@ export function useWorkoutState({
     void ensureWorkoutPlanCurrent().catch((e) => console.error("ensureWorkoutPlanCurrent failed:", e));
   }, [userBio, ensureWorkoutPlanCurrent]);
 
+  // The plan document only ever holds this week, so "what was planned last
+  // Thursday" has to be written down as it goes (services/smart/hardDay). Only
+  // this week's plan is recorded, only from today on; it never throws.
+  useEffect(() => {
+    void recordPlanWeek(workoutPlan);
+  }, [workoutPlan, currentDate]);
+
   // Training preferences live in the fitness profile; any write there may
   // change the plan's inputs. Settle a burst of writes, then check once.
   useEffect(() => {
@@ -227,6 +236,14 @@ export function useWorkoutState({
       // setState updater.
       const { data: streakUpdated } = await recordActivity(entry.date || currentDate);
       setStreakData(streakUpdated);
+
+      // Past the dedupe, so a remount of the summary screen cannot double-count.
+      // Always "session": every WorkoutLogEntry carries a sessionId, a duration
+      // and a completion percent, so this choke point only ever sees finished
+      // guided sessions. A hand-entered workout would need its own path, and
+      // would pass "manual" when it gets one.
+      track("workout_logged", { source: "session" });
+      void markActivated();
     },
     [currentDate, setWorkoutLog, setStreakData],
   );

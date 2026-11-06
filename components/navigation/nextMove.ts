@@ -79,14 +79,24 @@ export const WEIGH_IN_INTERVAL_DAYS = 7;
 export interface NextMoveInput {
   /** Local clock as minutes from midnight. Injected so the ladder is testable. */
   minutesOfDay: number;
+  /**
+   * Today is a rough day (services/smart/roughDay). The bar stops asking for
+   * anything that is effort or a target — see {@link PRESSING_MOVES}. A meal or
+   * a check-in can still be logged from it: those are offers, not asks.
+   */
+  gentle?: boolean;
   /** A live, resumable session saved mid-flight, if there is one. */
   savedSession: { label: string; index: number; total: number } | null;
   /** Today's meals in slot order. Empty when nothing is scheduled. */
   meals: MealSlot[];
   /** Whether today resolved to a diet at all. */
   hasScheduledDiet: boolean;
-  /** Today's planned training session, if the plan has one for this weekday. */
-  todaySession: { focus: string; minutes: number } | null;
+  /**
+   * Today's planned training session, if the plan has one for this weekday.
+   * `eased`: today it runs shorter or easier than planned (a short weekday, a
+   * fresh start), so `minutes` is not what it will take.
+   */
+  todaySession: { focus: string; minutes: number; eased?: boolean } | null;
   /** Whether a workout plan exists at all. */
   hasPlan: boolean;
   /** Any workout logged today. */
@@ -327,6 +337,9 @@ export function resolveDayProgress(input: NextMoveInput): DayProgress {
  * saying so — see `finishedDayMove` for the sentence a finished day still owes
  * the one surface that must never be empty.
  */
+/** What a rough day takes off the bar's list. */
+const PRESSING_MOVES: ReadonlySet<string> = new Set(["start-session", "personalize", "weighin", "water"]);
+
 export function resolveAgenda(input: NextMoveInput): NextMove[] {
   const {
     minutesOfDay,
@@ -418,7 +431,7 @@ export function resolveAgenda(input: NextMoveInput): NextMove[] {
     moves.push({
       id: "start-session",
       label: `Start ${todaySession.focus}`,
-      caption: `~${todaySession.minutes} min`,
+      caption: todaySession.eased ? "Eased today" : `~${todaySession.minutes} min`,
       icon: "barbell",
       action: { kind: "startSession" },
       tone: "primary",
@@ -535,7 +548,7 @@ export function resolveAgenda(input: NextMoveInput): NextMove[] {
     });
   }
 
-  return moves;
+  return input.gentle ? moves.filter((m) => !PRESSING_MOVES.has(m.id)) : moves;
 }
 
 /**

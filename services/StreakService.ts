@@ -21,9 +21,10 @@
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { liveStreak, readCommitment, withKeptDay } from "./commitment";
+import { liveStreak, readCommitment, runReaches, withKeptDay } from "./commitment";
 import { emitExternalWrite } from "./notifications/externalWrites";
-import { parseLocalDate, toLocalDateString, todayDate } from "./OfflineStorage";
+import { todayDate } from "./OfflineStorage";
+import { loadRoughDays, pausedDates } from "./smart/roughDay";
 
 // Storage key
 const STREAK_KEY = "@welliva_streak_data";
@@ -49,6 +50,12 @@ export interface StreakData {
    * run is reconstructed for those (see commitment.readCommitment).
    */
   days?: string[];
+  /**
+   * Paused days — protected rough days (services/smart/roughDay). Attached on
+   * load so every reader of this record (Home, achievements, Gozlin, the
+   * moment engine) sees the same live run; stripped before saving.
+   */
+  paused?: string[];
 }
 
 export interface Badge {
@@ -186,24 +193,40 @@ function announceKept(data: StreakData): void {
  * the week re-derived from the dated ledger. Pure — nothing is written back;
  * the next kept day rewrites the run anyway.
  */
-function asOf(raw: StreakData, today: string): StreakData {
-  const data: StreakData = { ...DEFAULT_STREAK, ...raw };
+function asOf(raw: StreakData, today: string, paused: string[]): StreakData {
+  const data: StreakData = { ...DEFAULT_STREAK, ...raw, paused };
   data.currentStreak = liveStreak(data, today);
   data.weekActivity = readCommitment(data, today).week.map((d) => d.kept);
   return data;
+}
+
+/** The paused days, read fresh. Never throws: no rough days is the default. */
+async function loadPaused(): Promise<string[]> {
+  try {
+    return pausedDates(await loadRoughDays());
+  } catch {
+    return [];
+  }
+}
+
+/** The record as it is SAVED — the paused days are the rough days' own. */
+function forStorage(data: StreakData): Omit<StreakData, "paused"> {
+  const { paused: _paused, ...rest } = data;
+  return rest;
 }
 
 /**
  * Load streak data from storage, as of today.
  */
 export async function loadStreakData(): Promise<StreakData> {
+  const paused = await loadPaused();
   try {
     const raw = await AsyncStorage.getItem(STREAK_KEY);
-    if (raw) return asOf(JSON.parse(raw) as StreakData, todayDate());
+    if (raw) return asOf(JSON.parse(raw) as StreakData, todayDate(), paused);
   } catch (e) {
     console.error("Error loading streak data:", e);
   }
-  return { ...DEFAULT_STREAK, days: [] };
+  return { ...DEFAULT_STREAK, days: [], paused };
 }
 
 /**
@@ -223,9 +246,10 @@ export async function recordActivity(
     return { data, newBadges: [] };
   }
 
-  // Check if yesterday was active (streak continues) or not (streak resets)
-  const yesterday = getYesterday(today);
-  if (data.lastActiveDate === yesterday) {
+  // The run continues when the last kept day reaches today — yesterday, or
+  // across days that were paused (protected rough days). A paused day adds
+  // nothing to the count; it only stops the gap from ending the run.
+  if (data.lastActiveDate && runReaches(data.lastActiveDate, today, data.paused)) {
     data.currentStreak += 1;
   } else {
     data.currentStreak = 1;
@@ -257,8 +281,8 @@ export async function recordActivity(
     }
   }
 
-  // Persist
-  await AsyncStorage.setItem(STREAK_KEY, JSON.stringify(data));
+  // Persist (without the paused days, which belong to the rough-day record)
+  await AsyncStorage.setItem(STREAK_KEY, JSON.stringify(forStorage(data)));
   announceKept(data);
 
   return { data, newBadges };
@@ -297,14 +321,4 @@ export async function resetWeekIfNeeded(_today: string): Promise<StreakData> {
  */
 export function getAllBadgeDefinitions(): BadgeDef[] {
   return BADGE_DEFINITIONS;
-}
-
-// ──────────────────────────────────────────────
-// HELPERS
-// ──────────────────────────────────────────────
-
-function getYesterday(todayStr: string): string {
-  const d = parseLocalDate(todayStr);
-  d.setDate(d.getDate() - 1);
-  return toLocalDateString(d);
 }

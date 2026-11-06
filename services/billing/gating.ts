@@ -54,6 +54,7 @@ import {
 import { trialGrants } from "./trial";
 import { checkQuota, recordUsage, type QuotaState } from "./usage";
 import { checkAllowance, spendAllowance } from "./allowance";
+import { track } from "../telemetry";
 
 /** Whether the paid tiers are enforced at all in this session. */
 export function isGatingActive(): boolean {
@@ -153,6 +154,12 @@ export async function checkCoachQuota(): Promise<MeteredState> {
  */
 export async function spendCoachTurn(): Promise<MeteredState> {
   const tier = featureTier("coach-limit");
+  // COUNTED BEFORE THE GATING CHECK, deliberately. This is cost of goods, not a
+  // quota: a turn spent while gating is off (a dev build, the 30-hour trial) costs
+  // exactly the same Haiku tokens as a metered one. tiers.ts calls the 100-a-day
+  // ceiling "a bet on the distribution" — analytics_coach_load is how that bet
+  // gets checked, and it is wrong the moment this line sits below the early return.
+  track("coach_message", { tier });
   if (!isGatingActive()) return { ...UNMETERED, tier };
   const state = await recordUsage("coach", coachDailyLimit(tier));
   return { ...state, metered: true, tier };
@@ -206,6 +213,7 @@ export async function checkDeepDive(): Promise<MeteredState> {
  */
 export async function spendDeepDive(): Promise<MeteredState> {
   const tier = featureTier("deep-dive");
+  track("deep_dive");
   if (!isGatingActive()) return { ...UNMETERED, tier };
   const limit = deepDiveLifetimeLimit(tier);
   if (limit === null) return { ...UNMETERED, tier };

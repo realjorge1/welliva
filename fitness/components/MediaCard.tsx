@@ -17,10 +17,17 @@
  *
  * Press feedback is a spring on the whole card rather than an opacity drop, and
  * collapses to a dim under Reduce Motion.
+ *
+ * THE INSTRUMENT SURFACE (2026-11-01, the app-wide upgrade sweep). Home, Diet
+ * and the session summary moved to black cards drawn by a thin white edge;
+ * Explore's cards were the last frosted panels. They are black now too, in
+ * both themes — which is also the ground the art's saturated ramps were made
+ * for — so their words are fixed light tones (ON_CARD), never the theme's
+ * text colours, which would go dark-on-black in light mode.
  */
 
-import { useColors } from "@/components/ui";
-import { LightCard, Radius, Spacing, alpha } from "@/constants/theme";
+import { EDGE_WHITE, INSTRUMENT_BLACK } from "@/components/home/surface";
+import { Radius, Spacing, alpha } from "@/constants/theme";
 import React, { useCallback } from "react";
 import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import Animated, {
@@ -33,6 +40,15 @@ import Animated, {
 export const MEDIA_CARD_RADIUS = Radius.xl;
 /** The media's corner radius: the card's, less its 1px border. */
 export const MEDIA_RADIUS = MEDIA_CARD_RADIUS - 1;
+
+/** The words on a black card: the name, the line under it, the quiet facts. */
+export const ON_CARD = {
+  title: "#FFFFFF",
+  body: alpha("#FFFFFF", 0.64),
+  meta: alpha("#FFFFFF", 0.5),
+  /** A control at rest, like the unfilled favourite heart. */
+  idle: alpha("#FFFFFF", 0.42),
+} as const;
 
 const PRESS_SPRING = { damping: 18, stiffness: 320, mass: 0.6 };
 const PRESSED_SCALE = 0.975;
@@ -63,7 +79,6 @@ export function MediaCard({
   accessory,
   style,
 }: MediaCardProps) {
-  const { colors, isDark } = useColors();
   const reduced = useReducedMotion();
   const scale = useSharedValue(1);
   const pressStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
@@ -79,11 +94,8 @@ export function MediaCard({
     <Animated.View
       style={[
         styles.card,
-        {
-          // The same surface as `Card`: frosted glass in dark, white in light.
-          backgroundColor: isDark ? alpha(colors.surface, 0.8) : LightCard.base,
-          borderColor: isDark ? alpha(colors.borderStrong, 0.55) : LightCard.border,
-        },
+        // The instrument surface, in both themes — see the header.
+        { backgroundColor: INSTRUMENT_BLACK, borderColor: EDGE_WHITE },
         pressStyle,
         style,
       ]}

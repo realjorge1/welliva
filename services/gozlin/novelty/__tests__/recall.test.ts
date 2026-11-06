@@ -117,6 +117,13 @@ describe("reading the reply back", () => {
     expect(askedInReply("Nordics went in. How did you sleep?", nordic)).toBe(false);
   });
 
+  it("hears the question in the phone's language too — the name stays as the app shows it", () => {
+    expect(askedInReply("Bravo pour hier. Comment se sont passés les Nordics ?", nordic)).toBe(true);
+    expect(askedInReply("昨天练得不错。Nordic Hamstring Curl 感觉怎么样？", nordic)).toBe(true);
+    expect(askedInReply("كيف كانت تمارين Nordic؟", nordic)).toBe(true);
+    expect(askedInReply("Nordic Hamstring Curl 做完了。昨晚睡得怎么样？", nordic)).toBe(false);
+  });
+
   it("gives a receipt only to the memories the reply used", () => {
     const picks = recallFor(input({ text: "nordic curls again?" }));
     expect(recallsUsed("Last time the Nordics left you wrecked — go easy on set one.", picks)).toHaveLength(1);

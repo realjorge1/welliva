@@ -33,6 +33,14 @@ import {
 const SESSION_KEY = "@welliva_active_session";
 const SESSION_HISTORY_KEY = "@welliva_session_history";
 
+/**
+ * The block a result is filed under, spread into it — only when the move has
+ * one, so a result from a session without blocks keeps exactly its old shape.
+ */
+function blockOf(ex: SessionExerciseInfo): Pick<ExerciseSessionResult, "block"> {
+  return ex.block ? { block: ex.block } : {};
+}
+
 // ──────────────────────────────────────────────
 // Singleton
 // ──────────────────────────────────────────────
@@ -333,6 +341,7 @@ export class SessionService {
       totalReps: 0,
       totalTimeSeconds: 0,
       skipped: true,
+      ...blockOf(ex),
     };
 
     const newResults = [...state.results, result];
@@ -444,6 +453,7 @@ export class SessionService {
         totalReps: reps,
         totalTimeSeconds: durationSeconds,
         skipped: false,
+        ...blockOf(ex),
       });
     } else {
       // Subsequent set — append
@@ -514,6 +524,7 @@ export class SessionService {
           totalReps: 0,
           totalTimeSeconds: 0,
           skipped: true,
+          ...blockOf(ex),
         });
       }
     }

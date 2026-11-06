@@ -29,8 +29,10 @@ import {
 } from "../notifications/categories";
 import { REMINDERS_CHANNEL_ID, ensureRemindersChannel } from "../notifications/init";
 import { ownerStamp } from "../notifications/owner";
-import { KEYS, readJSON, todayDate, writeJSON } from "../OfflineStorage";
-import { cycleModeOf, predict, todayStatus } from "./predict";
+import { notificationsPaused, quietDate } from "../notifications/pause";
+import { KEYS, readJSON, toLocalDateString, todayDate, writeJSON } from "../OfflineStorage";
+import { loadLifeMoments } from "./lifeMoments";
+import { predict, todayStatus } from "./predict";
 import { planCycleReminders, type CycleReminderKind, type PlannedReminder } from "./reminderPlan";
 import { loadCycleData } from "./store";
 
@@ -64,6 +66,7 @@ export async function syncCycleReminders(plan: readonly PlannedReminder[]): Prom
   try {
     await cancelOurs();
     if (!plan.length) return 0;
+    if (await notificationsPaused()) return 0;
     const perms = await Notifications.getPermissionsAsync();
     if (!perms.granted) return 0;
     await ensureRemindersChannel();
@@ -71,8 +74,11 @@ export async function syncCycleReminders(plan: readonly PlannedReminder[]): Prom
     // it is delivered, or it arrives with no buttons at all.
     await ensureNotificationCategories();
     const stamp = await ownerStamp();
+    // A rough day silences the rest of TODAY only (notifications/pause).
+    const quiet = await quietDate();
     const ids: string[] = [];
     for (const r of plan) {
+      if (quiet && toLocalDateString(r.at) === quiet) continue;
       const id = await Notifications.scheduleNotificationAsync({
         identifier: r.id,
         content: {
@@ -128,13 +134,15 @@ export async function relayCycleReminders(): Promise<number> {
       today: todayDate(),
       profile: { age: bio?.age ?? null, conditions: bio?.medicalConditions ?? [] },
     };
-    const prediction = cycleModeOf(input.profile.conditions) === "pregnancy" ? null : predict(input);
+    // predict() itself returns null in the paused and logging-only modes.
+    const prediction = predict(input);
     return await syncCycleReminders(
       planCycleReminders({
         settings: data.settings,
         status: todayStatus(input, prediction),
         prediction,
         now: new Date(),
+        moments: await loadLifeMoments(input.today),
       }),
     );
   } catch {

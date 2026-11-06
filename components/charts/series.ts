@@ -11,6 +11,7 @@
 
 import type { DietHistoryEntry } from "@/models/diet";
 import type { SessionSummaryData } from "@/models/session";
+import { hasRecordedIntake } from "@/services/nutrition/recordedIntake";
 import type { BodyLogEntry, WorkoutLogEntry } from "@/models/workout";
 import type { ChartPoint } from "./types";
 
@@ -86,25 +87,10 @@ function withinWindow<T extends { date: string }>(
 
 /* ─────────────────────────── nutrition ─────────────────────────── */
 
-/**
- * Did this day record any intake at all?
- *
- * "Has a number" is not the test. Day-close writes consumed totals for EVERY day
- * it closes, so a day the user logged nothing on is saved as 0 kcal / 0 g / 0 g /
- * 0 g — which means "nothing was recorded", not "nothing was eaten". Plotted as
- * a real zero it dragged every nutrition line to the floor on each unlogged day,
- * and on the overlaid macro chart it did worse: 0 indexes to 0% for every macro,
- * so all four lines were pinned to the same point, and a week with one logged
- * day came out as four identical [0, 100, 0] series — one visible line.
- *
- * A day counts once any macro is positive. A zero macro on such a day (fat on a
- * day of fruit) is a real zero and is kept.
- */
-function hasRecordedIntake(e: DietHistoryEntry): boolean {
-  return [e.consumedCalories, e.consumedProteinG, e.consumedCarbsG, e.consumedFatG].some(
-    (v) => typeof v === "number" && Number.isFinite(v) && v > 0,
-  );
-}
+// Did this day record any intake at all? `hasRecordedIntake` — the rule, and why
+// a closed day's zero is "unknown" rather than "nothing eaten" — lives in one
+// shared place now (services/nutrition/recordedIntake), so the charts and the
+// cycle tracker can't disagree about whether someone ate on Tuesday.
 
 /**
  * Daily calories actually eaten, over the last `days`. Only days that recorded

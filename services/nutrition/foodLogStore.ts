@@ -24,6 +24,7 @@ import {
 } from "../../models/nutrients";
 import { KEYS, readJSON, writeJSON } from "../OfflineStorage";
 import { pruneDatedRecord, RETENTION_DAYS } from "../sync/retention";
+import { canLogForDate } from "./logWindow";
 
 export interface FoodLogEntry {
   id: string;
@@ -75,6 +76,63 @@ export async function readStore(): Promise<LogStore> {
 export async function writeStore(store: LogStore): Promise<void> {
   const pruned = await pruneDatedRecord(store, RETENTION_DAYS.FOOD_LOG);
   await writeJSON(KEYS.FOOD_LOG, pruned);
+}
+
+// ============================================================================
+// RE-LOG — a meal logged again exactly as it was recorded
+// ============================================================================
+
+/** An entry as recorded, minus where and when — what a re-log copies. */
+export type RecordedEntry = Pick<
+  FoodLogEntry,
+  "label" | "items" | "totals" | "partialKeys" | "confidence" | "origin"
+>;
+
+export type RelogResult =
+  | { status: "logged"; entries: FoodLogEntry[] }
+  | { status: "already" }
+  | { status: "closed" };
+
+/**
+ * Log entries again, EXACTLY as they were recorded — the same items, numbers
+ * and confidence labels, new ids, filed under `slot` on `date`. The "your
+ * usual" meal (services/smart/usual), in the app and from the lock screen.
+ *
+ * It lives here, in the leaf, because nothing is resolved: a lock-screen press
+ * that boots the app headless must not load the food catalogs to copy numbers
+ * it already has. Same lock and same back-log window as every other add.
+ * `alreadyLogged` sees the day's entries inside the lock, so a repeat press
+ * can't log a second breakfast.
+ */
+export async function relogEntries(args: {
+  date: string;
+  slot: MealType | null;
+  entries: readonly RecordedEntry[];
+  alreadyLogged?: (day: readonly FoodLogEntry[]) => boolean;
+  now?: Date;
+}): Promise<RelogResult> {
+  if (!canLogForDate(args.date)) return { status: "closed" };
+  return withLock(async (): Promise<RelogResult> => {
+    const store = await readStore();
+    const day = store[args.date] ?? [];
+    if (args.alreadyLogged?.(day)) return { status: "already" };
+    const at = (args.now ?? new Date()).toISOString();
+    const created: FoodLogEntry[] = args.entries.map((e) => ({
+      id: newId(),
+      date: args.date,
+      slot: args.slot,
+      label: e.label,
+      items: e.items,
+      totals: e.totals,
+      partialKeys: e.partialKeys ?? [],
+      confidence: e.confidence,
+      origin: e.origin,
+      loggedAt: at,
+    }));
+    store[args.date] = [...day, ...created];
+    await writeStore(store);
+    return { status: "logged", entries: created };
+  });
 }
 
 // ============================================================================

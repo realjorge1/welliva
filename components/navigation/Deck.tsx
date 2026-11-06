@@ -31,6 +31,7 @@
  * for no reason at all.
  */
 
+import { WaterAfterWeighIn } from "@/components/cycle/WaterNote";
 import { MindSheet } from "@/components/mind";
 import {
   GozlinActionSheet,
@@ -38,7 +39,9 @@ import {
   useQuickLog,
   type ActionSheetOption,
 } from "@/components/gozlin";
+import { useEasedToday } from "@/components/smart/useHardDay";
 import { useColors } from "@/components/ui/useColors";
+import { planSessionToPlayerParams } from "@/fitness/services/playerParams";
 import * as Haptics from "@/utils/haptics";
 import { usePathname, useRouter } from "expo-router";
 import React, {
@@ -223,6 +226,9 @@ function DeckBody({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [checkinOpen, setCheckinOpen] = useState(false);
   const [weighInOpen, setWeighInOpen] = useState(false);
+  // A weight was just saved: if it reads as water before a period, say so next.
+  const [waterWatch, setWaterWatch] = useState(false);
+  const endWaterWatch = useCallback(() => setWaterWatch(false), []);
 
   // The deck's own receipt channel, for writes it makes itself. Screens call
   // the same thing through `useDeck().confirm`.
@@ -252,23 +258,25 @@ function DeckBody({
     fn?.();
   }, []);
 
+  // A short weekday or a fresh-start week: only the Fitness screen builds that
+  // version, so this bar sends you there rather than starting the full one.
+  const easedToday = useEasedToday();
+
   /**
-   * The player's launch contract, unchanged — the same parallel id/set/rep
-   * lists the Fitness screen's own start button builds.
+   * The player's launch contract — built by the same helper as the Fitness
+   * screen's own Start button, so the plan's rests and blocks arrive from both.
    */
   const startTodaySession = useCallback(() => {
     if (!todaySession) return;
+    if (easedToday) {
+      router.navigate("/exercise" as never);
+      return;
+    }
     router.push({
       pathname: "/guided-session",
-      params: {
-        exerciseIds: todaySession.exercises.map((e) => e.exerciseId).join(","),
-        sessionLabel: todaySession.dayLabel,
-        workoutSessionId: todaySession.id,
-        sets: todaySession.exercises.map((e) => e.sets).join(","),
-        reps: todaySession.exercises.map((e) => e.reps).join(","),
-      },
+      params: planSessionToPlayerParams(todaySession),
     });
-  }, [todaySession, router]);
+  }, [todaySession, router, easedToday]);
 
   const runMove = useCallback(
     (move: NextMove) => {
@@ -370,7 +378,9 @@ function DeckBody({
         key: "workout",
         label: todaySession ? `Start ${todaySession.focus}` : "Start a workout",
         caption: todaySession
-          ? `Today's session · ~${todaySession.totalDurationMinutes} min`
+          ? easedToday
+            ? "Today's session, eased"
+            : `Today's session · ~${todaySession.totalDurationMinutes} min`
           : "Browse and pick one",
         icon: "barbell-outline",
         tone: colors.protein,
@@ -412,6 +422,7 @@ function DeckBody({
       quickLog.todayCount,
       todaySession,
       startTodaySession,
+      easedToday,
       queue,
       confirm,
       waterMl,
@@ -422,7 +433,7 @@ function DeckBody({
 
   /**
    * The cue lives in the rail's middle, and only while the rail is folded. At
-   * rest the rail is four tabs and says nothing; scroll and the three labels'
+   * rest the rail is three tabs and says nothing; scroll and the three labels'
    * space becomes the one sentence the day wants. That pill is the Deck's only
    * voice now — there is no card above the rail.
    */
@@ -485,8 +496,12 @@ function DeckBody({
         currentWeightKg={quickLog.currentWeightKg}
         goalWeightKg={quickLog.goalWeightKg}
         onClose={() => setWeighInOpen(false)}
-        onSave={quickLog.saveWeighIn}
+        onSave={(payload) => {
+          if (payload.weightKg != null) setWaterWatch(true);
+          void quickLog.saveWeighIn(payload);
+        }}
       />
+      <WaterAfterWeighIn armed={waterWatch} onDone={endWaterWatch} />
     </>
   );
 }

@@ -25,6 +25,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { AppState } from "react-native";
 
 import { lifeContext, memory, runDailyLearning, signalsCoordinator } from "../../health-os";
+import { loadNoisyWeightDates } from "../../services/cycle/noisyWeightDays";
 import { maintenanceTdee } from "../../services/NutritionService";
 import type { NutritionTargets } from "../../models/nutrition";
 import type { PlanState } from "../../models/planState";
@@ -39,6 +40,7 @@ import {
   writeString,
 } from "../../services/OfflineStorage";
 import { ensureDietBuffer, ensureDietForDate } from "../../services/PlanSync";
+import { firstDrinkOn } from "../../services/nutrition/waterStore";
 import { sweepClosedDays } from "../../services/ScheduleService";
 
 interface Params {
@@ -115,6 +117,7 @@ export function useDayChange({
             await runDailyLearning({
               mifflinTdee: maintenanceTdee(userBio),
               weightKg: userBio.weightKg,
+              noisyWeightDates: await loadNoisyWeightDates(today),
             });
           } catch {
             // Learning is an enhancement, never a gate: a failure here must not
@@ -130,7 +133,7 @@ export function useDayChange({
         const endingMl = await readJSON<number>(KEYS.WATER_TODAY, 0);
         const waterGoal =
           userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500;
-        await archiveWaterDay(currentDate, endingMl, waterGoal);
+        await archiveWaterDay(currentDate, endingMl, waterGoal, await firstDrinkOn(currentDate));
         setCurrentDate(today);
         setWaterMl(0);
         await writeString(KEYS.LAST_ACTIVE_DATE, today);

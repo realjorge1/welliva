@@ -26,7 +26,14 @@ function clock(hhmm: string): string {
   return Number.isFinite(h) && Number.isFinite(m) ? formatTime(h, m) : hhmm;
 }
 
-export function CoachingCard({ blocked }: { blocked: boolean }) {
+export function CoachingCard({
+  blocked,
+  paused = false,
+}: {
+  blocked: boolean;
+  /** "Pause all notifications" is on — the switch stands, nothing is sent. */
+  paused?: boolean;
+}) {
   const { colors } = useColors();
   const notif = useNotificationSettings();
   const on = !!notif.prefs?.enabled;
@@ -43,7 +50,9 @@ export function CoachingCard({ blocked }: { blocked: boolean }) {
           </AppText>
           <AppText variant="footnote" color="tertiary" style={styles.status}>
             {on
-              ? `A morning briefing and timely nudges · at most ${budget} a day`
+              ? paused
+                ? "On — paused with everything else"
+                : `A morning briefing and timely nudges · at most ${budget} a day`
               : "Off — Gozlin only speaks when you open it"}
           </AppText>
         </View>
@@ -93,7 +102,14 @@ export function CoachingCard({ blocked }: { blocked: boolean }) {
 
 const DAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-export function WorkoutsCard({ fitness }: { fitness: FitnessReminderSummary }) {
+export function WorkoutsCard({
+  fitness,
+  waterCheckIns = false,
+}: {
+  fitness: FitnessReminderSummary;
+  /** The water check-ins are on — they carry the hydration check meanwhile. */
+  waterCheckIns?: boolean;
+}) {
   const { colors } = useColors();
   const p = fitness.prefs;
   const parts: string[] = [];
@@ -103,7 +119,9 @@ export function WorkoutsCard({ fitness }: { fitness: FitnessReminderSummary }) {
       : "no training days set";
     parts.push(`Training days (${days}) at ${formatTime(p.hour ?? 17, 0)}`);
   }
-  if (p?.hydration) parts.push("midday hydration check");
+  if (p?.hydration) {
+    parts.push(waterCheckIns ? "hydration via your water check-ins" : "midday hydration check");
+  }
   if (p?.stretch) parts.push("evening stretch");
   if (p?.weeklySummary) parts.push("Sunday week in review");
   const status = parts.length

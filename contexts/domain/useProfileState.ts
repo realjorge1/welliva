@@ -50,6 +50,7 @@ import {
 } from "../../fitness/services/FitnessProfileStore";
 import { resolveTrainingPrefs, spacedDays } from "../../services/training";
 import { describeAdaptations } from "../../services/WorkoutGenerator";
+import { track } from "../../services/telemetry";
 
 interface Params {
   userBio: UserBio | null;
@@ -247,6 +248,11 @@ export function useProfileState({
   );
 
   const completeOnboarding = useCallback(async (bio: UserBio, plan?: OnboardingPlanOptions) => {
+    // The single choke point for "setup finished" — app/onboarding.tsx reaches it
+    // from two branches, and preview mode deliberately never does, so this counts
+    // real completions only. Activation is a SECOND bar (first log); see
+    // markActivated in services/telemetry.
+    track("onboarding_complete");
     setUserBio(bio);
     const targets = calculateNutritionTargets(bio);
     setNutritionTargets(targets);

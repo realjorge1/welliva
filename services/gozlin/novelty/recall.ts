@@ -137,13 +137,20 @@ export function refersTo(text: string, subject: { label: string; familyKey: stri
   return words.some((w) => said.has(w));
 }
 
-/** Split into sentences, keeping each one's terminal mark. */
+/**
+ * Split into sentences, keeping each one's terminal mark. Chinese and Japanese
+ * end a sentence with no space after it, so their marks (and Arabic's) split
+ * on their own.
+ */
 function sentences(text: string): string[] {
   return text
-    .split(/(?<=[.!?])\s+/)
+    .split(/(?<=[.!?])\s+|(?<=[。！？؟])/)
     .map((s) => s.trim())
     .filter(Boolean);
 }
+
+/** A question, in any script the coach may now be writing in (agent/replyLanguage.ts). */
+const QUESTION_END = /[?？؟]$/;
 
 /**
  * Did the reply ASK about it? A sentence that refers to the subject and ends
@@ -151,7 +158,7 @@ function sentences(text: string): string[] {
  * direction: a miss only means the line rides one more turn, inside the cap.
  */
 export function askedInReply(reply: string, subject: { label: string; familyKey: string }): boolean {
-  return sentences(reply).some((s) => s.endsWith("?") && refersTo(s, subject));
+  return sentences(reply).some((s) => QUESTION_END.test(s) && refersTo(s, subject));
 }
 
 /** The memories a reply actually used — what earns a YOU TOLD ME receipt. */

@@ -37,6 +37,10 @@ import { IconBadge } from "@/components/ui/IconBadge";
 import { Screen } from "@/components/ui/Screen";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { AppText } from "@/components/ui/Text";
+import { withStoredTime } from "@/components/smart/timeChoices";
+import { useAnchorChoices } from "@/components/smart/useAnchors";
+import { useSmartMoment } from "@/components/smart/useSmartMoment";
+import { ANCHOR_OFFER_PRIORITY, anchorCopy, anchorReminder, type AnchorFound, type SmartCandidate } from "@/services/smart";
 import { useColors } from "@/components/ui/useColors";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useBilling } from "@/contexts/BillingContext";
@@ -49,8 +53,10 @@ import {
   EVERY_DAY,
   WEEKLY_GOAL_OPTIONS,
   goalModeOf,
+  reminderTitle,
   suggestWeeklyGoal,
   type GoalMode,
+  type HabitAnchor,
   type HabitReminder,
 } from "@/models/habit";
 import * as Haptics from "@/utils/haptics";
@@ -73,6 +79,27 @@ const REMINDER_PRESETS: { label: string; reminder: HabitReminder }[] = [
   { label: "18:00", reminder: { hour: 18, minute: 0 } },
   { label: "21:00", reminder: { hour: 21, minute: 0 } },
 ];
+
+/**
+ * The presets, with the habit's own time among them.
+ *
+ * A reminder can sit at a time that isn't a preset — one moved to when the
+ * habit really happens ("Move it to 9:30 PM?"). Shown as nothing selected, the
+ * form would read as "no reminder" and a save would keep a time the user can't
+ * see. So the stored time takes the place of the nearest preset; the grid stays
+ * five wide, in order.
+ */
+function reminderChoices(
+  stored: HabitReminder | null | undefined,
+): { label: string; reminder: HabitReminder }[] {
+  const own = stored
+    ? {
+        label: `${stored.hour}:${String(stored.minute).padStart(2, "0")}`,
+        reminder: { hour: stored.hour, minute: stored.minute },
+      }
+    : null;
+  return withStoredTime(REMINDER_PRESETS, own, (p) => p.reminder.hour * 60 + p.reminder.minute);
+}
 
 /** Columns per grid. HABIT_ICONS is sized to a whole multiple of ICON_COLS. */
 const ICON_COLS = 6;
@@ -122,6 +149,35 @@ export default function NewHabitScreen() {
   const [reminder, setReminder] = useState<HabitReminder | null>(
     editing?.reminder ?? null,
   );
+  // Tied to something they already do ("right after breakfast"), when it is.
+  const [anchor, setAnchor] = useState<HabitAnchor | null>(editing?.anchor ?? null);
+  // From the STORED time, so picking a preset doesn't make the habit's own
+  // time vanish from the grid mid-edit — or the anchor's, while it's chosen.
+  const reminderOptions = useMemo(
+    () => reminderChoices(anchor && reminder ? reminder : editing?.reminder),
+    [editing, anchor, reminder],
+  );
+
+  // One suggestion from their real routine, on a new habit: the steadiest thing
+  // they already do. It answers the form they opened, so it spends none of the
+  // day's budget, but it still keeps quiet in the first days and on a rough day.
+  const [topAnchor] = useAnchorChoices(editing?.id);
+  const anchorCandidates = useMemo<(SmartCandidate & { found: AnchorFound })[]>(
+    () =>
+      topAnchor && !editing
+        ? [
+            {
+              id: `anchor-form:${topAnchor.kind}`,
+              feature: "anchor",
+              priority: ANCHOR_OFFER_PRIORITY,
+              exempt: true,
+              found: topAnchor,
+            },
+          ]
+        : [],
+    [topAnchor, editing],
+  );
+  const anchorOffer = useSmartMoment("habit-form", anchorCandidates);
   // Which icon category the grid is showing. Seeded from the habit being
   // edited so its own icon is on screen, and selected, the moment it opens.
   const [iconGroup, setIconGroup] = useState(() =>
@@ -172,7 +228,18 @@ export default function NewHabitScreen() {
 
   const clearReminder = () => {
     setReminder(null);
+    setAnchor(null);
     setReminderBlocked(false);
+  };
+
+  // "After breakfast": the reminder lands just after their usual time for it.
+  const pickAnchor = (found: AnchorFound) => {
+    setAnchor({
+      kind: found.kind,
+      label: found.label,
+      ...(found.habitId ? { habitId: found.habitId } : {}),
+    });
+    chooseReminder(anchorReminder(found));
   };
 
   const toggleDay = (d: number) => {
@@ -206,13 +273,14 @@ export default function NewHabitScreen() {
     setSaving(true);
     try {
       if (editing) {
-        await updateHabit({ ...editing, name: trimmed, icon, color, reminder, ...goalFields() });
+        await updateHabit({ ...editing, name: trimmed, icon, color, reminder, anchor, ...goalFields() });
       } else {
         await createHabit({
           name: trimmed,
           icon,
           color,
           reminder,
+          anchor,
           source: "manual",
           ...goalFields(),
         });
@@ -519,9 +587,9 @@ export default function NewHabitScreen() {
       </AppText>
       <Card padding="lg">
         <PickerGrid
-          cols={REMINDER_PRESETS.length + 1}
+          cols={reminderOptions.length + 1}
           gap={Spacing.sm}
-          count={REMINDER_PRESETS.length + 1}
+          count={reminderOptions.length + 1}
           height={40}
           renderCell={(i) => {
             if (i === 0) {
@@ -547,12 +615,15 @@ export default function NewHabitScreen() {
                 </Pressable>
               );
             }
-            const { label, reminder: r } = REMINDER_PRESETS[i - 1];
+            const { label, reminder: r } = reminderOptions[i - 1];
             const on = reminder?.hour === r.hour && reminder?.minute === r.minute;
             return (
               <Pressable
                 key={label}
-                onPress={() => chooseReminder(r)}
+                onPress={() => {
+                  setAnchor(null);
+                  chooseReminder(r);
+                }}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: on }}
                 accessibilityLabel={`Remind me at ${label}`}
@@ -571,6 +642,30 @@ export default function NewHabitScreen() {
             );
           }}
         />
+        {/* Tied to something they already do: chosen, it names itself; not yet,
+            one offer from their real routine, with what it rests on. */}
+        {anchor ? (
+          <AppText variant="footnote" color="secondary" style={styles.reminderHint}>
+            The reminder will read “{reminderTitle({ name: name.trim() || "this habit", anchor })}”.
+          </AppText>
+        ) : anchorOffer ? (
+          <View style={styles.anchorOffer}>
+            <AppText variant="footnote" color="secondary">
+              {anchorCopy(anchorOffer.found).formOffer}
+            </AppText>
+            <AppText variant="caption" color="tertiary">
+              {anchorCopy(anchorOffer.found).source}
+            </AppText>
+            <Button
+              label={anchorCopy(anchorOffer.found).accept}
+              variant="tonal"
+              size="sm"
+              fullWidth={false}
+              onPress={() => pickAnchor(anchorOffer.found)}
+              style={styles.anchorButton}
+            />
+          </View>
+        ) : null}
         {reminderBlocked && reminder && (
           <AppText variant="caption" color="tertiary" style={styles.reminderHint}>
             Enable notifications for welliva in your device settings to get this
@@ -757,4 +852,6 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
     lineHeight: 18,
   },
+  anchorOffer: { marginTop: Spacing.lg, gap: Spacing.xs },
+  anchorButton: { alignSelf: "flex-start", marginTop: Spacing.xs },
 });

@@ -14,7 +14,12 @@
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
 import type { ExerciseCategory } from "@/models/exercise";
 import type { MovementPattern } from "@/models/workout";
-import { EXERCISE_MOTIONS, SPECIFIC_MOTION_FAMILY } from "./exerciseMotions";
+import {
+  EXERCISE_MOTIONS,
+  SPECIFIC_MOTION_FAMILY,
+  motionForName,
+  normalizeExerciseName,
+} from "./exerciseMotions";
 
 /** Point order inside a flat 14-number frame: [x,y] per node. */
 export const FIG_NODES = ["head", "shoulder", "elbow", "hand", "hip", "knee", "foot"] as const;
@@ -287,21 +292,37 @@ const CATEGORY_TO_MOTION: Record<ExerciseCategory, FigureMotion> = {
   flexibility: "flexibility",
 };
 
+/** What else is known about an exercise the catalogue may not have. */
+export interface MotionHint {
+  /** Its name — the best clue to a move that is not in the catalogue. */
+  name?: string;
+  /** Its movement pattern, when the plan that made it says. */
+  pattern?: MovementPattern;
+}
+
+/** Catalogue entries by normalised name, built on first use. */
+let byName: Map<string, FigureMotion> | null = null;
+
 /**
  * Resolve the best demonstration motion for an exercise, most precise first:
  *
  *   1. the exercise's OWN authored movement (a butt kick kicks; see
  *      exerciseMotions.ts),
  *   2. the local DB's movement pattern — the family stand-in,
- *   3. the session's category,
- *   4. a calm neutral idle.
+ *   3. its NAME: a catalogue exercise of the same name, else the name table
+ *      (exerciseMotions.ts NAME_MOTIONS) — so a plan's or the coach's own
+ *      "Burpees" demonstrates a burpee, not the cardio stand-in,
+ *   4. the pattern the plan gave it,
+ *   5. the session's category,
+ *   6. a calm neutral idle.
  *
- * Never throws — AI exercises the catalogue has never seen degrade to a
- * sensible pose rather than to nothing.
+ * Never throws — exercises the catalogue has never seen degrade to a sensible
+ * pose rather than to nothing.
  */
 export function resolveFigureMotion(
   exerciseId?: string,
   category?: ExerciseCategory,
+  hint?: MotionHint,
 ): FigureMotion {
   if (exerciseId) {
     const specific = EXERCISE_MOTIONS[exerciseId];
@@ -309,6 +330,19 @@ export function resolveFigureMotion(
     const entry = EXERCISE_DATABASE.find((e) => e.id === exerciseId);
     if (entry) return entry.movementPattern;
   }
+  if (hint?.name) {
+    if (!byName) {
+      byName = new Map(
+        EXERCISE_DATABASE.map((e) => [
+          normalizeExerciseName(e.name),
+          EXERCISE_MOTIONS[e.id] ?? e.movementPattern,
+        ]),
+      );
+    }
+    const named = byName.get(normalizeExerciseName(hint.name)) ?? motionForName(hint.name);
+    if (named) return named;
+  }
+  if (hint?.pattern && MOVEMENT_PROFILES[hint.pattern]) return hint.pattern;
   if (category && CATEGORY_TO_MOTION[category]) return CATEGORY_TO_MOTION[category];
   return "neutral";
 }

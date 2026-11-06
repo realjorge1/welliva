@@ -314,6 +314,8 @@ export interface UseMemoryCenter {
   ) => Promise<void>;
   // long-term facts
   clearMotivation: () => Promise<void>;
+  /** Their "why", in their words: trimmed, nothing else. */
+  setMotivation: (text: string) => Promise<void>;
   removePreference: (pref: string) => Promise<void>;
   dismissPattern: (message: string) => Promise<void>;
   forgetEpisode: (id: string) => Promise<void>;
@@ -408,6 +410,14 @@ export function useMemoryCenter(): UseMemoryCenter {
     await reload();
   }, [reload]);
 
+  const setMotivation = useCallback(
+    async (text: string) => {
+      await LongTermStore.rememberMotivation(text);
+      await reload();
+    },
+    [reload],
+  );
+
   const removePreference = useCallback(
     async (pref: string) => {
       await LongTermStore.removePreference(pref);
@@ -469,6 +479,7 @@ export function useMemoryCenter(): UseMemoryCenter {
     tagEvent,
     correctEvent,
     clearMotivation,
+    setMotivation,
     removePreference,
     dismissPattern,
     forgetEpisode,

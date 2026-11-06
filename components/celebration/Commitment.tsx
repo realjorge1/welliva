@@ -1,10 +1,9 @@
 /**
- * THE DAILY COMMITMENT, ON SCREEN — the week row and Home's streak strip.
+ * THE DAILY COMMITMENT, ON SCREEN — the week row of the celebration.
  *
- * The same flame as the celebration (components/celebration/Flame), so the
- * object you watch light up when a day is kept is the object that sits on Home
- * going grey on a day that hasn't been. That continuity is the whole mechanic:
- * a grey flame with your number next to it is the reason to open the app.
+ * Home's streak lives in "Your week" now (components/home/WeekTable — the
+ * streak strip that sat here told the same week as that table, so the two were
+ * merged on 2026-10-31). This row is the one the celebration pops today into.
  *
  * NOTHING HERE IS AN OUTLINE. These circles are not buttons, and an outlined
  * shape reads as one (see the no-dashed-lines / no-outline rule). State is told
@@ -17,19 +16,13 @@
  */
 import { AppText } from "@/components/ui";
 import { useColors } from "@/components/ui/useColors";
-import { Spacing, alpha } from "@/constants/theme";
-import {
-  commitmentStatus,
-  readCommitment,
-  type CommitmentDay,
-  type StreakLike,
-} from "@/services/commitment";
-import { todayDate } from "@/services/OfflineStorage";
+import { alpha } from "@/constants/theme";
+import type { CommitmentDay } from "@/services/commitment";
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo } from "react";
-import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import React from "react";
+import { StyleSheet, View } from "react-native";
 import Animated, { ZoomIn } from "react-native-reanimated";
-import { FLAME_COLORS, FlameGlyph } from "./Flame";
+import { FLAME_COLORS } from "./Flame";
 
 /* ── The week ─────────────────────────────────────────────────────────────── */
 
@@ -64,11 +57,13 @@ export function CommitmentWeek({
             : colors.surfaceSunken;
         const state = kept
           ? "kept"
-          : d.isToday
-            ? "not kept yet"
-            : d.isFuture
-              ? "still to come"
-              : "missed";
+          : d.paused
+            ? "rough day, streak paused"
+            : d.isToday
+              ? "not kept yet"
+              : d.isFuture
+                ? "still to come"
+                : "missed";
         return (
           <View
             key={d.date}
@@ -110,75 +105,16 @@ export function CommitmentWeek({
                 >
                   <Ionicons name="checkmark" size={Math.round(size * 0.56)} color="#FFFFFF" />
                 </Animated.View>
+              ) : d.paused ? (
+                // A rough day that paused the streak: its own quiet mark.
+                <View style={[StyleSheet.absoluteFill, styles.keptDisc]}>
+                  <Ionicons name="pause" size={Math.round(size * 0.44)} color={colors.textTertiary} />
+                </View>
               ) : null}
             </View>
           </View>
         );
       })}
-    </View>
-  );
-}
-
-/* ── Home's strip ─────────────────────────────────────────────────────────── */
-
-/**
- * The streak as Home shows it, card-less like the rest of Home's heroes: the
- * flame and the count, the week, and one line that says where today stands.
- *
- * The flame is the static glyph, not the animated one — a perpetually
- * flickering icon on Home is an animation the 1 GB phones pay for on every
- * frame of every scroll (see welliva-low-end-perf). The flicker belongs to the
- * moment a day is kept, which is the celebration's job.
- */
-export function CommitmentStrip({
-  streak,
-  style,
-}: {
-  streak: StreakLike;
-  style?: StyleProp<ViewStyle>;
-}) {
-  const { colors, isDark } = useColors();
-  const today = todayDate();
-  const state = useMemo(() => readCommitment(streak, today), [streak, today]);
-  const status = commitmentStatus(state);
-  const caption =
-    state.totalDays > 0
-      ? `Best ${state.best} · ${state.totalDays} ${state.totalDays === 1 ? "day" : "days"} kept`
-      : "Your first flame is one log away";
-
-  return (
-    <View style={style}>
-      <View
-        style={styles.head}
-        accessible
-        accessibilityLabel={`${state.streak} day streak. ${caption}.`}
-      >
-        <FlameGlyph size={30} unlit={!state.keptToday} dark={isDark} />
-        <AppText
-          variant="display"
-          weight="800"
-          style={[
-            styles.count,
-            { color: state.keptToday ? FLAME_COLORS.outer : colors.text },
-          ]}
-        >
-          {state.streak}
-        </AppText>
-        <View style={styles.headText}>
-          <AppText variant="callout" weight="700" numberOfLines={1}>
-            day streak
-          </AppText>
-          <AppText variant="caption" color="tertiary" numberOfLines={1}>
-            {caption}
-          </AppText>
-        </View>
-      </View>
-
-      <CommitmentWeek week={state.week} />
-
-      <AppText variant="footnote" color="tertiary" align="center" style={styles.status}>
-        {status}
-      </AppText>
     </View>
   );
 }
@@ -191,13 +127,4 @@ const styles = StyleSheet.create({
   },
   day: { alignItems: "center", gap: 6 },
   keptDisc: { alignItems: "center", justifyContent: "center" },
-  head: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-    marginBottom: Spacing.lg,
-  },
-  count: { fontVariant: ["tabular-nums"] },
-  headText: { flex: 1, gap: 1 },
-  status: { marginTop: Spacing.lg },
 });

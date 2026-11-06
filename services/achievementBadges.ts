@@ -15,9 +15,10 @@
  * achievement, so what you earned is recognisable across the room and two
  * badges side by side are never the same object.
  *
- * LOCKED BADGES DO NOT USE ANY OF THIS. An unearned trophy stays bare — the
- * material is the prize, and showing it before it's won gives the whole thing
- * away. `lockedFinish` is what the grid draws until then.
+ * LOCKED BADGES DO NOT USE ANY OF THIS. An unearned trophy stays unstruck —
+ * the material is the prize, and showing it before it's won gives the whole
+ * thing away. `bareFinish` is what the shelf draws until then: the same badge
+ * in three greys, its tier's shape and rank shown, its material held back.
  *
  * Pure data + two lookups. No React, no theme: a finish looks the same in light
  * and dark mode on purpose, exactly as a real medal does.
@@ -36,6 +37,11 @@ export interface BadgeFinish {
   ink: string;
   /** The light the badge throws — the still pool behind the medallion. */
   glow: string;
+  /**
+   * The rank's colour on the ribbon, when the lit stop can't carry it. A metal's
+   * light stop reads on its own deep band; the unstruck greys are too close.
+   */
+  ribbonInk?: string;
 }
 
 const finish = (
@@ -189,21 +195,53 @@ export function badgeFinish(def: Pick<AchievementDef, "id" | "tier">): BadgeFini
 }
 
 /**
- * The bare badge — what an achievement looks like before it is earned.
- *
- * Deliberately NOT a dimmed version of the real finish: a grey cast reads as
- * "there is a colour here you can't see yet", which is exactly the reveal the
- * unlock is for. Takes the surface's own muted tone so it disappears into the
- * card.
+ * The outline a badge is cut to — one per tier, the way Duolingo gives every
+ * league its own emblem. The material says WHICH badge it is; the shape says
+ * how far up the ladder it sits, readable across the room before a word is.
+ * The drawings live in components/celebration/badgeGeometry.
  */
-export function lockedFinish(muted: string, faint: string): BadgeFinish {
-  return {
-    material: "Unstruck",
-    ramp: [faint, faint, faint],
-    accent: muted,
-    ink: muted,
-    glow: muted,
-  };
+export type BadgeShape = "coin" | "hex" | "shield" | "seal" | "star";
+
+export const TIER_SHAPE: Record<AchievementTier, BadgeShape> = {
+  bronze: "coin",
+  silver: "hex",
+  gold: "shield",
+  platinum: "seal",
+  mythic: "star",
+};
+
+/** The word on a badge's ribbon — its rank, as Duolingo writes "LEVEL 3". */
+export const TIER_RIBBON: Record<AchievementTier, string> = {
+  bronze: "BRONZE",
+  silver: "SILVER",
+  gold: "GOLD",
+  platinum: "PLATINUM",
+  mythic: "MYTHIC",
+};
+
+/** The shape an achievement is cut to. */
+export function badgeShape(def: Pick<AchievementDef, "tier">): BadgeShape {
+  return TIER_SHAPE[def.tier] ?? "coin";
+}
+
+/**
+ * AN UNSTRUCK BADGE — grey, but still a badge.
+ *
+ * The locked tile used to be a tinted icon square, which made "still to earn"
+ * a list of buttons instead of a case of empty slots. This is the same plate,
+ * lip and face as a won badge, in greys: its SHAPE is already there (you can
+ * see a shield is a gold), its MATERIAL is not — the colour stays the prize,
+ * exactly as Duolingo greys a locked award.
+ *
+ * Two greys because the shelf sits on the theme's surface; the detail sheet is
+ * black in both themes and always asks for the dark one.
+ */
+export function bareFinish(dark: boolean): BadgeFinish {
+  // The rank stays legible on the grey band (~3.5:1 and ~4:1) — the shape and
+  // the rank are already the badge's to show; only the material is held back.
+  return dark
+    ? { ...finish("Unstruck", "#5A616D", "#3A3F48", "#2A2E35", "#7D8592"), ribbonInk: "#8A919C" }
+    : { ...finish("Unstruck", "#F7F8FA", "#E1E4E9", "#C9CDD5", "#A4AAB4"), ribbonInk: "#5F6670" };
 }
 
 /* ── Deriving a finish where there isn't a badge ─────────────────────────── */

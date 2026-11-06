@@ -23,7 +23,7 @@
 import { CANONICAL_FOODS } from "../../constants/NutrientDatabase";
 import { addDays, daysBetween } from "./dates";
 import { liveEpisodes } from "./episodes";
-import { describeWindow, SUBJECT_LABEL, type CyclePattern } from "./patterns";
+import { describeWindow, SUBJECT_LABEL, type CyclePattern, type Subject } from "./patterns";
 import type { CycleMode, CycleToday, Prediction } from "./predict";
 import type { CycleDayLog, CycleDays, PeriodEpisode } from "./types";
 
@@ -255,10 +255,16 @@ export function headsUps(
   patterns: readonly CyclePattern[],
   status: CycleToday,
   prediction: Prediction | null,
+  /**
+   * What has helped her with a subject, as a closing sentence ("Heat helped
+   * most the last 3 times.") — or null. From her own answers (./relief).
+   */
+  remedy: (subject: Subject) => string | null = () => null,
 ): HeadsUp[] {
   const out: HeadsUp[] = [];
   for (const p of patterns) {
     if (p.kind !== "timing" || !p.window || !p.subject) continue;
+    const before = out.length;
     const w = p.window;
     const label = SUBJECT_LABEL[p.subject];
     const lower = label.toLowerCase();
@@ -298,6 +304,12 @@ export function headsUps(
               : `${label} ${has} tended to show up about now for you, ${describeWindow(w)}.`,
         });
       }
+    }
+    // Her own answer about what eased it, said once beside the forecast.
+    const helped = out.length > before ? remedy(p.subject) : null;
+    if (helped) {
+      const last = out[out.length - 1];
+      out[out.length - 1] = { ...last, text: `${last.text} ${helped}` };
     }
     if (out.length >= 2) break;
   }

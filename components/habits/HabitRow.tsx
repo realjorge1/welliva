@@ -21,14 +21,16 @@ const MINI_WEEKS = 12;
 export interface HabitRowProps {
   view: HabitView;
   today: string;
+  /** Rough days that excuse a miss (HabitsContext `paused`). */
+  paused?: ReadonlySet<string>;
   onPress: () => void;
   onToggle: () => void;
 }
 
-export function HabitRow({ view, today, onPress, onToggle }: HabitRowProps) {
+export function HabitRow({ view, today, paused, onPress, onToggle }: HabitRowProps) {
   const { colors } = useColors();
   const { habit, stats, done } = view;
-  const weeks = buildHeatWeeks(habit, done, today, MINI_WEEKS);
+  const weeks = buildHeatWeeks(habit, done, today, MINI_WEEKS, paused);
 
   const scale = useRef(new Animated.Value(1)).current;
   const pop = () => {

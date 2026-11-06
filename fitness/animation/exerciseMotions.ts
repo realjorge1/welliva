@@ -330,3 +330,162 @@ export const EXERCISE_MOTIONS: Record<string, FigureMotion> = {
   flex_20: "wheel", // Full Bridge (Wheel)
   flex_21: "neckRoll", // Neck Rolls
 };
+
+/**
+ * Exercise NAME → the movement it performs, for exercises that are not in the
+ * catalogue: a plan or coach exercise has an id of its own, so `EXERCISE_MOTIONS`
+ * never sees it, and its category alone ("cardio") played one shared stand-in
+ * for burpees, skaters and high knees alike — a demonstration that did not
+ * match the session it was in.
+ *
+ * Read in order, first match wins, so every specific name sits ABOVE the
+ * general one it contains: a marching bridge before a march, a side plank dip
+ * before a dip and a plank, a squat thrust before a squat, a wheel before a
+ * bridge. Names are matched lower-case with hyphens and underscores as spaces
+ * (see `motionForName`). `__tests__/exerciseMotions.test.ts` proves the table
+ * against every name in the catalogue.
+ */
+export const NAME_MOTIONS: readonly (readonly [RegExp, FigureMotion])[] = [
+  // Jumps and cardio, specific first.
+  [/burpee/, "burpee"],
+  [/plank jack/, "plankJack"],
+  [/jumping jack/, "jumpingJack"],
+  [/star jump/, "starJump"],
+  [/tuck jump/, "tuckJump"],
+  [/(broad|long) jump/, "broadJump"],
+  [/jump(ing)? lunge|split jump/, "jumpLunge"],
+  [/jump(ing)? squat|squat jump/, "jumpSquat"],
+  [/jump(ing)? rope|skipping|rope skip/, "jumpRope"],
+  [/squat thrust/, "squatThrust"],
+  [/sprawl/, "sprawl"],
+  [/high knee|run(ning)? in place|jog/, "highKnee"],
+  [/butt kick/, "buttKick"],
+  [/mountain climber/, "mountainClimber"],
+  [/(lateral|side) shuffle/, "lateralShuffle"],
+  [/skater squat|shrimp squat/, "skaterSquat"],
+  [/skater/, "skater"],
+  [/marching (glute )?bridge/, "marchingBridge"],
+  [/march/, "march"],
+  [/shadow ?box|boxing|punch/, "boxing"],
+  [/bear crawl/, "bearCrawl"],
+  [/inchworm|walk ?out/, "inchworm"],
+  [/fast feet|quick feet/, "fastFeet"],
+  [/step touch/, "stepTouch"],
+  [/toe tap/, "toeTap"],
+  // Planks and floor core.
+  [/side plank (hip )?dip/, "sidePlankDip"],
+  [/side plank/, "sidePlank"],
+  [/shoulder tap/, "shoulderTap"],
+  [/up ?downs?|plank walk/, "plankUpDown"],
+  [/knee plank|plank on (the )?knees/, "kneePlank"],
+  [/plank/, "forearmPlank"],
+  [/bicycle/, "bicycleCrunch"],
+  [/reverse crunch/, "reverseCrunch"],
+  [/(side|oblique|standing) crunch/, "sideCrunch"],
+  [/crunch/, "crunch"],
+  [/sit ?ups?\b/, "situp"],
+  [/\bv ?ups?\b|jack ?knife/, "vUp"],
+  [/toe touch/, "toeTouch"],
+  [/heel tap/, "heelTap"],
+  [/dead ?bug/, "deadBug"],
+  [/hollow (body )?rock/, "hollowRock"],
+  [/hollow/, "hollowHold"],
+  [/flutter/, "flutterKick"],
+  [/boat/, "boatHold"],
+  [/windshield/, "windshieldWiper"],
+  [/russian twist/, "russianTwist"],
+  [/leg (raise|lift)/, "legRaise"],
+  [/bird ?dog/, "birdDog"],
+  [/superman/, "superman"],
+  // Push.
+  [/handstand push/, "handstandPushup"],
+  [/wall push/, "wallPushup"],
+  [/(knee|kneeling) push/, "kneePushup"],
+  [/incline push/, "inclinePushup"],
+  [/decline push/, "declinePushup"],
+  [/pike push/, "pikePushup"],
+  [/hindu push|dive bomber/, "hinduPushup"],
+  [/scap(ular)? push/, "scapPushup"],
+  [/spider ?man push/, "spidermanPushup"],
+  [/push ?ups?|press ?ups?/, "pushup"],
+  [/\bdips?\b/, "dip"],
+  [/(chest|bench|floor) press|chest fl(y|ies)/, "chestPress"],
+  [/lateral raise|side raise/, "lateralRaise"],
+  [/(shoulder|overhead|military|arnold) press/, "push"],
+  // Pull.
+  [/pull ?apart/, "pullApart"],
+  [/face pull/, "facePull"],
+  [/reverse fl(y|ies)|rear delt/, "reverseFly"],
+  [/snow angel/, "snowAngel"],
+  [/\by ?t raise|\b[yt] raise/, "yRaise"],
+  [/inverted row|australian/, "invertedRow"],
+  [/pull ?ups?|chin ?ups?/, "pullUp"],
+  [/pull ?down/, "pull"],
+  [/(seated|band|cable) rows?/, "seatedRow"],
+  [/(door ?frame|towel) rows?/, "leanRow"],
+  [/\brows?\b/, "row"],
+  [/nordic/, "nordicCurl"],
+  [/hamstring curl|leg curl/, "hamstringCurl"],
+  [/curl/, "curl"],
+  // Legs.
+  [/lateral lunge|side lunge/, "lateralLunge"],
+  [/curtsy/, "curtsyLunge"],
+  [/cossack/, "cossackSquat"],
+  [/bulgarian|split squat/, "splitSquat"],
+  [/hip flexor|kneeling lunge|low lunge/, "kneelingLunge"],
+  [/lunge/, "lunge"],
+  [/sumo/, "sumoSquat"],
+  [/goblet/, "gobletSquat"],
+  [/pistol/, "pistolSquat"],
+  [/squat pulse|pulse squat/, "squatPulse"],
+  [/deep squat|squat hold|malasana|garland/, "deepSquat"],
+  [/wall sit/, "wallSit"],
+  [/single leg calf|single calf/, "singleCalfRaise"],
+  [/calf raise|heel raise/, "calfRaise"],
+  [/step ?ups?\b/, "stepUp"],
+  [/(single|one) leg balance|stork/, "singleLegBalance"],
+  [/hip abduction|leg abduction|side leg raise/, "hipAbduction"],
+  [/sit to stand|chair stand|squat/, "squat"],
+  // Hinge.
+  [/wheel|full bridge/, "wheel"],
+  [/single leg (glute )?bridge/, "singleLegBridge"],
+  [/hip thrust/, "hipThrust"],
+  [/bridge/, "gluteBridge"],
+  [/single leg (romanian )?deadlift|single leg rdl/, "singleLegRdl"],
+  [/arm (circle|swing)|shoulder roll/, "armCircles"],
+  [/swing/, "kbSwing"],
+  [/good morning/, "goodMorning"],
+  [/donkey kick/, "donkeyKick"],
+  [/fire hydrant/, "fireHydrant"],
+  [/deadlift|\brdl\b|hip hinge/, "hinge"],
+  // Stretches and mobility.
+  [/cat ?cow|cat camel/, "catCow"],
+  [/child'?s? pose/, "childsPose"],
+  [/cobra|upward dog|up dog/, "cobra"],
+  [/down(ward)? ?dog/, "downDog"],
+  [/thread the needle/, "threadNeedle"],
+  [/pigeon/, "pigeon"],
+  [/couch stretch/, "couchStretch"],
+  [/world'?s greatest/, "worldsGreatest"],
+  [/seated (forward )?fold|seated hamstring/, "seatedFold"],
+  [/hamstring stretch|forward fold|toe reach/, "hamstringStretch"],
+  [/quad stretch/, "quadStretch"],
+  [/butterfly/, "butterfly"],
+  [/90 ?\/? ?90/, "ninetyNinety"],
+  [/figure ?(4|four)/, "figureFour"],
+  [/neck (roll|circle|stretch)/, "neckRoll"],
+  [/doorway|chest stretch|pec stretch/, "doorwayStretch"],
+  [/twist|trunk rotation/, "torsoTwist"],
+];
+
+/** Lower-case, hyphens and underscores as spaces, runs of spaces as one. */
+export function normalizeExerciseName(name: string): string {
+  return name.toLowerCase().replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** The movement an exercise's NAME describes, or null when nothing in the table matches. */
+export function motionForName(name: string): FigureMotion | null {
+  const n = normalizeExerciseName(name);
+  for (const [re, motion] of NAME_MOTIONS) if (re.test(n)) return motion;
+  return null;
+}

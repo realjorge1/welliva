@@ -17,6 +17,14 @@
  * while the profile says menopause. Bleeding after menopause should always be
  * checked, so it gets said plainly.
  *
+ * On hormonal contraception only the long-bleeding note applies. The gaps
+ * between bleeds follow the method there, so short, long, irregular and missed
+ * "cycles" would all be notes about the packet, not about her.
+ *
+ * And one from her own answers (./relief): cramps she said nothing eased, on
+ * NOTHING_HELPED_NOTE or more of her recent answered days, more often than
+ * anything else helped. The cramps page carries the same line and number.
+ *
  * Every note says what was seen, in her numbers, and that it is worth raising —
  * it never names a condition. A dismissed note stays dismissed until its
  * evidence changes: the `signature` is built from the dates behind it, so a new
@@ -26,7 +34,8 @@
 import { daysBetween, formatDay } from "./dates";
 import { liveEpisodes } from "./episodes";
 import { STATS_WINDOW, type CycleMode, type CycleProfile, type CycleRecord } from "./predict";
-import type { CycleSettings, PeriodEpisode } from "./types";
+import { unrelieved } from "./relief";
+import type { CycleDays, CycleSettings, PeriodEpisode } from "./types";
 
 export type DoctorNoteId =
   | "short_cycles"
@@ -34,7 +43,8 @@ export type DoctorNoteId =
   | "long_bleeding"
   | "irregular"
   | "missed"
-  | "menopause_bleeding";
+  | "menopause_bleeding"
+  | "cramps_unrelieved";
 
 export interface DoctorNote {
   id: DoctorNoteId;
@@ -50,6 +60,8 @@ export interface NotesInput {
   today: string;
   mode: CycleMode;
   profile?: CycleProfile;
+  /** Her day logs — for what she said helped (./relief). */
+  days?: CycleDays;
 }
 
 /** FIGO 2018: a regular cycle varies by ≤7 days at 26–41, ≤9 days otherwise. */
@@ -57,7 +69,8 @@ export function regularityLimit(age: number | null | undefined): number {
   return age != null && age >= 26 && age <= 41 ? 7 : 9;
 }
 
-const MISSED_AFTER_DAYS = 90;
+/** No period this long, outside pregnancy, postpartum and menopause, is worth raising. ./late quotes it. */
+export const MISSED_AFTER_DAYS = 90;
 
 function list(xs: number[]): string {
   return xs.join(", ");
@@ -66,7 +79,11 @@ function list(xs: number[]): string {
 export function doctorNotes(input: NotesInput): DoctorNote[] {
   const { cycles, today, mode } = input;
   const notes: DoctorNote[] = [];
-  const recent = cycles.filter((c) => c.status === "counted").slice(-STATS_WINDOW);
+  // On hormonal contraception the gaps between bleeds follow the method, so
+  // the cycle-length notes say nothing about her cycle. A long bleed still
+  // counts: it is worth raising on any method.
+  const hormonal = mode === "hormonal";
+  const recent = hormonal ? [] : cycles.filter((c) => c.status === "counted").slice(-STATS_WINDOW);
   const m = recent.length;
 
   const short = recent.filter((c) => c.length < 21);
@@ -102,8 +119,10 @@ export function doctorNotes(input: NotesInput): DoctorNote[] {
     const days = daysBetween(latest.start, latest.end as string) + 1;
     notes.push({
       id: "long_bleeding",
-      title: "A long period",
-      body: `Your period from ${formatDay(latest.start)} lasted ${days} days. Bleeding for more than 7 days is worth mentioning to a doctor.`,
+      title: hormonal ? "A long bleed" : "A long period",
+      body: hormonal
+        ? `Your bleed from ${formatDay(latest.start)} lasted ${days} days. Bleeding for more than 7 days is worth mentioning to a doctor, or to whoever prescribes your contraception.`
+        : `Your period from ${formatDay(latest.start)} lasted ${days} days. Bleeding for more than 7 days is worth mentioning to a doctor.`,
       signature: longBleeds.map((e) => `${e.start}:${e.end}`).join(","),
     });
   }
@@ -142,6 +161,18 @@ export function doctorNotes(input: NotesInput): DoctorNote[] {
         signature: last.start,
       });
     }
+  }
+
+  // "Nothing helped", said often enough that the cramps page's own line applies:
+  // pain that nothing eases is worth raising. Her answers, not a judgement.
+  const pain = input.days && mode !== "pregnancy" ? unrelieved(input.days, "cramps") : null;
+  if (pain) {
+    notes.push({
+      id: "cramps_unrelieved",
+      title: "Cramps that nothing eased",
+      body: `On ${pain.nothing} of the last ${pain.observed} days you had cramps, you told me nothing helped. Pain that nothing eases is worth mentioning to a doctor, who can look for the cause and what will help.`,
+      signature: pain.dates.join(","),
+    });
   }
 
   if (mode === "menopause" && last && daysBetween(last.start, today) <= 60) {

@@ -56,6 +56,8 @@ import {
 } from "../health-os";
 import { useAuth } from "../components/SupabaseAuthProvider";
 import { loadBodyLogs } from "../services/BodyLogService";
+import { loadNoisyWeightDates } from "../services/cycle/noisyWeightDays";
+import { useDayCalorieDelta } from "./domain/useDayTarget";
 import { useProfileSync } from "./domain/useProfileSync";
 import { useDayChange } from "./domain/useDayChange";
 import { useWorkoutState } from "./domain/useWorkoutState";
@@ -71,6 +73,7 @@ import {
 import { calculateNutritionTargets, maintenanceTdee } from "../services/NutritionService";
 import { ZERO_MACROS, type MacroTotals } from "../services/nutrition/DayTotals";
 import { reconcileTargetsVersion } from "../services/nutrition/TargetsVersion";
+import { firstDrinkOn } from "../services/nutrition/waterStore";
 import {
   archiveWaterDay,
   KEYS,
@@ -521,11 +524,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [workoutLog, currentDate],
   );
 
+  // Today's target is the usual one plus any planned change (services/nutrition/dayTargets).
+  const todayCalorieDelta = useDayCalorieDelta(currentDate);
   const coachInsights = useMemo<CoachInsight[]>(
     () =>
       generateCoachInsights({
         bio: userBio,
-        targets: nutritionTargets,
+        targets:
+          nutritionTargets && todayCalorieDelta
+            ? { ...nutritionTargets, calories: nutritionTargets.calories + todayCalorieDelta }
+            : nutritionTargets,
+        easyOnCalories: todayCalorieDelta > 0,
         consumed: consumedNutrition,
         waterGoalMl:
           userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500,
@@ -537,6 +546,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [
       userBio,
       nutritionTargets,
+      todayCalorieDelta,
       consumedNutrition,
       userGoals,
       todayDiet,
@@ -722,6 +732,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               await runDailyLearning({
                 mifflinTdee: maintenanceTdee(bio),
                 weightKg: bio.weightKg,
+                noisyWeightDates: await loadNoisyWeightDates(today),
               });
             } catch {
               // Never let learning block boot — the app has to come up regardless.
@@ -735,7 +746,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             goals?.dailyWaterMl ??
             (bio ? calculateNutritionTargets(bio).waterMl : undefined) ??
             2500;
-          await archiveWaterDay(lastDate, water || 0, waterGoal);
+          await archiveWaterDay(lastDate, water || 0, waterGoal, await firstDrinkOn(lastDate));
           setWaterMl(0);
           await writeJSON(KEYS.WATER_TODAY, 0);
           // Generate diet for the new day, preserving the previously chosen diet.

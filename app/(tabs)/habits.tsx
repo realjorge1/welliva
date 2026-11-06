@@ -67,7 +67,7 @@ const SUGGESTIONS: Suggestion[] = [
 export default function HabitsScreen() {
   const router = useRouter();
   const { colors } = useColors();
-  const { views, retired, toggleToday, createHabit, loading } = useHabits();
+  const { views, retired, paused, toggleToday, createHabit, loading } = useHabits();
   const { currentDate } = useSystem();
   const { userBio } = useProfile();
   const { tier, openUpgrade } = useBilling();
@@ -88,8 +88,8 @@ export default function HabitsScreen() {
   // asking for a fifth, so the number at the top of the screen is a thing that
   // can actually be finished.
   const dueToday = useMemo(
-    () => views.filter((v) => isDueToday(v.habit, v.done, currentDate)),
-    [views, currentDate],
+    () => views.filter((v) => isDueToday(v.habit, v.done, currentDate, paused)),
+    [views, currentDate, paused],
   );
   const doneToday = dueToday.filter((v) => v.stats.doneToday).length;
   const totalToday = dueToday.length;
@@ -221,6 +221,7 @@ export default function HabitsScreen() {
                 <HabitRow
                   view={view}
                   today={currentDate}
+                  paused={paused}
                   onPress={() => router.push(`/habit/${view.habit.id}` as any)}
                   onToggle={() => toggleToday(view.habit.id)}
                 />

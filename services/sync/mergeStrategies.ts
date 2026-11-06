@@ -266,6 +266,60 @@ export const MERGE_STRATEGIES: Record<string, MergeStrategy> = {
   // LATER edit (its ISO `updatedAt`), and a cleared day is an empty log with a
   // newer stamp, so clearing one on the phone beats the old entry on the tablet.
   "@welliva_cycle_days": { kind: "mergeByDate", preferField: "updatedAt" },
+  // HabitTickTime[] (services/routine/tickTimes) — when each habit was ticked,
+  // one record per habit per day (`id` = habitId:date). The later write wins,
+  // and an un-tick is a `deleted` record with a newer UTC stamp, so it beats the
+  // tick still sitting on the other phone. The writer keeps 60 per habit; this
+  // cap only bounds a runaway.
+  "@welliva_habit_tick_times": {
+    kind: "mergeById",
+    idField: "id",
+    tsField: "updatedAt",
+    order: "asc",
+    cap: 2000,
+  },
+  // SmartAnswer[] (services/smart/ledger) — every "Move it", "Keep", "Not now",
+  // one per moment `id`. The later answer wins, so a question declined on the
+  // phone stays declined on the tablet. Newest first, like the writer.
+  "@welliva_smart_answers": {
+    kind: "mergeById",
+    idField: "id",
+    tsField: "at",
+    order: "desc",
+    cap: 300,
+  },
+  // Record<date, PlannedDay> (services/smart/hardDay) — what was planned for each
+  // date, as it stood. A date on both phones resolves to the later change.
+  "@welliva_planned_days": { kind: "mergeByDate", preferField: "updatedAt" },
+  // ShortWeekday[] (services/smart/hardDay) — one per `id` (short:<weekday>). The
+  // later change wins; "back to full" is a `deleted` record with a newer stamp.
+  "@welliva_short_weekdays": {
+    kind: "mergeById",
+    idField: "id",
+    tsField: "updatedAt",
+    order: "asc",
+    cap: 14,
+  },
+  // RoughDay[] (services/smart/roughDay) — one per `date`. The later change
+  // wins, and "I'm OK actually" is a `deleted` record with a newer stamp, so a
+  // rough day taken back on the phone isn't merged back from the tablet.
+  "@welliva_rough_days": {
+    kind: "mergeById",
+    idField: "date",
+    tsField: "updatedAt",
+    order: "asc",
+    cap: 400,
+  },
+  // ForgottenUsual[] (services/smart/usualStore) — "Not my usual any more", by
+  // usual id. Only ever added to: a forget IS the tombstone, so the two phones'
+  // lists union and a usual turned away on one stays away on the other.
+  "@welliva_usuals_forgotten": {
+    kind: "mergeById",
+    idField: "id",
+    tsField: "at",
+    order: "desc",
+    cap: 200,
+  },
 };
 
 export function strategyFor(key: string): MergeStrategy {

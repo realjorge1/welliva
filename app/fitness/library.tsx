@@ -19,12 +19,12 @@
 import { AmbientCanvas, AppText, IconBadge, useColors } from "@/components/ui";
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
 import { Radius, Spacing } from "@/constants/theme";
-import { useProfile } from "@/contexts/AppContext";
+import { useProfile, useWorkout } from "@/contexts/AppContext";
 import { resolveFigureMotion } from "@/fitness/animation/movementProfiles";
 import { ExerciseCard, type ExerciseCardData } from "@/fitness/components/ExerciseCard";
 import { WorkoutCard } from "@/fitness/components/WorkoutCard";
 import { useFitnessProfile } from "@/fitness/hooks/useFitnessProfile";
-import { filterWorkouts } from "@/fitness/services/WorkoutCatalog";
+import { filterWorkouts, finishedCounts } from "@/fitness/services/WorkoutCatalog";
 import type { WorkoutFilter, WorkoutStyle } from "@/fitness/types";
 import type { Difficulty } from "@/models/exercise";
 import { DAY_NAMES } from "@/services/training";
@@ -85,7 +85,15 @@ export default function FitnessLibraryScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ view?: string; favorites?: string; pickDay?: string }>();
   const { userBio } = useProfile();
+  const { workoutLog, sessionHistory } = useWorkout();
   const { profile, toggleFavorite, isFavorite } = useFitnessProfile();
+  // Which catalogue workouts this user has finished, every set done — the
+  // check on a card's art. Read off the real log (and, for older runs, the
+  // per-set history), never kept separately.
+  const finished = useMemo(
+    () => finishedCounts(workoutLog, sessionHistory),
+    [workoutLog, sessionHistory],
+  );
 
   /** The weekday this visit is choosing a workout for, when opened from "Pick". */
   const pickDay = useMemo(() => {
@@ -172,9 +180,10 @@ export default function FitnessLibraryScreen() {
         onPress={openWorkout}
         isFavorite={isFavorite(item.id)}
         onToggleFavorite={toggleFavorite}
+        timesFinished={finished.get(item.id) ?? 0}
       />
     ),
-    [openWorkout, isFavorite, toggleFavorite],
+    [openWorkout, isFavorite, toggleFavorite, finished],
   );
 
   const difficultyTone = useCallback(

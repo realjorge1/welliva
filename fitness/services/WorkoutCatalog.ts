@@ -10,8 +10,9 @@
  */
 
 import { EXERCISE_DATABASE, type ExerciseDBEntry } from "@/constants/ExerciseDatabase";
-import { isTimedReps, parseTargetReps } from "@/models/session";
+import { isTimedReps, parseTargetReps, type SessionSummaryData } from "@/models/session";
 import type { UserBio } from "@/models/user";
+import type { WorkoutLogEntry } from "@/models/workout";
 import { exerciseSuitability } from "@/services/WorkoutGenerator";
 import { getCoach } from "../data/coaches";
 import { WORKOUTS, WORKOUT_BY_ID } from "../data/workouts";
@@ -196,14 +197,16 @@ export function workoutSuitability(
 }
 
 /**
- * The exact route params the EXISTING guided-session screen expects
- * (`exerciseIds`, `sets`, `reps` as comma-joined arrays). Keeping this
- * contract means library workouts run through the proven player untouched.
+ * The exact route params the guided-session screen expects (`exerciseIds`,
+ * `sets`, `reps` and `blocks` as comma-joined arrays). Keeping this contract
+ * means library workouts run through the proven player untouched; `blocks`
+ * lets the player speak in warm-up / main / cool-down.
  */
 export function workoutToPlayerParams(def: WorkoutDefinition): {
   exerciseIds: string;
   sets: string;
   reps: string;
+  blocks: string;
   sessionLabel: string;
   workoutSessionId: string;
 } {
@@ -212,6 +215,7 @@ export function workoutToPlayerParams(def: WorkoutDefinition): {
     exerciseIds: items.map((i) => i.exercise.id).join(","),
     sets: items.map((i) => i.sets).join(","),
     reps: items.map((i) => i.reps).join(","),
+    blocks: items.map((i) => i.block).join(","),
     sessionLabel: def.name,
     workoutSessionId: `lib_${def.id}`,
   };
@@ -225,4 +229,59 @@ export function isLibrarySessionId(sessionId: string): boolean {
 /** Reverse of workoutToPlayerParams' id ("lib_x" → catalog workout). */
 export function workoutFromSessionId(sessionId: string): ResolvedWorkout | null {
   return isLibrarySessionId(sessionId) ? getWorkout(sessionId.slice(4)) : null;
+}
+
+/**
+ * Was every set of every move done, nothing skipped? The one definition of a
+ * FINISHED run — the summary screen stamps it on the log entry, and Explore's
+ * check mark reads it.
+ *
+ * Not `completionPercent`: the engine counts a move as completed once any of
+ * its sets is, and a skip after the first set leaves that partial result in
+ * place — so 100% can still mean a third of the work.
+ */
+export function everySetDone(
+  run: Pick<SessionSummaryData, "setsCompleted" | "totalSets" | "exerciseResults">,
+): boolean {
+  return (
+    run.totalSets > 0 &&
+    run.setsCompleted >= run.totalSets &&
+    !run.exerciseResults.some((r) => r.skipped)
+  );
+}
+
+/**
+ * How many times each catalog workout has been FINISHED — every set of every
+ * move done, nothing skipped — keyed by workout id. Explore's check mark reads
+ * this.
+ *
+ * Finished, not started: a run abandoned two moves in is still in the log (it
+ * was real work, and the streak and the history count it), but a mark that
+ * says you've done a workout must mean the whole workout.
+ *
+ * Entries logged before the summary stamped `allSetsDone` are judged from the
+ * per-set session history when that run is still in it (the newest 50), and
+ * not counted when it isn't — a missing check, never a false one.
+ *
+ * Scope: runs started from Explore (`lib_*`). The same workout picked for a
+ * day runs as that day's plan session, under the plan's id.
+ */
+export function finishedCounts(
+  log: readonly Pick<WorkoutLogEntry, "id" | "sessionId" | "allSetsDone">[],
+  history: readonly Pick<
+    SessionSummaryData,
+    "sessionRunId" | "setsCompleted" | "totalSets" | "exerciseResults"
+  >[] = [],
+): Map<string, number> {
+  const runs = new Map(history.map((h) => [h.sessionRunId, h]));
+  const out = new Map<string, number>();
+  for (const entry of log) {
+    if (!isLibrarySessionId(entry.sessionId)) continue;
+    const run = runs.get(entry.id);
+    const finished = entry.allSetsDone ?? (run ? everySetDone(run) : false);
+    if (!finished) continue;
+    const id = entry.sessionId.slice(4);
+    out.set(id, (out.get(id) ?? 0) + 1);
+  }
+  return out;
 }

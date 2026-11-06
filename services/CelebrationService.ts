@@ -21,7 +21,14 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Palette } from "../constants/theme";
 import type { Moment } from "./MomentEngine";
-import { badgeFinish, finishFromAccent, type BadgeFinish } from "./achievementBadges";
+import {
+  TIER_RIBBON,
+  badgeFinish,
+  badgeShape,
+  finishFromAccent,
+  type BadgeFinish,
+  type BadgeShape,
+} from "./achievementBadges";
 import {
   TIER_META,
   type AchievementDef,
@@ -73,6 +80,13 @@ export interface Celebration {
    * a chapter or a moment has one derived from its tone.
    */
   finish: BadgeFinish;
+  /**
+   * The badge's outline and the rank on its ribbon — an achievement's tier
+   * (see TIER_SHAPE). Absent on a chapter or a moment, which have no tier:
+   * those arrive as the plain coin.
+   */
+  shape?: BadgeShape;
+  ribbon?: string;
   badgeIcon: keyof typeof Ionicons.glyphMap;
   badgeLabel: string;
   /** A quiet stat line shown to mature users ("more data, less spectacle"). */
@@ -112,6 +126,8 @@ export function celebrationFromAchievement(
     icon: def.icon,
     accent: finish.accent,
     finish,
+    shape: badgeShape(def),
+    ribbon: TIER_RIBBON[def.tier],
     badgeIcon: "medal",
     badgeLabel: `${tier.label} · +${tier.points} pts`,
     meta:

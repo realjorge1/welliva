@@ -53,8 +53,12 @@ export const COACH_CHANNEL_ID = "welliva-coach";
 /** Channels from earlier builds, removed once the current ones exist. */
 export const LEGACY_CHANNEL_IDS: readonly string[] = ["reminders"];
 
-/** The brand accent Android tints the small icon and action text with. */
-export const NOTIFICATION_ACCENT = "#E67E22";
+/**
+ * The brand accent Android tints the small icon and action text with — the
+ * gold of the wordmark and of the Gozlin diamond's warm half. Must match the
+ * expo-notifications `color` in app.json (that one is baked in at build time).
+ */
+export const NOTIFICATION_ACCENT = "#EDB623";
 
 let configured = false;
 

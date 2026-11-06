@@ -11,6 +11,7 @@ import { useCycle } from "@/contexts/CycleContext";
 import { AppText, Button, ChipGrid, Sheet, useColors } from "@/components/ui";
 import { Spacing, alpha } from "@/constants/theme";
 import {
+  bleedWords,
   daysBetween,
   ENERGIES,
   ENERGY_LABEL,
@@ -29,6 +30,7 @@ import {
   type OvulationTest,
   type Symptom,
 } from "@/services/cycle";
+import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo } from "react";
 import { ScrollView, StyleSheet, Switch, View } from "react-native";
 import { useCyclePalette } from "./cycleTheme";
@@ -51,7 +53,7 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
   const { colors } = useColors();
   const palette = useCyclePalette();
   const cycle = useCycle();
-  const { today, data, settings, view } = cycle;
+  const { today, data, view } = cycle;
 
   // Hold the last date so the copy doesn't blank while the sheet slides away.
   const lastDate = React.useRef<string | null>(null);
@@ -62,16 +64,21 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
   const episode = episodeOn(data.periods, d, today, view.typicalBleed);
   const inPeriod = !!episode;
   const midPeriod = !!episode && episode.start !== d;
+  const words = bleedWords(view.mode);
 
   const subtitle = useMemo(() => {
-    if (episode) return `Period day ${daysBetween(episode.start, d) + 1}`;
+    if (episode) return `${words.day} ${daysBetween(episode.start, d) + 1}`;
     const before = liveEpisodes(data.periods)
       .filter((e) => e.start <= d)
       .pop();
-    return before ? `Cycle day ${daysBetween(before.start, d) + 1}` : "No period logged before this day";
-  }, [episode, data.periods, d]);
+    if (!before) return `No ${words.noun} logged before this day`;
+    const n = daysBetween(before.start, d) + 1;
+    return view.mode === "hormonal" ? `Day ${n} since your last bleed began` : `Cycle day ${n}`;
+  }, [episode, data.periods, d, words, view.mode]);
 
   const title = d === today ? "Today" : daysBetween(d, today) === 1 ? "Yesterday" : formatDay(d, { weekday: true });
+
+  const recalls = view.relief.filter((r) => !!log?.symptoms?.includes(r.symptom));
 
   const toggleSymptom = (s: Symptom) => {
     const current = log?.symptoms ?? [];
@@ -103,12 +110,12 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
       >
         <View style={[styles.periodRow, { backgroundColor: inPeriod ? palette.wash : alpha(colors.text, 0.05) }]}>
           <View style={styles.flex}>
-            <AppText variant="callout">Period</AppText>
+            <AppText variant="callout">{words.label}</AppText>
             <AppText variant="footnote" color="tertiary">
               {midPeriod
-                ? "Switching this off ends that period the day before."
+                ? `Switching this off ends that ${words.noun} the day before.`
                 : inPeriod
-                  ? "This day is part of a period."
+                  ? `This day is part of a ${words.noun}.`
                   : "Bleeding today? Switch it on."}
             </AppText>
           </View>
@@ -116,7 +123,7 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
             value={inPeriod}
             onValueChange={(on) => void cycle.togglePeriodDay(d, on)}
             trackColor={{ true: palette.period, false: alpha(colors.text, 0.18) }}
-            accessibilityLabel="Period day"
+            accessibilityLabel={words.day}
           />
         </View>
 
@@ -137,6 +144,16 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
             onToggle={toggleSymptom}
             size="sm"
           />
+          {/* Her own answers, said back under the symptom she just ticked —
+              only once the same thing has helped most on two or more days. */}
+          {recalls.map((r) => (
+            <View key={r.symptom} style={styles.recall}>
+              <Ionicons name="sparkles-outline" size={14} color={palette.period} />
+              <AppText variant="footnote" color="secondary" style={styles.flex}>
+                {r.line}
+              </AppText>
+            </View>
+          ))}
         </Group>
 
         <Group label="Mood">
@@ -157,7 +174,7 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
           />
         </Group>
 
-        {settings.showFertileWindow ? (
+        {view.showFertile ? (
           <Group label="Ovulation test" hint="Two positive tests in different cycles teach me your own ovulation timing.">
             <ChipGrid<OvulationTest>
               options={TEST_OPTIONS}
@@ -209,5 +226,6 @@ const styles = StyleSheet.create({
   group: { marginTop: Spacing.xl },
   groupLabel: { marginBottom: Spacing.sm },
   groupHint: { marginTop: -4, marginBottom: Spacing.sm },
+  recall: { flexDirection: "row", alignItems: "center", gap: Spacing.sm, marginTop: Spacing.sm },
   saved: { marginTop: Spacing.xl, marginBottom: Spacing.md },
 });

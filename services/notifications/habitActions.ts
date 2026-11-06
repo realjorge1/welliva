@@ -21,9 +21,11 @@
  */
 import { computeStats, loadHabits, updateLogs } from "../HabitService";
 import { toLocalDateString } from "../OfflineStorage";
+import { recordHabitTick } from "../routine/tickTimes";
+import { loadRoughDays, pausedDates } from "../smart/roughDay";
 import { creditCommitment } from "../StreakService";
 import { emitExternalWrite, subscribeExternalWrites } from "./externalWrites";
-import { fireDateOf } from "./fireTime";
+import { fireDateOf, fireTimeMs } from "./fireTime";
 import { patchWidgetHabitDone, refreshWidgets } from "./widgets";
 
 export type MarkDoneResult =
@@ -62,10 +64,16 @@ export function subscribeHabitLogsChanged(fn: () => void): () => void {
  * @param habitId    from the notification's `data.habitId`
  * @param firedAt  `response.notification.date` — when the reminder fired
  *                 (seconds on iOS, milliseconds on Android; see ./fireTime)
+ * @param reminderFiredAt  when THIS notification fired, raw — differs from
+ *                 `firedAt` only on a snoozed copy, which is dated by the day it
+ *                 was first sent for. Kept with the tick's time so the routine
+ *                 clock can tell a press that answered the buzz from a habit
+ *                 done at its usual time (services/routine/clock).
  */
 export async function markHabitDoneFromNotification(
   habitId: string,
   firedAt?: number,
+  reminderFiredAt?: number,
 ): Promise<MarkDoneResult> {
   try {
     const date = toLocalDateString(fireDateOf(firedAt));
@@ -90,7 +98,10 @@ export async function markHabitDoneFromNotification(
     });
     const dates = new Set(logs[habitId] ?? []);
 
-    const { currentStreak } = computeStats(habit, dates, today);
+    // The same excused days the tracker uses, so this receipt's streak and the
+    // app's agree the morning after a rough day.
+    const paused = new Set(pausedDates(await loadRoughDays()));
+    const { currentStreak } = computeStats(habit, dates, today, paused);
 
     if (!alreadyDone) {
       await patchWidgetHabitDone(habitId, date, currentStreak);
@@ -98,6 +109,13 @@ export async function markHabitDoneFromNotification(
       emitExternalWrite({ kind: "habit", date });
       // A habit done keeps the day — today's only, as the meal button does.
       await creditCommitment(date);
+      // And when it was pressed, beside the log. Same-day only (a press for
+      // yesterday's reminder records no time); never throws. No usable fire
+      // time means no echo check — never "it fired just now".
+      const firedMs = fireTimeMs(reminderFiredAt ?? firedAt);
+      await recordHabitTick(habitId, date, "notification", {
+        firedAt: firedMs === null ? null : new Date(firedMs),
+      });
     }
 
     return {

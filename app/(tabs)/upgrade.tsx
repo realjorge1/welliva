@@ -180,8 +180,10 @@ import {
 } from "@/services/billing";
 import * as Haptics from "@/utils/haptics";
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+
+import { PAYWALL_SOURCES, type PaywallSource, track } from "@/services/telemetry";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 
 /** The tier the picker points at. Only one card may wear the badge. */
@@ -213,6 +215,28 @@ export default function UpgradeScreen() {
   } = useBilling();
 
   const currentTier = entitlement.tier;
+
+  // WHICH DOOR THEY CAME THROUGH. `lock` collapses anything unrecognised to
+  // "generic", which is correct for the COPY but throws away the funnel: the menu
+  // and Settings entries are not feature locks at all, and "people hit the paywall
+  // from the coach composer" is a different product fact from "people browsed to
+  // it". So prefer the raw param whenever it is a source we recognise.
+  const paywallSource: PaywallSource = useMemo(() => {
+    const raw = Array.isArray(source) ? source[0] : source;
+    return raw && (PAYWALL_SOURCES as readonly string[]).includes(raw)
+      ? (raw as PaywallSource)
+      : (lock as PaywallSource);
+  }, [source, lock]);
+
+  // One per VISIT, not per mount. This is a (tabs) route, so the screen stays
+  // mounted after the first visit and a `[]`-deps effect would fire exactly once
+  // in the app's lifetime — under-counting the denominator of the only
+  // conversion rate we have.
+  useFocusEffect(
+    useCallback(() => {
+      track("paywall_view", { source: paywallSource });
+    }, [paywallSource]),
+  );
 
   // Annual leads: it is the plan with the margin, and at these prices it is also
   // genuinely the better deal — the switch opens on the answer we'd defend.

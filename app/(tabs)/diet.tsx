@@ -2,10 +2,14 @@
  * DIET — the nutrition home.
  *
  * Today's plan + the premium intelligence layer, all offline:
- *   • Nutrition Progress Rings  — calories + protein/carbs/fat rings
+ *   • Nutrition Progress Rings  — a graduated calorie dial + protein/carbs/fat
+ *                                 rings, each filling from empty as it scrolls
+ *                                 into view from below
  *   • Protein Alerts            — paced protein status (getProteinStatus)
- *   • Consistency Score         — 0–100 from recent adherence
- *   • Weekly summary            — this week's adherence + macro averages
+ *   • Consistency Score         — 0–100 from recent adherence, as a black
+ *                                 instrument card with its line drawn on
+ *   • Nutrition trends          — each finished day's calories and macros as a
+ *                                 % of the targets, drawn on as it scrolls in
  *   • Smart Swaps               — meal alternatives ranked to your remaining
  *                                 budget, in the swap sheet + as meal hints
  *
@@ -26,19 +30,13 @@ import {
   Screen,
   SectionHeader,
   ThemedIcon,
+  TickRing,
   useColors,
 } from "@/components/ui";
-import {
-  ConsistencyGraph,
-  MacroTrendsCard,
-  WeekDonut,
-  buildAdherenceTrend,
-  buildMacroMatrix,
-  fullDate,
-  shortDate,
-  type MacroDescriptor,
-  type MacroRangeData,
-} from "@/components/charts";
+import { ConsistencyCard } from "@/components/diet/ConsistencyCard";
+import { NutritionTrendCard, type TrendRange } from "@/components/diet/NutritionTrendCard";
+import { useEntranceTrigger, type ScrollMetrics } from "@/components/home/useEntranceTrigger";
+import { buildAdherenceTrend, fullDate, shortDate } from "@/components/charts";
 import {
   DIET_DATABASE,
   DietData,
@@ -61,13 +59,24 @@ import {
 } from "@/services/nutrition/dayProvenance";
 import { mealsForSlot } from "@/services/nutrition/MealCatalog";
 import { TargetsRecalcCard } from "@/components/nutrition/TargetsRecalcCard";
-import { Gradients, Radius, Spacing, alpha } from "@/constants/theme";
+import { Radius, Spacing, alpha } from "@/constants/theme";
 import { retroText } from "@/constants/RetroFont";
+import { HungryOfferCard } from "@/components/cycle/HungryCard";
+import { useSmartMoment } from "@/components/smart/useSmartMoment";
 import { useNutrition, useProfile, useSystem } from "@/contexts/AppContext";
+import { useCycleOptional } from "@/contexts/CycleContext";
+import { useDayCalorieDelta } from "@/contexts/domain/useDayTarget";
+import { dayTargetNote } from "@/services/nutrition/dayTargets";
 import { useMealPlan } from "@/contexts/MealPlanContext";
 import { PlanDurationPicker } from "@/components/diet/PlanDurationPicker";
 import { PlanMealsStep } from "@/components/diet/PlanMealsStep";
 import { useBacklogNudge } from "@/components/diet/useBacklogNudge";
+import { AnchorChainChip } from "@/components/smart/AnchorChainChip";
+import { useAnchorChain } from "@/components/smart/useAnchors";
+import { UsualCard } from "@/components/smart/UsualCard";
+import { useReceipts } from "@/components/smart/receipt";
+import { useRoughToday } from "@/components/smart/useRoughDay";
+import { useUsualMoment } from "@/components/smart/useUsualMoment";
 import { DietMatchScore, MealType, ScheduledMeal } from "@/models/diet";
 import {
   dateRange,
@@ -89,7 +98,6 @@ import {
 import {
   buildDietReasons,
   computeConsistency,
-  computeWeeklySummary,
   findMealAlternative,
   getProteinStatus,
   hasSmartSwap,
@@ -99,9 +107,7 @@ import {
   type LiveDay,
   type ProteinStatus,
   type SmartSwap,
-  type WeeklyNutritionSummary,
 } from "@/services/intelligence";
-import { currentWeekStart } from "@/services/OfflineStorage";
 import { Ionicons } from "@expo/vector-icons";
 import AILogoIcon from "@/components/gozlin/AILogoIcon";
 import { MealsList, type MealListItem } from "@/components/diet";
@@ -116,8 +122,12 @@ import {
   StyleSheet,
   TextInput,
   View,
+  useWindowDimensions,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import type { SharedValue } from "react-native-reanimated";
 
 type Colors = ReturnType<typeof useColors>["colors"];
 
@@ -278,6 +288,27 @@ export default function DietScreen() {
 
   const insets = useSafeAreaInsets();
   const toast = useToast();
+
+  // "Your usual?" in the logging area — the same rule as on Home, and the same
+  // quiet layer deciding whether it shows (services/smart).
+  const smartReceipt = useReceipts(toast);
+  const usualMoment = useUsualMoment("diet", smartReceipt);
+  // "Next: vitamins?" right after the meal a habit is tied to is ticked.
+  const chain = useAnchorChain("diet");
+
+  // The hungrier-week offer, through that same quiet layer. Never counted: when
+  // it appears says where someone is in their cycle (services/smart/types).
+  const hungryOffer = useCycleOptional()?.view.hungryOffer ?? null;
+  const hasHungryOffer = hungryOffer !== null;
+  const hungryCandidates = useMemo(
+    () => (hasHungryOffer ? [{ id: "hungry-week", feature: "hungry-week" as const, priority: 1 }] : []),
+    [hasHungryOffer],
+  );
+  const hungryMoment = useSmartMoment("diet", hungryCandidates);
+
+  // A rough day reads "eat well enough": the targets and the facts stay, the
+  // countdown and the nudges step aside (services/smart/roughDay).
+  const gentleToday = useRoughToday() !== null;
 
   // A period that has run its course takes over the screen: the user asked for
   // a plan of a certain length, it finished, and the result is the payoff. It
@@ -820,16 +851,28 @@ export default function DietScreen() {
     };
   }, [todayDiet?.schedule, learnedMealTimes]);
 
+  // Today's own calorie target, when it isn't the usual one
+  // (services/nutrition/dayTargets). Only calories move: macros and every plan
+  // this screen generates keep reading the usual `nutritionTargets`.
+  const todayCalorieDelta = useDayCalorieDelta(currentDate);
+  const todayTargets = useMemo(
+    () =>
+      nutritionTargets && todayCalorieDelta
+        ? { ...nutritionTargets, calories: nutritionTargets.calories + todayCalorieDelta }
+        : nutritionTargets,
+    [nutritionTargets, todayCalorieDelta],
+  );
+
   const calorieProgress = useMemo(() => {
-    if (!nutritionTargets) return 0;
+    if (!todayTargets) return 0;
     return Math.min(
-      (consumed.calories / nutritionTargets.calories) * 100,
+      (consumed.calories / todayTargets.calories) * 100,
       100,
     );
-  }, [consumed, nutritionTargets]);
+  }, [consumed, todayTargets]);
 
-  const caloriesLeft = nutritionTargets
-    ? Math.max(0, Math.round(nutritionTargets.calories - consumed.calories))
+  const caloriesLeft = todayTargets
+    ? Math.max(0, Math.round(todayTargets.calories - consumed.calories))
     : 0;
 
   const macroRings = useMemo(
@@ -886,53 +929,64 @@ export default function DietScreen() {
     return pts;
   }, [dietHistory, currentDate, liveDay, tier]);
 
-  const weekly = useMemo<WeeklyNutritionSummary>(
-    () => computeWeeklySummary(dietHistory, currentWeekStart(), currentDate, liveDay),
-    [dietHistory, currentDate, liveDay],
+  /**
+   * RINGS THAT FILL ON ARRIVAL. Scroll down to the calorie dial, the macro rings
+   * or the Consistency card and each fills from empty to where today has put it
+   * (the line draws itself on); arrive from above and they are simply there.
+   * One trigger per block (components/home/useEntranceTrigger), all fed from ONE
+   * ref of scroll metrics — refs and shared values, never state, because this
+   * runs on every scroll event.
+   */
+  const { height: windowHeight } = useWindowDimensions();
+  const scrollMetrics = useRef<ScrollMetrics>({ y: 0, h: windowHeight });
+  const dialIn = useEntranceTrigger(scrollMetrics);
+  const macrosIn = useEntranceTrigger(scrollMetrics);
+  const consistencyIn = useEntranceTrigger(scrollMetrics);
+  const trendsIn = useEntranceTrigger(scrollMetrics);
+  const stepDial = dialIn.step;
+  const stepMacros = macrosIn.step;
+  const stepConsistency = consistencyIn.step;
+  const stepTrends = trendsIn.step;
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, layoutMeasurement } = e.nativeEvent;
+      scrollMetrics.current = { y: contentOffset.y, h: layoutMeasurement.height };
+      stepDial();
+      stepMacros();
+      stepConsistency();
+      stepTrends();
+    },
+    [stepDial, stepMacros, stepConsistency, stepTrends],
   );
 
-  // Scrubbable nutrition history — every macro's real per-day intake overlaid
-  // on ONE plot. Each range is aligned into shared rows (buildMacroMatrix) so
-  // calories/protein/carbs/fat line up sample-for-sample; the card indexes them
-  // to a shared starting point so their incomparable units share one axis.
-  const macroRanges = useMemo<MacroRangeData[]>(() => {
-    const ranges = [
-      { key: "1W", label: "1 wk", days: 7 },
-      { key: "1M", label: "1 mo", days: 30 },
-      { key: "3M", label: "3 mo", days: 90 },
-    ];
-    return ranges.map((r) => {
-      const rows = buildMacroMatrix(dietHistory, currentDate, r.days);
-      return {
-        key: r.key,
-        label: r.label,
-        labels: rows.map((p) => p.label),
-        fullLabels: rows.map((p) => p.fullLabel),
-        values: {
-          calories: rows.map((p) => p.calories),
-          protein: rows.map((p) => p.proteinG),
-          carbs: rows.map((p) => p.carbsG),
-          fat: rows.map((p) => p.fatG),
-        },
-        locked: isHistoryRangeLocked(r.days, tier),
-      };
-    });
-  }, [dietHistory, currentDate, tier]);
-
-  const macroDescriptors = useMemo<MacroDescriptor[]>(
+  // Nutrition trends: the ranges (beyond the viewer's plan they show locked)
+  // and the targets each finished day is measured against — today's, since the
+  // history doesn't keep the target a day had (see components/diet/nutritionTrend).
+  const trendRanges = useMemo<TrendRange[]>(
     () => [
-      { key: "calories", label: "Calories", unit: "kcal", color: colors.calories, gradient: Gradients.calories },
-      { key: "protein", label: "Protein", unit: "g", color: colors.protein, gradient: Gradients.protein },
-      { key: "carbs", label: "Carbs", unit: "g", color: colors.carbs, gradient: Gradients.carbs },
-      { key: "fat", label: "Fat", unit: "g", color: colors.fat, gradient: Gradients.fat },
+      { key: "1W", label: "1 wk", days: 7, locked: isHistoryRangeLocked(7, tier) },
+      { key: "1M", label: "1 mo", days: 30, locked: isHistoryRangeLocked(30, tier) },
+      { key: "3M", label: "3 mo", days: 90, locked: isHistoryRangeLocked(90, tier) },
     ],
-    [colors],
+    [tier],
+  );
+  const trendTargets = useMemo(
+    () =>
+      nutritionTargets
+        ? {
+            calories: nutritionTargets.calories,
+            proteinG: nutritionTargets.proteinG,
+            carbsG: nutritionTargets.carbsG,
+            fatG: nutritionTargets.fatG,
+          }
+        : null,
+    [nutritionTargets],
   );
 
   // Smart-swap hints on the main meals (does a clearly-better option exist?)
   const smartHints = useMemo(() => {
     const s = todayDiet?.schedule;
-    if (!currentDietData || !nutritionTargets || !s) {
+    if (!currentDietData || !todayTargets || !s) {
       return { breakfast: false, lunch: false, dinner: false };
     }
     const check = (
@@ -942,7 +996,7 @@ export default function DietScreen() {
       !!hasSmartSwap({
         options,
         current,
-        targets: nutritionTargets,
+        targets: todayTargets,
         consumed,
         slotsRemaining: mealsRemaining,
       });
@@ -951,7 +1005,7 @@ export default function DietScreen() {
       lunch: check(currentDietData.lunchOptions, s.lunch),
       dinner: check(currentDietData.dinnerOptions, s.dinner),
     };
-  }, [currentDietData, nutritionTargets, consumed, mealsRemaining, todayDiet?.schedule]);
+  }, [currentDietData, todayTargets, consumed, mealsRemaining, todayDiet?.schedule]);
 
   // All of today's meal slots in display order — breakfast, lunch, dinner, then
   // snacks — flattened into one list for the single "Today's meals" card. Empty
@@ -1027,17 +1081,17 @@ export default function DietScreen() {
   }, [todayDiet?.schedule, swapMealType, swapSnackIndex]);
 
   const smartPicks = useMemo<SmartSwap[]>(() => {
-    if (!nutritionTargets || swapOptions.length === 0) return [];
+    if (!todayTargets || swapOptions.length === 0) return [];
     return rankMealSwaps({
       options: swapOptions,
       current: currentSlotMeal,
-      targets: nutritionTargets,
+      targets: todayTargets,
       consumed,
       slotsRemaining: mealsRemaining,
     })
       .filter((s) => s.option.name !== currentSlotMeal?.name)
       .slice(0, 3);
-  }, [swapOptions, currentSlotMeal, nutritionTargets, consumed, mealsRemaining]);
+  }, [swapOptions, currentSlotMeal, todayTargets, consumed, mealsRemaining]);
 
   // Options for a given slot in the active diet — the pool an alternative is
   // drawn from.
@@ -1161,7 +1215,7 @@ export default function DietScreen() {
 
   return (
     <>
-      <Screen header={header} floatingHeader>
+      <Screen header={header} floatingHeader onScroll={onScroll}>
         {/* Active plan period — what you committed to and how far through it
             you are. Without this the app can show today's meals but never says
             what they're part of. */}
@@ -1446,12 +1500,19 @@ export default function DietScreen() {
             {/* Nutrition progress rings — daily summary */}
             {nutritionTargets && (
               <>
-                <View style={styles.heroRow}>
-                  <Ring
+                {/* A direct child of the scroll region, so its layout `y` is
+                    its true place on the page — the dial fills as it arrives. */}
+                <View style={styles.heroRow} onLayout={dialIn.onLayout}>
+                  {/* The goal as a dial of graduated strokes (owner, 2026-10-31,
+                      after a heart-rate dial in a reference): sixty strokes, a
+                      long one every five, lit one by one to today's share. */}
+                  <TickRing
                     progress={calorieProgress / 100}
                     size={132}
-                    strokeWidth={12}
+                    length={14}
+                    strokeWidth={2.6}
                     gradient={RING_GRADIENTS.calories}
+                    entrance={dialIn.value}
                   >
                     <AppText variant="metric" style={styles.ringPct}>
                       {Math.round(calorieProgress)}
@@ -1462,7 +1523,7 @@ export default function DietScreen() {
                     <AppText variant="caption" color="tertiary" uppercase>
                       of goal
                     </AppText>
-                  </Ring>
+                  </TickRing>
                   <View style={styles.heroInfo}>
                     <AppText variant="caption" color="tertiary" uppercase>
                       Calories
@@ -1471,12 +1532,17 @@ export default function DietScreen() {
                       {Math.round(consumed.calories)}
                     </AppText>
                     <AppText variant="subhead" color="secondary">
-                      of {Math.round(nutritionTargets.calories)} kcal
+                      of {Math.round(nutritionTargets.calories + todayCalorieDelta)} kcal
                     </AppText>
+                    {todayCalorieDelta ? (
+                      <AppText variant="caption" color="tertiary">
+                        {dayTargetNote(todayCalorieDelta)}
+                      </AppText>
+                    ) : null}
                     <View style={styles.heroChips}>
                       <Pill
-                        label={`${caloriesLeft} kcal left`}
-                        tone={colors.calories}
+                        label={gentleToday ? "Eat well enough today" : `${caloriesLeft} kcal left`}
+                        tone={gentleToday ? colors.success : colors.calories}
                         size="sm"
                       />
                       {liveDay && (
@@ -1515,9 +1581,9 @@ export default function DietScreen() {
 
                 <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
-                <View style={styles.macroRingGrid}>
+                <View style={styles.macroRingGrid} onLayout={macrosIn.onLayout}>
                   {macroRings.map((m) => (
-                    <MacroRing key={m.label} {...m} colors={colors} />
+                    <MacroRing key={m.label} {...m} colors={colors} entrance={macrosIn.value} />
                   ))}
                 </View>
 
@@ -1573,8 +1639,14 @@ export default function DietScreen() {
               </>
             )}
 
+            {hungryMoment && hungryOffer ? (
+              <Reveal index={3}>
+                <HungryOfferCard offer={hungryOffer} style={styles.block} />
+              </Reveal>
+            ) : null}
+
             {/* Protein alert */}
-            {nutritionTargets && showProteinAlert && (
+            {nutritionTargets && showProteinAlert && !gentleToday && (
               <Reveal index={3}>
                 <Card
                   style={styles.block}
@@ -1614,46 +1686,42 @@ export default function DietScreen() {
             {mealItems.length > 0 && (
               <Reveal index={5}>
                 <View style={styles.section}>
-                  <SectionHeader title="Today's meals" weight="700" />
+                  <SectionHeader
+                    title="Today's meals"
+                    subtitle={`${mealItems.filter((m) => m.completed).length} of ${mealItems.length} eaten`}
+                    weight="700"
+                  />
                   <MealsList
                     meals={mealItems}
                     onToggle={handleToggleMeal}
                     onSwap={handleOpenSwapModal}
                   />
+                  {chain.moment && (
+                    <AnchorChainChip
+                      name={chain.moment.view.habit.name}
+                      icon={chain.moment.view.habit.icon}
+                      color={chain.moment.view.habit.color}
+                      onDone={() => void chain.done(chain.moment!)}
+                      onDismiss={() => chain.dismiss(chain.moment!)}
+                      style={styles.chainChip}
+                    />
+                  )}
                 </View>
               </Reveal>
             )}
 
-            {/* Consistency score — bare on the page, no card */}
-            <Reveal index={6}>
+            {/* Consistency — a black instrument card in the calorie hero's
+                language: the score as a dot-matrix figure, and the fortnight as
+                one smooth line with a ball at today, drawn on as it scrolls in
+                (components/diet/ConsistencyCard). Its own Reveal, directly under
+                the scroll region, so `onLayout` says where it sits. */}
+            <Reveal index={6} onLayout={consistencyIn.onLayout}>
               <View style={styles.section}>
-                <SectionHeader title="Consistency" weight="700" />
-                <View style={styles.consistRow}>
-                  <Ring
-                    progress={consistency.score / 100}
-                    size={96}
-                    strokeWidth={10}
-                    gradient={colors.brandGradient}
-                  >
-                    <AppText variant="title" style={styles.bold}>
-                      {consistency.score}
-                    </AppText>
-                  </Ring>
-                  <View style={styles.flex}>
-                    <View style={styles.consistHead}>
-                      <AppText variant="headline">{consistency.label}</AppText>
-                      <TrendIcon trend={consistency.trend} colors={colors} />
-                    </View>
-                    <AppText variant="subhead" color="secondary" style={styles.consistSub}>
-                      {consistency.daysTracked > 0
-                        ? `Tracked ${consistency.daysTracked} of the last 7 days. Keep meals logged to grow your score.`
-                        : "Log meals to start building your consistency score."}
-                    </AppText>
-                  </View>
-                </View>
-                <View style={styles.consistGraph}>
-                  <ConsistencyGraph points={adherenceTrend} />
-                </View>
+                <ConsistencyCard
+                  consistency={consistency}
+                  points={adherenceTrend}
+                  entrance={consistencyIn.value}
+                />
               </View>
             </Reveal>
 
@@ -1663,6 +1731,14 @@ export default function DietScreen() {
             <Reveal index={6}>
               <View style={styles.section}>
                 <SectionHeader title="Anything else today?" weight="700" />
+                {usualMoment.usual && (
+                  <UsualCard
+                    usual={usualMoment.usual}
+                    onLog={usualMoment.logIt}
+                    onNotMine={usualMoment.notMine}
+                    style={styles.usualOffer}
+                  />
+                )}
                 <Card onPress={() => router.push("/diet/log-food")}>
                   <View style={styles.logRow}>
                     <IconBadge name="sparkles" tone={colors.primary} size={40} />
@@ -1739,24 +1815,19 @@ export default function DietScreen() {
               </View>
             </Reveal>
 
-            {/* Weekly summary */}
-            <Reveal index={7}>
+            {/* Nutrition trends — each finished day's calories and macros as a
+                share of the targets, 100% drawn as one line; the lines draw on
+                as the card scrolls in (components/diet/NutritionTrendCard). Its
+                own Reveal, directly under the scroll region, for `onLayout`. */}
+            <Reveal index={8} onLayout={trendsIn.onLayout}>
               <View style={styles.section}>
-                <SectionHeader title="This week" weight="700" />
-                <WeeklyCard summary={weekly} colors={colors} />
-              </View>
-            </Reveal>
-
-            {/* Nutrition trends — every macro overlaid on one scrubbable plot */}
-            <Reveal index={8}>
-              <View style={styles.section}>
-                <SectionHeader title="Nutrition trends" weight="700" />
-                <MacroTrendsCard
-                  macros={macroDescriptors}
-                  ranges={macroRanges}
-                  initialRangeKey="1W"
-                  emptyHint="Log a few days of meals and your macro trends appear here."
+                <NutritionTrendCard
+                  history={dietHistory}
+                  today={currentDate}
+                  targets={trendTargets}
+                  ranges={trendRanges}
                   onLockedRangePress={() => openUpgrade("history")}
+                  entrance={trendsIn.value}
                 />
               </View>
             </Reveal>
@@ -2395,6 +2466,7 @@ function MacroRing({
   gradient,
   counterClockwise,
   colors,
+  entrance,
 }: {
   label: string;
   consumed: number;
@@ -2402,6 +2474,8 @@ function MacroRing({
   gradient: readonly [string, string, ...string[]];
   counterClockwise?: boolean;
   colors: Colors;
+  /** Fill from empty as the row scrolls into view — see Ring. */
+  entrance?: SharedValue<number>;
 }) {
   const pct = target > 0 ? consumed / target : 0;
   return (
@@ -2412,6 +2486,7 @@ function MacroRing({
         strokeWidth={8}
         gradient={gradient}
         counterClockwise={counterClockwise}
+        entrance={entrance}
       >
         <AppText variant="callout">{consumed}</AppText>
         <AppText variant="caption" color="tertiary">
@@ -2419,111 +2494,6 @@ function MacroRing({
         </AppText>
       </Ring>
       <AppText variant="footnote" color="secondary" style={styles.macroRingLabel}>
-        {label}
-      </AppText>
-    </View>
-  );
-}
-
-function TrendIcon({
-  trend,
-  colors,
-}: {
-  trend: ConsistencyScore["trend"];
-  colors: Colors;
-}) {
-  if (trend === "flat") return null;
-  const up = trend === "up";
-  return (
-    <Ionicons
-      name={up ? "trending-up" : "trending-down"}
-      size={18}
-      color={up ? colors.success : colors.warning}
-    />
-  );
-}
-
-function WeeklyCard({
-  summary,
-  colors,
-}: {
-  summary: WeeklyNutritionSummary;
-  colors: Colors;
-}) {
-  const adherencePct = Math.round(summary.avgAdherence * 100);
-  // No card: this renders straight on the page (like the nutrition rings above),
-  // so it picks up the light page palette instead of the deep-cyan card surface.
-  return (
-    <View style={styles.weeklySummary}>
-      <View style={styles.weeklyStats}>
-        <WeeklyStat
-          value={`${adherencePct}%`}
-          label="Avg adherence"
-          colors={colors}
-        />
-        <WeeklyStat
-          value={`${summary.daysLogged}`}
-          label="Days logged"
-          colors={colors}
-        />
-        <WeeklyStat
-          value={`${summary.daysCompleted}`}
-          label="Days completed"
-          colors={colors}
-        />
-      </View>
-
-      {summary.daysLogged > 0 && (
-        <View style={styles.weeklyPie}>
-          <WeekDonut days={summary.perDay} />
-        </View>
-      )}
-
-      {(summary.avgCalories != null || summary.avgProteinG != null) && (
-        <View style={[styles.weeklyAvgRow, { borderTopColor: colors.divider }]}>
-          {summary.avgCalories != null && (
-            <View style={styles.weeklyAvgItem}>
-              <View style={[styles.macroDot, { backgroundColor: colors.calories }]} />
-              <AppText variant="footnote" color="secondary">
-                Avg {summary.avgCalories} kcal eaten/day
-              </AppText>
-            </View>
-          )}
-          {summary.avgProteinG != null && (
-            <View style={styles.weeklyAvgItem}>
-              <View style={[styles.macroDot, { backgroundColor: colors.protein }]} />
-              <AppText variant="footnote" color="secondary">
-                Avg {summary.avgProteinG}g protein/day
-              </AppText>
-            </View>
-          )}
-        </View>
-      )}
-
-      {summary.daysLogged === 0 && (
-        <AppText variant="subhead" color="tertiary" style={styles.weeklyEmpty}>
-          Log meals through the week to see your trends here.
-        </AppText>
-      )}
-    </View>
-  );
-}
-
-function WeeklyStat({
-  value,
-  label,
-  colors,
-}: {
-  value: string;
-  label: string;
-  colors: Colors;
-}) {
-  return (
-    <View style={styles.weeklyStat}>
-      <AppText variant="title" style={styles.bold}>
-        {value}
-      </AppText>
-      <AppText variant="caption" color="tertiary" uppercase style={styles.weeklyStatLabel}>
         {label}
       </AppText>
     </View>
@@ -2915,6 +2885,8 @@ const styles = StyleSheet.create({
 
   // --- Free-form food logging ---
   logRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
+  usualOffer: { marginBottom: Spacing.md },
+  chainChip: { marginTop: Spacing.md },
   logged: {
     marginTop: Spacing.md,
     paddingTop: Spacing.md,
@@ -3004,28 +2976,6 @@ const styles = StyleSheet.create({
   alertRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
   alertMsg: { marginTop: 2 },
   alertBar: { marginTop: Spacing.sm },
-
-  // Consistency
-  consistRow: { flexDirection: "row", alignItems: "center", gap: Spacing.xl },
-  consistHead: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
-  consistSub: { marginTop: 4 },
-  consistGraph: { marginTop: Spacing.lg, marginHorizontal: -Spacing.xs },
-
-  // Weekly
-  weeklySummary: { marginTop: Spacing.sm },
-  weeklyStats: { flexDirection: "row", justifyContent: "space-between" },
-  weeklyStat: { alignItems: "center", flex: 1 },
-  weeklyStatLabel: { marginTop: 4, textAlign: "center" },
-  weeklyPie: { marginTop: Spacing.xxl, marginBottom: Spacing.sm, paddingHorizontal: Spacing.xs },
-  weeklyAvgRow: {
-    marginTop: Spacing.lg,
-    paddingTop: Spacing.lg,
-    borderTopWidth: 1,
-    gap: Spacing.sm,
-  },
-  weeklyAvgItem: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
-  weeklyEmpty: { marginTop: Spacing.md, textAlign: "center" },
-  macroDot: { width: 8, height: 8, borderRadius: 4 },
 
   // Smart picks
   smartBlock: { marginBottom: Spacing.lg },

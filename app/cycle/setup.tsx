@@ -3,7 +3,10 @@
  *
  *   1. When did your last period start?   (today first; "not sure" is an answer)
  *   2. How long does it usually last?     (her period, and her whole cycle —
- *                                          either can be "not sure")
+ *                                          either can be "not sure"), plus one
+ *                                          optional card: hormonal contraception
+ *                                          or not. A yes means bleeding is
+ *                                          logged and never predicted.
  *
  * Both answers are only a starting point: the prediction treats them as a
  * prior that her logs take over from (services/cycle/predict). The privacy
@@ -12,9 +15,16 @@
  */
 import { DateStrip, useCyclePalette } from "@/components/cycle";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
-import { AppText, Button, Card, Chip, Screen, Stepper, useColors } from "@/components/ui";
+import { AppText, Button, Card, Chip, ChipGrid, Screen, Stepper, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useCycle } from "@/contexts/CycleContext";
+import {
+  CONTRACEPTION_HINT,
+  CONTRACEPTION_OPTIONS,
+  CONTRACEPTION_QUESTION,
+  HORMONAL_LINE,
+  type ContraceptionAnswer,
+} from "@/services/cycle";
 import { useSyncStatus } from "@/services/sync/useSyncStatus";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -34,6 +44,9 @@ export default function CycleSetupScreen() {
   const [unsureStart, setUnsureStart] = useState(false);
   const [periodDays, setPeriodDays] = useState<number | null>(PERIOD_RANGE.start);
   const [cycleDays, setCycleDays] = useState<number | null>(CYCLE_RANGE.start);
+  const [contraception, setContraception] = useState<ContraceptionAnswer | null>(
+    cycle.settings.contraception?.answer ?? null,
+  );
   const [saving, setSaving] = useState(false);
 
   const canNext = unsureStart || !!lastStart;
@@ -45,6 +58,7 @@ export default function CycleSetupScreen() {
         lastStart: unsureStart ? null : lastStart,
         usualCycleDays: cycleDays,
         usualPeriodDays: periodDays,
+        contraception,
       });
       // /cycle is a (tabs) destination now, not a pushed screen, so it is
       // SWITCHED to rather than replaced onto the stack — the same two steps
@@ -155,6 +169,27 @@ export default function CycleSetupScreen() {
             range={CYCLE_RANGE}
             onChange={setCycleDays}
           />
+
+          <Card padding="lg" style={styles.lengthCard}>
+            <AppText variant="callout">{CONTRACEPTION_QUESTION}</AppText>
+            <AppText variant="footnote" color="tertiary">
+              {CONTRACEPTION_HINT} You can skip this.
+            </AppText>
+            <View style={styles.methodChips}>
+              <ChipGrid<ContraceptionAnswer>
+                options={CONTRACEPTION_OPTIONS}
+                selected={(v) => contraception === v}
+                onToggle={(v) => setContraception((cur) => (cur === v ? null : v))}
+                tone={palette.period}
+                size="sm"
+              />
+            </View>
+            {contraception === "hormonal" ? (
+              <AppText variant="footnote" color="secondary" style={styles.methodNote}>
+                {HORMONAL_LINE}
+              </AppText>
+            ) : null}
+          </Card>
 
           <Card padding="lg" style={styles.promise}>
             <View style={styles.promiseHead}>
@@ -267,6 +302,8 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     marginTop: Spacing.md,
   },
+  methodChips: { marginTop: Spacing.md },
+  methodNote: { marginTop: Spacing.md },
   promise: { marginTop: Spacing.xl },
   promiseHead: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
   promiseLine: { marginTop: Spacing.sm },

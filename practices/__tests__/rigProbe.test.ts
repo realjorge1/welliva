@@ -20,6 +20,7 @@ import {
   buildSideRig,
   buildSideRigFrom,
   poseRig,
+  sideContextOf,
   type Rig,
 } from "@/fitness/animation/rig";
 import { SIDE_PROFILES } from "@/fitness/animation/sideProfiles";
@@ -51,9 +52,15 @@ describe("rigging a profile that is not in the exercise registry", () => {
       );
     }
     for (const [motion, profile] of Object.entries(SIDE_PROFILES)) {
-      expect(buildSideRigFrom(profile), motion).toEqual(
-        buildSideRig(motion as keyof typeof SIDE_PROFILES),
-      );
+      const m = motion as keyof typeof SIDE_PROFILES;
+      // The registry also knows a side view's facing, equipment and bar
+      // (`sideContextOf`); handed the same context, the two paths agree…
+      expect(buildSideRigFrom(profile, sideContextOf(m)), motion).toEqual(buildSideRig(m));
+      // …and for a movement with none of it, the bare profile is the same rig.
+      const ctx = sideContextOf(m);
+      if (ctx.facing === 1 && !ctx.props?.length && !ctx.hanging) {
+        expect(buildSideRigFrom(profile), motion).toEqual(buildSideRig(m));
+      }
     }
   });
 

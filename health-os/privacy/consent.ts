@@ -31,9 +31,11 @@ export type ConsentCategory =
   | "experience_followups" // ask how a new exercise went, remember the answer
   // ── the cycle log — its own boundary, OFF by default ──
   | "cycle_gozlin" // put her cycle day + today's cycle log in front of the coach
+  // ── measurement: first-party, anonymous, ON by default (see below) ──
+  | "product_analytics" // anonymous usage events to OUR Supabase, never a vendor
+  | "crash_diagnostics" // the crash black box, uploaded so someone can read it
   // ── declared-but-not-implemented (honest, future-proof UI) ──
-  | "cloud_backup"
-  | "crash_diagnostics";
+  | "cloud_backup";
 
 export interface ConsentDecision {
   granted: boolean;
@@ -48,15 +50,33 @@ export interface ConsentRecord {
   updatedAt: string;
 }
 
-/** Bump when the consent copy/policy changes materially → triggers re-consent. */
-export const CONSENT_VERSION = 1;
+/**
+ * Bump when the consent copy/policy changes materially → triggers re-consent.
+ *
+ * 2 (30 October 2026): added the `measurement` group — `product_analytics` and a
+ * `crash_diagnostics` that now actually collects something, where before it was
+ * declared and empty. Both default ON, which is why the privacy policy was
+ * rewritten and LEGAL_VERSION went to 4 in the same change: that gate is wired to
+ * a re-accept prompt, and it is the one the user actually sees.
+ *
+ * An explicit earlier decision survives this: `reconcile` only fills categories a
+ * stored record is MISSING, so someone who had already switched crash reports off
+ * stays off.
+ */
+export const CONSENT_VERSION = 2;
 
 /**
  * "coaching" is neither a sense nor a way out: it is how Gozlin behaves with
  * what it can already see. It is the one group whose switch may default ON —
  * see experience_followups below.
  */
-export type ConsentGroup = "core" | "integration" | "coaching" | "future" | "cycle";
+export type ConsentGroup =
+  | "core"
+  | "integration"
+  | "coaching"
+  | "future"
+  | "cycle"
+  | "measurement";
 
 export interface ConsentCategoryMeta {
   label: string;
@@ -158,7 +178,7 @@ export const CONSENT_CATEGORY_META: Record<ConsentCategory, ConsentCategoryMeta>
   cycle_gozlin: {
     label: "Cycle in Gozlin chats",
     blurb:
-      "When you chat, I can see your cycle day, when your next period is likely and what you logged today — nothing else. Off until you switch it on.",
+      "When you chat, I can see your cycle day, when your next period is likely, what you logged today, whether you use hormonal contraception, what you said helped a symptom, and what your logs show around your cycle: what changed when a period is late, your weight before a period, a hungrier-week plan, and a period that falls during a trip — nothing else. Off until you switch it on.",
     // Its own group: the Trust screen shows it only to someone who tracks a
     // cycle, inside Reach, because it is data leaving the phone.
     group: "cycle",
@@ -172,12 +192,42 @@ export const CONSENT_CATEGORY_META: Record<ConsentCategory, ConsentCategoryMeta>
     icon: "save",
     defaultGranted: false,
   },
+
+  /* ── measurement ───────────────────────────────────────────────────────────
+   * THE ONLY TWO CATEGORIES IN THIS FILE THAT SEND DATA AND DEFAULT TO ON.
+   *
+   * Every sense and every reach above is off until asked, and that is the right
+   * default for a sense: reading someone's calendar or their cycle without being
+   * asked is a different act from counting that a meal was logged. These two send
+   * no health data at all — an event NAME and a stack trace, keyed to a random id
+   * that is not the device id and not the ad id (services/telemetry/events.ts is
+   * the closed list, and sanitize() is the second lock).
+   *
+   * They default on because the alternative is not "more privacy", it is "no
+   * measurement": opt-in analytics is answered by a self-selected minority, which
+   * means a product shaped by whoever enjoys toggles. Shipping a health app whose
+   * crash rate and drop-off nobody can see is its own harm to the people using it.
+   *
+   * What makes that defensible rather than a helpful story: the policy says so
+   * plainly (LEGAL_VERSION 4 bumped for exactly this disclosure, so everyone
+   * re-accepts), both switches are in Trust under their own heading, and turning
+   * one off drops the queue rather than merely stopping new sends.
+   * ──────────────────────────────────────────────────────────────────────────── */
+  product_analytics: {
+    label: "Usage analytics",
+    blurb:
+      "Count which features get used, so we can fix what people abandon. Event names only — never a weight, a meal, a mood or a cycle date — and it goes to our own server, never a tracking company.",
+    group: "measurement",
+    icon: "stats-chart",
+    defaultGranted: true,
+  },
   crash_diagnostics: {
-    label: "Crash diagnostics",
-    blurb: "None are collected today. Declared for transparency.",
-    group: "future",
+    label: "Crash reports",
+    blurb:
+      "When a screen breaks, send what broke and where so it can be fixed. The error and the code path, nothing you typed or logged.",
+    group: "measurement",
     icon: "bug",
-    defaultGranted: false,
+    defaultGranted: true,
   },
 };
 

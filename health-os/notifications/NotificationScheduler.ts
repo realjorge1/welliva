@@ -130,6 +130,15 @@ export class NotificationScheduler {
     return planned;
   }
 
+  /**
+   * Cancel what is scheduled and keep the ledger — a quiet day (a rough day,
+   * services/notifications/pause `quietDate`): today's coaching stops, and
+   * nothing it already said comes back as if new.
+   */
+  async cancelPending(): Promise<void> {
+    await this.port.cancelAll();
+  }
+
   /** Clear the sent ledger + cancel scheduled (part of "forget everything"). */
   async clear(): Promise<void> {
     await this.port.cancelAll();

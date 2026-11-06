@@ -4,15 +4,28 @@
  * The cycle log never reaches the coach by default. When she switches on
  * "Let Gozlin see your cycle" (consent category `cycle_gozlin`), each chat turn
  * carries THIS and nothing more: where she is in her cycle, when the next period
- * is likely, her typical length, and what she logged today. No dates, no
- * history, no fertile window unless she has chosen to see one herself.
+ * is likely and how sure that is, her typical length, what she logged today,
+ * whether she uses hormonal contraception (which is why nothing is predicted),
+ * what she said helped a symptom, and what her logs show around her cycle: what
+ * changed when a period is late, her weight before a period, a hungrier-week plan,
+ * and a period that falls during a trip. No history, and no fertile window unless
+ * she has chosen to see one herself. Every line is a token on every message, and
+ * the Privacy Policy, the consent row and cycle settings all list these same things,
+ * so a new line here means new words in all three.
  *
  * The brief is also the grounding evidence: every number in the lines below is
  * a field of the object, so the reply may quote "day 12" exactly when it was
  * put in front of the model (services/gozlin/agent/grounding).
  */
 
+import { glanceConfidence, type ConfidenceWord } from "./copy";
+import { hungryForCoach } from "./hungry";
+import type { LateContext } from "./late";
+import type { CyclePattern } from "./patterns";
 import type { CycleMode, CycleToday, Phase, Prediction } from "./predict";
+import type { ReliefRecall } from "./relief";
+import type { ComingUp } from "./upcoming";
+import { waterForCoach, type WaterMoment } from "./water";
 import {
   ENERGY_LABEL,
   FLOW_LABEL,
@@ -34,9 +47,31 @@ export interface CycleBrief {
   nextPeriodTo: number | null;
   lateByDays: number | null;
   typicalCycleDays: number | null;
+  /** How sure that window is — the cycle screen's words, so the coach can't sound surer. */
+  sure: ConfidenceWord | null;
   /** What she logged today, in words. */
   loggedToday: string[];
+  /** What has helped her most, from her own answers: "heat for cramps (3 of the last 4 times)". */
+  remedies?: string[];
+  /** While late: what changed this cycle (./late), in words about her. Empty = nothing stands out. */
+  lateChanges?: string[] | null;
+  /** Events a predicted period is likely to meet (./upcoming), in words about her. */
+  upcoming?: string[];
+  /** Her weight rising before her period (./water), once her own weigh-ins confirm it. */
+  water?: string | null;
+  /** The hungrier-week plan she chose (./hungry), and what it does today. */
+  hungry?: string | null;
 }
+
+/** Every line costs tokens on every message: the soonest two are plenty. */
+const UPCOMING_FOR_COACH = 2;
+
+/** The confidence words, said about her rather than to her. */
+const SURE_FOR_COACH: Record<ConfidenceWord, string> = {
+  "Fairly sure": "fairly sure",
+  "Still learning": "still learning her rhythm",
+  "Varies for you": "her cycles vary, so the window is wide",
+};
 
 function phaseWords(phase: Phase | null, showFertile: boolean): string | null {
   switch (phase) {
@@ -60,6 +95,17 @@ export function buildCycleBrief(input: {
   prediction: Prediction | null;
   todayLog?: CycleDayLog;
   showFertileWindow: boolean;
+  /** The view's recalls (./relief) — only ones that met the standard. */
+  relief?: readonly ReliefRecall[];
+  /** The late reading (./late), when she is late. */
+  late?: LateContext | null;
+  /** The view's overlaps with her trips and events (./upcoming). */
+  comingUp?: readonly ComingUp[];
+  /** The view's weight pattern and today's reading of it (./water). */
+  weightPattern?: CyclePattern | null;
+  water?: WaterMoment | null;
+  /** Her hungrier-week plan: on or off, and today's kcal from the ledger. */
+  hungryPlan?: { on: boolean; todayKcal: number };
 }): CycleBrief {
   const { status, prediction, todayLog } = input;
   const logged: string[] = [];
@@ -78,7 +124,13 @@ export function buildCycleBrief(input: {
     nextPeriodTo: predicting && !status.inPeriod ? Math.max(0, status.toLatest ?? 0) : null,
     lateByDays: status.lateBy > 0 ? status.lateBy : null,
     typicalCycleDays: prediction && prediction.basedOn > 0 ? prediction.cycleLength : null,
+    sure: glanceConfidence({ status, prediction }),
     loggedToday: logged,
+    remedies: (input.relief ?? []).map((r) => r.fact),
+    lateChanges: input.late && status.lateBy > 0 ? input.late.changes.map((c) => c.coach) : null,
+    upcoming: (input.comingUp ?? []).slice(0, UPCOMING_FOR_COACH).map((u) => u.coach),
+    water: waterForCoach(input.weightPattern ?? null, input.water ?? null),
+    hungry: hungryForCoach(input.hungryPlan?.on ?? false, input.hungryPlan?.todayKcal ?? 0),
   };
 }
 
@@ -89,23 +141,42 @@ export function cycleStateLines(brief: CycleBrief | null | undefined): string[] 
     return ["", "CYCLE (she chose to share this): cycle tracking is paused during pregnancy."];
   }
   const facts: string[] = [];
-  if (brief.periodDay !== null) facts.push(`on her period, day ${brief.periodDay}`);
-  else if (brief.cycleDay !== null) {
+  const hormonal = brief.lifeStage === "hormonal";
+  if (brief.periodDay !== null) {
+    facts.push(hormonal ? `bleeding, day ${brief.periodDay}` : `on her period, day ${brief.periodDay}`);
+  } else if (brief.cycleDay !== null && !hormonal) {
     facts.push(`cycle day ${brief.cycleDay}${brief.phase ? ` (${brief.phase})` : ""}`);
+  }
+  if (hormonal) {
+    facts.push("she uses hormonal contraception, so her bleeding follows the method and nothing is predicted");
   }
   if (brief.lateByDays !== null) {
     facts.push(`period ${brief.lateByDays} days later than her predicted window`);
+    if (brief.lateChanges) {
+      facts.push(
+        brief.lateChanges.length
+          ? `what's been different this cycle, from her logs (changes that can delay a period, never a cause or a diagnosis): ${brief.lateChanges.join("; ")}`
+          : "nothing stands out in what she logged this cycle",
+      );
+    }
   } else if (brief.nextPeriodFrom !== null && brief.nextPeriodTo !== null) {
+    const how = brief.sure ? `an estimate; ${SURE_FOR_COACH[brief.sure]}` : "an estimate";
     facts.push(
       brief.nextPeriodFrom === brief.nextPeriodTo
-        ? `next period likely in about ${brief.nextPeriodFrom} days (an estimate)`
-        : `next period likely in ${brief.nextPeriodFrom}–${brief.nextPeriodTo} days (an estimate)`,
+        ? `next period likely in about ${brief.nextPeriodFrom} days (${how})`
+        : `next period likely in ${brief.nextPeriodFrom}–${brief.nextPeriodTo} days (${how})`,
     );
   }
+  if (brief.upcoming?.length) facts.push(`coming up: ${brief.upcoming.join("; ")}`);
+  if (brief.water) facts.push(brief.water);
+  if (brief.hungry) facts.push(brief.hungry);
   if (brief.typicalCycleDays !== null) facts.push(`her cycles usually run about ${brief.typicalCycleDays} days`);
   if (brief.lifeStage === "menopause") facts.push("menopause is on her profile");
   if (brief.lifeStage === "postpartum") facts.push("she is postpartum");
   if (brief.loggedToday.length) facts.push(`logged today: ${brief.loggedToday.join(", ")}`);
+  if (brief.remedies?.length) {
+    facts.push(`what has helped her before, by her own answers (her experience, not a recommendation): ${brief.remedies.join("; ")}`);
+  }
   if (!facts.length) return [];
   return [
     "",

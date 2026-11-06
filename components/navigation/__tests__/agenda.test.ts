@@ -267,6 +267,33 @@ describe("a dismissal is a lease, not a tombstone", () => {
   });
 });
 
+describe("a rough day", () => {
+  it("takes effort and targets off the list, and leaves meals and the check-in", () => {
+    const day = on({
+      gentle: true,
+      minutesOfDay: EIGHT_PM,
+      meals: [meal("dinner", "Salmon & rice")],
+      todaySession: { focus: "Push Day", minutes: 42 },
+      workoutDoneToday: false,
+      setupComplete: false,
+      checkedInToday: false,
+      daysSinceWeighIn: 12,
+      waterMl: 500,
+    });
+    const open = ids(day);
+    expect(open).not.toContain("start-session");
+    expect(open).not.toContain("personalize");
+    expect(open).not.toContain("weighin");
+    expect(open).not.toContain("water");
+    expect(open).toContain("checkin");
+  });
+
+  it("changes nothing on any other day", () => {
+    const day = on({ todaySession: { focus: "Push Day", minutes: 42 }, workoutDoneToday: false });
+    expect(ids(day)).toContain("start-session");
+  });
+});
+
 describe("the finished day still gets its sentence", () => {
   it("is calm, and may be waved away for the night", () => {
     const done = finishedDayMove(on({ currentHref: "/" }));

@@ -10,6 +10,13 @@ import { Difficulty, ExerciseCategory } from "./exercise";
 /** The one question the completion screen asks, so the plan can adapt. */
 export type SessionEffort = "easy" | "right" | "hard";
 
+/**
+ * The part of a session a move belongs to — the three parts every coach writes
+ * a session in. A move with no block is main work (a single exercise, or a
+ * session saved before blocks were passed to the player).
+ */
+export type SessionBlock = "warmup" | "main" | "cooldown";
+
 // ──────────────────────────────────────────────
 // Session Phases
 // ──────────────────────────────────────────────
@@ -49,6 +56,8 @@ export interface ExerciseSessionResult {
   totalReps: number;
   totalTimeSeconds: number;
   skipped: boolean;
+  /** Which part of the session the move was in. Absent on older records. */
+  block?: SessionBlock;
 }
 
 // ──────────────────────────────────────────────
@@ -107,7 +116,9 @@ export interface SessionExerciseInfo {
    */
   workSeconds?: number;
   restSeconds: number;
-  transitionSeconds: number; // rest between exercises (default 60)
+  transitionSeconds: number; // the hand-over INTO this move (see fitness/components/sessionBlocks)
+  /** Warm-up, main or cool-down. Absent means main. */
+  block?: SessionBlock;
   setupPosition: string;
   instructions: string[];
   coachCues: string[];

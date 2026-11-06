@@ -46,6 +46,8 @@ import {
   updateLogs,
 } from "../services/HabitService";
 import { subscribeHabitLogsChanged } from "../services/notifications/habitActions";
+import { clearHabitTick, recordHabitTick } from "../services/routine/tickTimes";
+import { loadRoughDays, pausedDates, subscribeRoughDays } from "../services/smart/roughDay";
 import { creditCommitment } from "../services/StreakService";
 import { writeWidgetSnapshot } from "../services/notifications/widgets";
 import {
@@ -70,6 +72,12 @@ interface HabitsContextType {
    * shelf, and it is the only place a finished habit still exists.
    */
   retired: RetiredHabit[];
+  /**
+   * Days no habit can be missed on — protected rough days
+   * (services/smart/roughDay). Pass to the measuring functions (heatmaps,
+   * "due today") so every surface excuses the same days.
+   */
+  paused: ReadonlySet<string>;
   getView: (id: string) => HabitView | undefined;
   /** Manual habits only — linked ones complete from app data. */
   toggleToday: (id: string) => Promise<void>;
@@ -114,7 +122,28 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
   const [logs, setLogs] = useState<HabitLogs>({});
   const [waterHistory, setWaterHistory] = useState<WaterHistoryEntry[]>([]);
   const [retired, setRetired] = useState<RetiredHabit[]>([]);
+  const [paused, setPaused] = useState<ReadonlySet<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
+
+  // Rough days excuse habits the way they pause the streak: read them, and
+  // follow every change (marked, taken back, arrived from another phone on the
+  // next foreground).
+  useEffect(() => {
+    let alive = true;
+    const apply = (list: Parameters<typeof pausedDates>[0]) => {
+      if (alive) setPaused(new Set(pausedDates(list)));
+    };
+    void loadRoughDays().then(apply);
+    const off = subscribeRoughDays(apply);
+    const sub = AppState.addEventListener("change", (s) => {
+      if (s === "active") void loadRoughDays().then(apply);
+    });
+    return () => {
+      alive = false;
+      off();
+      sub.remove();
+    };
+  }, []);
 
   const waterGoalMl =
     userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500;
@@ -223,9 +252,9 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
     () =>
       habits.map((habit) => {
         const done = doneFor(habit);
-        return { habit, done, stats: computeStats(habit, done, currentDate) };
+        return { habit, done, stats: computeStats(habit, done, currentDate, paused) };
       }),
-    [habits, doneFor, currentDate],
+    [habits, doneFor, currentDate, paused],
   );
 
   const getView = useCallback(
@@ -248,7 +277,7 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
       // "Due", not "scheduled" — a weekly-goal habit that already met its quota
       // must drop out of the widget's ring exactly as it drops out of the
       // screen's, or the two disagree about what today asks for.
-      scheduledToday: isDueToday(v.habit, v.done, currentDate),
+      scheduledToday: isDueToday(v.habit, v.done, currentDate, paused),
     }));
     const scheduled = items.filter((i) => i.scheduledToday);
     void writeWidgetSnapshot({
@@ -257,7 +286,7 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
       completed: scheduled.filter((i) => i.doneToday).length,
       habits: items,
     });
-  }, [views, currentDate, loading]);
+  }, [views, currentDate, loading, paused]);
 
   // ── Actions ───────────────────────────────────────────────────────
   const toggleToday = useCallback(
@@ -281,6 +310,12 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
         applyToggle(stored, id, currentDate, completing),
       );
       setLogs(next);
+      // WHEN it was done, beside the log (services/routine/tickTimes) — the
+      // time of day the routine clock reads. A tick on any day but today
+      // records no time; an un-tick tombstones it.
+      void (completing
+        ? recordHabitTick(id, currentDate, "app")
+        : clearHabitTick(id, currentDate));
       // Doing a habit keeps the day. Un-ticking one does not un-keep it: the
       // day was kept the moment something counted, the same as a meal.
       if (completing) void creditCommitment(currentDate);
@@ -338,7 +373,17 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
       setRetired((prev) => [entry, ...prev.filter((r) => r.habit.id !== id)]);
 
       await syncReminders({ ...habit, reminder: null });
-      const next = habits.filter((h) => h.id !== id);
+      // A habit tied to this one loses the tie: its reminder can't keep saying
+      // "After Vitamins" once Vitamins is gone.
+      const next = await Promise.all(
+        habits
+          .filter((h) => h.id !== id)
+          .map(async (h) => {
+            if (h.anchor?.habitId !== id) return h;
+            const freed: Habit = { ...h, anchor: null };
+            return { ...freed, reminderIds: await syncReminders(freed) };
+          }),
+      );
       setHabits(next);
       await saveHabits(next);
       if (logs[id]) {
@@ -394,6 +439,7 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
       loading,
       views,
       retired,
+      paused,
       getView,
       toggleToday,
       createHabit,
@@ -403,7 +449,7 @@ export function HabitsProvider({ children }: { children: React.ReactNode }) {
       refreshRetired,
       reconcileReminders,
     }),
-    [loading, views, retired, getView, toggleToday, createHabit, updateHabit, deleteHabit, reorderHabits, refreshRetired, reconcileReminders],
+    [loading, views, retired, paused, getView, toggleToday, createHabit, updateHabit, deleteHabit, reorderHabits, refreshRetired, reconcileReminders],
   );
 
   return <HabitsContext.Provider value={value}>{children}</HabitsContext.Provider>;

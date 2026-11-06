@@ -9,8 +9,14 @@
  * standing up in its "front" panel. These tests keep all three from coming back.
  */
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
-import { motionCameras, motionLoopMs } from "@/fitness/animation/cameras";
-import { EXERCISE_MOTIONS } from "@/fitness/animation/exerciseMotions";
+import {
+  motionCameras,
+  motionLoopMs,
+  primaryView,
+  secondaryView,
+  stillCaption,
+} from "@/fitness/animation/cameras";
+import { EXERCISE_MOTIONS, NAME_MOTIONS, motionForName } from "@/fitness/animation/exerciseMotions";
 import { FRONT_PROFILES } from "@/fitness/animation/frontProfiles";
 import { resolveFigureMotion, type FigureMotion } from "@/fitness/animation/movementProfiles";
 import { MOTION_PROPS, propsFor } from "@/fitness/animation/props";
@@ -135,19 +141,112 @@ describe("exercise demonstrations", () => {
 });
 
 describe("cameras", () => {
-  it("lists exactly the cameras a movement has a profile for", () => {
+  it("only ever shows a movement from a camera it has a profile for, and from at least one", () => {
     const keys = new Set([...Object.keys(FRONT_PROFILES), ...Object.keys(SIDE_PROFILES)]) as Set<FigureMotion>;
     for (const motion of keys) {
       const cameras = motionCameras(motion);
-      expect(cameras.includes("front"), motion).toBe(!!FRONT_PROFILES[motion]);
-      expect(cameras.includes("side"), motion).toBe(!!SIDE_PROFILES[motion]);
+      expect(cameras.length, motion).toBeGreaterThan(0);
+      if (cameras.includes("front")) expect(FRONT_PROFILES[motion], motion).toBeDefined();
+      if (cameras.includes("side")) expect(SIDE_PROFILES[motion], motion).toBeDefined();
     }
+  });
+
+  it("never pairs two cameras that draw different movements (the owner's main-vs-corner mismatch)", () => {
+    // Hinged, folded, seated or striding work front-on came out STANDING; side-
+    // to-side work side-on swung its arms forward. Each of these now has its one
+    // honest camera — the corner shows its key position instead.
+    for (const m of [
+      "row",
+      "russianTwist",
+      "burpee",
+      "plankJack",
+      "tuckJump",
+      "broadJump",
+      "lunge",
+      "wallSit",
+      "yRaise",
+    ] as FigureMotion[]) {
+      expect(FRONT_PROFILES[m], m).toBeDefined();
+      expect(motionCameras(m), m).toEqual(["side"]);
+    }
+    for (const m of ["lateralShuffle", "skater", "jumpingJack", "starJump"] as FigureMotion[]) {
+      expect(SIDE_PROFILES[m], m).toBeDefined();
+      expect(motionCameras(m), m).toEqual(["front"]);
+    }
+  });
+
+  it("captions the corner's still by what it shows — never a mid-air tuck called the bottom", () => {
+    expect(stillCaption("lunge")).toBe("bottom");
+    expect(stillCaption("burpee")).toBe("bottom");
+    expect(stillCaption("pushup")).toBe("top");
+    expect(stillCaption("tuckJump")).not.toBe("bottom");
+    expect(stillCaption("jumpingJack")).toBe("key pose");
+    expect(stillCaption("row")).toBe("key pose");
+  });
+
+  it("puts the plank jack's plank on the main stage — it used to be a person crouching upright", () => {
+    expect(primaryView("plankJack")).toBe("side");
+    expect(secondaryView("plankJack")).toBeNull();
+  });
+
+  it("gives the main panel and the corner the SAME movement: each camera's rep starts and ends together", () => {
+    // Where both cameras are shown they are two views of one body on one clock:
+    // whatever the hips do in one, they do in the other, in the same direction.
+    const keys = new Set([...Object.keys(FRONT_PROFILES), ...Object.keys(SIDE_PROFILES)]) as Set<FigureMotion>;
+    const disagree: string[] = [];
+    for (const m of keys) {
+      const second = secondaryView(m);
+      if (!second) continue;
+      const hipDrop = (rig: Rig) => tip(rig, 0.5, "lowerSpine")[1] - tip(rig, 0, "lowerSpine")[1];
+      const front = hipDrop(buildFrontRig(m));
+      const side = hipDrop(buildSideRig(m));
+      // A real rise or drop (more than 3 units) in one view must not be the
+      // opposite in the other.
+      if (Math.abs(front) > 3 && Math.abs(side) > 3 && Math.sign(front) !== Math.sign(side)) {
+        disagree.push(`${m}: front ${front.toFixed(1)}, side ${side.toFixed(1)}`);
+      }
+    }
+    expect(disagree).toEqual([]);
   });
 
   it("times a single-camera movement off its own profile, not the neutral fallback", () => {
     expect(motionLoopMs("crunch")).toBe(SIDE_PROFILES.crunch!.loopMs);
     expect(motionLoopMs("sidePlank")).toBe(FRONT_PROFILES.sidePlank!.loopMs);
     expect(motionLoopMs("lateralRaise")).toBe(FRONT_PROFILES.lateralRaise!.loopMs);
+  });
+});
+
+describe("an exercise the catalogue doesn't have still demonstrates its own move", () => {
+  it("reads every catalogued exercise's NAME back to the movement its id plays", () => {
+    // The name table is proven against the whole catalogue, so a plan's own
+    // "Bulgarian Split Squats" or "Plank Shoulder Taps" lands where ours does.
+    const wrong: string[] = [];
+    for (const ex of EXERCISE_DATABASE) {
+      const byName = motionForName(ex.name);
+      const byId = resolveFigureMotion(ex.id);
+      if (byName !== byId) wrong.push(`${ex.id} "${ex.name}": ${byName} ≠ ${byId}`);
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it("resolves a plan exercise by its name before falling back to its category", () => {
+    expect(resolveFigureMotion("ai_3", "cardio", { name: "Burpees" })).toBe("burpee");
+    expect(resolveFigureMotion("plan_7", "cardio", { name: "Skater hops" })).toBe("skater");
+    expect(resolveFigureMotion("x", "legs", { name: "Reverse lunge" })).toBe("lunge");
+    expect(resolveFigureMotion("x", "core", { name: "Side plank hip dips" })).toBe("sidePlankDip");
+    expect(resolveFigureMotion("x", "flexibility", { name: "Hip circles" })).toBe("flexibility");
+    // An exact catalogue name wins, whatever its casing and hyphens.
+    expect(resolveFigureMotion("x", undefined, { name: "push ups" })).toBe("pushup");
+    // A plan's pattern still beats its category when the name is no help.
+    expect(resolveFigureMotion("x", "legs", { name: "Mystery move", pattern: "hinge" })).toBe("hinge");
+    // A catalogued id is never second-guessed by a name.
+    expect(resolveFigureMotion("flex_14", undefined, { name: "Burpees" })).toBe("torsoTwist");
+  });
+
+  it("names only movements the figure can draw", () => {
+    for (const [, motion] of NAME_MOTIONS) {
+      expect(!!FRONT_PROFILES[motion] || !!SIDE_PROFILES[motion], motion).toBe(true);
+    }
   });
 });
 

@@ -58,6 +58,9 @@ import {
 } from "@/components/gozlin";
 import { enterFade, exitFade } from "@/components/motion";
 import { MenuButton } from "@/components/navigation";
+import { RoughDaySheet } from "@/components/smart/RoughDaySheet";
+import { useRoughDay } from "@/components/smart/useRoughDay";
+import { track } from "@/services/telemetry";
 import { AmbientCanvas, AppText, useKeyboardInset } from "@/components/ui";
 import { useColors } from "@/components/ui/useColors";
 import { InsightArchive } from "@/components/home/InsightArchive";
@@ -138,6 +141,12 @@ export default function GozlinScreen() {
   const [input, setInput] = useState("");
   const [focused, setFocused] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // The rough-day button's other door (services/smart/roughDay): someone having
+  // a bad day may well come to their coach first.
+  const roughDay = useRoughDay();
+  const gentleToday = roughDay.rough !== null;
+  const clearRough = roughDay.clear;
+  const [roughOpen, setRoughOpen] = useState(false);
   // ONE receipt sheet for the whole conversation. Held here rather than per
   // bubble so a long history does not mount a modal per message.
   const [openReceipt, setOpenReceipt] = useState<Receipt | null>(null);
@@ -378,6 +387,22 @@ export default function GozlinScreen() {
         onPress: () => setInsightsOpen(true),
       },
       {
+        // Not about the conversation, and here on purpose — see `roughDay`.
+        key: "rough",
+        label: gentleToday ? "I'm OK actually" : "Rough day?",
+        caption: gentleToday ? "Back to a normal day" : "Make today gentle",
+        icon: "leaf-outline",
+        onPress: () => {
+          if (gentleToday) {
+            void clearRough();
+            toast.show("Back to a normal day");
+            return;
+          }
+          track("smart_moment", { feature: "rough-day", result: "shown" });
+          setRoughOpen(true);
+        },
+      },
+      {
         // Used to be its own header icon. The header is the coach's identity —
         // a second destination up there competed with it for attention and,
         // being icon-only, never said where it went. As a menu row it gets a
@@ -423,7 +448,7 @@ export default function GozlinScreen() {
         onPress: () => setForgetOpen(true),
       },
     ],
-    [archive.length, threadCount, hasSaidSomething, resetConversation, router, toast, allows, insightLedger.length],
+    [archive.length, threadCount, hasSaidSomething, resetConversation, router, toast, allows, insightLedger.length, gentleToday, clearRough],
   );
 
   /** The conversation in three figures, above the menu's verbs. */
@@ -976,6 +1001,19 @@ export default function GozlinScreen() {
       />
 
       <GozlinToast controller={toast} topOffset={insets.top} />
+
+      <RoughDaySheet
+        visible={roughOpen}
+        onClose={() => setRoughOpen(false)}
+        onConfirm={(reason) => {
+          setRoughOpen(false);
+          void roughDay.mark(reason);
+          toast.show("Today's a gentle day. Take care.", { icon: "leaf" });
+        }}
+        canProtect={roughDay.canProtectToday}
+        usedThisMonth={roughDay.usedThisMonth}
+        perMonth={roughDay.perMonth}
+      />
     </View>
   );
 }

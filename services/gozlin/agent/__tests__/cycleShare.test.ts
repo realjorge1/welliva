@@ -39,6 +39,7 @@ const BRIEF: CycleBrief = {
   nextPeriodTo: 7,
   lateByDays: null,
   typicalCycleDays: 29,
+  sure: null,
   loggedToday: ["headache", "energy: low"],
 };
 

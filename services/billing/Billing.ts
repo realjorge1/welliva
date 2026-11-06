@@ -32,6 +32,8 @@ import {
   TIER_OFFERINGS,
 } from "./config";
 import { clearEntitlement, setEntitlement } from "./entitlement";
+import { track } from "../telemetry";
+import type { PlanKind } from "../telemetry";
 import {
   describeStoreError,
   emptyOfferingProblem,
@@ -621,6 +623,15 @@ export async function getPlanOptions(): Promise<Storefront> {
  * Play — so this call deliberately takes no change info. Adding an in-app
  * monthly ↔ annual switch means adding it here first.
  */
+/**
+ * Map the storefront period onto the analytics vocabulary. "other" becomes
+ * "unknown" rather than being dropped: a purchase of a period we did not expect
+ * is exactly the thing worth seeing in the data.
+ */
+function planKind(period: BillingPeriod): PlanKind {
+  return period === "monthly" || period === "annual" ? period : "unknown";
+}
+
 export async function purchasePlan(plan: PlanOption): Promise<PurchaseOutcome> {
   const p = loadSdk();
   if (!p || !configured) {
@@ -642,6 +653,7 @@ export async function purchasePlan(plan: PlanOption): Promise<PurchaseOutcome> {
       };
     }
     const pkg = plan.raw as RCPackage;
+    track("purchase_start", { plan: planKind(plan.period) });
     const { customerInfo } = await p.purchasePackage(pkg);
     await applyCustomerInfo(customerInfo);
 
@@ -650,6 +662,10 @@ export async function purchasePlan(plan: PlanOption): Promise<PurchaseOutcome> {
     // the product is not attached to the entitlement in the console — and
     // announcing "You're on Pro" here would be contradicted by every lock.
     if (tierOf(customerInfo).tier === "free") {
+      // Paid but not unlocked — a console misconfiguration, and the worst
+      // possible outcome to not be counting. It looks like a successful
+      // purchase to the store and like a broken app to the buyer.
+      track("purchase_failed", { plan: planKind(plan.period), result: "error" });
       return {
         status: "error",
         kind: "setup",
@@ -660,13 +676,26 @@ export async function purchasePlan(plan: PlanOption): Promise<PurchaseOutcome> {
           `Attach this product to the "${PRO_ENTITLEMENT}" entitlement in RevenueCat.`,
       };
     }
+    // Conversion, counted. `trial_start` stays a SEPARATE event: a trial start
+    // and a paid conversion are different things to a business that sells a
+    // 30-hour Gozlin trial, and collapsing them would make the paywall look
+    // better than it is.
+    track("purchase_success", { plan: planKind(plan.period) });
+    if (plan.trialDays && plan.trialDays > 0) track("trial_start");
     return { status: "purchased" };
   } catch (e) {
     const err = e as { userCancelled?: boolean | null };
-    if (err?.userCancelled) return { status: "cancelled" };
+    if (err?.userCancelled) {
+      track("purchase_failed", { plan: planKind(plan.period), result: "cancelled" });
+      return { status: "cancelled" };
+    }
     const problem = describeStoreError(e, "purchase");
-    if (problem.kind === "pending") return { status: "pending", message: problem.message };
+    if (problem.kind === "pending") {
+      track("purchase_failed", { plan: planKind(plan.period), result: "pending" });
+      return { status: "pending", message: problem.message };
+    }
     console.warn("[billing] purchase failed:", e);
+    track("purchase_failed", { plan: planKind(plan.period), result: "error" });
     return { status: "error", ...problem };
   }
 }

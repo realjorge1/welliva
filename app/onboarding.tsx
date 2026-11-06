@@ -105,8 +105,12 @@ import {
 import { detectRegion, detectUnits } from "@/utils/region";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { track } from "@/services/telemetry";
 import { Alert, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
 import { hasSeenNotificationPrimer } from "@/services/notifications/primer";
+import { WhyField } from "@/components/smart/WhySheet";
+import { rememberMotivation } from "@/services/gozlin/GozlinMemoryStore";
 import { useProfile } from "../contexts/AppContext";
 import { useMealPlan } from "../contexts/MealPlanContext";
 import { ensureDietLibraryLoaded } from "../constants/DietDatabase";
@@ -168,6 +172,7 @@ type Step =
   | "food"
   | "health"
   | "menu"
+  | "why"
   | "building"
   | "plan";
 
@@ -394,6 +399,7 @@ const STEP_KICKER: Partial<Record<Step, string>> = {
   food: "Food",
   health: "Health & safety",
   menu: "Your menu",
+  why: "One last thing",
 };
 
 /** Most dishes one meal can rotate through a week — more stops being a rotation. */
@@ -471,7 +477,21 @@ export default function OnboardingScreen() {
 
   const [currentStep, setCurrentStep] = useState<Step>("welcome");
   const [direction, setDirection] = useState<"forward" | "back">("forward");
+
+  // SETUP STARTED. Preview mode (?preview=1) replays the whole flow from the
+  // Profile test button and deliberately persists nothing, so counting it would
+  // put the owner in every cohort and quietly flatter the funnel. Mount-only is
+  // right here: this is a plain route, not a (tabs) child, so it unmounts on exit
+  // and a genuine second run mounts again.
+  useEffect(() => {
+    if (isPreview) return;
+    track("onboarding_start");
+    track("onboarding_step", { step: "welcome" });
+  }, [isPreview]);
   const [loading, setLoading] = useState(false);
+  // "In one sentence: why now?" — optional, and kept word for word. Gozlin's
+  // identity memory is its home once setup is saved (services/smart/why).
+  const [why, setWhy] = useState("");
   // The diet library + exercise pool are lazy-loaded (Phase D — bundle trim).
   // The plan preview reads both synchronously, so warm them up and recompute the
   // preview once ready (until then it would build from base diets / no exercises).
@@ -681,6 +701,7 @@ export default function OnboardingScreen() {
       // After health on purpose: allergies are known by now, so the dishes on
       // offer are already the ones this user can safely be served.
       "menu",
+      "why",
       "building",
       "plan",
     ],
@@ -741,6 +762,10 @@ export default function OnboardingScreen() {
       clearTimeout(advanceTimer.current);
       advanceTimer.current = null;
     }
+    // Every arrival at a step, back included: the funnel view counts DISTINCT
+    // installs per step, so "reached" means "got this far at least once" and a
+    // back-and-forth cannot inflate it.
+    if (!isPreview) track("onboarding_step", { step });
     seen.current.add(currentStep);
     setHeld(HELD_STEPS.has(step) && !seen.current.has(step) ? step : null);
     setDirection(dir);
@@ -881,7 +906,8 @@ export default function OnboardingScreen() {
   // the menu step AND the reveal. One computation, so the dishes offered, the
   // dishes previewed and the dishes saved all descend from the same numbers.
   // Same engines the app uses everywhere — no bespoke math here.
-  const needsBasis = currentStep === "menu" || currentStep === "building" || currentStep === "plan";
+  const needsBasis =
+    currentStep === "menu" || currentStep === "why" || currentStep === "building" || currentStep === "plan";
   const basis = useMemo(() => {
     if (!needsBasis) return null;
     if (!sex || !activityLevel || !primaryGoal) return null;
@@ -1119,6 +1145,9 @@ export default function OnboardingScreen() {
           dietId: basis?.dietId ?? null,
         });
       }
+      // Their reason, if they gave one. Failing to keep it must not fail setup;
+      // they can add it from Memory any time.
+      if (why.trim()) await rememberMotivation(why).catch(() => {});
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       saved.current = "ok";
       land();
@@ -1265,7 +1294,7 @@ export default function OnboardingScreen() {
 
   /** What Continue means on the menu step — it names the next thing, or the skip. */
   const menuActionLabel = (() => {
-    if (mealMode === "auto" || menuPhase === MENU_LAST_PHASE) return "Build my plan";
+    if (mealMode === "auto" || menuPhase === MENU_LAST_PHASE) return "Continue";
     if (menuPhase === 0) return "Start with breakfast";
     const slot = MENU_SLOT_OF_PHASE[menuPhase] ?? "breakfast";
     const picked = Object.values(menuDraft.dishes).some((d) => d.slot === slot);
@@ -1295,6 +1324,8 @@ export default function OnboardingScreen() {
     }
     if (currentStep === "food" && foodQuestion < 2) return "Continue";
     if (currentStep === "menu") return menuActionLabel;
+    // Optional, and the button says so: nothing typed is a skip, not a stop.
+    if (currentStep === "why") return why.trim() ? "Build my plan" : "Skip and build my plan";
     return isLastForm ? "Build my plan" : "Continue";
   })();
   lastLabel.current = actionLabel;
@@ -1716,6 +1747,19 @@ export default function OnboardingScreen() {
           </StepScroll>
         );
       }
+
+      case "why":
+        return (
+          <StepScroll tail={Spacing.giant}>
+            <AnimatedQuestion
+              title="In one sentence: why now?"
+              support="Optional. Your words, kept exactly as you write them. welliva may quote them back on a hard day, about once a month at most."
+            />
+            <Appear delay={OPTIONS_DELAY}>
+              <WhyField value={why} onChangeText={setWhy} />
+            </Appear>
+          </StepScroll>
+        );
 
       case "building":
         return (

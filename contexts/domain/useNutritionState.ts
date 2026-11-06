@@ -42,6 +42,7 @@ import {
 import {
   addSnackToSchedule,
   getDietHistory,
+  getScheduleForDate,
   getTodayDiet,
   markMealConsumed,
   swapMealInSchedule,
@@ -309,10 +310,33 @@ export function useNutritionState({
     ) => {
       // Resolved at the write, never from the provider's clock — see
       // markMealAsConsumed above for why those two can disagree.
-      await toggleMealConsumed(todayDate(), mealType, snackIndex);
+      const date = todayDate();
+      const applied = await toggleMealConsumed(date, mealType, snackIndex);
       await refreshTodayDiet();
+
+      // A tick KEEPS THE DAY, exactly as markMealAsConsumed does. This is the
+      // path the Diet screen's meal list uses, and it used to skip the credit
+      // — so a day of ticked meals left the flame grey (owner, 2026-10-31:
+      // "meals and water logged but no sign user has been checked in"). Read
+      // back which way the toggle went: an un-tick earns nothing.
+      if (!applied) return;
+      try {
+        const day = await getScheduleForDate(date);
+        const meal =
+          mealType === "snack"
+            ? typeof snackIndex === "number"
+              ? day?.snacks[snackIndex]
+              : null
+            : day?.[mealType];
+        if (meal?.isConsumed) {
+          const { data: updatedStreak } = await recordActivity(date);
+          setStreakData(updatedStreak);
+        }
+      } catch {
+        // a failed credit must never undo the tick that earned it
+      }
     },
-    [refreshTodayDiet],
+    [refreshTodayDiet, setStreakData],
   );
 
   /**

@@ -4,12 +4,11 @@
  *
  * TWO LOOKS, ONE SKELETON (see animation/characterArt.ts):
  *
- *   character (the default) — a friendly athlete with curly hair, a face that
- *     acts (it blinks, glances, breathes, and works as hard as the movement
- *     does), a ringer tee, shorts, socks and trainers. It is built the way a
- *     rigged cartoon is — shapes parented to bones, a face of separate layers,
- *     an idle layer that never blocks the body — and it moves with a feel per
- *     exercise rather than one ease (see animation/tempo.ts). Its kit is fixed.
+ *   character (the default) — a slim, seven-heads-tall athlete in a tee,
+ *     shorts, socks and trainers, drawn flat (see animation/characterArt.ts).
+ *     Shapes are parented to bones; the face is drawn once and never moves.
+ *     Every movement runs on one beat grid with one human curve, the whole body
+ *     in step (see animation/tempo.ts). Its kit is fixed.
  *   pictogram — the original classic stick-figure reference: detached circular
  *     head, blocky trunk, uniform round-capped limbs, one flat colour (`color`).
  *     Kept whole behind `look="pictogram"`.
@@ -24,9 +23,8 @@
  * animation/cameras.ts. Equipment the body rests on (a bench, a wall, a bar)
  * sits behind the figure at the far-limb opacity — see animation/props.ts.
  *
- * THE CLOCK runs over a MACRO cycle of several reps (animation/tempo.ts), so the
- * limbs repeat every rep, as an exercise must, while the face does not: a blink
- * every few reps, a glance now and then. One clock, one pose solver
+ * THE CLOCK runs over one 12 s cycle for every movement — a whole number of
+ * reps of each (animation/tempo.ts). One clock, one pose solver
  * (animation/motion.ts), for the animated panel and the still alike.
  *
  * Animation stops the moment the panel is off screen — pass `playing={false}`
@@ -42,9 +40,9 @@ import { AppText, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { motionCameras } from "@/fitness/animation/cameras";
 import {
-  KIT,
   buildCharacterArt,
   faceMirrored,
+  frontShoeTurn,
   type ArtDetail,
   type FigureLook,
   type Shape,
@@ -89,6 +87,12 @@ if (isSkiaAvailable) {
 export interface ExerciseFigureProps {
   exerciseId?: string;
   category?: ExerciseCategory;
+  /**
+   * The exercise's name. A plan's or the coach's own exercise is not in the
+   * catalogue, so its id finds nothing; its name still says what it is (see
+   * resolveFigureMotion).
+   */
+  name?: string;
   /** Explicit movement override — wins over exerciseId/category resolution. */
   motion?: FigureMotion;
   /** Per-panel height in px. */
@@ -108,9 +112,8 @@ export interface ExerciseFigureProps {
    */
   fit?: number;
   /**
-   * The pictogram's one flat colour (and its equipment's), and the tint of the
-   * character's ground shadow. Defaults to the brand. The character wears its
-   * own kit and ignores it otherwise.
+   * The pictogram's one flat colour (and its equipment's). Defaults to the
+   * brand. The character wears its own kit and ignores it.
    */
   color?: string;
   /**
@@ -139,86 +142,21 @@ export interface ExerciseFigureProps {
   style?: StyleProp<ViewStyle>;
 }
 
-/**
- * Movements a side-on camera reads best; everything else faces the viewer.
- * Only consulted for movements that have both cameras — a single-camera
- * movement always gets its one camera (see animation/cameras.ts).
- */
-const SIDE_READS_BEST = new Set<FigureMotion>([
-  "squat",
-  "hinge",
-  "push",
-  "core",
-  "flexibility",
-  // Anything that happens along the body's own front-back axis: a camera
-  // square-on to a push-up or a hip hinge sees a foreshortened blob.
-  "pushup",
-  "plank",
-  "sidePlank",
-  "gluteBridge",
-  "legRaise",
-  "row",
-  "superman",
-  "birdDog",
-  "catCow",
-  "childsPose",
-  "russianTwist",
-  "wallSit",
-  "lunge",
-  "burpee",
-  "inchworm",
-  "bearCrawl",
-  "mountainClimber",
-  "broadJump",
-  "tuckJump",
-  "curl",
-  // Squat family: the hip travelling back is what reads.
-  "gobletSquat",
-  "jumpSquat",
-  "squatPulse",
-  "deepSquat",
-  // The pull toward the face, and the step under the foot, only show side-on.
-  "facePull",
-  "toeTap",
-]);
-
-/*
- * KNEE DRIVES ARE SIDE-ON ONLY — high knees, marching, butt kicks.
- *
- * They used to face the viewer, because the side rig echoed one leg and a
- * driven knee lifted both (the athlete levitated). The side rig now authors its
- * far leg, so side-on is honest. Front-on never was: a constant-length thigh can
- * only rise toward the camera by swinging OUT through horizontal, so every rep
- * flashed both legs into a sideways split. Those front views are gone.
- */
-
-/**
- * The single best camera angle for a movement — for the places only one panel
- * fits, like the live player stage where the figure IS the screen. A movement
- * authored for one camera only (floor work, a side plank) gets that camera.
- */
-export function primaryView(motion: FigureMotion): FigureView {
-  const cameras = motionCameras(motion);
-  if (cameras.length === 1) return cameras[0];
-  return SIDE_READS_BEST.has(motion) ? "side" : "front";
-}
-
-/**
- * The camera angle the primary one doesn't cover — or null when the movement
- * only reads from one camera, and a second panel would draw a different
- * exercise (a "front" plank was a person standing upright).
- */
-export function secondaryView(motion: FigureMotion): FigureView | null {
-  if (motionCameras(motion).length < 2) return null;
-  return primaryView(motion) === "side" ? "front" : "side";
-}
+// The camera choice (primaryView / secondaryView) is pure and lives in
+// animation/cameras.ts, where the suite can hold the main and corner panels to
+// the same movement; it is re-exported here for the screens.
+export { primaryView, secondaryView } from "@/fitness/animation/cameras";
 
 /**
  * A clock a caller owns, to drive several `ExerciseFigure`s in unison.
  *
- * One linear 0→1 pass per MACRO cycle (several reps — see animation/tempo.ts),
- * frozen at 0 when it isn't playing. A panel handed this clock behaves exactly
- * as it would on its own, only in step with its siblings.
+ * One linear 0→1 pass per clock cycle (a whole number of reps — see
+ * animation/tempo.ts), frozen at 0 when it isn't playing. A panel handed this
+ * clock behaves exactly as it would on its own, only in step with its siblings.
+ *
+ * It starts again from 0 whenever the MOVEMENT changes, not only when its
+ * cycle's length does: every movement's cycle is now the same 12 s, and a new
+ * exercise must begin at its first pose, on the beat, in every panel at once.
  */
 export function useFigureClock(
   motion: FigureMotion,
@@ -242,7 +180,7 @@ export function useFigureClock(
       false,
     );
     return () => cancelAnimation(progress);
-  }, [animate, macroMs, progress]);
+  }, [animate, macroMs, progress, motion]);
 
   return progress;
 }
@@ -252,6 +190,7 @@ export type { FigureView };
 export function ExerciseFigure({
   exerciseId,
   category,
+  name,
   motion: motionOverride,
   size = 150,
   views: viewsProp,
@@ -268,8 +207,8 @@ export function ExerciseFigure({
   const reduced = useReducedMotion();
   const tint = color ?? colors.primary;
   const motion = useMemo(
-    () => motionOverride ?? resolveFigureMotion(exerciseId, category),
-    [motionOverride, exerciseId, category],
+    () => motionOverride ?? resolveFigureMotion(exerciseId, category, { name }),
+    [motionOverride, exerciseId, category, name],
   );
   const macroMs = useMemo(() => motionTempo(motion).macroMs, [motion]);
   // Only the cameras this movement reads from — a requested angle it was never
@@ -298,7 +237,7 @@ export function ExerciseFigure({
       false,
     );
     return () => cancelAnimation(own);
-  }, [animate, macroMs, own]);
+  }, [animate, macroMs, own, motion]);
 
   const showLabels = views.length > 1;
 
@@ -389,36 +328,9 @@ export function figureStillWidth(view: FigureView, size: number): number {
   return size * (view === "side" ? 0.78 : 0.94);
 }
 
-/**
- * Motions whose TOP of rep is the frame that says what they are. At the bottom
- * a push-up is a body lying on the floor with its arms folded out of sight —
- * nothing about it says push-up; at the top it is the unmistakable straight
- * body on locked arms.
- */
-const TOP_OF_REP_STILLS = new Set<FigureMotion>([
-  "pushup",
-  "plank",
-  // Every push-up variant reads at lockout, and so do the presses.
-  "kneePushup",
-  "inclinePushup",
-  "declinePushup",
-  "pikePushup",
-  "scapPushup",
-  "wallPushup",
-  "handstandPushup",
-  "chestPress",
-  // At the bottom the tapping hand is the dimmed far one; at the top it's near.
-  "shoulderTap",
-]);
-
-/**
- * The rep position a still should freeze at to be recognisable. For almost
- * every movement that is the bottom — the working position: a squat at the top
- * of its rep is just a person standing; at the bottom it is a squat.
- */
-export function stillFrame(motion: FigureMotion): number {
-  return TOP_OF_REP_STILLS.has(motion) ? 0 : 0.5;
-}
+// Which frame a still freezes at, and what to call it, are pure and live in
+// animation/cameras.ts beside the camera choice; re-exported for the screens.
+export { stillCaption, stillFrame } from "@/fitness/animation/cameras";
 
 const deg = (rad: number): number => (rad * 180) / Math.PI;
 
@@ -443,10 +355,7 @@ function SvgShapes({ shapes }: { shapes: Shape[] }) {
 
 /**
  * The character in SVG, in exactly the Skia panel's order: far limbs (shaded),
- * legs and trainers, torso, the shoulders' caps, collar, head, arms. The face is
- * relaxed and smiling — the blink, the strain and the glances are the live
- * panel's: a still is a list thumbnail, and a row of gritted teeth is not an
- * invitation.
+ * legs and trainers, torso, the shoulders' caps, collar, head, arms.
  */
 const CharacterStill = React.memo(function CharacterStill({
   rig,
@@ -467,10 +376,16 @@ const CharacterStill = React.memo(function CharacterStill({
   const r = headRadius(rig);
   const h = headFrame(kit, pose, r);
   const mirror = faceMirrored(motion, view) ? -1 : 1;
+  // As the Skia panel: a side pose facing −x has every bone's art turned over
+  // and its far limbs set back toward its own back.
+  const flip = view === "side" ? rig.facing : 1;
   const head = art.head;
 
   const at = (i: number) =>
-    `translate(${pose[i * 3]} ${pose[i * 3 + 1]}) rotate(${deg(pose[i * 3 + 2])})`;
+    `translate(${pose[i * 3]} ${pose[i * 3 + 1]}) rotate(${deg(pose[i * 3 + 2])})` +
+    (flip < 0 ? " scale(1 -1)" : "") +
+    // A bone turning toward the camera shows only part of its length.
+    (kit.depthSlot[i] < 0 ? "" : ` scale(${pose[kit.n * 3 + i]} 1)`);
   const bone = (i: number, prefix: string) => (
     <G key={`${prefix}${i}`} transform={at(i)}>
       <SvgShapes shapes={art.bones[i]} />
@@ -485,7 +400,7 @@ const CharacterStill = React.memo(function CharacterStill({
   return (
     <>
       {art.layers.far.length > 0 && (
-        <G transform={`translate(${-FAR_SHIFT} 0)`}>
+        <G transform={`translate(${-FAR_SHIFT * flip} 0)`}>
           {art.layers.far.flatMap((i) => [cap(i), bone(i, "far")])}
         </G>
       )}
@@ -497,7 +412,7 @@ const CharacterStill = React.memo(function CharacterStill({
         const x = pose[i * 3] + rig.bones[i].length * Math.cos(a) + out;
         const y = pose[i * 3 + 1] + rig.bones[i].length * Math.sin(a) + art.shoeDrop;
         return (
-          <G key={`shoe${i}`} transform={`translate(${x} ${y})`}>
+          <G key={`shoe${i}`} transform={`translate(${x} ${y}) rotate(${deg(frontShoeTurn(a))})`}>
             <SvgShapes shapes={s.shapes} />
           </G>
         );
@@ -506,7 +421,6 @@ const CharacterStill = React.memo(function CharacterStill({
       {art.layers.caps.map(cap)}
       {art.layers.collar.map((i) => bone(i, "collar"))}
       <G transform={`translate(${h.x} ${h.y}) rotate(${deg(h.rot)}) scale(${h.r * mirror} ${h.r})`}>
-        <SvgShapes shapes={head.puffs} />
         <SvgShapes shapes={head.back} />
         <SvgShapes shapes={head.skull} />
         <SvgShapes shapes={head.face} />

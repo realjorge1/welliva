@@ -6,6 +6,10 @@
  * focus, foreground, and a lock-screen press landing while it's on screen.
  */
 import { useReminderPermission } from "@/components/notifications/useReminderPermission";
+import {
+  notificationsPaused,
+  subscribeNotificationPause,
+} from "@/services/notifications/pause";
 import { subscribePipelineOutcomes } from "@/services/notifications/pipeline";
 import { readPendingQueue, type QueuedNotification } from "@/services/notifications/queue";
 import { useFocusEffect } from "expo-router";
@@ -16,9 +20,12 @@ import { inlineWhen, plural } from "./format";
 export function useNotificationSummary() {
   const permission = useReminderPermission();
   const [queue, setQueue] = useState<QueuedNotification[] | null>(null);
+  const [paused, setPaused] = useState(false);
 
   const refresh = useCallback(async () => {
-    setQueue(await readPendingQueue());
+    const [q, p] = await Promise.all([readPendingQueue(), notificationsPaused()]);
+    setQueue(q);
+    setPaused(p);
   }, []);
 
   useFocusEffect(
@@ -32,16 +39,19 @@ export function useNotificationSummary() {
       if (s === "active") void refresh();
     });
     const off = subscribePipelineOutcomes(() => void refresh());
+    const offPause = subscribeNotificationPause(() => void refresh());
     return () => {
       sub.remove();
       off();
+      offPause();
     };
   }, [refresh]);
 
   let subtitle: string;
   switch (permission.status) {
     case "granted": {
-      if (!queue) subtitle = "Habits, meals and water — finish them from the lock screen";
+      if (paused) subtitle = "Paused — tap to switch them back on";
+      else if (!queue) subtitle = "Habits, meals and water — finish them from the lock screen";
       else if (queue.length === 0) subtitle = "On — nothing scheduled yet. Tap to choose";
       else {
         const next = queue.find((q) => q.next);
@@ -61,5 +71,5 @@ export function useNotificationSummary() {
       subtitle = "Off — reminders you can finish from the lock screen";
   }
 
-  return { permission, queue, subtitle, refresh };
+  return { permission, queue, paused, subtitle, refresh };
 }

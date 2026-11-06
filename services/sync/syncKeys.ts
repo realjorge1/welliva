@@ -78,9 +78,20 @@ export const DEVICE_LOCAL_KEYS: readonly string[] = [
   // phone lets them fire as exact alarms
   "@welliva_notif_format",
   "@welliva_exact_alarm_state",
+  // "Pause notifications" (services/notifications/pause) — quiet on this phone
+  // is a decision about this phone; every setting it sits above still syncs
+  "@welliva_notifications_paused",
+  // the water goal the app last knew, kept so a lock-screen glass (no React,
+  // no bio) can still tell whether today's goal is met — a regenerable cache
+  "@welliva_water_goal_cache",
   // glasses pressed on this phone's lock screen, waiting for its day to turn —
   // folded into the synced water counter/history, never synced themselves
   "@welliva_water_inbox",
+  // the drink-by-drink list behind today's water (services/nutrition/waterPours).
+  // The TOTAL syncs on its own; a list of one phone's drinks cannot be merged
+  // with another's without inventing water, so it stays here and the card shows
+  // anything it cannot account for as "earlier"
+  "@welliva_water_pours",
   // this device's migration bookkeeping — load-bearing for the migration runner
   "@welliva_schema_version",
   "@welliva_migration_journal",
@@ -100,8 +111,21 @@ export const DEVICE_LOCAL_KEYS: readonly string[] = [
   "@welliva_sync_telemetry",
   // THIS device's caught-render-crash black box (services/telemetry/CrashLog)
   "@welliva_crash_log",
+  // Analytics (services/telemetry). All three are per-DEVICE by definition:
+  //  - the install id must not follow the user to a second phone, or two devices
+  //    would collapse into one "install" and every retention cohort would be
+  //    wrong in the one direction that flatters us;
+  //  - the unsent queue describes what THIS phone still owes the server;
+  //  - the activation latch pairs with the install id, so a new device is a new
+  //    install and activates on its own first log.
+  "@welliva_install_id",
+  "@welliva_analytics_queue",
+  "@welliva_analytics_activated",
   // the cycle reminders pending in THIS phone's OS queue (services/cycle/reminders)
   "@welliva_cycle_reminder_ids",
+  // which smart moment took which screen's slot today (services/smart/ledger).
+  // A day's budget is a decision about this phone; the ANSWERS sync.
+  "@welliva_smart_shown",
   ACTIVE_USER_KEY,
   WATERMARKS_KEY,
   OUTBOX_KEY,

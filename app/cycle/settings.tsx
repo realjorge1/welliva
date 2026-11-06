@@ -2,8 +2,9 @@
  * CYCLE SETTINGS — every choice the tracker makes on her behalf, and the way
  * out of each.
  *
- *   Predictions — the fertile window (off unless she wants it), and the usual
- *                 lengths her logs are taking over from.
+ *   Predictions — the fertile window (off unless she wants it), the usual
+ *                 lengths her logs are taking over from, and the one
+ *                 contraception question (a "yes" means logging only).
  *   Reminders   — on or off, and whether the lock screen may say "period".
  *   Privacy     — the backup (on by default; switching it off deletes the
  *                 cloud copy, not just future uploads) and whether Gozlin may
@@ -20,6 +21,7 @@ import { useReminderPermission } from "@/components/notifications/useReminderPer
 import {
   AppText,
   Card,
+  ChipGrid,
   ConfirmSheet,
   ListGroup,
   ListRow,
@@ -29,7 +31,15 @@ import {
 } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useCycle } from "@/contexts/CycleContext";
-import { cycleCsv, doctorSummary } from "@/services/cycle";
+import {
+  CONTRACEPTION_HINT,
+  CONTRACEPTION_OPTIONS,
+  CONTRACEPTION_QUESTION,
+  contraceptionNote,
+  cycleCsv,
+  doctorSummary,
+  type ContraceptionAnswer,
+} from "@/services/cycle";
 import { useSyncStatus } from "@/services/sync/useSyncStatus";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -47,10 +57,16 @@ export default function CycleSettingsScreen() {
   const [busy, setBusy] = useState(false);
 
   const switchTrack = { true: palette.period, false: alpha(colors.text, 0.18) };
+  // Logging only: nothing is predicted, so the rows that hang off a
+  // prediction say so instead of describing what they would do.
+  const hormonal = view.mode === "hormonal";
+  const methodNote = contraceptionNote(settings.contraception);
 
   const remindersSubtitle = !settings.remindersOn
     ? "Off"
-    : permission.status === "granted"
+    : hormonal
+      ? "None while you use hormonal contraception, because nothing is predicted."
+      : permission.status === "granted"
       ? "A heads-up before your period, a check-in after the likely day, and \"has it ended?\""
       : permission.status === "denied"
         ? "Notifications are off for welliva in your phone's settings. Tap to open them."
@@ -90,10 +106,15 @@ export default function CycleSettingsScreen() {
             icon="sparkles"
             tone={palette.fertile}
             title="Show fertile window"
-            subtitle="An estimate from your cycle. Never use it as birth control."
+            subtitle={
+              hormonal
+                ? "Not shown while you use hormonal contraception."
+                : "An estimate from your cycle. Never use it as birth control."
+            }
             right={
               <Switch
-                value={settings.showFertileWindow}
+                value={settings.showFertileWindow && !hormonal}
+                disabled={hormonal}
                 onValueChange={(v) => void cycle.updateSettings({ showFertileWindow: v })}
                 trackColor={switchTrack}
                 accessibilityLabel="Show fertile window"
@@ -101,6 +122,25 @@ export default function CycleSettingsScreen() {
             }
           />
         </ListGroup>
+
+        <Card padding="lg" style={styles.lengths}>
+          <AppText variant="callout">{CONTRACEPTION_QUESTION}</AppText>
+          <AppText variant="footnote" color="tertiary" style={styles.lengthsHint}>
+            {CONTRACEPTION_HINT}
+          </AppText>
+          <ChipGrid<ContraceptionAnswer>
+            options={CONTRACEPTION_OPTIONS}
+            selected={(v) => settings.contraception?.answer === v}
+            onToggle={(v) => void cycle.setContraception(v)}
+            tone={palette.period}
+            size="sm"
+          />
+          {methodNote ? (
+            <AppText variant="footnote" color="secondary" style={styles.methodNote}>
+              {methodNote}
+            </AppText>
+          ) : null}
+        </Card>
 
         <Card padding="lg" style={styles.lengths}>
           <AppText variant="callout">What you told me</AppText>
@@ -127,6 +167,30 @@ export default function CycleSettingsScreen() {
             onChange={(v) => void cycle.updateSettings({ usualCycleDays: v })}
           />
         </Card>
+
+        {/* Only for someone it applies to. Always her choice, and always one tap to undo. */}
+        {view.hungry || settings.planHungryWeek ? (
+          <ListGroup style={styles.lengths}>
+            <ListRow
+              icon="restaurant"
+              tone={palette.period}
+              title="Plan for my hungrier week"
+              subtitle={
+                view.hungryAllowed
+                  ? "The 5 days before your period get a little more of your calorie target, and the 10 days before them a little less. Your total stays the same."
+                  : "Not used right now, because of what's on your profile."
+              }
+              right={
+                <Switch
+                  value={settings.planHungryWeek}
+                  onValueChange={(v) => void cycle.setHungryPlan(v)}
+                  trackColor={switchTrack}
+                  accessibilityLabel="Plan for my hungrier week"
+                />
+              }
+            />
+          </ListGroup>
+        ) : null}
 
         <Label text="Reminders" />
         <ListGroup>
@@ -198,7 +262,7 @@ export default function CycleSettingsScreen() {
             icon="chatbubble-ellipses"
             tone={colors.primary}
             title="Let Gozlin see your cycle"
-            subtitle="When you chat, Gozlin gets your cycle day, when your next period is likely, and what you logged today. Nothing else. Gozlin is part of welliva Pro."
+            subtitle="When you chat, Gozlin gets your cycle day, when your next period is likely, what you logged today, whether you use hormonal contraception, what you said helped a symptom, and what your logs show around your cycle: what changed when a period is late, your weight before a period, a hungrier-week plan, and a period that falls during a trip. Nothing else. Gozlin is part of welliva Pro."
             right={
               <Switch
                 value={cycle.shareWithGozlin}
@@ -340,6 +404,7 @@ const styles = StyleSheet.create({
   lengths: { marginTop: Spacing.md },
   lengthsHint: { marginTop: 2, marginBottom: Spacing.sm },
   lengthRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md, paddingVertical: Spacing.sm },
+  methodNote: { marginTop: Spacing.md },
   footnote: { marginTop: Spacing.sm, marginLeft: Spacing.xs },
 });
 

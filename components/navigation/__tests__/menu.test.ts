@@ -25,6 +25,7 @@ import {
   RAIL_ITEMS,
   SECONDARY_ITEMS,
   SWIPEABLE_PATHS,
+  isRailItem,
   primaryItems,
 } from "../menu";
 import { GAP_MIN, LIFT_TIGHT, ROW_MIN, menuContentHeight, menuRhythm, type MenuShape } from "../menuRhythm";
@@ -77,8 +78,29 @@ describe("the derived sets", () => {
     expect(COMPACT_RAIL_PATHS.has(CYCLE_ITEM.href)).toBe(false);
   });
 
-  it("does not put Cycle on the rail — four tabs, and it isn't one", () => {
+  it("does not put Cycle on the rail — three tabs, and it isn't one", () => {
     expect(routes(RAIL_ITEMS)).not.toContain("cycle");
+  });
+
+  it("puts exactly Home, Diet and Fitness on the rail, in that order", () => {
+    expect(routes(RAIL_ITEMS)).toEqual(["index", "diet", "exercise"]);
+  });
+
+  it("keeps Gozlin off the rail but one row down in the drawer", () => {
+    // Every rail destination carries its own Gozlin button, so the coach has no
+    // tab of its own (owner, 2026-10-31) — but it is still a menu destination,
+    // so the drawer, the swipe and every deep link to /gozlin keep working.
+    expect(routes(RAIL_ITEMS)).not.toContain("gozlin");
+    const gozlin = PRIMARY_ITEMS.find((i) => i.route === "gozlin");
+    expect(gozlin).toBeDefined();
+    expect(isRailItem(gozlin!)).toBe(false);
+    expect(SWIPEABLE_PATHS.has("/gozlin")).toBe(true);
+    expect(routes(primaryItems({ cycle: false }))).toContain("gozlin");
+  });
+
+  it("marks the rail's own three in the drawer, and only those", () => {
+    const pinned = PRIMARY_ITEMS.filter(isRailItem).map((i) => i.route);
+    expect(pinned).toEqual(["index", "diet", "exercise"]);
   });
 
   it("has a unique route and href for every destination", () => {

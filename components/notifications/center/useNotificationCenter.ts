@@ -26,8 +26,14 @@ import {
   syncMealReminders,
   type MealReminderSettings,
 } from "@/services/notifications/mealReminders";
+import {
+  notificationsPaused,
+  setNotificationsPaused,
+  subscribeNotificationPause,
+} from "@/services/notifications/pause";
 import { subscribePipelineOutcomes } from "@/services/notifications/pipeline";
 import { readPendingQueue, type QueuedNotification } from "@/services/notifications/queue";
+import { refreshFitnessReminders } from "@/fitness/services/FitnessNotifications";
 import {
   DEFAULT_WATER_SETTINGS,
   loadWaterReminders,
@@ -52,6 +58,7 @@ export function useNotificationCenter() {
   const [fitness, setFitness] = useState<FitnessReminderSummary>({ prefs: null, days: [] });
   const [queue, setQueue] = useState<QueuedNotification[]>([]);
   const [journal, setJournal] = useState<JournalEntry[]>([]);
+  const [paused, setPausedState] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const alive = useRef(true);
 
@@ -71,14 +78,16 @@ export function useNotificationCenter() {
   }, []);
 
   const refreshAll = useCallback(async () => {
-    const [m, w, profile] = await Promise.all([
+    const [m, w, profile, p] = await Promise.all([
       loadMealReminders(),
       loadWaterReminders(),
       loadFitnessProfile().catch(() => null),
+      notificationsPaused(),
     ]);
     if (!alive.current) return;
     setMeals(m);
     setWater(w);
+    setPausedState(p);
     setFitness({
       prefs: profile?.reminders ?? null,
       days: Array.isArray(profile?.daysAvailable) ? profile!.daysAvailable : [],
@@ -99,10 +108,22 @@ export function useNotificationCenter() {
     });
     const offWrites = subscribeExternalWrites(() => void refreshLive());
     const offOutcomes = subscribePipelineOutcomes(() => void refreshLive());
+    // The queue empties (pause) or refills (resume) a beat after the switch:
+    // the runner re-lays module by module, so read it again once that settles.
+    let settle: ReturnType<typeof setTimeout> | null = null;
+    const offPause = subscribeNotificationPause((p) => {
+      if (!alive.current) return;
+      setPausedState(p);
+      void refreshLive();
+      if (settle) clearTimeout(settle);
+      settle = setTimeout(() => void refreshLive(), 2500);
+    });
     return () => {
       sub.remove();
       offWrites();
       offOutcomes();
+      offPause();
+      if (settle) clearTimeout(settle);
     };
   }, [refreshLive]);
 
@@ -136,10 +157,19 @@ export function useNotificationCenter() {
       setWater(next);
       await saveWaterReminders(next);
       await syncWaterReminders(next);
+      // The workouts' midday hydration check stands down while the water
+      // check-ins are on (and comes back when they're off).
+      await refreshFitnessReminders().catch(() => null);
       await refreshLive();
     },
     [refreshLive],
   );
+
+  /** Pause or resume everything. The runner re-lays (or clears) the queue. */
+  const setPaused = useCallback(async (next: boolean) => {
+    setPausedState(next);
+    await setNotificationsPaused(next);
+  }, []);
 
   return {
     loaded,
@@ -149,6 +179,8 @@ export function useNotificationCenter() {
     fitness,
     queue,
     journal,
+    paused,
+    setPaused,
     applyMeals,
     applyWater,
     refreshLive,

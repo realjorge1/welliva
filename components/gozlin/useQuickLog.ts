@@ -29,6 +29,7 @@ import { makeWeighIn } from "@/services/BodyLogService";
 import {
   loadCheckins,
   recordMindEntry,
+  subscribeMindEntries,
   type GozlinCheckin,
 } from "@/services/gozlin";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -57,8 +58,17 @@ export function useQuickLog(): UseQuickLog {
     void loadCheckins().then((c) => {
       if (alive) setCheckins(c);
     });
+    // More than one copy of this hook is mounted at a time now — the Deck's, for
+    // the quick-log sheet, and Home's check-in pill. The write path announces,
+    // so a check-in saved through either one reaches the other instead of
+    // leaving it counting from a stale read (the rail's evening "Check in" cue
+    // keys off this count).
+    const stop = subscribeMindEntries((next) => {
+      if (alive) setCheckins(next);
+    });
     return () => {
       alive = false;
+      stop();
     };
   }, []);
 

@@ -390,6 +390,13 @@ export interface DailyLearningInput {
   mifflinTdee: number;
   /** Current scale weight, for initialising the filter on first run. */
   weightKg: number;
+  /**
+   * Days the scale can't be read as body mass (`YYYY-MM-DD`), which the filter
+   * trusts less. Injected by the app layer, because this package must not know
+   * why: health-os never imports services/cycle. Since everything refits from
+   * scratch, a date added today also corrects the past.
+   */
+  noisyWeightDates?: readonly string[];
   store?: KeyValueStore;
   now?: Date;
 }
@@ -429,10 +436,11 @@ export async function runDailyLearning(
   await store.set(K.LEARNING_POSTERIORS, posteriors);
 
   // ── 3. Refit the Kalman TDEE filter over the whole series ──
+  const noisy = new Set(input.noisyWeightDates ?? []);
   const kalman = series.length
     ? runFilter(
         initKalman(firstWeight(series) ?? input.weightKg, input.mifflinTdee),
-        series.map((r) => ({ intakeKcal: r.intakeKcal, scaleKg: r.weightKg })),
+        series.map((r) => ({ intakeKcal: r.intakeKcal, scaleKg: r.weightKg, noisy: noisy.has(r.date) })),
       )
     : null;
   if (kalman) await store.set(K.LEARNING_TDEE, kalman);

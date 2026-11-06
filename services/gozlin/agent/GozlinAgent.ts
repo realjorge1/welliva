@@ -34,6 +34,7 @@ import {
   addDerivedGaps,
   addUserStatedNumbers,
   collectAllowedNumbers,
+  maskLocalDates,
   recordGrounding,
   validateNumbers,
 } from "./grounding";
@@ -307,6 +308,12 @@ export async function runAgentTurn(
       .map((m) => m.content as string),
   );
 
+  // A reply in the phone's language writes its dates that language's way —
+  // "le 12 septembre", "12 сентября". The checks below read the reply with
+  // those dates blanked out, exactly as they already skip "12 Sep" in English;
+  // the reply itself is never changed.
+  const checkable = (text: string) => maskLocalDates(text, ctx.language);
+
   let regenerations = 0;
 
   try {
@@ -327,7 +334,7 @@ export async function runAgentTurn(
       const onDelta = opts.onDelta
         ? (delta: string) => {
             draft += delta;
-            const safe = safeDisplayLength(draft, allowed);
+            const safe = safeDisplayLength(checkable(draft), allowed);
             if (safe > shown) {
               opts.onDelta!(draft.slice(shown, safe));
               shown = safe;
@@ -353,7 +360,7 @@ export async function runAgentTurn(
         if (!reply) return fallback();
 
         // 3. Numeric grounding. One correction, then the floor.
-        const check = validateNumbers(reply, allowed);
+        const check = validateNumbers(checkable(reply), allowed);
         recordGrounding(check);
         if (!check.ok) {
           if (regenerations >= MAX_REGENERATIONS) return fallback();
@@ -391,7 +398,7 @@ export async function runAgentTurn(
         const message = coachMsg(reply, inferTone(ctx), now);
         // Only the agent path gets receipts: it is the only one whose figures
         // came from evidence rather than from copy we wrote ourselves.
-        message.receipts = receiptsFor(reply, ledger);
+        message.receipts = receiptsFor(checkable(reply), ledger);
 
         // The memories the reply actually used get a YOU TOLD ME receipt — and
         // only those: one handed to the model and left unused is not a claim.

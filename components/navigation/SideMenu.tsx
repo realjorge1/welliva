@@ -49,7 +49,7 @@
  * each time the active row moves.
  */
 
-import AILogoIcon from "@/components/gozlin/AILogoIcon";
+import { GozlinAvatar } from "@/components/gozlin/GozlinAvatar";
 import { AppText } from "@/components/ui/Text";
 import { useColors } from "@/components/ui/useColors";
 import { Radius, Spacing, alpha } from "@/constants/theme";
@@ -532,12 +532,15 @@ function Row({
       >
         {/* Fixed-width slot, sized for the active glyph — see the file header.
             Gozlin's mark is the diamond artwork in its own colours, never
-            tinted: the owner's call (2026-10-15, "exactly as is"), which
-            retired the monochrome bolt. "You are here" is still said by the
-            gold label and the size jump, which the mark takes part in. */}
+            tinted (the owner's call, 2026-10-15, "exactly as is") — and in the
+            menu it sits in its gold-rimmed round, the same face the coach has
+            on every screen header (owner, 2026-10-31), so the menu row and the
+            button you tap to get there read as one thing. "You are here" is
+            still said by the gold label and the size jump, which the mark takes
+            part in. */}
         <View style={styles.markSlot}>
           {item.mark === "gozlin" ? (
-            <AILogoIcon size={active ? MARK_ACTIVE : MARK_REST} />
+            <GozlinAvatar size={active ? MARK_ACTIVE : GOZLIN_REST} />
           ) : (
             <Ionicons
               name={active ? item.activeIcon : item.icon}
@@ -563,7 +566,7 @@ function Row({
         </AppText>
 
         {/* PINNED TO THE RAIL. A dot, not a word and not a badge: it says these
-            four rows are also reachable from the bottom of every screen, which
+            three rows are also reachable from the bottom of every screen, which
             is the one fact that stops the rail reading as a second, rival set
             of destinations. It is faint by design — nobody needs to be told
             this, but the person who notices it has understood the whole
@@ -584,6 +587,12 @@ function Row({
 /** Mark at rest, and the same mark on the screen you're actually looking at. */
 const MARK_REST = 21;
 const MARK_ACTIVE = 30;
+/**
+ * The coach's round at rest. A disc has no empty corners to give back the way a
+ * 21pt line glyph does, so at 21 it would read smaller than the glyphs around
+ * it; 24 matches their optical weight and still leaves the size jump to 30.
+ */
+const GOZLIN_REST = 24;
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },

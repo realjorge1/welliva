@@ -18,6 +18,8 @@ import type { GozlinHabitReport, HabitPattern, RetiredBeat } from "@/services/go
 export interface CoachCard extends CoachInsight {
   /** The Gozlin habit-awareness card — opens the deep-dive framed on habits. */
   isHabit?: boolean;
+  /** A counted finding (what your best days share): its numbers are never clipped. */
+  identity?: string;
 }
 
 function patternTitle(p: HabitPattern): string {

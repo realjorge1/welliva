@@ -15,6 +15,7 @@ import * as Notifications from "expo-notifications";
 import {
   EVERY_DAY,
   frequencyLabel,
+  reminderTitle,
   type Habit,
   type HabitLogs,
   type HabitStats,
@@ -35,6 +36,7 @@ import {
 import { reminderBody } from "./notifications/copy";
 import { REMINDERS_CHANNEL_ID, ensureRemindersChannel } from "./notifications/init";
 import { ownerStamp } from "./notifications/owner";
+import { notificationsPaused, quietDate } from "./notifications/pause";
 
 const HABITS_KEY = "@welliva_habits";
 const LOGS_KEY = "@welliva_habit_logs";
@@ -255,6 +257,16 @@ export function isScheduled(habit: Habit, dateStr: string): boolean {
   return habit.days.includes(wellivaDay(dateStr));
 }
 
+/**
+ * Scheduled, and not excused. A PAUSED day — a protected rough day
+ * (services/smart/roughDay) — is treated like an unscheduled one: it can't be
+ * missed. Done anyway, it still counts: a kept day beats a rough day.
+ */
+function counts(habit: Habit, dateStr: string, done: Set<string>, paused?: ReadonlySet<string>): boolean {
+  if (!isScheduled(habit, dateStr)) return false;
+  return !paused?.has(dateStr) || done.has(dateStr);
+}
+
 function shiftDate(dateStr: string, deltaDays: number): string {
   const d = parseLocalDate(dateStr);
   d.setDate(d.getDate() + deltaDays);
@@ -293,8 +305,13 @@ function firstRelevantDate(habit: Habit, done: Set<string>): string {
  * it. Already ticked today always counts, so the summary's "done" and "total"
  * move together.
  */
-export function isDueToday(habit: Habit, done: Set<string>, today: string): boolean {
-  if (habit.weeklyGoal == null) return isScheduled(habit, today);
+export function isDueToday(
+  habit: Habit,
+  done: Set<string>,
+  today: string,
+  paused?: ReadonlySet<string>,
+): boolean {
+  if (habit.weeklyGoal == null) return counts(habit, today, done, paused);
   if (done.has(today)) return true;
   return weekCount(done, today) < habit.weeklyGoal;
 }
@@ -312,14 +329,24 @@ export function computeStats(
   habit: Habit,
   done: Set<string>,
   today: string,
+  paused?: ReadonlySet<string>,
 ): HabitStats {
   return habit.weeklyGoal != null
     ? goalStats(habit, done, today, habit.weeklyGoal)
-    : scheduleStats(habit, done, today);
+    : scheduleStats(habit, done, today, paused);
 }
 
-/** The weekday engine: streaks counted in scheduled days. */
-function scheduleStats(habit: Habit, done: Set<string>, today: string): HabitStats {
+/**
+ * The weekday engine: streaks counted in scheduled days. Paused days (rough
+ * days) are unscheduled for it — see {@link counts}. Quota habits never miss a
+ * day to begin with, so the goal engine needs no such rule.
+ */
+function scheduleStats(
+  habit: Habit,
+  done: Set<string>,
+  today: string,
+  paused?: ReadonlySet<string>,
+): HabitStats {
   const doneToday = done.has(today);
 
   // Current streak
@@ -327,7 +354,7 @@ function scheduleStats(habit: Habit, done: Set<string>, today: string): HabitSta
   let cursor = today;
   let first = true;
   for (let i = 0; i < MAX_LOOKBACK_DAYS; i++) {
-    if (isScheduled(habit, cursor)) {
+    if (counts(habit, cursor, done, paused)) {
       if (done.has(cursor)) {
         currentStreak++;
       } else if (first && cursor === today) {
@@ -350,7 +377,7 @@ function scheduleStats(habit: Habit, done: Set<string>, today: string): HabitSta
   let best = 0;
   let run = 0;
   for (let d = from; d <= today; d = shiftDate(d, 1)) {
-    if (!isScheduled(habit, d)) continue;
+    if (!counts(habit, d, done, paused)) continue;
     if (done.has(d)) {
       run++;
       if (run > best) best = run;
@@ -366,7 +393,7 @@ function scheduleStats(habit: Habit, done: Set<string>, today: string): HabitSta
   for (let i = 0; i < 30; i++) {
     const d = shiftDate(today, -i);
     if (d < habit.createdAt && !done.has(d)) continue;
-    if (!isScheduled(habit, d)) continue;
+    if (!counts(habit, d, done, paused)) continue;
     scheduled++;
     if (done.has(d)) completed++;
   }
@@ -475,6 +502,7 @@ export function buildHeatWeeks(
   done: Set<string>,
   today: string,
   weeks: number,
+  paused?: ReadonlySet<string>,
 ): HeatWeek[] {
   const firstRelevant = firstRelevantDate(habit, done);
 
@@ -495,7 +523,8 @@ export function buildHeatWeeks(
       col.push({
         date,
         done: done.has(date),
-        scheduled: quota ? false : isScheduled(habit, date),
+        // A paused rough day is no missed square either.
+        scheduled: quota ? false : counts(habit, date, done, paused),
         outside: date > today || date < firstRelevant,
       });
     }
@@ -564,6 +593,11 @@ export async function syncReminders(
       await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
     }
     if (!habit.reminder || habit.source !== "manual") return [];
+    // Everything is paused (services/notifications/pause): the reminder stays
+    // set on the habit and is laid by the forced reconcile on resume. A rough
+    // day is quiet the same way until the first sync on a normal day — a
+    // repeating reminder has no "skip just today".
+    if ((await notificationsPaused()) || (await quietDate())) return [];
 
     const granted = prompt
       ? (await Notifications.requestPermissionsAsync()).status === "granted"
@@ -579,7 +613,7 @@ export async function syncReminders(
     const stamp = await ownerStamp();
     const { hour, minute } = habit.reminder;
     const contentFor = (variant: number) => ({
-      title: habit.name,
+      title: reminderTitle(habit),
       body: reminderBody(habit.id, variant),
       categoryIdentifier: HABIT_REMINDER_CATEGORY,
       data: {
@@ -661,6 +695,20 @@ export async function reconcileHabitReminders(
     if (!perms.granted) return null;
 
     const pending = await Notifications.getAllScheduledNotificationsAsync();
+
+    // Paused, or a quiet rough day: nothing of ours may stay pending. The
+    // habits keep their reminder settings untouched; resuming (or the first
+    // sync on a normal day) lays them all again.
+    if ((await notificationsPaused()) || (await quietDate())) {
+      for (const p of pending) {
+        const data = (p.content?.data ?? {}) as Record<string, unknown>;
+        if (data.type === "habit-reminder") {
+          await Notifications.cancelScheduledNotificationAsync(p.identifier).catch(() => {});
+        }
+      }
+      return null;
+    }
+
     const owner = (await ownerStamp()).uid;
     const byHabit = new Map<string, { id: string; uid?: unknown }[]>();
     for (const p of pending) {

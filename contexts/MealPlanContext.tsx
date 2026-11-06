@@ -76,6 +76,8 @@ import { invalidateDietBuffer } from "../services/PlanSync";
 import { loadBodyLogs } from "../services/BodyLogService";
 import { creditCommitment } from "../services/StreakService";
 import { getDietHistory } from "../services/ScheduleService";
+import { subscribeExternalWrites } from "../services/notifications/externalWrites";
+import { AppState } from "react-native";
 import { useNutrition, useProfile, useSystem } from "./AppContext";
 
 // ============================================================================
@@ -641,6 +643,24 @@ export function MealPlanProvider({ children }: { children: React.ReactNode }) {
     },
     [refreshTodayDiet],
   );
+
+  // Food logged BEHIND this provider's back — a lock-screen "Had my usual", or
+  // the usual's own Log it (services/smart/usualLog) — is announced on the
+  // external-write bus while the app is alive; a write made while it was
+  // suspended is caught by the foreground re-read. Either way the Diet
+  // screen's list of what was logged today catches up.
+  useEffect(() => {
+    const off = subscribeExternalWrites((w) => {
+      if (w.kind === "meal") void refreshLog(todayDate());
+    });
+    const sub = AppState.addEventListener("change", (s) => {
+      if (s === "active") void refreshLog(todayDate());
+    });
+    return () => {
+      off();
+      sub.remove();
+    };
+  }, [refreshLog]);
 
   const logFoodAnalysis = useCallback(
     async (analysis: FoodAnalysis, slot: MealType | null, date?: string) => {

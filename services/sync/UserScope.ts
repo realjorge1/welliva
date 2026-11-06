@@ -14,6 +14,9 @@
  * FAIL-SOFT: cleanup must never wedge sign-in/out. Errors log and are swallowed.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
+
+import { forgetSmartLedgerMemory } from "../smart/ledger";
+import { __resetInstallIdCache } from "../telemetry/installId";
 import { ACTIVE_USER_KEY, listAppKeys } from "./syncKeys";
 
 /** The account this device currently holds data for, if any. */
@@ -34,6 +37,16 @@ export async function purgeAppData(): Promise<void> {
   try {
     const keys = await listAppKeys();
     if (keys.length > 0) await AsyncStorage.multiRemove(keys);
+    // The install id lives under the app prefix, so the sweep above already
+    // deleted it — but services/telemetry memoizes it in module state, which a
+    // storage wipe cannot reach. Without this, a purge leaves the next events
+    // stamped with the PREVIOUS owner's install id, stitching two people's
+    // funnels together on one phone. Clearing the memo makes the next read mint
+    // a fresh id, which is what "a different account on this device" means.
+    __resetInstallIdCache();
+    // The same trap: the smart layer holds its answers in memory, and the next
+    // "Not now" would write the previous owner's straight back to the wiped disk.
+    forgetSmartLedgerMemory();
   } catch (e) {
     console.warn("UserScope.purgeAppData:", e);
   }

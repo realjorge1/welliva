@@ -21,6 +21,8 @@ import React, {
   useState,
 } from "react";
 import { supabase } from "../lib/supabase";
+import { setAnalyticsUser, track } from "../services/telemetry";
+import type { AuthMethod } from "../services/telemetry";
 import { parseAuthRedirect } from "./auth/authRedirect";
 import { deleteAccount as deleteAccountData } from "../services/account/AccountDeletion";
 import { clearAllAppNotifications } from "../services/notifications/send";
@@ -226,6 +228,10 @@ export function SupabaseAuthProvider({
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
       setUser(newSession?.user ?? null);
+      // Attach (or clear) the account on every later analytics event. Earlier
+      // anonymous events keep their install id and join to the account through
+      // it — which is why the funnel can see people who left before signing up.
+      setAnalyticsUser(newSession?.user?.id ?? null);
       setIsLoading(false);
       // A session arriving retires any complaint about how the last attempt
       // went: they are in, and an error line about an expired link would be
@@ -299,6 +305,10 @@ export function SupabaseAuthProvider({
         options: { redirectTo, skipBrowserRedirect: true },
       });
       if (error) throw error;
+      // The attempt, not the outcome: the session arrives asynchronously through
+      // the redirect, and by then the provider that started it is out of scope.
+      // For "which door do people come in by" the attempt is the useful signal.
+      track("sign_in", { method: provider as AuthMethod });
       if (!data?.url) throw new Error(`Could not start ${label} sign-in.`);
 
       const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
@@ -335,6 +345,7 @@ export function SupabaseAuthProvider({
           password,
         });
         if (error) throw error;
+        track("sign_in", { method: "email" });
       },
       signUpWithEmail: async (email, password) => {
         const { data, error } = await supabase.auth.signUp({
@@ -343,6 +354,7 @@ export function SupabaseAuthProvider({
           options: { emailRedirectTo: authRedirectUri() },
         });
         if (error) throw error;
+        track("sign_up", { method: "email" });
         // With email confirmations ON, signUp returns a user but NO session — the
         // caller sends them to the verify-email screen. With confirmations OFF it
         // returns a live session and the app routes straight into onboarding.

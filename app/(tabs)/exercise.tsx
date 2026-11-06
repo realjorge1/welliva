@@ -60,6 +60,7 @@ import {
   recommendToday,
   type RecommendationInput,
 } from "@/fitness/services/RecommendationEngine";
+import { planSessionToPlayerParams } from "@/fitness/services/playerParams";
 import {
   getWorkout,
   workoutToPlayerParams,
@@ -78,7 +79,16 @@ import type { SessionState } from "@/models/session";
 import { PlannedExercise, WorkoutSession } from "@/models/workout";
 import { computeRecovery } from "@/services/gozlin/GozlinRecoveryEngine";
 import { SessionService } from "@/services/SessionService";
-import { formatDose, lightenSession, resolveTrainingPrefs } from "@/services/training";
+import { formatDose, lightenSession, resolveTrainingPrefs, shortenSession } from "@/services/training";
+import { GozlinToast, useToast } from "@/components/gozlin/GozlinToast";
+import { HardDayCard } from "@/components/smart/HardDayCard";
+import { useReceipts } from "@/components/smart/receipt";
+import { RoughDayWorkoutCard } from "@/components/smart/RoughDayWorkoutCard";
+import { useHardDayMoment, useShortWeekdays } from "@/components/smart/useHardDay";
+import { useRoughDay } from "@/components/smart/useRoughDay";
+import { useFreshStartDay } from "@/components/smart/useWelcomeBack";
+import { SHORT_MINUTES, activeShortDay, shortSessionReason } from "@/services/smart/hardDay";
+import { FRESH_START_DAYS } from "@/services/smart/welcomeBack";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "@/utils/haptics";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -152,6 +162,19 @@ export default function ExerciseScreen() {
   // eases today's session (services/cycle/care). Null when she doesn't track.
   const cycle = useCycleOptional();
   const cycleEase = cycle?.view.ease ?? null;
+  // A rough day offers a gentle walk or rest in place of the workout; "anyway"
+  // brings the workout back for the day (services/smart/roughDay).
+  const { rough, chooseWorkout } = useRoughDay();
+  const [trainAnywayOn, setTrainAnywayOn] = useState<string | null>(null);
+  // Day 1–7 of a fresh start: the workouts ease in (services/smart/welcomeBack).
+  const freshDay = useFreshStartDay();
+  // A weekday the user asked to keep short, and the offer to make one short
+  // (services/smart/hardDay).
+  const shortDays = useShortWeekdays();
+  const shortToday = useMemo(() => activeShortDay(shortDays, currentDate), [shortDays, currentDate]);
+  const toast = useToast();
+  const showReceipt = useReceipts(toast);
+  const hardDay = useHardDayMoment("fitness", showReceipt);
 
   /* ── the plan ─────────────────────────────────────────────────────── */
 
@@ -236,12 +259,38 @@ export default function ExerciseScreen() {
       );
       return l ? { ...l, source: "cycle" as const } : null;
     }
+    // A weekday they asked to keep short: this session, fitted to the slot by
+    // the engine. Free for the same reason, and the full one stays a tap away.
+    if (shortToday) {
+      const l = shortenSession(
+        todaySession,
+        SHORT_MINUTES,
+        EXERCISE_DATABASE,
+        shortSessionReason(shortToday.weekday),
+      );
+      if (l) return { ...l, source: "short" as const };
+    }
+    // The first week back after "Start fresh": the same session, eased — free,
+    // like the cycle's, because it's the user's own choice and not a reading.
+    if (freshDay != null) {
+      const l = lightenSession(
+        todaySession,
+        { level: "amber", score: recovery.score },
+        EXERCISE_DATABASE,
+        userBio,
+        {
+          headline: `Easing back in: day ${freshDay} of ${FRESH_START_DAYS}`,
+          dose: "Eased for your first week back",
+        },
+      );
+      return l ? { ...l, source: "fresh" as const } : null;
+    }
     if (recoveryLow) {
       const l = lightenSession(todaySession, readiness, EXERCISE_DATABASE, userBio);
       return l ? { ...l, source: "recovery" as const } : null;
     }
     return null;
-  }, [adaptiveTraining, todaySession, userBio, recovery.level, recovery.score, cycleEase]);
+  }, [adaptiveTraining, todaySession, userBio, recovery.level, recovery.score, cycleEase, freshDay, shortToday]);
   // Eased by default — unless she chose the full session on her last cramp or
   // heavy days; then the lighter one is offered and waits for her tap.
   const easeByDefault = lighter?.source !== "cycle" || !!cycleEase?.auto;
@@ -252,20 +301,9 @@ export default function ExerciseScreen() {
   const handleStartSession = useCallback(() => {
     if (!shownSession) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    const exerciseIds = shownSession.exercises.map((e) => e.exerciseId).join(",");
-    const sets = shownSession.exercises.map((e) => e.sets).join(",");
-    const reps = shownSession.exercises.map((e) => e.reps).join(",");
-    const rest = shownSession.exercises.map((e) => e.restSeconds).join(",");
     router.push({
       pathname: "/guided-session",
-      params: {
-        exerciseIds,
-        sessionLabel: shownSession.dayLabel,
-        workoutSessionId: shownSession.id,
-        sets,
-        reps,
-        rest,
-      },
+      params: planSessionToPlayerParams(shownSession),
     });
   }, [shownSession, router]);
 
@@ -518,9 +556,31 @@ export default function ExerciseScreen() {
             </Reveal>
           )}
 
+          {/* A weekday that keeps getting missed, offered a short version the
+              evening before it (services/smart/hardDay). */}
+          {hardDay.moment && (
+            <Reveal index={revealIndex++}>
+              <HardDayCard
+                moment={hardDay.moment}
+                onAccept={(m) => void hardDay.accept(m)}
+                onDecline={(m) => void hardDay.decline(m)}
+                style={styles.block}
+              />
+            </Reveal>
+          )}
+
           {/* Today — the recommendation hero */}
           <Reveal index={revealIndex++}>
-            {recommendation.kind === "plan_session" && shownSession ? (
+            {rough && !todayCompleted && trainAnywayOn !== currentDate ? (
+              <RoughDayWorkoutCard
+                choice={rough.workout}
+                hasSession={!!todaySession}
+                onChoose={(c) => void chooseWorkout(c)}
+                onMobility={() => router.push("/fitness/workout/mobility-reset" as never)}
+                onTrainAnyway={() => setTrainAnywayOn(currentDate)}
+                style={styles.block}
+              />
+            ) : recommendation.kind === "plan_session" && shownSession ? (
               <Card padding="xxl" style={styles.block}>
                 <View style={styles.todayHead}>
                   <IconBadge
@@ -958,6 +1018,7 @@ export default function ExerciseScreen() {
           its own canvas rather than using `Screen`. It is mounted once in
           AppDrawer now, so there is nothing to dock — but `content` must keep
           reserving NAV_CLEARANCE, or the last card scrolls under the rail. */}
+      <GozlinToast controller={toast} topOffset={insets.top} />
     </View>
   );
 }

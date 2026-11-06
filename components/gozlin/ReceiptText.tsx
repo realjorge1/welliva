@@ -40,6 +40,7 @@ import { AppText } from "@/components/ui";
 import { useColors } from "@/components/ui/useColors";
 import { Mono } from "@/components/ui/Mono";
 import { alpha, Radius, Spacing } from "@/constants/theme";
+import { numberSpans, readingsOf } from "@/services/gozlin/agent";
 import type { RecallReceipt, Receipt } from "@/services/gozlin/agent";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo } from "react";
@@ -55,8 +56,9 @@ type Segment =
  * receipts computed for this message.
  *
  * Matching is on the PARSED value rather than the literal string, because the
- * coach writes "1,840" and the ledger holds 1840. Commas inside a number are
- * stripped for the comparison and preserved in what's displayed.
+ * coach writes "1,840" — or, in French, "1 840" — and the ledger holds 1840.
+ * The literal is read by the same `numberSpans` the grounding gate uses, so
+ * the two agree on what a number is, and it is preserved in what's displayed.
  *
  * NOTHING RENDERS THESE SEGMENTS ANY MORE — the reply is drawn as one plain
  * string. This is kept because it is still the honest answer to "which figures
@@ -73,21 +75,21 @@ export function segmentReply(content: string, receipts: Receipt[]): Segment[] {
 
   const out: Segment[] = [];
   let cursor = 0;
-  // Numbers with optional thousands separators and decimals.
-  const re = /\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/g;
 
-  for (const m of content.matchAll(re)) {
-    const literal = m[0];
-    const value = Number(literal.replace(/,/g, ""));
-    const receipt = byValue.get(value);
+  for (const span of numberSpans(content)) {
+    // Figures written in digits only — a spelled-out number has no literal
+    // worth putting on a pill.
+    if (span.kind !== "digits") continue;
+    const receipt = readingsOf(span)
+      .map((n) => byValue.get(n))
+      .find((r) => r !== undefined);
     if (!receipt) continue;
 
-    const start = m.index ?? 0;
-    if (start > cursor) {
-      out.push({ kind: "text", text: content.slice(cursor, start) });
+    if (span.start > cursor) {
+      out.push({ kind: "text", text: content.slice(cursor, span.start) });
     }
-    out.push({ kind: "figure", text: literal, receipt });
-    cursor = start + literal.length;
+    out.push({ kind: "figure", text: content.slice(span.start, span.end), receipt });
+    cursor = span.end;
   }
 
   if (cursor < content.length) {

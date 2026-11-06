@@ -8,10 +8,16 @@
  * needs some). One accent per card, taken from its art, instead of the old
  * row of differently-coloured pills competing for the eye.
  *
+ * 2026-11-01, the upgrade sweep: the card is the black instrument surface (see
+ * MediaCard), the duration on the art is a mono readout like every other
+ * reading in the app, and a workout you have FINISHED — every move done —
+ * carries a check on its art, so the catalogue knows which ones are yours.
+ * Same height as before: the owner asked for these slim.
+ *
  * Memoized for smooth FlatList scrolling.
  */
 
-import { AppText, useColors } from "@/components/ui";
+import { AppText, Mono, useColors } from "@/components/ui";
 import { Spacing } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
@@ -20,18 +26,22 @@ import type { ResolvedWorkout } from "../types";
 import { ArtPanel } from "./ArtPanel";
 import { artAccent } from "./ArtTile";
 import { LEVEL_LABEL, LEVEL_RANK, STYLE_LABEL, equipmentLabel } from "./cardCopy";
-import { LevelBars, MEDIA_RADIUS, MediaCard } from "./MediaCard";
+import { LevelBars, MEDIA_RADIUS, MediaCard, ON_CARD } from "./MediaCard";
 
 /** Width of the art edge. Sized for a ~320dp phone, where every dp of text counts. */
 const ART_WIDTH = 88;
-/** Room the glyph leaves under itself so it never sits on the duration chip. */
+/** Room the glyph leaves under itself so it never sits on the duration readout. */
 const DURATION_CHIP_HEIGHT = 16;
+/** The overlays on the art share one dark glass, so they read as one set. */
+const ART_GLASS = "rgba(0,0,0,0.42)";
 
 export interface WorkoutCardProps {
   workout: ResolvedWorkout;
   onPress: (id: string) => void;
   isFavorite?: boolean;
   onToggleFavorite?: (id: string) => void;
+  /** Times this workout has been finished, every move done (see finishedCounts). */
+  timesFinished?: number;
 }
 
 export const WorkoutCard = React.memo(function WorkoutCard({
@@ -39,18 +49,24 @@ export const WorkoutCard = React.memo(function WorkoutCard({
   onPress,
   isFavorite = false,
   onToggleFavorite,
+  timesFinished = 0,
 }: WorkoutCardProps) {
-  const { colors, isDark } = useColors();
-  const accent = artAccent(w.art.hue, isDark);
+  const { colors } = useColors();
+  // The light end of the art's ramp: the card is black in both themes.
+  const accent = artAccent(w.art.hue, true);
   const style = STYLE_LABEL[w.style] ?? w.style;
   const level = LEVEL_LABEL[w.difficulty];
   const gear = equipmentLabel(w.equipment);
   const needsGear = w.equipment.some((e) => e && e !== "none");
+  const finished =
+    timesFinished > 0
+      ? ` Finished ${timesFinished === 1 ? "once" : `${timesFinished} times`}.`
+      : "";
 
   return (
     <MediaCard
       onPress={() => onPress(w.id)}
-      accessibilityLabel={`${w.name}. ${style}, ${w.durationMinutes} minutes, ${level}, ${gear}. ${w.tagline}`}
+      accessibilityLabel={`${w.name}. ${style}, ${w.durationMinutes} minutes, ${level}, ${gear}. ${w.tagline}.${finished}`}
       accessibilityHint="Opens the workout"
       media={
         <ArtPanel
@@ -61,10 +77,15 @@ export const WorkoutCard = React.memo(function WorkoutCard({
           radius={MEDIA_RADIUS}
           glyphInsetBottom={DURATION_CHIP_HEIGHT}
         >
+          {timesFinished > 0 ? (
+            <View style={styles.done}>
+              <Ionicons name="checkmark" size={11} color="#FFFFFF" />
+            </View>
+          ) : null}
           <View style={styles.duration}>
-            <AppText variant="caption" color="#FFFFFF" style={styles.durationText}>
-              {w.durationMinutes} min
-            </AppText>
+            <Mono size={10} weight="700" tracking={0.6} color="#FFFFFF">
+              {`${w.durationMinutes} MIN`}
+            </Mono>
           </View>
         </ArtPanel>
       }
@@ -82,7 +103,7 @@ export const WorkoutCard = React.memo(function WorkoutCard({
             <Ionicons
               name={isFavorite ? "heart" : "heart-outline"}
               size={18}
-              color={isFavorite ? colors.error : colors.textTertiary}
+              color={isFavorite ? colors.error : ON_CARD.idle}
             />
           </Pressable>
         ) : undefined
@@ -91,6 +112,7 @@ export const WorkoutCard = React.memo(function WorkoutCard({
       <AppText
         variant="bodyLg"
         weight="700"
+        color={ON_CARD.title}
         numberOfLines={1}
         // Shrink a long name a touch rather than cut it: "Chest & Arms Builder"
         // is the longest, and on a 320dp phone it is a few dp too wide.
@@ -100,12 +122,12 @@ export const WorkoutCard = React.memo(function WorkoutCard({
       >
         {w.name}
       </AppText>
-      <AppText variant="subhead" color="secondary" numberOfLines={1} style={styles.tagline}>
+      <AppText variant="subhead" color={ON_CARD.body} numberOfLines={1} style={styles.tagline}>
         {w.tagline}
       </AppText>
       <View style={styles.meta}>
         <LevelBars rank={LEVEL_RANK[w.difficulty]} color={accent} />
-        <AppText variant="footnote" color="tertiary" numberOfLines={1} style={styles.metaText}>
+        <AppText variant="footnote" color={ON_CARD.meta} numberOfLines={1} style={styles.metaText}>
           <AppText variant="footnote" color={accent} weight="700">
             {style}
           </AppText>
@@ -125,12 +147,23 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: Spacing.sm,
     bottom: Spacing.sm,
-    paddingHorizontal: 7,
+    paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 999,
-    backgroundColor: "rgba(0,0,0,0.30)",
+    backgroundColor: ART_GLASS,
   },
-  durationText: { fontWeight: "700", letterSpacing: 0.2, fontVariant: ["tabular-nums"] },
+  /** Finished: a check in the art's top-left corner, clear of the glyph. */
+  done: {
+    position: "absolute",
+    left: 6,
+    top: 6,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: ART_GLASS,
+  },
   heart: { padding: 4 },
   // Keeps a long name from running under the heart.
   besideHeart: { paddingRight: 24 },

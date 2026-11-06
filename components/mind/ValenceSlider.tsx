@@ -23,7 +23,7 @@
  * that remaining true — the same guard the elastic scroll needed when its own
  * vertical pan met the drawer's horizontal one.
  */
-import { AppText, useColors } from "@/components/ui";
+import { Mono, useColors } from "@/components/ui";
 import { Spacing, alpha } from "@/constants/theme";
 import {
   STOP_COUNT,
@@ -44,7 +44,7 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 
-const TRACK_H = 14;
+const TRACK_H = 10;
 const THUMB = 32;
 /** Row height. The extra padding is hit area — a 14px bar is not a target. */
 const HIT_H = THUMB + 16;
@@ -169,10 +169,7 @@ export function ValenceSlider({ valence, stop, onStopChange }: ValenceSliderProp
           <Animated.View
             style={[
               styles.thumb,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: VALENCE_COLORS[stop],
-              },
+              styles.thumbFace,
               thumbStyle,
             ]}
             accessibilityRole="adjustable"
@@ -193,17 +190,20 @@ export function ValenceSlider({ valence, stop, onStopChange }: ValenceSliderProp
               reported.value = next;
               emit(next);
             }}
-          />
+          >
+            {/* A white bead with the answer's colour at its heart. */}
+            <View style={[styles.thumbCore, { backgroundColor: VALENCE_COLORS[stop] }]} />
+          </Animated.View>
         </View>
       </GestureDetector>
 
       <View style={styles.ends}>
-        <AppText variant="caption" color="tertiary">
-          Very Unpleasant
-        </AppText>
-        <AppText variant="caption" color="tertiary">
-          Very Pleasant
-        </AppText>
+        <Mono size={10} tracking={0.8} color={colors.textTertiary}>
+          VERY UNPLEASANT
+        </Mono>
+        <Mono size={10} tracking={0.8} color={colors.textTertiary}>
+          VERY PLEASANT
+        </Mono>
       </View>
     </View>
   );
@@ -234,7 +234,8 @@ const styles = StyleSheet.create({
     width: THUMB,
     height: THUMB,
     borderRadius: THUMB / 2,
-    borderWidth: 3,
+    alignItems: "center",
+    justifyContent: "center",
     // `left: 0` puts the thumb's CENTRE at the track's left inset (the track is
     // inset by THUMB / 2), so translateX maps straight onto travel with no
     // offset arithmetic at either end.
@@ -243,5 +244,14 @@ const styles = StyleSheet.create({
     // vertical centre has to be stated or the thumb rides 8px above the track.
     top: (HIT_H - THUMB) / 2,
   },
-  ends: { flexDirection: "row", justifyContent: "space-between" },
+  thumbFace: {
+    backgroundColor: "#FFFFFF",
+    shadowColor: "#000000",
+    shadowOpacity: 0.45,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
+  },
+  thumbCore: { width: 12, height: 12, borderRadius: 6 },
+  ends: { flexDirection: "row", justifyContent: "space-between", marginTop: 2 },
 });

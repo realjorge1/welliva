@@ -63,10 +63,10 @@ export const TERMS_URL = `${LEGAL_SITE_URL}/terms/`;
 export const DATA_DELETION_URL = `${LEGAL_SITE_URL}/data-deletion/`;
 
 /** Bump on any material change → every user re-accepts. */
-export const LEGAL_VERSION = 3;
+export const LEGAL_VERSION = 4;
 
 /** Shown in each document header. Update alongside LEGAL_VERSION. */
-export const LEGAL_LAST_UPDATED = "15 October 2026";
+export const LEGAL_LAST_UPDATED = "5 November 2026";
 
 /** Minimum age to hold an account (the onboarding age field enforces it too). */
 export const MINIMUM_AGE = 13;
@@ -147,7 +147,7 @@ const PRIVACY: LegalDoc = {
         "Food: dietary style, cuisine preference, meals per day, allergies and foods you dislike",
         "Health context: medical conditions (including pregnancy and trimester, diabetes, kidney, liver, thyroid, digestive and hormonal conditions), injuries or pain areas, and medications or medication categories",
         "Your logs: meals and foods eaten, water, workouts and sessions completed, body measurements and weigh-ins, habits, streaks, and mood/energy/sleep check-ins",
-        "Your cycle log, only if you switch cycle tracking on: the dates your periods start and end, flow, symptoms you note (such as cramps or headache), mood and energy, how long your cycle usually is, and ovulation-test results if you turn on the fertile-window estimate. Cycle tracking is off until you enable it",
+        "Your cycle log, only if you switch cycle tracking on: the dates your periods start and end, flow, symptoms you note (such as cramps or headache), mood and energy, how long your cycle usually is, ovulation-test results if you turn on the fertile-window estimate, whether you use hormonal contraception (if you choose to say), what you said helped a symptom, and whether you asked welliva to plan for a hungrier week. Cycle tracking is off until you enable it",
         "Photos, if you add them: a profile picture, progress photos, and meal photos you ask the coach to analyse",
         "Messages you send to the AI coach",
       ],
@@ -171,7 +171,7 @@ const PRIVACY: LegalDoc = {
       bullets: [
         "To create your nutrition targets, meal plan and training plan — this is the service you asked for (performance of a contract)",
         "To keep you safe: allergies, conditions, injuries and medications are used to filter foods and exercises out of your plan",
-        "To track your cycle, estimate when your next period is likely and, on days you log cramps or heavy flow, ease your workout — only if you switch cycle tracking on",
+        "To track your cycle, estimate when your next period is likely and, on days you log cramps or heavy flow, ease your workout; and to line your cycle up, on your phone, against your own weight, food, sleep, training, mood and trips, so welliva can explain what it sees and, if you ask it to, plan your calories around it — only if you switch cycle tracking on",
         "To sync your account across your devices and restore it if you change phone",
         "To send reminders you have enabled",
         "To keep the service secure and to diagnose faults",
@@ -186,7 +186,7 @@ const PRIVACY: LegalDoc = {
       body: [
         "On your device. Your timeline, logs, summaries and the coach's memory are stored locally on your phone.",
         "In your private cloud account. So your account survives a lost phone, your profile and logs are synced to our hosted database (Supabase). Rows are protected by per-user row-level security: your account can only read and write its own data. Photos and voice notes go to private storage buckets scoped to your user id, and are served through short-lived signed links — never public URLs.",
-        "Your cycle log. It is stored on your phone and, by default, included in your account backup — the same sync that carries your other logs. Switch the backup off in Cycle settings and the log stays on your phone only; the copy in your cloud account is erased. It reaches the AI coach only if you switch on \"Let Gozlin see your cycle\" in Cycle settings, which is off by default; the coach then sees your cycle day, when your next period is likely and what you logged today, and nothing else. \"Delete all cycle data\" erases the log from your phone and from your backup, and you can export it first.",
+        "Your cycle log. It is stored on your phone and, by default, included in your account backup — the same sync that carries your other logs. Switch the backup off in Cycle settings and the log stays on your phone only; the copy in your cloud account is erased. It reaches the AI coach only if you switch on \"Let Gozlin see your cycle\" in Cycle settings, which is off by default; the coach then sees your cycle day, when your next period is likely, what you logged today, whether you use hormonal contraception, what you said helped a symptom, and what your logs show around your cycle (what changed when a period is late, your weight before a period, a hungrier-week plan, and a period that falls during a trip), and nothing else. \"Delete all cycle data\" erases the log from your phone and from your backup, and you can export it first.",
         "With the AI coach, only if enabled. When you use Gozlin's cloud features, a minimised summary of the relevant context — not your full history — is sent over an encrypted connection to our backend, which uses Anthropic's Claude models to generate the reply. It is used to answer you, and not to train third-party models.",
         "Weather. If you enable weather, coarse coordinates are sent to Open-Meteo to fetch a forecast. No account identifier is attached.",
       ],
@@ -248,7 +248,20 @@ const PRIVACY: LegalDoc = {
     {
       heading: "Analytics and tracking",
       body: [
-        "welliva contains no advertising SDKs, no third-party analytics and no cross-app tracking. We do not use your data to build advertising profiles, and we do not ask for the advertising identifier.",
+        "welliva contains no advertising SDKs, no third-party analytics and no cross-app tracking. We do not use your data to build advertising profiles, and we do not ask for the advertising identifier. Nothing about you is sold, and nothing is shared with a tracking company.",
+        "We do measure two things ourselves, on our own servers, to find out which parts of the app work and which quietly break:",
+      ],
+      bullets: [
+        "Usage events — that a meal was logged, that a screen was opened, that setup was finished, that the upgrade screen was seen. The event name and nothing else",
+        "Crash reports — when a screen fails, the error and the part of the code it happened in",
+      ],
+    },
+    {
+      heading: "What the measurement never sees",
+      body: [
+        "Not any number or note you entered. No weight, no calories, no meal or food name, no mood, no cycle dates or symptoms, no messages to the coach, no search terms, no photos. The list of events the app is able to send is fixed in its own code, and a value that is not on that list cannot be sent even by mistake.",
+        "Events are tied to a random identifier created on your device at first launch — not your name, not your email, and not your phone's or advertiser's ID. Reinstalling the app, or resetting your data, replaces it, and earlier events can no longer be connected to you.",
+        "Our legal basis is our legitimate interest in keeping welliva working and fixing what breaks. Both are on when you install, and both have their own switch under More → Trust. Turning one off stops it at once and discards anything still waiting to be sent on your device.",
       ],
     },
     {
@@ -418,6 +431,7 @@ const DISCLAIMER: LegalDoc = {
       heading: "Cycle tracking and the fertile window",
       body: [
         "Period and fertile-window predictions are statistical estimates drawn from the dates you log, and cycles vary from month to month. The fertile-window estimate is not birth control: never rely on it to prevent a pregnancy, and it does not protect against sexually transmitted infections. If you want to avoid or plan a pregnancy, talk to a clinician about methods that suit you.",
+        "If you tell welliva you use hormonal contraception, it logs your bleeding and does not predict it, because those bleeds follow your method rather than a natural cycle. Nothing in welliva replaces using your contraception as directed.",
       ],
     },
     {

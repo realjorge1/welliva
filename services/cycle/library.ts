@@ -9,7 +9,7 @@
  * its most frightening in the same sentence, and the only honest answer to
  * "worth mentioning to a doctor" is a page that says what is being mentioned.
  *
- * NINETEEN PAGES, in four groups, each one reachable three ways: from the
+ * TWENTY PAGES, in four groups, each one reachable three ways: from the
  * library, from the flag that raised it (`READING_FOR_NOTE`), and from whatever
  * she logged today (`suggestedReading`).
  *
@@ -40,6 +40,7 @@
  */
 
 import type { DoctorNoteId } from "./flags";
+import { fertileWindowAllowed } from "./predict";
 import type { CycleSettings, Symptom } from "./types";
 import type { CycleView } from "./view";
 
@@ -55,6 +56,7 @@ export type CycleArticleId =
   | "heavy-bleeding"
   | "headaches"
   | "bloating-and-skin"
+  | "scale-before-period"
   | "mood"
   | "energy-and-training"
   | "food-and-iron"
@@ -267,6 +269,7 @@ const ARTICLES: CycleArticle[] = [
         heading: "What welliva does about it",
         body: [
           "Log cramps and today's session gets lighter on its own — shorter, gentler, same shape. If you keep choosing the full session on days like this, it stops deciding for you and offers the lighter one instead.",
+          "The day after, it asks what helped most. Once the same thing has helped twice, it tells you so the next time cramps come, and it only ever repeats your own answer. If you say nothing helped three times, it says so plainly: that is worth mentioning to a doctor.",
         ],
       },
       {
@@ -422,7 +425,46 @@ const ARTICLES: CycleArticle[] = [
       "Bloating that is severe, constant, or doesn't settle once your period ends.",
       "Acne with unusual hair growth or irregular cycles — mention all three at once.",
     ],
-    seeAlso: ["mood", "food-and-iron", "irregular-cycles"],
+    seeAlso: ["scale-before-period", "mood", "food-and-iron", "irregular-cycles"],
+  },
+  {
+    id: "scale-before-period",
+    group: "month",
+    title: "Why the scale jumps before a period",
+    blurb: "A kilo overnight isn't fat. What it is, when it goes, and what welliva does about it.",
+    icon: "scale-outline",
+    minutes: 2,
+    sections: [
+      {
+        heading: "It's mostly water",
+        body: [
+          "In the days before a period, many people hold on to more water and salt, and the gut slows down as well. For some it's nothing you would notice; for others it's a kilo or two on the scale, usually at its highest around the first days of bleeding. Then it goes.",
+          "It is very unlikely to be fat, for a simple reason: a kilo of body fat takes roughly 7,700 calories more than you use, which is far more than most people eat over the few days it took the scale to move.",
+        ],
+      },
+      {
+        heading: "What welliva does about it",
+        body: [
+          "It compares your weigh-ins from days 6 to 12 of a cycle with the 5 days before your next period and the first two days of it. When a rise of half a kilo or more shows up in at least two cycles, and in at least half of the cycles with enough weigh-ins, that's your pattern, and it appears on your cycle screen with its numbers.",
+          "After that, when a new reading looks like the same thing, it tells you. Until then it says only that this is common, once, and that it will know more after a couple of cycles of weigh-ins.",
+          "It also stops your calorie estimate reading those days as fat: it trusts them less, rather than taking a guessed number off the scale.",
+        ],
+      },
+      {
+        heading: "Getting a fair picture",
+        points: [
+          "Compare like with like: this week against the same point last cycle says more than this week against last week.",
+          "Weighing in a few times a week is plenty. Two readings in each stretch is what the pattern needs.",
+          "You don't need to do anything about a rise that leaves by itself. Eating less because of it is treating a number, not a problem.",
+        ],
+      },
+    ],
+    seeSomeone: [
+      "Swelling that comes on suddenly, or with breathlessness or chest pain — that one is same-day, not next-appointment.",
+      "Swelling in your legs, hands or face that doesn't ease once your period has passed.",
+      "Weight that keeps rising over months with no change you can point to.",
+    ],
+    seeAlso: ["bloating-and-skin", "food-and-iron", "tracking-well"],
   },
   {
     id: "mood",
@@ -540,6 +582,13 @@ const ARTICLES: CycleArticle[] = [
         ],
       },
       {
+        heading: "If your own logs show it",
+        body: [
+          "welliva compares what you logged in the 5 days before a period with the rest of that cycle, using only days you actually logged. If those days ran at least 150 kcal higher in at least two cycles, and in at least half of the cycles with enough logs, it can offer to plan for it.",
+          "Say yes and those 5 days get up to 300 kcal more of your target, spread from the 10 days before them, never more than 150 kcal less on any of those days and never below a safe minimum. Your total stays the same. It is only ever an offer, and you can turn it off in cycle settings whenever you like.",
+        ],
+      },
+      {
         heading: "Iron, if your periods are heavy",
         body: [
           "This is the one nutrient your cycle genuinely puts at risk. Blood loss is iron loss, and low iron is common, easy to miss and very treatable. If your periods are heavy and you are tired in a way sleep doesn't fix, ask for ferritin and a full blood count rather than buying supplements — too much iron is its own problem.",
@@ -578,6 +627,12 @@ const ARTICLES: CycleArticle[] = [
         body: [
           "Do it before spending a fortnight wondering. A test from the day your period was due is reliable; if it's negative and your period still hasn't come a week later, test again.",
           "No prediction in any app — including this one — is a pregnancy test or a contraceptive. It is arithmetic on past cycles.",
+        ],
+      },
+      {
+        heading: "What welliva shows you",
+        body: [
+          "While a period is late, the cycle screen compares this cycle with your last three: your sleep, training, what you ate, your weight, your mood, any trips and the days you marked as ill. It names only what genuinely changed, in your own numbers. These are changes that can delay a period, not a diagnosis, and if nothing stands out it says that too.",
         ],
       },
       {
@@ -799,6 +854,13 @@ const ARTICLES: CycleArticle[] = [
         ],
       },
       {
+        heading: "What welliva does when you say you use one",
+        body: [
+          "Tell welliva you use hormonal contraception, in setup or in cycle settings, and it logs your bleeding and stops predicting it: no next-period window, no fertile window, no reminders built on either. Bleeding that lasts more than seven days is still flagged as worth raising, because that is worth mentioning on any method.",
+          "When you stop, change the answer to No. Your predictions then start fresh, the same way they would after a birth. Nothing in welliva is, or replaces, contraception.",
+        ],
+      },
+      {
         heading: "Coming off it",
         body: [
           "Cycles can take a few months to settle after stopping a hormonal method, and after the injection it can take considerably longer. A few irregular cycles in that stretch are expected. Logging through it is useful precisely because it shows you when your own rhythm returns.",
@@ -991,6 +1053,7 @@ export const READING_FOR_NOTE: Record<DoctorNoteId, CycleArticleId> = {
   irregular: "irregular-cycles",
   missed: "late-period",
   menopause_bleeding: "perimenopause",
+  cramps_unrelieved: "cramps",
 };
 
 /** The page a logged symptom leads to. */
@@ -1004,6 +1067,11 @@ const READING_FOR_SYMPTOM: Record<Symptom, CycleArticleId> = {
   cravings: "food-and-iron",
   nausea: "cramps",
 };
+
+/** The page about a symptom she logged — the "what tends to help" a relief answer links to. */
+export function readingForSymptom(symptom: Symptom): CycleArticleId {
+  return READING_FOR_SYMPTOM[symptom];
+}
 
 /** How many the cycle screen offers. Three is a shelf; ten is homework. */
 export const SUGGESTED_COUNT = 3;
@@ -1039,10 +1107,12 @@ export function suggestedReading(
   // 3. Where she is in the cycle, and which life stage the profile says.
   if (view.mode === "postpartum") add("after-a-birth");
   if (view.mode === "menopause") add("perimenopause");
+  // Why nothing is predicted — the page that says what she is looking at.
+  if (view.mode === "hormonal") add("contraception");
   if (view.status.lateBy > 0) add("late-period");
   if (view.status.inPeriod) add("cramps");
   if (!view.status.inPeriod && view.status.phase === "luteal") add("mood");
-  if (settings.showFertileWindow) add("ovulation");
+  if (fertileWindowAllowed(settings.showFertileWindow, view.mode)) add("ovulation");
 
   // 4. The floor. Someone three days into tracking has no flags and no logs,
   //    and still deserves the three pages that explain what she is looking at.

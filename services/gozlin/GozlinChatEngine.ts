@@ -73,6 +73,11 @@ export interface GozlinChatContext {
    * Absent means say nothing about it — never infer one.
    */
   cycle?: CycleBrief;
+  /**
+   * Today is a rough day the user marked (services/smart/roughDay): the coach
+   * goes gentle for the day. Absent on any other day.
+   */
+  roughDay?: { reasonLabel?: string; streakPaused: boolean };
   weekStart: string;
   weeklyWorkoutTarget: number;
   /**
@@ -80,6 +85,13 @@ export interface GozlinChatContext {
    * the deterministic path is stateless by design and ignores this.
    */
   conversation?: GozlinMessage[];
+  /**
+   * The language the phone is set to, as a BCP 47 tag ("fr-FR"), which the
+   * coach writes its replies in (agent/replyLanguage.ts). Absent or English
+   * means no instruction at all. The offline path ignores it: its replies are
+   * written English copy.
+   */
+  language?: string;
   now?: Date;
 }
 
@@ -158,7 +170,6 @@ function briefingInput(ctx: GozlinChatContext, now: Date): BriefingInput {
     insights: ctx.insights,
     dietHistory: ctx.snapshot.dietHistory,
     workoutLog: ctx.snapshot.workoutLog,
-    motivation: ctx.identity.motivation,
     journeyStartedAt: ctx.snapshot.goals.journeyStartedAt,
     weeklyWorkoutTarget: ctx.weeklyWorkoutTarget,
     now,
@@ -296,7 +307,7 @@ function respondToIntent(
       const f = buildForecast({
         twin,
         dietHistory: ctx.snapshot.dietHistory,
-        bodyLogs: ctx.snapshot.bodyLogs,
+        bodyLogs: ctx.snapshot.trendBodyLogs ?? ctx.snapshot.bodyLogs,
         calorieTarget: ctx.snapshot.targets?.calories ?? 0,
         goal: twin.goal,
         weeklyWorkoutTarget: ctx.weeklyWorkoutTarget,
@@ -358,7 +369,7 @@ function respondToIntent(
         dietHistory: ctx.snapshot.dietHistory,
         workoutLog: ctx.snapshot.workoutLog,
         sessionHistory: ctx.snapshot.sessionHistory,
-        bodyLogs: ctx.snapshot.bodyLogs,
+        bodyLogs: ctx.snapshot.trendBodyLogs ?? ctx.snapshot.bodyLogs,
         weeklyWorkoutTarget: ctx.weeklyWorkoutTarget,
         now,
       });

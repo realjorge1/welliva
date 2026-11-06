@@ -20,6 +20,8 @@
  */
 
 import { useOpenThread } from "@/components/gozlin";
+import { useEasedToday } from "@/components/smart/useHardDay";
+import { useRoughToday } from "@/components/smart/useRoughDay";
 import { useNutrition, useProfile, useSystem, useWorkout } from "@/contexts/AppContext";
 import { useFitnessProfile } from "@/fitness/hooks/useFitnessProfile";
 import type { SessionState } from "@/models/session";
@@ -165,8 +167,15 @@ export function useDeckState(
   // missing session on a real plan means rest, not a hole in the schedule.
   const isRestDay = !!workoutPlan && (!todaySession || !!todaySession.isRestDay);
 
+  // A rough day reads as a rest day here, and takes the pressing asks off the
+  // bar (services/smart/roughDay).
+  const gentleToday = useRoughToday() !== null;
+  // Today's session runs shorter or easier than planned (services/smart).
+  const easedToday = useEasedToday();
+
   const input = useMemo<NextMoveInput>(
     () => ({
+      gentle: gentleToday,
       minutesOfDay,
       savedSession: savedSession
         ? {
@@ -178,12 +187,12 @@ export function useDeckState(
       meals,
       hasScheduledDiet: !!todayDiet?.hasScheduledDiet,
       todaySession:
-        todaySession && !todaySession.isRestDay
-          ? { focus: todaySession.focus, minutes: todaySession.totalDurationMinutes }
+        todaySession && !todaySession.isRestDay && !gentleToday
+          ? { focus: todaySession.focus, minutes: todaySession.totalDurationMinutes, eased: easedToday }
           : null,
       hasPlan: !!workoutPlan,
       workoutDoneToday: workoutLog.some((l) => l.date === currentDate),
-      isRestDay,
+      isRestDay: isRestDay || gentleToday,
       // Until the stored profile has been read, assume setup is done: a dock
       // that flashes "Personalize training" for one frame on every cold start
       // and then swaps is worse than one that arrives a beat late.
@@ -197,6 +206,8 @@ export function useDeckState(
       currentHref,
     }),
     [
+      gentleToday,
+      easedToday,
       currentHref,
       minutesOfDay,
       savedSession,

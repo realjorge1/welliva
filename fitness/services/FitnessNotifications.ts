@@ -37,6 +37,12 @@ import {
 } from "@/services/notifications/categories";
 import { REMINDERS_CHANNEL_ID, ensureRemindersChannel } from "@/services/notifications/init";
 import { ownerStamp } from "@/services/notifications/owner";
+import { notificationsPaused, quietDate } from "@/services/notifications/pause";
+import {
+  DEFAULT_WATER_SETTINGS,
+  loadWaterReminders,
+  waterRemindersOn,
+} from "@/services/notifications/waterReminders";
 import type { FitnessProfile } from "../types";
 import { loadFitnessProfile } from "./FitnessProfileStore";
 
@@ -57,6 +63,7 @@ export type FitnessReminderStatus =
   | "off" // nothing is switched on (a clean cancel)
   | "no-permission" // the OS refused, or the user hasn't granted yet
   | "no-days" // workouts are on but the profile has no training days
+  | "paused" // the user paused all notifications; laid again on resume
   | "failed"; // something was on and permitted, but every schedule call failed
 
 export interface FitnessReminderSync {
@@ -164,7 +171,19 @@ export async function syncFitnessReminders(profile: FitnessProfile): Promise<Fit
     !!reminders &&
     (reminders.workouts || reminders.hydration || reminders.stretch || reminders.weeklySummary);
   if (!anyOn) return { status: "off", scheduled: 0 };
+  // Paused — or a quiet rough day, which can only stand repeating reminders
+  // down until the first sync on a normal day (services/notifications/pause).
+  if ((await notificationsPaused()) || (await quietDate())) return { status: "paused", scheduled: 0 };
   if (!(await hasNotificationPermission())) return { status: "no-permission", scheduled: 0 };
+
+  // The water check-ins (services/notifications/waterReminders) already ask
+  // about a glass at times the user picked — and they know when the last one
+  // was. A second, fixed 12:30 ask on top would be the same question twice, so
+  // while they're on, they carry the hydration check.
+  const waterCovers =
+    reminders.hydration &&
+    waterRemindersOn(await loadWaterReminders().catch(() => DEFAULT_WATER_SETTINGS));
+  const hydrationLaid = reminders.hydration && !waterCovers;
 
   // Android drops notifications posted to a channel that doesn't exist yet.
   await ensureRemindersChannel();
@@ -209,7 +228,7 @@ export async function syncFitnessReminders(profile: FitnessProfile): Promise<Fit
     }
   }
 
-  if (reminders.hydration) {
+  if (hydrationLaid) {
     await schedule(
       {
         title: "Hydration check",
@@ -270,12 +289,17 @@ export async function syncFitnessReminders(profile: FitnessProfile): Promise<Fit
   await saveOwnedIds(ids);
 
   if (ids.length === 0) {
+    // The hydration check was the only thing on, and the water check-ins are
+    // delivering it — a reminder WILL arrive, so this is not a failure.
+    if (waterCovers && !reminders.workouts && !reminders.stretch && !reminders.weeklySummary) {
+      return { status: "ok", scheduled: 0 };
+    }
     // Switched on, permitted, and still nothing pending. Either workouts were
     // the only reminder and there are no training days to hang them on, or
     // every native schedule call failed. Both are failures to report, not an
     // "off" — the caller must not leave a switch claiming a live reminder.
     const onlyWorkouts =
-      reminders.workouts && !reminders.hydration && !reminders.stretch && !reminders.weeklySummary;
+      reminders.workouts && !hydrationLaid && !reminders.stretch && !reminders.weeklySummary;
     return { status: onlyWorkouts && days.length === 0 ? "no-days" : "failed", scheduled: 0 };
   }
   return { status: "ok", scheduled: ids.length };

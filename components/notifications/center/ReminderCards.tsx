@@ -28,11 +28,13 @@ import {
 import {
   GLASS_SIZES,
   MAX_WATER_TIMES,
+  QUIET_AFTER_LOG_MINUTES,
   WATER_TIMES,
   toMinutes,
   waterRemindersOn,
   type WaterReminderSettings,
 } from "@/services/notifications/waterReminders";
+import { withStoredTime } from "@/components/smart/timeChoices";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React from "react";
@@ -149,6 +151,18 @@ const SLOT_TIMES: Record<MealSlotKey, readonly { hour: number; minute: number }[
   ],
 };
 
+/**
+ * The slot's choices with the stored time among them — a reminder moved to
+ * when the user actually eats ("Move it to 8:05?") must show as selected, not
+ * quietly highlight the first chip (components/smart/timeChoices).
+ */
+function slotChoices(
+  presets: readonly { hour: number; minute: number }[],
+  chosen: { hour: number; minute: number },
+): { hour: number; minute: number }[] {
+  return withStoredTime(presets, { hour: chosen.hour, minute: chosen.minute }, (t) => t.hour * 60 + t.minute);
+}
+
 const SLOT_ICON: Record<MealSlotKey, keyof typeof Ionicons.glyphMap> = {
   breakfast: "sunny-outline",
   lunch: "restaurant-outline",
@@ -160,6 +174,7 @@ export function MealRemindersCard({
   settings,
   pending,
   blocked,
+  paused = false,
   loaded,
   ensurePermission,
   apply,
@@ -168,6 +183,8 @@ export function MealRemindersCard({
   /** Meal reminders actually pending in the OS queue. */
   pending: number;
   blocked: boolean;
+  /** "Pause all notifications" is on — settings stand, nothing is queued. */
+  paused?: boolean;
   loaded: boolean;
   ensurePermission: () => Promise<boolean>;
   apply: (next: MealReminderSettings) => Promise<void>;
@@ -203,9 +220,11 @@ export function MealRemindersCard({
       title="Meals"
       status={
         on
-          ? pending > 0
-            ? `${plural(pending, "reminder")} lined up for the next ${HORIZON_DAYS} days`
-            : "On — waiting for notifications to be allowed"
+          ? paused
+            ? "On — paused with everything else"
+            : pending > 0
+              ? `${plural(pending, "reminder")} lined up for the next ${HORIZON_DAYS} days`
+              : "On — waiting for notifications to be allowed"
           : "Off — asks about a planned meal at times you pick"
       }
       buttonLabel="Ate it"
@@ -216,7 +235,7 @@ export function MealRemindersCard({
     >
       {MEAL_SLOTS.map((slot, i) => {
         const r = settings.slots[slot];
-        const times = SLOT_TIMES[slot];
+        const times = slotChoices(SLOT_TIMES[slot], r);
         const selected = times.findIndex((t) => t.hour === r.hour && t.minute === r.minute);
         return (
           <View key={slot}>
@@ -261,8 +280,9 @@ export function MealRemindersCard({
         );
       })}
       <AppText variant="caption" color="tertiary" style={styles.note}>
-        On a day with nothing planned for that meal, the reminder has no button —
-        tapping it opens the food log instead, so you can record what you had.
+        Already ticked that meal, or logged it? Then it doesn’t ask. On a day with
+        nothing planned for that meal, the reminder has no button — tapping it
+        opens the food log instead, so you can record what you had.
       </AppText>
     </CategoryCard>
   );
@@ -272,15 +292,29 @@ export function MealRemindersCard({
 // WATER
 // ════════════════════════════════════════════════════════════════════
 
+/**
+ * The offered times plus any stored one that isn't among them (a first
+ * check-in moved to just before the first glass), in order. A chosen time the
+ * row could not show would be a reminder the user can neither see nor remove.
+ */
+function waterChoices(settings: WaterReminderSettings): { hour: number; minute: number }[] {
+  const offered = WATER_TIMES.map((t) => toMinutes(t.hour, t.minute));
+  const all = [...new Set([...offered, ...(settings.enabled ? settings.times : [])])].sort((a, b) => a - b);
+  return all.map((m) => ({ hour: Math.floor(m / 60), minute: m % 60 }));
+}
+
 export function WaterRemindersCard({
   settings,
   blocked,
+  paused = false,
   loaded,
   ensurePermission,
   apply,
 }: {
   settings: WaterReminderSettings;
   blocked: boolean;
+  /** "Pause all notifications" is on — settings stand, nothing is queued. */
+  paused?: boolean;
   loaded: boolean;
   ensurePermission: () => Promise<boolean>;
   apply: (next: WaterReminderSettings) => Promise<void>;
@@ -322,7 +356,9 @@ export function WaterRemindersCard({
       title="Water"
       status={
         on
-          ? `${plural(settings.times.length, "reminder")} a day · ${settings.glassMl} ml a tap`
+          ? paused
+            ? "On — paused with everything else"
+            : `Up to ${plural(settings.times.length, "check-in")} a day · ${settings.glassMl} ml a tap`
           : "Off — a quick ask a few times a day"
       }
       buttonLabel={waterButtonTitle(settings.glassMl || DEFAULT_GLASS_ML)}
@@ -335,7 +371,7 @@ export function WaterRemindersCard({
         When
       </AppText>
       <View style={styles.times}>
-        {WATER_TIMES.map(({ hour, minute }) => {
+        {waterChoices(settings).map(({ hour, minute }) => {
           const m = toMinutes(hour, minute);
           const selected = settings.enabled && settings.times.includes(m);
           const full =
@@ -376,6 +412,13 @@ export function WaterRemindersCard({
         value={settings.glassMl}
         onChange={(ml) => void apply({ ...settings, glassMl: ml })}
       />
+      <AppText variant="caption" color="tertiary" style={styles.note}>
+        It asks like a friend would — “your last one was at 2:10, had another
+        since?” — and stays quiet when it shouldn’t ask: for{" "}
+        {QUIET_AFTER_LOG_MINUTES} minutes after a glass, and for the rest of the
+        day once you reach your goal. Away for a few days? It goes quiet until
+        you’re back.
+      </AppText>
     </CategoryCard>
   );
 }

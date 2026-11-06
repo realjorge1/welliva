@@ -8,17 +8,11 @@
  * ring update land on the same second.
  */
 import { Motion, alpha } from "@/constants/theme";
-import React, { useEffect, useRef } from "react";
+import React, { useRef } from "react";
 import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
-import Animated, {
-  useAnimatedProps,
-  useReducedMotion,
-  useSharedValue,
-  withTiming,
-} from "react-native-reanimated";
+import Animated, { useAnimatedProps, type SharedValue } from "react-native-reanimated";
 import Svg, { Circle, Defs, Stop, LinearGradient as SvgGradient } from "react-native-svg";
-import { Ease } from "@/components/motion/motion";
-import { useIntroReveal } from "@/components/motion/IntroReveal";
+import { useEntranceProgress } from "@/components/motion/useEntranceProgress";
 import { useColors } from "./useColors";
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -41,6 +35,12 @@ export interface RingProps {
    * the same bottom start point but fills anti-clockwise instead.
    */
   counterClockwise?: boolean;
+  /**
+   * Fill from empty when the ring's card scrolls into view from below, instead
+   * of on the cold-start reveal: 0 wait · 1 play · 2 show finished. See
+   * components/motion/useEntranceProgress.
+   */
+  entrance?: SharedValue<number>;
   children?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
 }
@@ -54,27 +54,20 @@ export function Ring({
   track,
   duration = Motion.duration.hero,
   counterClockwise = false,
+  entrance,
   children,
   style,
 }: RingProps) {
   const { colors, isDark } = useColors();
-  const reduced = useReducedMotion();
-  const intro = useIntroReveal();
   const clamped = Math.max(0, Math.min(1, progress || 0));
   const radius = (size - strokeWidth) / 2;
   const circumference = radius * 2 * Math.PI;
   const gradId = useRef(`ring-${RING_SEQ++}`).current;
 
-  // Fill up from empty only on a cold-start reveal; on warm mounts start at the
-  // real value so it snaps. Later value changes always animate the delta.
-  const anim = useSharedValue(reduced || !intro ? clamped : 0);
-  useEffect(() => {
-    if (reduced) {
-      anim.value = clamped;
-      return;
-    }
-    anim.value = withTiming(clamped, { duration, easing: Ease.standard });
-  }, [clamped, duration, anim, reduced]);
+  // Fill up from empty only on a cold-start reveal (or, with an `entrance`, on
+  // arrival); on warm mounts start at the real value so it snaps. Later value
+  // changes always animate the delta.
+  const anim = useEntranceProgress(clamped, { entrance, duration });
 
   const animatedProps = useAnimatedProps(() => ({
     strokeDashoffset: circumference * (1 - anim.value),

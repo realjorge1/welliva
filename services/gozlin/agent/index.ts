@@ -70,10 +70,19 @@ export {
   collectAllowedNumbers,
   groundingStats,
   isRoundingOf,
+  isSpanGrounded,
+  maskLocalDates,
   numberSpans,
+  readingsOf,
   resetGroundingStats,
   validateNumbers,
 } from "./grounding";
+
+export {
+  languageName,
+  normalizeLocaleTag,
+  replyLanguageLines,
+} from "./replyLanguage";
 export type { GroundingResult, NumberSpan } from "./grounding";
 
 export {

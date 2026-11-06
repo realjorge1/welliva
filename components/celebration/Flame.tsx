@@ -108,6 +108,8 @@ const FLICKER_MS = 3600;
 const SHIVER_MS = 380;
 /** How long the fire takes to grow out to the edges of the grey shell. */
 const CATCH_MS = 380;
+/** How long a bounded flicker takes to ease down to still. */
+const SETTLE_MS = 1400;
 
 export type FlameEntrance = "ignite" | "light" | "still";
 
@@ -122,6 +124,12 @@ export interface FlameProps {
   unlit?: boolean;
   /** Idle flicker once lit. Leave off for small glyphs that sit on a screen. */
   flicker?: boolean;
+  /**
+   * How many flicker loops to play before the flame settles still — for a
+   * flame that sits on an always-on screen (Home), where an endless loop is a
+   * cost the low-end phones pay on every frame. Omit for an endless flicker.
+   */
+  flickerCycles?: number;
   /** Wait this long before the entrance starts, ms. */
   delay?: number;
   /** Fired once, the moment the flame is fully lit. */
@@ -136,6 +144,7 @@ export function Flame({
   entrance = "ignite",
   unlit = false,
   flicker = true,
+  flickerCycles,
   delay = 0,
   onLit,
   glow,
@@ -169,11 +178,25 @@ export function Flame({
       const lands = !animated
         ? delay
         : delay + (entrance === "ignite" ? 520 : SHIVER_MS + CATCH_MS + 420);
+      const loops = flickerCycles != null && flickerCycles > 0 ? Math.round(flickerCycles) : -1;
       clock.value = withDelay(
         lands,
-        withRepeat(withTiming(1, { duration: FLICKER_MS, easing: Easing.linear }), -1, false),
+        withRepeat(withTiming(1, { duration: FLICKER_MS, easing: Easing.linear }), loops, false),
       );
-      flickerGain.value = withDelay(lands, withTiming(1, { duration: 600 }));
+      flickerGain.value = withDelay(
+        lands,
+        loops < 0
+          ? withTiming(1, { duration: 600 })
+          : // A bounded flicker rides back down to still over its last stretch,
+            // so it settles rather than freezing mid-sway.
+            withSequence(
+              withTiming(1, { duration: 600 }),
+              withDelay(
+                Math.max(0, loops * FLICKER_MS - 600 - SETTLE_MS),
+                withTiming(0, { duration: SETTLE_MS, easing: Easing.inOut(Easing.quad) }),
+              ),
+            ),
+      );
     }
     const stop = () => {
       cancelAnimation(clock);

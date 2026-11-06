@@ -32,6 +32,11 @@ export interface ButtonProps {
   fullWidth?: boolean;
   disabled?: boolean;
   loading?: boolean;
+  /**
+   * Where the button sits — margins, `flex`, `alignSelf` — applied to its OUTER
+   * box. So `flex: 1` shares a row with a neighbour; a compact button beside it
+   * passes `fullWidth={false}`.
+   */
   style?: StyleProp<ViewStyle>;
   /**
    * Overrides the spoken name. Only needed when the visible `label` isn't the
@@ -111,11 +116,12 @@ export function Button({
     { height: s.h, paddingHorizontal: s.px },
     fullWidth ? styles.full : null,
     disabled ? { opacity: 0.45 } : null,
-    style,
   ];
 
   return (
-    <Animated.View style={[fullWidth ? styles.full : null, { transform: [{ scale }] }]}>
+    // `style` goes on this outer box. On the inner face, a row's `flex: 1`
+    // left this box 100% wide, and it pushed its neighbour off the card.
+    <Animated.View style={[fullWidth ? styles.full : null, style, { transform: [{ scale }] }]}>
       <Pressable
         onPress={handlePress}
         onPressIn={() => animate(0.97)}

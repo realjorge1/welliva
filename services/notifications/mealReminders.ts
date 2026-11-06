@@ -35,13 +35,19 @@
 import * as Notifications from "expo-notifications";
 import type { DaySchedule, MealType, ScheduledDiet } from "../../models/diet";
 import { KEYS, readJSON, toLocalDateString, writeJSON } from "../OfflineStorage";
+import type { IntakeLedger } from "../nutrition/IntakeLedger";
+import type { LogStore } from "../nutrition/foodLogStore";
+import { findUsuals, snapshotOf, usualReminderBody, type Usual } from "../smart/usual";
+import { loadForgottenUsuals } from "../smart/usualStore";
 import {
   MEAL_REMINDER_CATEGORY,
+  MEAL_USUAL_CATEGORY,
   ensureNotificationCategories,
 } from "./categories";
 import { mealBody, mealOpenBody, mealTitle, type MealSlotKey } from "./copy";
 import { REMINDERS_CHANNEL_ID, ensureRemindersChannel } from "./init";
 import { ownerStamp } from "./owner";
+import { notificationsPaused, quietDate } from "./pause";
 
 const SETTINGS_KEY = "@welliva_meal_reminders";
 /**
@@ -218,6 +224,7 @@ export async function syncMealReminders(
     const config = settings ?? (await loadMealReminders());
     await cancelOurs();
     if (!anyEnabled(config)) return 0;
+    if (await notificationsPaused()) return 0;
 
     const perms = await Notifications.getPermissionsAsync();
     if (!perms.granted) return 0;
@@ -230,14 +237,30 @@ export async function syncMealReminders(
     // blob per call — twenty-eight of those on a cold start is a measurable
     // stall for a lookup that is the same document every time.
     const plans = await scheduleIndex();
+    const foodLog = await foodLogIndex();
+    const usuals = await usualIndex(now);
+    // A rough day silences the rest of TODAY only (./pause `quietDate`).
+    const quiet = await quietDate(now);
 
     const stamp = await ownerStamp();
     const ids: string[] = [];
     for (const plan of plannedReminders(config, now)) {
+      if (quiet && plan.date === quiet) continue;
+      // ALREADY EATEN, SO DON'T ASK. "Lunch — had it?" twenty minutes after
+      // lunch was ticked is the reminder that teaches people to swipe these
+      // away unread. Ticking a meal (or logging one under that slot) re-lays
+      // this window (components/notifications/ReminderSyncRunner), so today's
+      // reminder for it disappears from the queue.
+      if (alreadyEaten(plans.get(plan.date), foodLog, plan.date, plan.slot)) continue;
       // The meal's real name, when the plan for that day already exists. A
       // reminder six days out usually has nothing to read; the next top-up
       // fills it in once the day is generated.
       const name = mealNameIn(plans.get(plan.date), plan.slot);
+      // Someone who logs this meal freely, the same foods most days, is asked
+      // about THAT: "Your usual? Oats with milk, coffee" — and "Had my usual"
+      // logs it exactly as last time. The usual's entries ride in the data, so
+      // the button never has to look a food up (services/notifications/usualActions).
+      const usual = usuals.get(plan.slot);
       // THE BUTTON ONLY WHEN THERE IS SOMETHING TO TICK. "Ate it" records the
       // meal planned in that slot; on a day with no planned meal it could only
       // fail. So an unplanned day gets the honest version — no button, and a
@@ -248,7 +271,21 @@ export async function syncMealReminders(
         // Deterministic: re-laying the window replaces rather than duplicates,
         // even if the stored id list was lost.
         identifier: `welliva.meal.${plan.date}.${plan.slot}`,
-        content: name
+        content: usual
+          ? {
+              title: mealTitle(plan.slot, plan.date),
+              body: usualReminderBody(usual),
+              categoryIdentifier: MEAL_USUAL_CATEGORY,
+              data: {
+                type: "meal-reminder",
+                slot: plan.slot,
+                date: plan.date,
+                route: "/(tabs)/diet",
+                usual: snapshotOf(usual, now),
+                ...stamp,
+              },
+            }
+          : name
           ? {
               title: mealTitle(plan.slot, plan.date),
               body: mealBody(plan.slot, plan.date, name),
@@ -298,6 +335,63 @@ async function scheduleIndex(): Promise<Map<string, DaySchedule>> {
   } catch {
     return new Map();
   }
+}
+
+/**
+ * Each meal's USUAL, when it has one (services/smart/usual) — someone who logs
+ * that meal freely, the same foods most days. Read once per sync, from the same
+ * food log. Empty on any failure: the reminder then falls back to the plain one.
+ */
+async function usualIndex(now: Date): Promise<Map<MealSlotKey, Usual>> {
+  try {
+    const [foodLog, intake, forgotten] = await Promise.all([
+      readJSON<LogStore>(KEYS.FOOD_LOG, {}),
+      readJSON<IntakeLedger>(KEYS.INTAKE_LEDGER, {}),
+      loadForgottenUsuals(),
+    ]);
+    const index = new Map<MealSlotKey, Usual>();
+    for (const u of findUsuals({ foodLog, intake, forgotten, today: toLocalDateString(now) })) {
+      index.set(u.slot, u);
+    }
+    return index;
+  } catch {
+    return new Map();
+  }
+}
+
+/** Free-form food-log entries by date — only the slot each was logged under. */
+type FoodLogSlots = Record<string, { slot?: string | null }[]>;
+
+/** The food log, read once per sync. Read-only; never writes. */
+async function foodLogIndex(): Promise<FoodLogSlots> {
+  try {
+    const store = await readJSON<FoodLogSlots>(KEYS.FOOD_LOG, {});
+    return store && typeof store === "object" ? store : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Has this slot's meal already been eaten on that day? Either the planned meal
+ * is ticked, or the user logged something from the food log under that slot.
+ * For snacks, any snack counts — there is one snack reminder, not one per snack.
+ */
+export function alreadyEaten(
+  schedule: DaySchedule | undefined,
+  foodLog: FoodLogSlots,
+  date: string,
+  slot: MealSlotKey,
+): boolean {
+  if (schedule) {
+    const ticked =
+      slot === "snack"
+        ? (schedule.snacks ?? []).some((s) => s?.isConsumed)
+        : !!schedule[slot as Exclude<MealType, "snack">]?.isConsumed;
+    if (ticked) return true;
+  }
+  const logged = foodLog[date];
+  return Array.isArray(logged) && logged.some((e) => e?.slot === slot);
 }
 
 /** The scheduled meal's name for a slot, or null if there isn't one yet. */

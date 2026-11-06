@@ -217,6 +217,7 @@ export function ExperienceAnswerSheet({ visible, entry, onClose, onAnswer, onNot
                   label="Keep these words"
                   variant="tonal"
                   size="sm"
+                  fullWidth={false}
                   onPress={() => {
                     setNoteSaved(true);
                     void save({ note });
@@ -230,8 +231,14 @@ export function ExperienceAnswerSheet({ visible, entry, onClose, onAnswer, onNot
           </>
         ) : (
           <View style={styles.actions}>
-            <Button label="Not now" variant="ghost" size="sm" onPress={onNotNow} />
-            <Button label="Don't ask me these" variant="ghost" size="sm" onPress={onStopAsking} />
+            <Button label="Not now" variant="ghost" size="sm" fullWidth={false} onPress={onNotNow} />
+            <Button
+              label="Don't ask me these"
+              variant="ghost"
+              size="sm"
+              fullWidth={false}
+              onPress={onStopAsking}
+            />
           </View>
         )}
       </View>

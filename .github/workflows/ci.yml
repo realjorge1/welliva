@@ -38,18 +38,24 @@ jobs:
         if: always() && steps.typecheck.outcome != 'cancelled'
         run: npx vitest run --reporter=verbose
 
-      # Ratchet: the ceiling sits just above the current count (143 — of which
-      # 108 are the accessibility rule). Lower it every sprint rather than
-      # declaring a flag day; see docs/accessibility.md for the burn-down order.
+      # Ratchet: the ceiling sits ON the current count, never above it. Lower it
+      # every sprint rather than declaring a flag day; see docs/accessibility.md
+      # for the burn-down order (the accessibility rule was the bulk of it).
       # Errors are always fatal regardless of this number.
       #
       # 165 → 148: `import/first` is now off for test files (eslint.config.js),
       # which retired 21 warnings no one could action. Ratchets only work if
       # they follow the count DOWN — leaving the old ceiling would have banked
       # the win as slack and let 20 new warnings in unnoticed.
+      #
+      # 148 -> 55 (31 Oct 2026): the count had fallen to 55 while the ceiling stayed
+      # at 148, so the ratchet carried 93 warnings of slack and had stopped being a
+      # ratchet - almost a hundred new warnings could have landed green. Set to the
+      # exact count. If this step fails, read the new warning rather than raising
+      # the number: raising it is how it reached 148.
       - name: Lint
         if: always() && steps.typecheck.outcome != 'cancelled'
-        run: npx eslint . --max-warnings=148
+        run: npx eslint . --max-warnings=55
 
       # Report-only for now. Dead code accumulates fastest post-refactor /
       # pre-launch, which is exactly where this project is. Flip to a hard gate

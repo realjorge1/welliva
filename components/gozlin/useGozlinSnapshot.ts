@@ -12,6 +12,8 @@
  */
 
 import { useApp } from "@/contexts/AppContext";
+import { useCycleOptional } from "@/contexts/CycleContext";
+import { useDayCalorieDelta } from "@/contexts/domain/useDayTarget";
 import type { WorkoutSession } from "@/models/workout";
 import { buildTwin, type GozlinSnapshotInput, type GozlinTwin } from "@/services/gozlin";
 import { useMemo } from "react";
@@ -43,10 +45,27 @@ export function useGozlinSnapshot(): GozlinSnapshot {
   // training-load proxy. Shared with the Exercise screen so both show one score.
   const { wearable, checkins } = useReadinessSignals(app.currentDate);
 
+  // The coach's weight trend leaves out the days her own history shows the scale
+  // reads water, once that's confirmed. The coach isn't told why; it sees a trend.
+  const noisyKey = useCycleOptional()?.view.noisyWeightDates.join(",") ?? "";
+  const trendBodyLogs = useMemo(() => {
+    if (!noisyKey) return undefined;
+    const noisy = new Set(noisyKey.split(","));
+    return app.bodyLogs.filter((b) => !noisy.has(b.date));
+  }, [noisyKey, app.bodyLogs]);
+
+  // Today's own calorie target, when today has one. `targets` stays the usual
+  // one: the forecast and the coach's 14-day read compare against it.
+  const calorieDelta = useDayCalorieDelta(app.currentDate);
+  const usualCalories = app.nutritionTargets?.calories;
+
   const snapshot = useMemo<GozlinSnapshotInput>(
     () => ({
       bio: app.userBio,
       targets: app.nutritionTargets,
+      ...(calorieDelta && usualCalories
+        ? { dayCalorieTarget: usualCalories + calorieDelta, easyOnCalories: calorieDelta > 0 }
+        : {}),
       consumed: app.consumedNutrition,
       waterGoalMl:
         app.userGoals?.dailyWaterMl ?? app.nutritionTargets?.waterMl ?? 2500,
@@ -58,6 +77,7 @@ export function useGozlinSnapshot(): GozlinSnapshot {
       sessionHistory: app.sessionHistory,
       dietHistory: app.dietHistory,
       bodyLogs: app.bodyLogs,
+      trendBodyLogs,
       streak: app.streakData,
       goals: app.userGoals,
       wearable,
@@ -66,6 +86,8 @@ export function useGozlinSnapshot(): GozlinSnapshot {
     [
       app.userBio,
       app.nutritionTargets,
+      calorieDelta,
+      usualCalories,
       app.consumedNutrition,
       app.userGoals,
       app.todayDiet,
@@ -76,6 +98,7 @@ export function useGozlinSnapshot(): GozlinSnapshot {
       app.sessionHistory,
       app.dietHistory,
       app.bodyLogs,
+      trendBodyLogs,
       app.streakData,
       wearable,
       checkins,

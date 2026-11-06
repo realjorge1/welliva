@@ -33,6 +33,7 @@ import type { GozlinChatContext } from "../GozlinChatEngine";
 import { crossReference, type HabitTrackerBrief } from "../GozlinTrackerHabits";
 import { conditionRules } from "./clinical";
 import { experienceEvidence } from "./experiences";
+import { replyLanguageLines } from "./replyLanguage";
 import { cycleStateLines } from "../../cycle/brief";
 
 // ════════════════════════════════════════════════════════════════
@@ -194,7 +195,10 @@ export function localClock(asOf: string): { date: string; label: string } {
  */
 export function twinStateMessage(
   twin: GozlinTwin,
-  ctx?: Pick<GozlinChatContext, "snapshot" | "identity" | "habits" | "experiences" | "cycle" | "now">,
+  ctx?: Pick<
+    GozlinChatContext,
+    "snapshot" | "identity" | "habits" | "experiences" | "cycle" | "language" | "now" | "roughDay"
+  >,
   /** The message being answered — enables the habit cross-reference and recall. */
   userText?: string,
 ): WireMessage {
@@ -212,7 +216,7 @@ export function twinStateMessage(
   ];
 
   const who = identityEvidence(ctx?.identity);
-  if (who.motivation) lines.push(`their stated why: ${who.motivation}`);
+  if (who.motivation) lines.push(`their stated why: ${who.motivation} (their exact words: quote them or leave them, never reword them)`);
 
   // What they asked Gozlin to remember. These used to reach the model only if
   // it chose to call recall_memory, so "bad left knee" — saved, confirmed by
@@ -252,6 +256,18 @@ export function twinStateMessage(
   // grounding set, so "day 12" is citable exactly when it was shown.
   lines.push(...cycleStateLines(ctx?.cycle));
 
+  // A rough day they marked themselves (services/smart/roughDay). It changes
+  // how to talk today, not what is true: the logged numbers above still stand.
+  if (ctx?.roughDay) {
+    const why = ctx.roughDay.reasonLabel ? ` (${ctx.roughDay.reasonLabel.toLowerCase()})` : "";
+    lines.push(
+      "",
+      `Today they marked a rough day${why}. Be brief and kind; don't push plans, workouts or targets today.${
+        ctx.roughDay.streakPaused ? " Their daily streak is paused for today, not broken." : ""
+      }`,
+    );
+  }
+
   const rules = conditionRules(ctx?.snapshot.bio ?? null);
   if (rules.length > 0) {
     lines.push(
@@ -260,6 +276,11 @@ export function twinStateMessage(
       ...rules.map((r) => `- ${r}`),
     );
   }
+
+  // Which language to write in — form, not state, so it goes last. It lives
+  // here rather than in TIER 1 because it is per-person: one French sentence
+  // in the frozen prompt would split the cache everyone shares.
+  lines.push(...replyLanguageLines(ctx?.language));
 
   return { role: "system", content: lines.join("\n") };
 }

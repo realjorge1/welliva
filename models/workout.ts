@@ -127,6 +127,12 @@ export interface WorkoutLogEntry {
   completionPercent: number;
   durationMinutes: number;
   completedAt: string; // ISO timestamp
+  /**
+   * Every set of every move done, nothing skipped. `completionPercent` can't say
+   * this: a move with one of its three sets done still counts as completed.
+   * Absent on entries written before 2026-11-02.
+   */
+  allSetsDone?: boolean;
 }
 
 /** Body measurement log */

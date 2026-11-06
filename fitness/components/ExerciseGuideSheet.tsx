@@ -89,6 +89,7 @@ export function ExerciseGuideSheet({ visible, onClose, exercise }: ExerciseGuide
           <ExerciseFigure
             exerciseId={exercise.exerciseId}
             category={exercise.category}
+            name={exercise.name}
             size={176}
             playing={visible}
           />

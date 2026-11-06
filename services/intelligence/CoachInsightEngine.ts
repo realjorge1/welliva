@@ -56,6 +56,11 @@ export interface CoachContext {
   workoutSession: WorkoutSession | null;
   workoutDoneToday: boolean;
   streak: StreakData;
+  /**
+   * Today is a day she chose to plan extra for (services/nutrition/dayTargets).
+   * Going over on it is never told off, and never followed by "lighter tomorrow".
+   */
+  easyOnCalories?: boolean;
   /** Injectable for testing; defaults to now. */
   now?: Date;
 }
@@ -113,7 +118,7 @@ export function generateCoachInsights(ctx: CoachContext): CoachInsight[] {
         priority: 7,
       });
     } else if (calPct > 1.08) {
-      insights.push({
+      if (!ctx.easyOnCalories) insights.push({
         id: "over-cal",
         type: "nutrition",
         tone: "warning",

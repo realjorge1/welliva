@@ -27,12 +27,20 @@
  * diet for a meal, the water counter and streak for a glass or a meal — so the
  * ring fills and the meal checks off while the user watches. (Habits re-read in
  * HabitsContext; the suspended/killed case re-reads on foreground.)
+ *
+ * ── HALF THREE: REMINDERS THAT KNOW WHAT'S DONE ─────────────────────────────
+ * A glass logged in the app re-plans the water check-ins (the next one names
+ * the time of this glass and the next 90 minutes stay quiet); a meal ticked or
+ * logged re-lays the meal window, which drops today's reminder for it. The
+ * water goal is cached here for the lock-screen path, which has no bio to
+ * derive one from. And "Pause notifications" clears or re-lays everything.
  */
 import { useAuth } from "@/components/SupabaseAuthProvider";
 import { onReminderPermissionGranted } from "@/components/notifications/useReminderPermission";
-import { useNutrition } from "@/contexts/AppContext";
+import { useNutrition, useProfile } from "@/contexts/AppContext";
 import { useHabits } from "@/contexts/HabitsContext";
 import { refreshFitnessReminders } from "@/fitness/services/FitnessNotifications";
+import type { DaySchedule } from "@/models/diet";
 import {
   commitExactAlarmStatus,
   exactAlarmStatus,
@@ -45,7 +53,8 @@ import {
   readNotificationFormat,
   writeNotificationFormat,
 } from "@/services/notifications/format";
-import { syncWaterReminders } from "@/services/notifications/waterReminders";
+import { subscribeNotificationPause } from "@/services/notifications/pause";
+import { rememberWaterGoal, syncWaterReminders } from "@/services/notifications/waterReminders";
 import { relayCycleReminders } from "@/services/cycle/reminders";
 import * as Notifications from "expo-notifications";
 import { useEffect, useRef } from "react";
@@ -54,23 +63,45 @@ import { AppState } from "react-native";
 /** A foreground within this long of the last full re-lay only re-checks permission. */
 const RELAY_THROTTLE_MS = 5 * 60 * 1000;
 
+/** How long a burst of logging settles before the reminders are re-planned. */
+const REPLAN_DEBOUNCE_MS = 1500;
+
 export function ReminderSyncRunner(): null {
   const { user } = useAuth();
   const signedIn = !!user;
-  const { refreshTodayDiet, syncLiveCounters } = useNutrition();
+  const { refreshTodayDiet, syncLiveCounters, consumedNutrition, todayDiet } = useNutrition();
+  const { userGoals, nutritionTargets } = useProfile();
   const { reconcileReminders } = useHabits();
   const reconcileRef = useRef(reconcileReminders);
   reconcileRef.current = reconcileReminders;
+
+  // The same goal every water surface uses (Home, Diet, the streak).
+  const waterGoalMl = userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500;
+  const waterGoalRef = useRef(waterGoalMl);
+  waterGoalRef.current = waterGoalMl;
+  useEffect(() => {
+    if (signedIn) void rememberWaterGoal(waterGoalMl).catch(() => {});
+  }, [signedIn, waterGoalMl]);
 
   useEffect(() => {
     if (!signedIn) return;
     let alive = true;
     let running = false;
+    let queued: { forceRelay: boolean; forceHabits: boolean } | null = null;
     let lastGranted: boolean | null = null;
     let lastRelayAt = 0;
 
-    const run = async (forceRelay = false) => {
-      if (running) return;
+    const run = async (forceRelay = false, forceHabits = false) => {
+      if (running) {
+        // A pause/resume mid-run must not be lost: run again once this one ends.
+        if (forceRelay) {
+          queued = {
+            forceRelay: true,
+            forceHabits: forceHabits || !!queued?.forceHabits,
+          };
+        }
+        return;
+      }
       running = true;
       try {
         const perms = await Notifications.getPermissionsAsync().catch(() => null);
@@ -92,13 +123,17 @@ export function ReminderSyncRunner(): null {
 
         // A notification-format change (new channel, owner stamp, identifiers,
         // exact alarms) re-lays every habit reminder once rather than waiting
-        // for each one to go missing.
+        // for each one to go missing. So does a resume from "Pause".
         const force =
-          exactChanged || (await readNotificationFormat()) < NOTIFICATION_FORMAT;
+          forceHabits ||
+          exactChanged ||
+          (await readNotificationFormat()) < NOTIFICATION_FORMAT;
 
         // Sequential on purpose: each module cancels its own ids and re-lays,
         // and interleaving them against one OS queue gains nothing.
         await syncMealReminders();
+        // The goal first, so today's check-ins can tell whether it's met.
+        await rememberWaterGoal(waterGoalRef.current).catch(() => {});
         await syncWaterReminders();
         await refreshFitnessReminders();
         // Cycle: read straight from storage, so it holds even when the cycle
@@ -112,6 +147,9 @@ export function ReminderSyncRunner(): null {
         // fail-soft: the next foreground tries again
       } finally {
         running = false;
+        const next = queued;
+        queued = null;
+        if (next && alive) void run(next.forceRelay, next.forceHabits);
       }
     };
 
@@ -122,12 +160,54 @@ export function ReminderSyncRunner(): null {
     const offGrant = onReminderPermissionGranted(() => {
       if (alive) void run(true);
     });
+    // Pause: every module cancels its own and lays nothing (each checks the
+    // flag). Resume: everything comes back from its stored settings, habits
+    // included — their repair is forced, since the queue was emptied under them.
+    const offPause = subscribeNotificationPause(() => {
+      if (alive) void run(true, true);
+    });
     return () => {
       alive = false;
       sub.remove();
       offGrant();
+      offPause();
     };
   }, [signedIn]);
+
+  // ── re-plan around what was just logged ───────────────────────────
+  // Skips the first value of each (that's the mount, which `run` covers) and
+  // waits for a burst of taps to settle before touching the queue.
+  const waterMl = consumedNutrition.waterMl;
+  const mealSignature = mealProgressSignature(todayDiet?.schedule, consumedNutrition.calories);
+  const seenWater = useRef<number | null>(null);
+  const seenMeals = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!signedIn) return;
+    if (seenWater.current === null || seenWater.current === waterMl) {
+      seenWater.current = waterMl;
+      return;
+    }
+    seenWater.current = waterMl;
+    const timer = setTimeout(() => {
+      void (async () => {
+        await rememberWaterGoal(waterGoalRef.current).catch(() => {});
+        await syncWaterReminders();
+      })();
+    }, REPLAN_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [signedIn, waterMl]);
+
+  useEffect(() => {
+    if (!signedIn) return;
+    if (seenMeals.current === null || seenMeals.current === mealSignature) {
+      seenMeals.current = mealSignature;
+      return;
+    }
+    seenMeals.current = mealSignature;
+    const timer = setTimeout(() => void syncMealReminders(), REPLAN_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [signedIn, mealSignature]);
 
   // Lock-screen writes made while this tree is alive.
   useEffect(
@@ -146,4 +226,24 @@ export function ReminderSyncRunner(): null {
   // re-reads the diet and then these same counters.
 
   return null;
+}
+
+/**
+ * Changes whenever a meal is ticked/unticked or food is logged today: which
+ * planned meals are eaten, plus the day's calories (the food log moves only
+ * those). Cheap enough to compute every render.
+ */
+function mealProgressSignature(
+  schedule: DaySchedule | null | undefined,
+  calories: number,
+): string {
+  const ticks = schedule
+    ? [
+        schedule.breakfast?.isConsumed ? 1 : 0,
+        schedule.lunch?.isConsumed ? 1 : 0,
+        schedule.dinner?.isConsumed ? 1 : 0,
+        (schedule.snacks ?? []).filter((s) => s?.isConsumed).length,
+      ].join("")
+    : "-";
+  return `${schedule?.date ?? ""}:${ticks}:${Math.round(calories)}`;
 }

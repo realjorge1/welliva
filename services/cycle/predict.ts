@@ -36,9 +36,9 @@
  * the youngest and oldest age groups.
  */
 
-import { addDays, daysBetween } from "./dates";
+import { addDays, daysBetween, maxDate } from "./dates";
 import { liveEpisodes, resolveEnd } from "./episodes";
-import type { CycleDays, CycleSettings, PeriodEpisode } from "./types";
+import type { ContraceptionAnswer, CycleDays, CycleSettings, PeriodEpisode } from "./types";
 
 export const POPULATION_CYCLE_DAYS = 29;
 export const POPULATION_PERIOD_DAYS = 5;
@@ -50,19 +50,62 @@ export const STATS_WINDOW = 6;
 /** z for a two-sided 80% interval. */
 const Z80 = 1.2816;
 
-export type CycleMode = "normal" | "pregnancy" | "postpartum" | "menopause";
+/**
+ * What the tracker is doing for her:
+ *   normal     — predicting
+ *   pregnancy  — paused
+ *   postpartum — predicting again, from the first period after the birth
+ *   menopause  — logging only
+ *   hormonal   — logging only: she uses hormonal contraception, so bleeding
+ *                follows the method and nothing is predicted (./contraception)
+ */
+export type CycleMode = "normal" | "pregnancy" | "postpartum" | "menopause" | "hormonal";
 
 export interface CycleProfile {
   age?: number | null;
   conditions?: readonly string[];
+  /** Only the hungrier-week plan reads this (./hungry). */
+  bmi?: number | null;
 }
 
-/** Life stage from the profile. Pregnancy outranks postpartum outranks menopause. */
-export function cycleModeOf(conditions: readonly string[] = []): CycleMode {
+/**
+ * The mode, from the profile's life stage and her contraception answer.
+ * Pregnancy and menopause outrank hormonal contraception; hormonal outranks
+ * postpartum, because predictions from bleeds on a method are wrong whatever
+ * else is true. Among the life stages: pregnancy, postpartum, menopause.
+ */
+export function cycleModeOf(
+  conditions: readonly string[] = [],
+  contraception: ContraceptionAnswer | null = null,
+): CycleMode {
   if (conditions.includes("pregnancy")) return "pregnancy";
+  if (contraception === "hormonal" && !conditions.includes("menopause")) return "hormonal";
   if (conditions.includes("postpartum")) return "postpartum";
   if (conditions.includes("menopause")) return "menopause";
   return "normal";
+}
+
+/**
+ * The first day her history counts from, or null for all of it: after a birth
+ * (postpartum), and after she stopped a hormonal method. The later one wins.
+ */
+export function countFrom(
+  settings: Pick<CycleSettings, "postpartumSince" | "contraception">,
+  mode: CycleMode,
+): string | null {
+  const birth = mode === "postpartum" ? settings.postpartumSince : null;
+  const method = settings.contraception?.restartFrom ?? null;
+  return birth && method ? maxDate(birth, method) : (birth ?? method);
+}
+
+/**
+ * Whether the fertile-window estimate may appear anywhere: she asked to see
+ * it, AND the mode predicts at all. In logging-only modes it is never computed
+ * (predict returns null) and never labelled — this is the one switch every
+ * surface reads, so there is no way to show it by reading the setting alone.
+ */
+export function fertileWindowAllowed(showFertileWindow: boolean, mode: CycleMode): boolean {
+  return showFertileWindow && (mode === "normal" || mode === "postpartum");
 }
 
 /* ───────────────────────────── small stats ───────────────────────────── */
@@ -248,8 +291,11 @@ export function personalLuteal(cycles: readonly CycleRecord[], days: CycleDays):
 
 export function predict(input: PredictInput): Prediction | null {
   const { settings, today } = input;
-  const mode = cycleModeOf(input.profile?.conditions);
-  const since = mode === "postpartum" ? settings.postpartumSince : null;
+  const mode = cycleModeOf(input.profile?.conditions, settings.contraception?.answer);
+  // Nothing to predict: paused, or bleeding that follows a method. Returning
+  // here is what makes the fertile window impossible to compute in either.
+  if (mode === "pregnancy" || mode === "hormonal") return null;
+  const since = countFrom(settings, mode);
   const live = liveEpisodes(input.episodes).filter((e) => !since || e.start >= since);
   if (!live.length) return null;
 
@@ -352,8 +398,8 @@ export interface CycleToday {
 
 export function todayStatus(input: PredictInput, prediction: Prediction | null): CycleToday {
   const { today, settings } = input;
-  const mode = cycleModeOf(input.profile?.conditions);
-  const since = mode === "postpartum" ? settings.postpartumSince : null;
+  const mode = cycleModeOf(input.profile?.conditions, settings.contraception?.answer);
+  const since = countFrom(settings, mode);
   const live = liveEpisodes(input.episodes).filter((e) => !since || e.start >= since);
   const last = live.length ? live[live.length - 1] : null;
   const typicalBleed = prediction?.periodLength ?? typicalPeriodLength(live, settings).days;

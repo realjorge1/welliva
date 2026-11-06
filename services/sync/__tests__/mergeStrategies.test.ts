@@ -184,6 +184,61 @@ const FIXTURES: Record<string, [string, string]> = {
       "2026-09-03": { date: "2026-09-03", flow: "light", updatedAt: "2026-09-03T08:00:00.000Z" },
     }),
   ],
+  // SmartAnswer[] — "Keep" on the phone after "Move it" was shown on the tablet: later wins.
+  "@welliva_smart_answers": [
+    JSON.stringify([
+      { id: "reminder-move:habit:h1", feature: "reminder-move", answer: "declined", at: "2026-11-03T21:00:00.000Z", until: "2026-12-02", value: 1290 },
+    ]),
+    JSON.stringify([
+      { id: "reminder-move:habit:h1", feature: "reminder-move", answer: "accepted", at: "2026-11-03T20:00:00.000Z" },
+      { id: "why:ask", feature: "why", answer: "dismissed", at: "2026-11-02T08:00:00.000Z", until: "2026-12-01" },
+    ]),
+  ],
+  // Record<date, PlannedDay> — 11-05 re-planned on the phone (newer), 11-06 only on the tablet.
+  "@welliva_planned_days": [
+    JSON.stringify({
+      "2026-11-05": { planned: false, updatedAt: "2026-11-03T10:00:00.000Z" },
+    }),
+    JSON.stringify({
+      "2026-11-05": { planned: true, sessionId: "s1", updatedAt: "2026-11-02T08:00:00.000Z" },
+      "2026-11-06": { planned: true, sessionId: "s2", updatedAt: "2026-11-02T08:00:00.000Z" },
+    }),
+  ],
+  // ShortWeekday[] — Thursday back to full on one phone (tombstone, newer), Monday only there.
+  "@welliva_short_weekdays": [
+    JSON.stringify([
+      { id: "short:3", weekday: 3, since: "2026-10-01", until: "2026-10-28", updatedAt: "2026-10-01T18:00:00.000Z" },
+    ]),
+    JSON.stringify([
+      { id: "short:3", weekday: 3, since: "2026-10-01", until: "2026-10-28", updatedAt: "2026-10-29T08:00:00.000Z", deleted: true },
+      { id: "short:0", weekday: 0, since: "2026-10-12", until: "2026-11-08", updatedAt: "2026-10-12T08:00:00.000Z" },
+    ]),
+  ],
+  // RoughDay[] — 11-03 taken back on the phone (tombstone, newer), 11-01 only on the tablet.
+  "@welliva_rough_days": [
+    JSON.stringify([
+      { date: "2026-11-03", protected: true, createdAt: "2026-11-03T08:00:00.000Z", updatedAt: "2026-11-03T15:00:00.000Z", deleted: true },
+    ]),
+    JSON.stringify([
+      { date: "2026-11-01", reason: "ill", protected: true, createdAt: "2026-11-01T09:00:00.000Z", updatedAt: "2026-11-01T09:00:00.000Z" },
+      { date: "2026-11-03", protected: true, createdAt: "2026-11-03T08:00:00.000Z", updatedAt: "2026-11-03T08:00:00.000Z" },
+    ]),
+  ],
+  // ForgottenUsual[] — breakfast forgotten on the phone, dinner on the tablet: both stay forgotten.
+  "@welliva_usuals_forgotten": [
+    JSON.stringify([{ id: "usual:breakfast:abc", at: "2026-11-03T08:00:00.000Z" }]),
+    JSON.stringify([{ id: "usual:dinner:xyz", at: "2026-11-02T20:00:00.000Z" }]),
+  ],
+  // HabitTickTime[] — h1's tick un-ticked on one phone (tombstone, newer), h2 only there.
+  "@welliva_habit_tick_times": [
+    JSON.stringify([
+      { id: "h1:2026-11-02", habitId: "h1", date: "2026-11-02", at: "2026-11-02T21:40:00+00:00", via: "app", updatedAt: "2026-11-02T21:40:00.000Z" },
+    ]),
+    JSON.stringify([
+      { id: "h1:2026-11-02", habitId: "h1", date: "2026-11-02", at: "2026-11-02T21:40:00+00:00", via: "app", updatedAt: "2026-11-02T22:05:00.000Z", deleted: true },
+      { id: "h2:2026-11-02", habitId: "h2", date: "2026-11-02", at: "2026-11-02T07:10:00+00:00", via: "notification", firedAt: "2026-11-02T07:00:00+00:00", updatedAt: "2026-11-02T07:10:00.000Z" },
+    ]),
+  ],
   [KEYS.NUTRITION_HISTORY]: [
     JSON.stringify([{ date: "2026-07-01", calories: 2000, mealsLogged: 3 }]),
     JSON.stringify([{ date: "2026-07-02", calories: 2100, mealsLogged: 2 }]),

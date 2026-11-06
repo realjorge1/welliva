@@ -100,6 +100,18 @@ export interface ScreenTopBarProps {
 const CENTRE_INSET = 52;
 
 /**
+ * How far the centre line sits BELOW the menu button's own centre line.
+ *
+ * Dead-centre on the buttons put Home's one-line fact level with the very top of
+ * the page, where it read as crowding the status bar (owner, 2026-10-31: "too far
+ * up, bring it down a bit"). Eight points hangs it from the buttons' mid-line
+ * toward their lower edge — still clearly the same row, and clear of the name
+ * line beneath, whose top is 4pt past this row's foot. Only Home draws a centre
+ * line, so this moves nothing else.
+ */
+const GREETING_DROP = 8;
+
+/**
  * How far the island reaches past line 1's own box. Enough that the menu glyph
  * and the coach's ring sit inside the pill rather than on its rim, little
  * enough that it still clears the screen edge by the same few points.
@@ -264,6 +276,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: CENTRE_INSET,
+    // A translate, not padding: padding on a centred box moves the text by half
+    // of it, which is a hard sum to read back when someone wants "a bit more".
+    transform: [{ translateY: GREETING_DROP }],
   },
 
   nameLine: {

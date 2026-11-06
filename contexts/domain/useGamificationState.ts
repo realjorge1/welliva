@@ -66,6 +66,7 @@ import {
   loadStreakData,
   onCommitmentKept,
 } from "../../services/StreakService";
+import { track } from "../../services/telemetry";
 
 /** Human label per goal — used in chapter celebrations + Gozlin memory. */
 const GOAL_LABEL: Record<PrimaryGoal, string> = {
@@ -179,6 +180,10 @@ export function useGamificationState({
       onCommitmentKept((data) => {
         const today = todayDate();
         if (data.lastActiveDate !== today) return;
+        // Past the today-only guard, so this counts the day actually being kept
+        // rather than any replay of an older ledger entry. The retention mechanic
+        // firing is the thing worth measuring against whether people come back.
+        track("streak_kept");
         const c = celebrationForCommitment(readCommitment(data, today), today);
         setCelebrations((prev) => {
           if (prev.some((p) => p.id === c.id)) return prev;

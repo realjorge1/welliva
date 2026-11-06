@@ -12,9 +12,11 @@ import {
   commitmentLine,
   commitmentStatus,
   isMilestone,
+  keptOn,
   liveStreak,
   readCommitment,
   shiftDay,
+  streakWithToday,
   weekdayIndex,
   withKeptDay,
   type StreakLike,
@@ -165,6 +167,60 @@ describe("readCommitment", () => {
       WED,
     );
     expect(s.best).toBe(6);
+  });
+});
+
+describe("keptOn — any run of days", () => {
+  it("answers a rolling week that crosses a Monday, off the ledger", () => {
+    // Thu 8 Oct … Wed 14 Oct: last week's Friday and this week's Tuesday kept.
+    const dates = Array.from({ length: 7 }, (_, i) => shiftDay(WED, i - 6));
+    const kept = keptOn(record({ days: ["2026-10-09", "2026-10-13"] }), dates);
+    expect(kept).toEqual([false, true, false, false, false, true, false]);
+  });
+
+  it("reconstructs a pre-ledger run as far back as the earliest date asked", () => {
+    const dates = Array.from({ length: 7 }, (_, i) => shiftDay(WED, i - 6));
+    const kept = keptOn(
+      { currentStreak: 4, longestStreak: 4, lastActiveDate: "2026-10-13", totalActiveDays: 4 },
+      dates,
+    );
+    // A run of 4 ending Tuesday the 13th: the 10th, 11th, 12th and 13th.
+    expect(kept).toEqual([false, false, true, true, true, true, false]);
+  });
+
+  it("is empty for no dates", () => {
+    expect(keptOn(record(), [])).toEqual([]);
+  });
+});
+
+describe("streakWithToday — the run an action is about to land on", () => {
+  const TUE = shiftDay(WED, -1);
+
+  it("adds today to a run that is still open", () => {
+    const s = readCommitment(record({ currentStreak: 3, lastActiveDate: TUE, days: [TUE] }), WED);
+    expect(streakWithToday(s)).toBe(4);
+  });
+
+  it("starts a new run at 1 after a lapse, or on a first day", () => {
+    const lapsed = readCommitment(record({ currentStreak: 9, lastActiveDate: "2026-10-01" }), WED);
+    expect(streakWithToday(lapsed)).toBe(1);
+    expect(streakWithToday(readCommitment(record(), WED))).toBe(1);
+  });
+
+  it("adds nothing once today is kept", () => {
+    const s = readCommitment(record({ currentStreak: 4, lastActiveDate: WED, days: [WED] }), WED);
+    expect(streakWithToday(s)).toBe(4);
+  });
+
+  it("shows two workouts on one day the same run (owner, 2026-11-01)", () => {
+    // Yesterday kept; the first workout of today is what keeps today.
+    const before = record({ currentStreak: 1, lastActiveDate: TUE, days: [TUE] });
+    const firstChip = streakWithToday(readCommitment(before, WED));
+    // The first session is banked: today is kept, the run is 2.
+    const after = record({ currentStreak: 2, lastActiveDate: WED, days: [TUE, WED] });
+    const secondChip = streakWithToday(readCommitment(after, WED));
+    expect(firstChip).toBe(2);
+    expect(secondChip).toBe(firstChip);
   });
 });
 

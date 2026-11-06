@@ -77,6 +77,23 @@ export const ENERGY_LABEL: Record<Energy, string> = {
   high: "High",
 };
 
+/**
+ * The symptoms "what helped?" asks about (./relief), most significant first —
+ * when she logged more than one, the first here is the one asked about.
+ */
+export const RELIEF_SYMPTOMS = ["cramps", "headache", "back_pain", "nausea"] as const;
+export type ReliefSymptom = (typeof RELIEF_SYMPTOMS)[number];
+
+/** What helped — her one-tap answer. */
+export const RELIEFS = ["heat", "moving", "painkiller", "rest", "sleep", "hot_drink", "other", "nothing"] as const;
+export type Relief = (typeof RELIEFS)[number];
+
+/** Her answer about one symptom, kept on the day she logged it. "skipped" = asked, and passed. */
+export interface ReliefNote {
+  symptom: ReliefSymptom;
+  helped: Relief | "skipped";
+}
+
 /** One period, from the day it started to the last day of bleeding. */
 export interface PeriodEpisode {
   id: string;
@@ -105,6 +122,8 @@ export interface CycleDayLog {
   energy?: Energy;
   /** Only offered when the fertile window is shown. Sharpens the ovulation estimate. */
   ovulationTest?: OvulationTest;
+  /** "What helped most?", answered the next day — at most one entry per symptom logged here. */
+  relief?: ReliefNote[];
   updatedAt: string;
 }
 
@@ -117,6 +136,30 @@ export type CycleDays = Record<string, CycleDayLog>;
  *   pause — pregnancy, illness or a break from logging (never counts)
  */
 export type GapNote = "long" | "pause";
+
+/**
+ * Her answer to "Do you use hormonal contraception?" (the pill, patch, ring,
+ * implant, injection or a hormonal coil). Optional, asked without judgement:
+ *   hormonal — bleeding follows the method, not a cycle, so it is logged and
+ *              never predicted (./predict's "hormonal" mode)
+ *   none     — predictions as usual
+ *   unsaid   — "prefer not to say": predictions as usual
+ */
+export const CONTRACEPTION_ANSWERS = ["hormonal", "none", "unsaid"] as const;
+export type ContraceptionAnswer = (typeof CONTRACEPTION_ANSWERS)[number];
+
+export interface Contraception {
+  answer: ContraceptionAnswer;
+  /** The day she gave this answer. */
+  since: string;
+  /**
+   * Set when she stops a hormonal method: the first day her history counts
+   * from again. Bleeds before it followed the method rather than her cycle, so
+   * they never reach the averages, the patterns or the cycle-length notes —
+   * the same fresh start `postpartumSince` gives after a birth.
+   */
+  restartFrom: string | null;
+}
 
 export interface CycleSettings {
   enabled: boolean;
@@ -139,6 +182,25 @@ export interface CycleSettings {
   fullSessionDays: string[];
   /** First day the profile was seen postpartum — predictions restart from here. */
   postpartumSince: string | null;
+  /** "Do you use hormonal contraception?" — null until she answers (it is optional). */
+  contraception: Contraception | null;
+  /**
+   * The day "many people hold extra water before a period" was first put in
+   * front of her. It is said once, so it stays for that day and never returns.
+   */
+  waterNoteOn: string | null;
+  /** She said yes to planning for her hungrier week. Off until she does; every cycle after that. */
+  planHungryWeek: boolean;
+  /** The day she said yes: the plan can't reach back past it. */
+  hungryPlanFrom: string | null;
+  /** "No thanks", for good. The switch in cycle settings is always there. */
+  hungryDeclined: boolean;
+  /**
+   * Date → kcal the plan moved that day's target by. The past is frozen here
+   * because history doesn't keep the target a day had, and the prediction that
+   * chose these days has moved on since; "% of target" still has to be right.
+   */
+  hungryLedger: Record<string, number>;
   /** The Home invitation was answered "not now". */
   offerDismissed: boolean;
   /**
@@ -180,6 +242,12 @@ export const DEFAULT_CYCLE_SETTINGS: CycleSettings = {
   dismissedFlags: {},
   fullSessionDays: [],
   postpartumSince: null,
+  contraception: null,
+  waterNoteOn: null,
+  planHungryWeek: false,
+  hungryPlanFrom: null,
+  hungryDeclined: false,
+  hungryLedger: {},
   offerDismissed: false,
   gozlinAskDismissed: false,
   gozlinAskDays: [],
@@ -210,6 +278,18 @@ function oneOf<T extends string>(v: unknown, allowed: readonly T[]): T | undefin
   return typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : undefined;
 }
 
+/** An answer without a valid day is no answer: it couldn't say where her history restarts. */
+function normalizeContraception(raw: unknown): Contraception | null {
+  if (!isObject(raw)) return null;
+  const answer = oneOf(raw.answer, CONTRACEPTION_ANSWERS);
+  if (!answer || !isIsoDate(raw.since)) return null;
+  return {
+    answer,
+    since: raw.since,
+    restartFrom: isIsoDate(raw.restartFrom) ? raw.restartFrom : null,
+  };
+}
+
 export function normalizeSettings(raw: unknown): CycleSettings {
   if (!isObject(raw)) return { ...DEFAULT_CYCLE_SETTINGS };
   const gapNotes: Record<string, GapNote> = {};
@@ -230,6 +310,12 @@ export function normalizeSettings(raw: unknown): CycleSettings {
   const gozlinAskDays = Array.isArray(raw.gozlinAskDays)
     ? [...new Set(raw.gozlinAskDays.filter(isIsoDate))].sort().slice(-GOZLIN_ASK_LIMIT)
     : [];
+  const hungryLedger: Record<string, number> = {};
+  if (isObject(raw.hungryLedger)) {
+    for (const [k, v] of Object.entries(raw.hungryLedger)) {
+      if (isIsoDate(k) && typeof v === "number" && Number.isFinite(v)) hungryLedger[k] = Math.round(v);
+    }
+  }
   const bool = (v: unknown, fallback: boolean) => (typeof v === "boolean" ? v : fallback);
   const d = DEFAULT_CYCLE_SETTINGS;
   return {
@@ -245,6 +331,12 @@ export function normalizeSettings(raw: unknown): CycleSettings {
     dismissedFlags,
     fullSessionDays,
     postpartumSince: isIsoDate(raw.postpartumSince) ? raw.postpartumSince : null,
+    contraception: normalizeContraception(raw.contraception),
+    waterNoteOn: isIsoDate(raw.waterNoteOn) ? raw.waterNoteOn : null,
+    planHungryWeek: bool(raw.planHungryWeek, d.planHungryWeek),
+    hungryPlanFrom: isIsoDate(raw.hungryPlanFrom) ? raw.hungryPlanFrom : null,
+    hungryDeclined: bool(raw.hungryDeclined, d.hungryDeclined),
+    hungryLedger,
     offerDismissed: bool(raw.offerDismissed, d.offerDismissed),
     gozlinAskDismissed: bool(raw.gozlinAskDismissed, d.gozlinAskDismissed),
     gozlinAskDays,
@@ -289,7 +381,23 @@ export function normalizeDayLog(date: string, raw: unknown): CycleDayLog | null 
   if (mood) log.mood = mood;
   if (energy) log.energy = energy;
   if (test) log.ovulationTest = test;
+  // An answer about a symptom this day doesn't carry is an answer about nothing.
+  const relief = normalizeRelief(raw.relief).filter((r) => symptoms.includes(r.symptom));
+  if (relief.length) log.relief = relief;
   return log;
+}
+
+/** One entry per symptom, the last one written winning; anything malformed dropped. */
+function normalizeRelief(raw: unknown): ReliefNote[] {
+  if (!Array.isArray(raw)) return [];
+  const bySymptom = new Map<ReliefSymptom, ReliefNote>();
+  for (const item of raw) {
+    if (!isObject(item)) continue;
+    const symptom = oneOf(item.symptom, RELIEF_SYMPTOMS);
+    const helped = item.helped === "skipped" ? "skipped" : oneOf(item.helped, RELIEFS);
+    if (symptom && helped) bySymptom.set(symptom, { symptom, helped });
+  }
+  return [...bySymptom.values()];
 }
 
 export function normalizeDays(raw: unknown): CycleDays {

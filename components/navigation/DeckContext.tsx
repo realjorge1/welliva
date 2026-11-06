@@ -2,7 +2,7 @@
  * THE DECK — one object at the base of the screen, and the rules it lives by.
  *
  *   ╭──────────────────────────────────────────╮  ╭─────╮
- *   │  ◉ Home    Diet    Fitness    Gozlin     │  │  +  │  ← THE RAIL
+ *   │  ◉ Home         Diet         Fitness     │  │  +  │  ← THE RAIL
  *   ╰──────────────────────────────────────────╯  ╰─────╯
  *
  * WHAT THIS REPLACED, AND WHY. The Action Bar put a full-width gold button at
@@ -12,7 +12,7 @@
  * where am I, where else can I go — had no presence at the bottom at all. The
  * weighting was inverted. The Deck swaps it back:
  *
- *   · THE RAIL is furniture. Four destinations and one action, the same four
+ *   · THE RAIL is furniture. Three destinations and one action, the same three
  *     and the same one on every screen, so muscle memory has somewhere to live
  *     and nothing at the bottom needs reading at rest. It is a pinned SUBSET of
  *     the swipe menu, rendered from the same `menu.ts` and lit with the same
@@ -98,9 +98,9 @@ export function useDeckOptional(): DeckApi | null {
 }
 
 /* ───────────────────────────── Geometry & motion ──────────────────────────
- * Tuned for a 393pt-wide phone: four tabs and a 62pt action still leave the
- * labels room to sit on one line, and the whole object clears the home
- * indicator without floating halfway up the screen.
+ * Tuned for a 393pt-wide phone: three tabs and a 62pt action leave the labels
+ * room to sit on one line, and the whole object clears the home indicator
+ * without floating halfway up the screen.
  */
 
 /** The rail at rest, and the gold action beside it. */

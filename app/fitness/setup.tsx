@@ -305,7 +305,7 @@ export default function FitnessSetupScreen() {
     // be torn down when reminders are switched off, and re-laid when the
     // training days changed underneath an already-on reminder.
     const result = await syncFitnessReminders(await loadFitnessProfile());
-    if (workoutReminders && result.status !== "ok") {
+    if (workoutReminders && result.status !== "ok" && result.status !== "paused") {
       // Opted in but nothing was scheduled — say so rather than let the profile
       // claim a reminder that will never arrive.
       await update({ reminders: { workouts: false } });

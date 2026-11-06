@@ -31,12 +31,15 @@ export function StatusHero({
   exact: ExactAlarmStatus;
 }) {
   const { colors } = useColors();
-  const { permission, queue } = center;
+  const { permission, queue, paused } = center;
   const status = permission.status;
+  // Paused only means something once notifications are allowed at all.
+  const quiet = paused && status === "granted";
 
   const next = queue.find((q) => q.next !== null) ?? null;
-  const tone =
-    status === "granted"
+  const tone = quiet
+    ? colors.warning
+    : status === "granted"
       ? colors.success
       : status === "denied"
         ? colors.warning
@@ -45,13 +48,19 @@ export function StatusHero({
   return (
     <Card padding="lg" style={styles.card}>
       <View style={styles.row}>
-        <BellGlyph tone={tone} on={status === "granted"} />
+        <BellGlyph tone={tone} on={status === "granted" && !quiet} />
         <View style={styles.flex}>
-          <AppText variant="headline">{TITLE[status]}</AppText>
-          <AppText variant="footnote" color="secondary" style={styles.line}>
-            {status === "granted" ? summary(queue, next) : BLURB[status]}
+          <AppText variant="headline">
+            {quiet ? "Notifications are paused" : TITLE[status]}
           </AppText>
-          {status === "granted" && exact === "exact" && queue.length > 0 ? (
+          <AppText variant="footnote" color="secondary" style={styles.line}>
+            {quiet
+              ? "Nothing is lined up while they're paused. Switch the pause off below and every reminder comes back as you set it."
+              : status === "granted"
+                ? summary(queue, next)
+                : BLURB[status]}
+          </AppText>
+          {status === "granted" && !quiet && exact === "exact" && queue.length > 0 ? (
             <Pill
               label="On the minute"
               icon="alarm"

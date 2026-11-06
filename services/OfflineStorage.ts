@@ -235,6 +235,14 @@ export interface WaterHistoryEntry {
   date: string; // YYYY-MM-DD (local)
   ml: number; // total water consumed that day
   goalMl?: number; // the daily goal in effect that day, if known
+  /**
+   * ISO time of the day's first glass, when this phone logged it. The drink
+   * list itself is kept for one day only (services/nutrition/waterPours), so
+   * this is the one piece of it the routine clock (services/routine) needs to
+   * outlive midnight. Absent on days before 2026-11-03 and on days whose
+   * glasses were all logged elsewhere.
+   */
+  firstAt?: string;
 }
 
 /** Keep the archive bounded — roughly three months of daily entries. */
@@ -245,16 +253,28 @@ const WATER_HISTORY_MAX = 90;
  * (re-archiving the same day overwrites), sorted ascending, capped to the most
  * recent WATER_HISTORY_MAX days. No-ops for a missing/zero day so we don't
  * persist empty placeholder entries.
+ *
+ * `firstAt` is the time of the day's first glass, if known. A re-archive that
+ * doesn't know it keeps the one already on the row — by then the drink list
+ * may hold the next day's glasses.
  */
 export async function archiveWaterDay(
   date: string,
   ml: number,
   goalMl?: number,
+  firstAt?: string | null,
 ): Promise<void> {
   if (!date || ml <= 0) return;
   const history = await readJSON<WaterHistoryEntry[]>(KEYS.WATER_HISTORY, []);
+  const prior = history.find((e) => e.date === date);
   const next = history.filter((e) => e.date !== date);
-  next.push(goalMl != null ? { date, ml, goalMl } : { date, ml });
+  const first = firstAt ?? prior?.firstAt;
+  next.push({
+    date,
+    ml,
+    ...(goalMl != null ? { goalMl } : {}),
+    ...(first ? { firstAt: first } : {}),
+  });
   next.sort((a, b) => a.date.localeCompare(b.date));
   await writeJSON(KEYS.WATER_HISTORY, next.slice(-WATER_HISTORY_MAX));
 }

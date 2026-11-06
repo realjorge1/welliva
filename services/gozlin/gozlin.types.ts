@@ -76,6 +76,21 @@ export interface GozlinSnapshotInput {
   dietHistory: DietHistoryEntry[];
   /** Weigh-ins / tape measurements — the empirical ground truth for the forecast. */
   bodyLogs: BodyLogEntry[];
+  /**
+   * The weigh-ins a TREND may read, when that differs from all of them: without
+   * the days her own history shows the scale reads water before a period. A
+   * straight line over 28 days with a 1 kg rise in its last week is off by about
+   * 0.28 kg a week, enough to make a steady loss look stalled. Absent: all of them.
+   */
+  trendBodyLogs?: BodyLogEntry[];
+  /**
+   * Today's own calorie target, when it isn't the usual one
+   * (services/nutrition/dayTargets). `targets` stays the usual one: the forecast
+   * and the 14-day comparison read long-run averages, and the plan keeps the total.
+   */
+  dayCalorieTarget?: number;
+  /** Today is a day she chose to plan extra for: going over isn't flagged. */
+  easyOnCalories?: boolean;
   streak: StreakData;
   goals: UserGoals;
   /**
@@ -904,8 +919,12 @@ export interface GozlinSuggestion {
 // ════════════════════════════════════════════════════════════════
 
 export interface GozlinIdentityMemory {
-  /** The user's stated "why". */
+  /** The user's stated "why", exactly as they put it (trimmed, never rewritten). */
   motivation?: string;
+  /** ISO time they said it — "On 3 November you said…". Absent on older records. */
+  motivationAt?: string;
+  /** ISO time it was last quoted back to them (services/smart/why). */
+  motivationQuotedAt?: string;
   /** Free-form preferences the user told Gozlin. */
   preferences: string[];
   /** Constraints the user mentioned (time, injuries the user states, etc). */

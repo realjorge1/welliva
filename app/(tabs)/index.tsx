@@ -1,23 +1,21 @@
 /**
  * HOME — the daily dashboard.
- * Hero nutrition ring, today's plan, the daily-commitment strip (the flame,
- * the streak and the week — see components/celebration/Commitment), a
- * redesigned hydration hero and a coaching carousel — all on the welliva
- * design system.
+ * The calorie hero and the three macro cards (black, edge-drawn — see
+ * components/home/CalorieHero and MacroTile), today's plan, the hydration log,
+ * "Your week" (the streak and the last seven days in ONE card —
+ * components/home/WeekTable), the check-in and fitness cards, and a coaching
+ * carousel — all on the welliva design system.
  */
 
-import WaterTracker from "@/components/WaterTracker";
+import { Hydration } from "@/components/hydration";
 import AILogoIcon from "@/components/gozlin/AILogoIcon";
 import {
-  AnimatedNumber,
   AppText,
   AscendingMeter,
   Card,
   IconBadge,
   Pill,
-  ProgressBar,
   Reveal,
-  Ring,
   Screen,
   SectionHeader,
   useColors,
@@ -34,7 +32,35 @@ import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { CoachDeepDive } from "@/components/home/CoachDeepDive";
 import { CycleHomeCard, CycleOfferCard } from "@/components/cycle";
+import { CalorieHero } from "@/components/home/CalorieHero";
+import { CheckInBar } from "@/components/home/CheckInBar";
+import { FitnessTile } from "@/components/home/FitnessTile";
+import { MacroTile } from "@/components/home/MacroTile";
 import { NudgeCard } from "@/components/home/NudgeCard";
+import { AnchorChainChip } from "@/components/smart/AnchorChainChip";
+import { useAnchorChain } from "@/components/smart/useAnchors";
+import { HardDayCard } from "@/components/smart/HardDayCard";
+import { useEasedToday, useHardDayMoment } from "@/components/smart/useHardDay";
+import { SmartCard } from "@/components/smart/SmartCard";
+import { useWhyMoment } from "@/components/smart/useWhyMoment";
+import { WhySheet } from "@/components/smart/WhySheet";
+import { whyMessage } from "@/services/smart/why";
+import { RoughDayLink } from "@/components/smart/RoughDayLink";
+import { RoughDaySheet } from "@/components/smart/RoughDaySheet";
+import { UsualCard } from "@/components/smart/UsualCard";
+import { FreshStartCard, WelcomeBack } from "@/components/smart/WelcomeBack";
+import { useRoughDay } from "@/components/smart/useRoughDay";
+import { useUsualMoment } from "@/components/smart/useUsualMoment";
+import { useFreshStart, useWelcomeBack } from "@/components/smart/useWelcomeBack";
+import { GoodDaysSheet } from "@/components/smart/GoodDaysSheet";
+import { useGoodDaysMoment } from "@/components/smart/useGoodDays";
+import { track } from "@/services/telemetry";
+import { GozlinToast, useToast } from "@/components/gozlin/GozlinToast";
+import { useReceipts } from "@/components/smart/receipt";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MACRO_BRIGHT } from "@/components/home/surface";
+import { useEntranceTrigger, type ScrollMetrics } from "@/components/home/useEntranceTrigger";
+import { WeekTable } from "@/components/home/WeekTable";
 import {
   buildCoachDeck,
   buildHabitCard,
@@ -45,8 +71,10 @@ import {
 import { pickWeeklyInsight, WEEKLY_INSIGHT_EYEBROW } from "@/components/home/weeklyInsight";
 import { useInsightLedger } from "@/components/home/useInsightLedger";
 import { isInsightSeen, openInsight, unseenCards } from "@/services/gozlin/InsightLedger";
-import { Gradients, Radius, Spacing, alpha } from "@/constants/theme";
+import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useGamification, useNutrition, useProfile, useWorkout } from "@/contexts/AppContext";
+import { useDayAdjustments } from "@/contexts/domain/useDayTarget";
+import { dayCalorieDelta, dayTargetNote } from "@/services/nutrition/dayTargets";
 import { calculateProgress } from "@/services/NutritionService";
 import { todayDate } from "@/services/OfflineStorage";
 import { readCommitment, shiftDay } from "@/services/commitment";
@@ -54,8 +82,7 @@ import { pickHomeFact } from "@/services/homeFact";
 import { readDayIntake } from "@/services/nutrition/todayIntake";
 import { sumMacros } from "@/services/nutrition/DayTotals";
 import { router } from "expo-router";
-import { CommitmentStrip } from "@/components/celebration/Commitment";
-import { insightTitle, retroText } from "@/constants/RetroFont";
+import { insightTitle } from "@/constants/RetroFont";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -75,13 +102,68 @@ const COACH_PEEK = 54;
 
 export default function HomeScreen() {
   const { colors } = useColors();
-  const { width } = useWindowDimensions();
+  const { width, height: windowHeight } = useWindowDimensions();
   const { nutritionTargets, bodyLogs } = useProfile();
   const { consumedNutrition, todayDiet, coachInsights } = useNutrition();
   const { streakData, nudge } = useGamification();
   const { workoutPlan, workoutLog } = useWorkout();
 
   const { top: gozlinMoment } = useGozlinMoments("home");
+
+  // "Your usual?" — a meal eaten the same way most days, offered around its
+  // usual time while nothing is logged for it yet. Like every smart moment it
+  // asks the quiet layer first (services/smart): one here a day at most.
+  const toast = useToast();
+  const insets = useSafeAreaInsets();
+  const showSmartReceipt = useReceipts(toast);
+  const usualMoment = useUsualMoment("home", showSmartReceipt);
+  // "Next: vitamins?" right after the thing a habit is tied to gets logged.
+  const chain = useAnchorChain("home");
+
+  // The rough-day button: one tap makes today gentle (services/smart/roughDay).
+  // `gentleToday` is what the rest of this screen reads to stop pushing.
+  const roughDay = useRoughDay();
+  const gentleToday = roughDay.rough !== null;
+  const [roughSheetOpen, setRoughSheetOpen] = useState(false);
+  const openRoughSheet = useCallback(() => {
+    track("smart_moment", { feature: "rough-day", result: "shown" });
+    setRoughSheetOpen(true);
+  }, []);
+  const showToast = toast.show;
+  const clearRough = roughDay.clear;
+  const roughFooter = useMemo(
+    () => (
+      <RoughDayLink
+        rough={gentleToday}
+        onOpen={openRoughSheet}
+        onOk={() => {
+          void clearRough();
+          showToast("Back to a normal day");
+        }}
+      />
+    ),
+    [gentleToday, openRoughSheet, clearRough, showToast],
+  );
+
+  // Back after a week or more, or a thin week ending on a Monday or the 1st.
+  const welcomeBack = useWelcomeBack();
+  const freshStart = useFreshStart();
+
+  // The weekday that keeps getting missed, the evening before it.
+  const hardDay = useHardDayMoment("home", showSmartReceipt);
+  // Today's session isn't the full one (a short weekday, a fresh-start week).
+  const easedToday = useEasedToday();
+
+  // Their own reason, quoted back word for word on a wobbly day, rarely.
+  const whyMoment = useWhyMoment();
+  const [whySheetOpen, setWhySheetOpen] = useState(false);
+  // The welcome-back screen's quote spends the same once-a-month allowance.
+  const welcomeShowing = welcomeBack.welcome != null;
+  const welcomeWords = whyMoment.welcomeWords;
+  const noteQuoted = whyMoment.noteQuoted;
+  useEffect(() => {
+    if (welcomeShowing && welcomeWords) noteQuoted();
+  }, [welcomeShowing, welcomeWords, noteQuoted]);
 
   // Habit Awareness report powers the extra "habits" coach card + the deep-dive.
   const habitReport = useHabitReport();
@@ -107,6 +189,11 @@ export default function HomeScreen() {
    */
   const { ledger, ready: ledgerReady } = useInsightLedger();
   const insightDay = todayDate();
+  // What their best days have in common: at most one new finding a week. Asked
+  // for after the other moments, so it only takes the day's slot if they don't.
+  const goodDays = useGoodDaysMoment();
+  const goodDayCard = goodDays.card;
+  const [goodDaysOpen, setGoodDaysOpen] = useState(false);
   const weeklyCard = useMemo(
     () => (weekly ? cardFromPattern(weekly.pattern, "weekly-insight") : null),
     [weekly],
@@ -132,10 +219,12 @@ export default function HomeScreen() {
   // Filtered AFTER the deck is curated, not before: the deck is a considered
   // four, and filtering first would backfill it from the cards it left out.
   // What the user has opened simply leaves; the rest keep their places.
-  const coachDeck = useMemo<CoachCard[]>(
-    () => (ledgerReady ? unseenCards(fullDeck, ledger, insightDay) : []),
-    [fullDeck, ledger, ledgerReady, insightDay],
-  );
+  const coachDeck = useMemo<CoachCard[]>(() => {
+    if (!ledgerReady) return [];
+    const unseen = unseenCards(fullDeck, ledger, insightDay);
+    // It leads while it waits, and the deck stays a considered four.
+    return goodDayCard ? [goodDayCard, ...unseen].slice(0, 4) : unseen;
+  }, [fullDeck, ledger, ledgerReady, insightDay, goodDayCard]);
 
   // The tapped card that opens the coach deep-dive.
   const [selectedCard, setSelectedCard] = useState<CoachCard | null>(null);
@@ -227,10 +316,31 @@ export default function HomeScreen() {
     ]).start();
   }, [coachTranslate]);
 
+  /**
+   * CARDS THAT PLAY ON ARRIVAL. Scroll down to Your week on a kept day and its
+   * flame catches; scroll down to Fitness and its line draws on, left to right.
+   * Each card gets a trigger (components/home/useEntranceTrigger) — one shared
+   * value to read, 0 wait / 1 play / 2 show finished — and this screen feeds
+   * them all the latest scroll metrics from ONE ref. The rules for when are in
+   * components/home/scrollEntrance.
+   *
+   * Refs and shared values only, on purpose: this runs on every scroll event,
+   * and a `useState` here would re-render the whole of Home sixty times a second
+   * to ask a question whose answer changes twice.
+   */
+  const scrollMetrics = useRef<ScrollMetrics>({ y: 0, h: windowHeight });
+  const weekIn = useEntranceTrigger(scrollMetrics);
+  const fitnessIn = useEntranceTrigger(scrollMetrics);
+  const stepWeek = weekIn.step;
+  const stepFitness = fitnessIn.step;
+
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (!canHintCoach) return;
       const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+      scrollMetrics.current = { y: contentOffset.y, h: layoutMeasurement.height };
+      stepWeek();
+      stepFitness();
+      if (!canHintCoach) return;
       // The coach carousel is the last section, so "reached the bottom of the
       // scroll" is the moment it's fully in view — fire the peek hint there.
       const distanceToBottom =
@@ -243,7 +353,7 @@ export default function HomeScreen() {
         coachArmed.current = true;
       }
     },
-    [canHintCoach, runCoachHint],
+    [canHintCoach, runCoachHint, stepWeek, stepFitness],
   );
 
   // Track where the carousel is parked so the peek always leans toward content.
@@ -258,6 +368,9 @@ export default function HomeScreen() {
   // is read once from the intake ledger; null (not zero) when nothing was logged.
   const [yesterdayIntake, setYesterdayIntake] = useState<{ calories: number; proteinG: number } | null>(null);
   const dayKey = todayDate();
+  // A day can have its own calorie target (services/nutrition/dayTargets).
+  const dayAdjustments = useDayAdjustments();
+  const todayDelta = dayCalorieDelta(dayKey, dayAdjustments);
   useEffect(() => {
     let active = true;
     readDayIntake(shiftDay(dayKey, -1)).then(({ intake, foodLog }) => {
@@ -282,7 +395,10 @@ export default function HomeScreen() {
         totalDays: commitment.totalDays,
         yesterdayIntake,
         targets: nutritionTargets
-          ? { calories: nutritionTargets.calories, proteinG: nutritionTargets.proteinG }
+          ? {
+              calories: nutritionTargets.calories + dayCalorieDelta(shiftDay(dayKey, -1), dayAdjustments),
+              proteinG: nutritionTargets.proteinG,
+            }
           : null,
         workouts: workoutLog,
         nowMs: Date.now(),
@@ -290,7 +406,7 @@ export default function HomeScreen() {
         waterGoalMl: nutritionTargets?.waterMl ?? null,
         weighIns: bodyLogs ?? [],
       }),
-    [commitment, dayKey, yesterdayIntake, nutritionTargets, workoutLog, consumedNutrition.waterMl, bodyLogs],
+    [commitment, dayKey, dayAdjustments, yesterdayIntake, nutritionTargets, workoutLog, consumedNutrition.waterMl, bodyLogs],
   );
 
   // "Friday, 29 Aug" — the plan card's scope, spelled out rather than implied.
@@ -304,9 +420,9 @@ export default function HomeScreen() {
     [],
   );
 
-  const calorieTarget = nutritionTargets?.calories || 2000;
+  const calorieTarget = (nutritionTargets?.calories || 2000) + todayDelta;
   const caloriePct = nutritionTargets
-    ? calculateProgress(consumedNutrition.calories, nutritionTargets.calories)
+    ? calculateProgress(consumedNutrition.calories, calorieTarget)
     : 0;
   const remaining = Math.max(
     0,
@@ -317,21 +433,21 @@ export default function HomeScreen() {
     {
       key: "protein",
       label: "Protein",
-      tone: colors.protein,
+      tone: MACRO_BRIGHT.protein,
       current: consumedNutrition.proteinG,
       target: nutritionTargets?.proteinG || 50,
     },
     {
       key: "carbs",
       label: "Carbs",
-      tone: colors.carbs,
+      tone: MACRO_BRIGHT.carbs,
       current: consumedNutrition.carbsG,
       target: nutritionTargets?.carbsG || 250,
     },
     {
       key: "fat",
       label: "Fat",
-      tone: colors.fat,
+      tone: MACRO_BRIGHT.fat,
       current: consumedNutrition.fatG,
       target: nutritionTargets?.fatG || 65,
     },
@@ -369,7 +485,7 @@ export default function HomeScreen() {
    * showing someone a snoozing face after they went and trained anyway would be
    * the same mistake pointing the other way.
    */
-  const workoutGlyph = !todayWorkoutDone && isRestToday ? "rest" : null;
+  const workoutGlyph = !todayWorkoutDone && (isRestToday || gentleToday) ? "rest" : null;
 
   // Coach carousel: each card ~82% of the viewport so the next one peeks.
   const coachW = Math.round(width * 0.82);
@@ -405,123 +521,40 @@ export default function HomeScreen() {
           over every destination now, so `Screen`'s own NAV_CLEARANCE default is
           the honest number and there is nothing left for a screen to tune. */}
       <Screen gutter={false} header={header} floatingHeader onScroll={onScroll}>
-      {/* ── Hero: calories + macros ── */}
+      {/* ── Hero: calories. ONE big black card — the ring, Target, Remaining and
+             % of goal together (components/home/CalorieHero). ── */}
       <Reveal index={1}>
-        <Card style={styles.gutter} padding="xxl">
-          <View style={styles.heroRow}>
-            <Ring
-              progress={caloriePct / 100}
-              size={132}
-              strokeWidth={12}
-              gradient={Gradients.calories}
-            >
-              <AnimatedNumber
-                value={Math.round(consumedNutrition.calories)}
-                variant="metric"
-              />
-              <AppText variant="caption" color="tertiary" uppercase>
-                kcal eaten
-              </AppText>
-            </Ring>
+        <CalorieHero
+          style={styles.gutter}
+          eaten={consumedNutrition.calories}
+          target={calorieTarget}
+          remaining={remaining}
+          percent={caloriePct}
+          gentle={gentleToday}
+          targetNote={dayTargetNote(todayDelta)}
+        />
+      </Reveal>
 
-            {/* The ring and this block are ONE centred group, not two things
-                pinned to opposite edges of the card. Stretching them apart put
-                the dial against the left rule and the figures against the
-                right, which reads as two separate cards sharing a box.
-
-                Centred text rather than a label-left/figure-right table: this
-                column is ~140pt on a 390pt screen and under 90pt on a small
-                one, and a two-column row at that width either overflows or
-                truncates its label. Stacked and centred, every width fits. */}
-            <View style={styles.heroInfo}>
-              <View style={styles.stat}>
-                <AppText variant="caption" color="tertiary" uppercase align="center">
-                  Target
-                </AppText>
-                <AppText
-                  variant="headline"
-                  align="center"
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                style={retroText}
-                >
-                  {calorieTarget.toLocaleString()}
-                  <AppText variant="footnote" color="tertiary" style={{ fontSize: 9, lineHeight: 24 }}>
-                    {" "}
-                    kcal
-                  </AppText>
-                </AppText>
-              </View>
-
-              <View style={[styles.statRule, { backgroundColor: colors.divider }]} />
-
-              <View style={styles.stat}>
-                <AppText variant="caption" color="tertiary" uppercase align="center">
-                  Remaining
-                </AppText>
-                <AppText
-                  variant="headline"
-                  color="calories"
-                  align="center"
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                style={retroText}
-                >
-                  {remaining.toLocaleString()}
-                  <AppText variant="footnote" color="tertiary" style={{ fontSize: 11, lineHeight: 26 }}>
-                    {" "}
-                    kcal
-                  </AppText>
-                </AppText>
-              </View>
-
-              <Pill
-                label={`${caloriePct}% of goal`}
-                tone={colors.calories}
-                size="sm"
-                icon="flame-outline"
-                style={styles.heroPill}
-              />
-            </View>
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
-
-          {/* Macros */}
-          <View style={styles.macroRow}>
-            {macros.map((m) => {
-              const pct = m.target > 0 ? m.current / m.target : 0;
-              return (
-                <View key={m.key} style={styles.macroCol}>
-                  <View style={styles.macroHead}>
-                    <View style={[styles.macroDot, { backgroundColor: m.tone }]} />
-                    <AppText variant="footnote" color="secondary">
-                      {m.label}
-                    </AppText>
-                  </View>
-                  <AppText variant="headline" align="center" numberOfLines={1}>
-                    {Math.round(m.current)}
-                    <AppText variant="footnote" color="tertiary">
-                      {" "}
-                      / {m.target}g
-                    </AppText>
-                  </AppText>
-                  <ProgressBar
-                    progress={pct}
-                    tone={m.tone}
-                    height={6}
-                    style={styles.macroBar}
-                  />
-                </View>
-              );
-            })}
-          </View>
-        </Card>
+      {/* ── Macros: protein, carbs and fat as three small cards of their own — a
+             dot-matrix figure, the target in the regular face, and a graduated bar
+             in each macro's own colour (components/home/MacroTile). ── */}
+      <Reveal index={2}>
+        <View style={[styles.gutter, styles.macroRow]}>
+          {macros.map((m) => (
+            <MacroTile
+              key={m.key}
+              label={m.label}
+              tone={m.tone}
+              current={m.current}
+              target={m.target}
+            />
+          ))}
+        </View>
       </Reveal>
 
       {/* ── Within reach: the one record/near-miss in range (MomentEngine).
              Renders nothing on most days — see components/home/NudgeCard. ── */}
-      {nudge && (
+      {nudge && !gentleToday && (
         <Reveal index={2}>
           {/* `nudgeBlock`, not `gutter`: the shared gutter style carries no
               vertical margin, so this card used to sit flush against the hero
@@ -530,6 +563,33 @@ export default function HomeScreen() {
               the one block that didn't. */}
           <View style={styles.nudgeBlock}>
             <NudgeCard nudge={nudge} />
+          </View>
+        </Reveal>
+      )}
+
+      {chain.moment && (
+        <Reveal index={2}>
+          <View style={styles.nudgeBlock}>
+            <AnchorChainChip
+              name={chain.moment.view.habit.name}
+              icon={chain.moment.view.habit.icon}
+              color={chain.moment.view.habit.color}
+              onDone={() => void chain.done(chain.moment!)}
+              onDismiss={() => chain.dismiss(chain.moment!)}
+            />
+          </View>
+        </Reveal>
+      )}
+
+      {/* ── Your usual? — around a meal's usual time, until it's logged. ── */}
+      {usualMoment.usual && (
+        <Reveal index={2}>
+          <View style={styles.nudgeBlock}>
+            <UsualCard
+              usual={usualMoment.usual}
+              onLog={usualMoment.logIt}
+              onNotMine={usualMoment.notMine}
+            />
           </View>
         </Reveal>
       )}
@@ -554,24 +614,35 @@ export default function HomeScreen() {
                     ? todayWorkouts.count > 1
                       ? `${todayWorkouts.count} sessions`
                       : "Completed"
-                    : isRestToday
-                      ? "Rest day"
-                      : todayWorkout
-                        ? todayWorkout.focus
-                        : "No plan"
+                    : gentleToday
+                      ? roughDay.rough?.workout === "walk"
+                        ? "A gentle walk"
+                        : roughDay.rough?.workout === "rest"
+                          ? "Resting"
+                          : "Walk or rest"
+                      : isRestToday
+                        ? "Rest day"
+                        : todayWorkout
+                          ? todayWorkout.focus
+                          : "No plan"
                 }
                 caption={
                   todayWorkoutDone
                     ? `${todayWorkouts.percent}% done · ${todayWorkouts.minutes} min`
-                    : isRestToday
-                      ? "Recovery counts"
-                      : todayWorkout
-                        ? `~${todayWorkout.totalDurationMinutes} min`
-                        : "Set a plan"
+                    : gentleToday
+                      ? "Your plan can wait"
+                      : isRestToday
+                        ? "Recovery counts"
+                        : todayWorkout
+                          ? // Eased: the Fitness tab builds it, so no figure for the full one here.
+                            easedToday
+                            ? "Eased today"
+                            : `~${todayWorkout.totalDurationMinutes} min`
+                          : "Set a plan"
                 }
-                icon={isRestToday && !todayWorkoutDone ? "bed-outline" : "fitness"}
+                icon={(isRestToday || gentleToday) && !todayWorkoutDone ? "bed-outline" : "fitness"}
                 tone={
-                  todayWorkoutDone || isRestToday
+                  todayWorkoutDone || isRestToday || gentleToday
                     ? colors.success
                     : todayWorkout
                       ? colors.fat
@@ -579,7 +650,7 @@ export default function HomeScreen() {
                 }
                 progress={workoutProgress}
                 glyph={workoutGlyph}
-                glyphLabel="Rest day — nothing scheduled"
+                glyphLabel={gentleToday ? "A gentle day — no workout asked for" : "Rest day — nothing scheduled"}
               />
               <View style={[styles.planSep, { backgroundColor: colors.divider }]} />
               <PlanTile
@@ -613,18 +684,82 @@ export default function HomeScreen() {
         <CycleOfferCard style={styles.cycleBlock} />
       </Reveal>
 
-      {/* ── Daily commitment (card-less strip) ── */}
+      {/* ── Hydration — the log card (components/hydration). Before Your week:
+             the thing you tap through the day sits above the thing you read. ── */}
       <Reveal index={4}>
-        <CommitmentStrip streak={streakData} style={[styles.gutter, styles.streakBlock]} />
+        <View style={styles.section}>
+          <Hydration />
+        </View>
       </Reveal>
 
-      {/* ── Hydration ── */}
-      <Reveal index={5}>
-        <View style={styles.section}>
-          <View style={styles.gutter}>
-            <SectionHeader title="Hydration" weight="700" />
+      {/* ── Your week — the streak and the last seven days in ONE card: the
+             flame and the count, a flame per day where it was kept, and what was
+             eaten, trained and drunk (components/home/WeekTable). It used to be a
+             streak strip here and a separate table further down, telling the
+             same week twice. Its own Reveal, directly under the scroll region, so
+             `onLayout` says where it sits: the flame lights as it scrolls in. ── */}
+      {welcomeBack.freshMoment && welcomeBack.freshMoment.kind !== "welcome" && (
+        <Reveal index={5}>
+          <View style={styles.nudgeBlock}>
+            <FreshStartCard
+              kind={welcomeBack.freshMoment.kind}
+              onStartFresh={() => void welcomeBack.startFresh(welcomeBack.freshMoment!)}
+              onPickUp={() => void welcomeBack.pickUp(welcomeBack.freshMoment!)}
+            />
           </View>
-          <WaterTracker />
+        </Reveal>
+      )}
+      {whyMoment.why && (
+        <Reveal index={5}>
+          <View style={styles.nudgeBlock}>
+            <SmartCard
+              icon="heart-outline"
+              message={whyMessage(whyMoment.why, whyMoment.whyAt)}
+              source="Your own words. You can change or remove them in Memory."
+              primary={{ label: "Still true", onPress: whyMoment.stillTrue }}
+              secondary={{ label: "Change it", onPress: () => setWhySheetOpen(true) }}
+              tertiary={{ label: "Not now", onPress: whyMoment.notNow }}
+            />
+          </View>
+        </Reveal>
+      )}
+      {hardDay.moment && (
+        <Reveal index={5}>
+          <View style={styles.nudgeBlock}>
+            <HardDayCard
+              moment={hardDay.moment}
+              onAccept={(m) => void hardDay.accept(m)}
+              onDecline={(m) => void hardDay.decline(m)}
+            />
+          </View>
+        </Reveal>
+      )}
+      <Reveal index={5} onLayout={weekIn.onLayout}>
+        <WeekTable
+          streak={streakData}
+          entrance={weekIn.value}
+          freshStart={freshStart?.since}
+          footer={roughFooter}
+          style={[styles.gutter, styles.weekBlock]}
+        />
+      </Reveal>
+
+      {/* ── Check in · Fitness ───────────────────────────────────────────────
+             How you feel, logged by hand, and how much you have moved, watched
+             over time. Each reads real records (see components/home) and
+             neither draws a number it did not read. ── */}
+      <Reveal index={6}>
+        <View style={[styles.section, styles.gutter]}>
+          <CheckInBar />
+        </View>
+      </Reveal>
+
+      {/* Its own Reveal, directly under the scroll region, so `onLayout` hands
+          back where the card truly sits on the page: that is what lets the line
+          draw itself on as the page scrolls it into view. */}
+      <Reveal index={6} onLayout={fitnessIn.onLayout}>
+        <View style={[styles.gutter, styles.trackGap]}>
+          <FitnessTile log={workoutLog} today={dayKey} entrance={fitnessIn.value} />
         </View>
       </Reveal>
 
@@ -633,7 +768,7 @@ export default function HomeScreen() {
              that produces this is what Pro is sold on, and it used to be three
              taps deep in a modal — which meant the people deciding whether to
              pay for it had never seen it work on their own data. */}
-      {showWeekly && weekly && weeklyCard && (
+      {showWeekly && !gentleToday && weekly && weeklyCard && (
         <Reveal index={6}>
           <View style={[styles.section, styles.gutter]}>
             <Pressable
@@ -666,7 +801,7 @@ export default function HomeScreen() {
       )}
 
       {/* ── Coach (card-less carousel — tap any card for the deep-dive) ── */}
-      {coachDeck.length > 0 && (
+      {coachDeck.length > 0 && !gentleToday && (
         <Reveal index={7}>
           <View style={styles.section}>
             <View style={styles.gutter}>
@@ -716,6 +851,8 @@ export default function HomeScreen() {
                             pathname: "/gozlin",
                             params: { prompt: retiredBeat.prompt },
                           } as never);
+                        } else if (insight.identity) {
+                          setGoodDaysOpen(true);
                         } else {
                           setSelectedCard(insight);
                         }
@@ -734,6 +871,51 @@ export default function HomeScreen() {
         insight={selectedCard}
         report={habitReport}
         onClose={closeDeepDive}
+      />
+      <GoodDaysSheet
+        visible={goodDaysOpen}
+        report={goodDays.report}
+        findings={goodDays.findings}
+        onClose={() => {
+          // Filed on close, like every other insight: "done", not a card vanishing
+          // behind its own sheet.
+          setGoodDaysOpen(false);
+          goodDays.read();
+        }}
+      />
+      <GozlinToast controller={toast} topOffset={insets.top} />
+      <RoughDaySheet
+        visible={roughSheetOpen}
+        onClose={() => setRoughSheetOpen(false)}
+        onConfirm={(reason) => {
+          setRoughSheetOpen(false);
+          void roughDay.mark(reason);
+          toast.show("Today's a gentle day. Take care.", { icon: "leaf" });
+        }}
+        canProtect={roughDay.canProtectToday}
+        usedThisMonth={roughDay.usedThisMonth}
+        perMonth={roughDay.perMonth}
+      />
+      <WhySheet
+        visible={whySheetOpen}
+        initial={whyMoment.why ?? ""}
+        onClose={() => setWhySheetOpen(false)}
+        onSave={(text) => {
+          setWhySheetOpen(false);
+          void whyMoment.change(text);
+        }}
+      />
+      <WelcomeBack
+        visible={welcomeBack.welcome != null}
+        today={dayKey}
+        why={whyMoment.welcomeWords}
+        whyAt={whyMoment.whyAt}
+        onStartFresh={() => {
+          if (welcomeBack.welcome) void welcomeBack.startFresh(welcomeBack.welcome);
+        }}
+        onPickUp={() => {
+          if (welcomeBack.welcome) void welcomeBack.pickUp(welcomeBack.welcome);
+        }}
       />
     </>
   );
@@ -801,6 +983,8 @@ function CoachCardView({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${insight.title}. ${insight.message}`}
       style={({ pressed }) => [
         styles.coachCard,
         {
@@ -819,14 +1003,19 @@ function CoachCardView({
           <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
         )}
       </View>
-      <AppText variant="callout" style={[styles.coachTitle, insightTitle]} numberOfLines={1}>
+      <AppText
+        variant="callout"
+        style={[styles.coachTitle, insightTitle]}
+        numberOfLines={insight.identity ? 2 : 1}
+      >
         {insight.title}
       </AppText>
       <AppText
         variant="subhead"
         color="secondary"
         style={styles.coachMsg}
-        numberOfLines={2}
+        // A finding's two numbers and its caveat ARE the card; never clip them.
+        numberOfLines={insight.identity ? undefined : 2}
       >
         {insight.message}
       </AppText>
@@ -857,32 +1046,9 @@ const styles = StyleSheet.create({
   brand: { fontWeight: "900", marginTop: 3, letterSpacing: -0.2 },
   syncPill: { marginTop: Spacing.sm },
 
-  // Hero
-  // One centred group. `justifyContent: center` + a shrinkable (not flexed)
-  // info column is what keeps the two pieces together in the middle of the
-  // card instead of stretched to its two rules — with the gap, not the card
-  // width, deciding how far apart they sit.
-  heroRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: Spacing.xxl,
-  },
-  heroInfo: { flexShrink: 1, gap: Spacing.md, alignItems: "center" },
-  stat: { alignSelf: "stretch", gap: 1 },
-  statRule: { height: 1, alignSelf: "stretch" },
-  heroPill: { marginTop: Spacing.xs },
-  divider: { height: 1, marginVertical: Spacing.xl },
-  macroRow: { flexDirection: "row", gap: Spacing.lg },
-  // Centred, not left-aligned: a label and a figure that describe a bar belong
-  // over the middle of it. Left-aligned they read as three ragged columns
-  // pulling the whole card toward its left edge.
-  macroCol: { flex: 1, gap: 6, alignItems: "center" },
-  macroHead: { flexDirection: "row", alignItems: "center", gap: 6 },
-  macroDot: { width: 8, height: 8, borderRadius: 4 },
-  // alignSelf is load-bearing: the column centres its children, which would
-  // otherwise shrink the bar to nothing.
-  macroBar: { marginTop: 2, alignSelf: "stretch" },
+  // Hero — the card itself is components/home/CalorieHero; the three macro
+  // cards beneath it share the row, and the phone's width, equally.
+  macroRow: { flexDirection: "row", gap: Spacing.sm, marginTop: Spacing.md },
 
   // Plan
   planCard: { marginHorizontal: Spacing.screen },
@@ -898,11 +1064,16 @@ const styles = StyleSheet.create({
   planValue: { marginTop: 3 },
   planCaption: { marginTop: 2 },
 
-  // Daily commitment
-  streakBlock: { marginTop: Spacing.xxxl },
+  // Your week — the streak and the table, one card
+  weekBlock: { marginTop: Spacing.xxxl },
 
   // Sections
   section: { marginTop: Spacing.xxxl },
+
+  // Check in · Fitness — one family of cards, one rhythm. Fitness is its own
+  // Reveal (its line needs to know where it sits on the page), so the gap
+  // between the two is a margin.
+  trackGap: { marginTop: Spacing.md },
 
   // Coach carousel
   coachScroll: { paddingHorizontal: Spacing.screen },

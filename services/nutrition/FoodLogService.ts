@@ -51,8 +51,11 @@ export {
   getFoodLogForDate,
   getFoodLogRange,
   pruneFoodLog,
+  relogEntries,
   type FoodLogEntry,
   type LogStore,
+  type RecordedEntry,
+  type RelogResult,
 } from "./foodLogStore";
 
 // ============================================================================

@@ -24,14 +24,18 @@ export interface CycleCalendarProps {
   today: string;
   paint: (date: string) => DayPaint;
   showFertile: boolean;
+  /** Anything is forecast at all. Logging-only modes draw no "Predicted" key. */
+  predicting?: boolean;
+  /** What the logged days are called: "Period", or "Bleeding" on hormonal contraception. */
+  bleedLabel?: string;
   onSelect: (date: string) => void;
 }
 
-function describe(date: string, paint: DayPaint, today: string): string {
+function describe(date: string, paint: DayPaint, today: string, bleed: string): string {
   const parts = [formatDay(date, { weekday: true })];
   if (date === today) parts.push("today");
-  if (paint.period === "logged") parts.push("period day");
-  else if (paint.period === "assumed") parts.push("period day, end not logged");
+  if (paint.period === "logged") parts.push(`${bleed} day`);
+  else if (paint.period === "assumed") parts.push(`${bleed} day, end not logged`);
   else if (paint.period === "predicted") parts.push("predicted period");
   if (paint.ovulation) parts.push("estimated ovulation");
   else if (paint.fertile) parts.push("fertile window, an estimate");
@@ -46,6 +50,8 @@ export function CycleCalendar({
   today,
   paint,
   showFertile,
+  predicting = true,
+  bleedLabel = "Period",
   onSelect,
 }: CycleCalendarProps) {
   const { colors } = useColors();
@@ -125,7 +131,7 @@ export function CycleCalendar({
                 onPress={() => onSelect(date)}
                 accessibilityRole="button"
                 accessibilityState={{ disabled: future }}
-                accessibilityLabel={describe(date, p, today)}
+                accessibilityLabel={describe(date, p, today, bleedLabel.toLowerCase())}
                 style={({ pressed }) => [
                   styles.cell,
                   { width: cell, height: disc + 12, opacity: pressed ? 0.7 : 1 },
@@ -168,8 +174,8 @@ export function CycleCalendar({
       ))}
 
       <View style={styles.legend}>
-        <Legend color={palette.period} label="Period" />
-        <Legend color={palette.predicted} label="Predicted" />
+        <Legend color={palette.period} label={bleedLabel} />
+        {predicting ? <Legend color={palette.predicted} label="Predicted" /> : null}
         {showFertile ? <Legend color={palette.fertileSoft} ink={palette.fertile} label="Fertile (estimate)" /> : null}
         <View style={styles.legendItem}>
           <View style={[styles.legendLogDot, { backgroundColor: alpha(colors.text, 0.55) }]} />

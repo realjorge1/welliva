@@ -16,6 +16,18 @@ export interface HabitReminder {
   minute: number; // 0–59
 }
 
+/**
+ * Something the person already does that this habit is tied to — "right after
+ * breakfast" (services/smart/anchor). `label` reads inside a sentence:
+ * "After breakfast: vitamins", "After your check-in: stretch".
+ */
+export interface HabitAnchor {
+  kind: "breakfast" | "lunch" | "dinner" | "water" | "checkin" | "workout" | "habit";
+  label: string;
+  /** The other habit, when `kind` is "habit". */
+  habitId?: string;
+}
+
 export interface Habit {
   id: string;
   name: string;
@@ -42,6 +54,8 @@ export interface Habit {
   weeklyGoal?: number | null;
   source: HabitSource;
   reminder: HabitReminder | null;
+  /** Tied to something they already do. Absent on most habits; no migration. */
+  anchor?: HabitAnchor | null;
   /** Scheduled expo-notifications ids, so edits can cancel stale reminders. */
   reminderIds?: string[];
   /** Manual sort position in the list. */
@@ -107,6 +121,12 @@ export function frequencyLabel(days: number[], weeklyGoal?: number | null): stri
   }
   if (days.length >= 7) return "Every day";
   return [...days].sort((a, b) => a - b).map((d) => DAY_SHORT[d]).join(", ");
+}
+
+/** What the reminder's title says: "After breakfast: vitamins", or just the name. */
+export function reminderTitle(habit: Pick<Habit, "name" | "anchor">): string {
+  if (!habit.anchor) return habit.name;
+  return `After ${habit.anchor.label.replace(/^your /, "")}: ${habit.name}`;
 }
 
 /** "12-day streak" / "3-week streak" — the unit is never assumed. */

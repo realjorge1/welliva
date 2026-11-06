@@ -462,7 +462,7 @@ export default function SettingsScreen() {
   const cyclePalette = useCyclePalette();
   const cycleSubtitle = cycle.settings.enabled
     ? (() => {
-        const h = cycleHeadline(cycle.view, cycle.settings.showFertileWindow);
+        const h = cycleHeadline(cycle.view, cycle.view.showFertile);
         return `${h.eyebrow} · ${h.title}`;
       })()
     : "Predictions that learn your rhythm, and a plan that eases off on hard days";

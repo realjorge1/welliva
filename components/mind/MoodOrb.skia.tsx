@@ -25,6 +25,16 @@
  *            metaphor is how much room the feeling has, which is the one thing
  *            people do reliably report about their own mood.
  *
+ * ── THE GLOW NEVER MEETS AN EDGE ────────────────────────────────────────────
+ * A Skia canvas clips to its own box, and the blurred lobes reach well past the
+ * orb's nominal size — so a canvas exactly `size` across sliced the glow into a
+ * visible square (owner, 2026-10-31: "the gradient glow seems to be in a box").
+ * The canvas now bleeds `ORB_BLEED` of the orb past every side and gives that
+ * room back with a negative margin: the orb still takes `size` in the layout,
+ * and the glow fades to nothing well inside the canvas. The furthest the glow
+ * reaches is the widest lobe (spread + radius, 0.45 of the orb) plus three blur
+ * radii (0.33) — 0.78 from the centre, against a half-canvas of 0.85.
+ *
  * Amplitude of drift stays LOW throughout. An orb that thrashes at the
  * unpleasant end would read as alarm, and this thing sits on screen while
  * someone decides how they feel.
@@ -44,6 +54,7 @@ import {
 } from "react-native-reanimated";
 
 import { VALENCE_COLORS } from "@/services/gozlin/mind";
+import { ORB_BLEED } from "./orbGeometry";
 
 /** Stop positions matching VALENCE_COLORS across −1…+1. */
 const STOPS = [-1, -2 / 3, -1 / 3, 0, 1 / 3, 2 / 3, 1];
@@ -64,13 +75,15 @@ const LOBES = [
 ];
 
 export function SkiaMoodOrb({ size, valence, phase }: SkiaMoodOrbProps) {
-  const c = size / 2;
+  const bleed = Math.round(size * ORB_BLEED);
+  const box = size + bleed * 2;
+  const c = box / 2;
 
   // Blur radius scales with the orb so the fusion looks identical at any size.
   const blur = size * 0.11;
 
   return (
-    <Canvas style={{ width: size, height: size }}>
+    <Canvas style={{ width: box, height: box, margin: -bleed }}>
       <Group layer={<Paint><Blur blur={blur} /></Paint>}>
         {LOBES.map((lobe, i) => (
           <Lobe

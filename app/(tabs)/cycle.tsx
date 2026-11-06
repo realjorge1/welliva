@@ -36,15 +36,21 @@
  * resolves.
  */
 import {
+  ComingUpCard,
   CycleCalendar,
   CycleDial,
   CycleGozlinAsk,
   CycleHistory,
   DayLogSheet,
+  HungryOfferCard,
+  HungryPlanCard,
+  LateSection,
   PickDateSheet,
+  ReliefQuestion,
   useCyclePalette,
+  WaterCard,
 } from "@/components/cycle";
-import { useCyclePatterns, useIronPicks } from "@/components/cycle/useCycleInsights";
+import { useCyclePatterns, useIronPicks, useLateContext } from "@/components/cycle/useCycleInsights";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { ScreenTopBar } from "@/components/navigation";
 import { AppText, Button, Card, IconBadge, Reveal, Screen, SectionHeader, useColors } from "@/components/ui";
@@ -53,9 +59,11 @@ import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useCycle } from "@/contexts/CycleContext";
 import {
   addDays,
+  bleedWords,
   confidenceLine,
   cycleHeadline,
   CYCLE_LIBRARY,
+  daysBetween,
   dialModel,
   doctorSummary,
   ENERGY_LABEL,
@@ -70,13 +78,15 @@ import {
   shiftMonthCursor,
   suggestedReading,
   SYMPTOM_LABEL,
+  topSuggestion,
+  TRIP_SOON_DAYS,
   windowLine,
   type CycleDayLog,
   type CycleRecord,
 } from "@/services/cycle";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useMemo, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useMemo, useState } from "react";
 import { Pressable, Share, StyleSheet, View, useWindowDimensions } from "react-native";
 
 type DateQuestion =
@@ -95,28 +105,59 @@ export default function CycleScreen() {
   const sync = useSyncStatus();
   const patterns = useCyclePatterns();
   const iron = useIronPicks(view.iron !== null);
+  const late = useLateContext();
 
   const [logDate, setLogDate] = useState<string | null>(null);
   const [question, setQuestion] = useState<DateQuestion | null>(null);
+  /** She answered "what helped?" here — keep its "Noted" in the slot until she leaves. */
+  const [reliefTouched, setReliefTouched] = useState(false);
   const [cursor, setCursor] = useState(() => ({
     year: Number(today.slice(0, 4)),
     month: Number(today.slice(5, 7)),
   }));
 
+  // She may have just added a trip on another screen.
+  const { refreshMoments } = cycle;
+  useFocusEffect(
+    useCallback(() => {
+      void refreshMoments();
+    }, [refreshMoments]),
+  );
+
   const model = useMemo(
-    () => dialModel({ episodes: data.periods, view, today, showFertile: settings.showFertileWindow }),
-    [data.periods, view, today, settings.showFertileWindow],
+    () => dialModel({ episodes: data.periods, view, today, showFertile: view.showFertile }),
+    [data.periods, view, today],
   );
   const paint = useMemo(
-    () => paintDays({ episodes: data.periods, days: data.days, view, today, showFertile: settings.showFertileWindow }),
-    [data.periods, data.days, view, today, settings.showFertileWindow],
+    () => paintDays({ episodes: data.periods, days: data.days, view, today, showFertile: view.showFertile }),
+    [data.periods, data.days, view, today],
   );
   const open = useMemo(() => openEpisode(data.periods), [data.periods]);
   /** The three pages that bear on today — see the "Worth reading" section. */
   const reading = useMemo(() => suggestedReading(view, settings), [view, settings]);
 
   const dialSize = Math.min(300, Math.round(width - Spacing.screen * 2 - 48));
-  const headline = cycleHeadline(view, settings.showFertileWindow);
+  const headline = cycleHeadline(view, view.showFertile);
+  /** On hormonal contraception: bleeding is logged, never predicted, and never called a period. */
+  const logOnly = view.mode === "hormonal";
+  const words = bleedWords(view.mode);
+  /** What the hungrier-week plan is doing to today's target, if she has one. */
+  const hungryToday = settings.planHungryWeek ? (settings.hungryLedger[today] ?? 0) : 0;
+  /** The one new suggestion the screen shows today (services/cycle/suggest). */
+  const nextUp = view.comingUp[0] ?? null;
+  const tripSoon = !!nextUp && daysBetween(today, nextUp.start) <= TRIP_SOON_DAYS;
+  const suggestion = topSuggestion({
+    late: !!late,
+    trip: tripSoon,
+    water: !!view.water,
+    relief: !!view.reliefAsk || reliefTouched,
+    hungry: !!view.hungryOffer || !!hungryToday,
+    "trip-later": !!nextUp && !tripSoon,
+  });
+  const showTrip = suggestion === "trip" || suggestion === "trip-later";
+  // The same line a few days out is also a heads-up (it's the Home card's only
+  // way to say it); here the slot is already saying it.
+  const todayUps = view.headsUps.filter((h) => !(showTrip && nextUp && h.id === `upcoming:${nextUp.id}`));
 
   /**
    * The menu's own top bar, not a back arrow. This screen is a root destination
@@ -190,16 +231,28 @@ export default function CycleScreen() {
       ? "Saved on this phone (backup is part of welliva Pro)"
       : "Backed up with your account";
 
-  const centerEyebrow = s.inPeriod ? "Period day" : s.cycleDay !== null ? "Cycle day" : "Cycle";
-  const centerSub = s.inPeriod
-    ? `usually ${view.typicalBleed} days`
-    : s.lateBy > 0
-      ? `late by ${s.lateBy} ${s.lateBy === 1 ? "day" : "days"}`
-      : p && s.predicting
-        ? `of about ${p.cycleLength}`
-        : s.cycleDay === null
-          ? "log your period"
-          : " ";
+  const centerEyebrow = s.inPeriod
+    ? words.day
+    : s.cycleDay !== null
+      ? logOnly
+        ? "Day"
+        : "Cycle day"
+      : "Cycle";
+  const centerSub = logOnly
+    ? s.inPeriod
+      ? "logging only"
+      : s.cycleDay !== null
+        ? "since your last bleed began"
+        : "logging only"
+    : s.inPeriod
+      ? `usually ${view.typicalBleed} days`
+      : s.lateBy > 0
+        ? `late by ${s.lateBy} ${s.lateBy === 1 ? "day" : "days"}`
+        : p && s.predicting
+          ? `of about ${p.cycleLength}`
+          : s.cycleDay === null
+            ? "log your period"
+            : " ";
 
   const dialLabel = `${headline.eyebrow}. ${headline.title}. ${headline.detail}`;
 
@@ -272,19 +325,19 @@ export default function CycleScreen() {
             <View style={styles.actions}>
               {showPeriodStarted ? (
                 <Button
-                  label="Period started"
+                  label={words.started}
                   icon="water"
                   onPress={() => void cycle.startPeriod()}
                   style={styles.flex}
-                  accessibilityHint="Logs today as the first day of your period"
+                  accessibilityHint={`Logs today as the first day of your ${words.noun}`}
                 />
               ) : showPeriodEnded ? (
                 <Button
-                  label="Period ended"
+                  label={words.ended}
                   icon="checkmark-circle-outline"
                   onPress={() => void cycle.endPeriod()}
                   style={styles.flex}
-                  accessibilityHint="Logs today as the last day of your period"
+                  accessibilityHint={`Logs today as the last day of your ${words.noun}`}
                 />
               ) : null}
               <Button
@@ -304,7 +357,9 @@ export default function CycleScreen() {
                 }
                 accessibilityRole="button"
                 accessibilityLabel={
-                  showPeriodEnded ? "Pick the day your period ended" : "Pick the day your period started"
+                  showPeriodEnded
+                    ? `Pick the day your ${words.noun} ended`
+                    : `Pick the day your ${words.noun} started`
                 }
                 hitSlop={8}
                 style={styles.otherDay}
@@ -321,7 +376,7 @@ export default function CycleScreen() {
         {s.periodStale && open ? (
           <Reveal index={2}>
             <Card padding="lg" style={styles.block}>
-              <AppText variant="callout">Has your period ended?</AppText>
+              <AppText variant="callout">Has your {words.noun} ended?</AppText>
               <AppText variant="footnote" color="secondary" style={styles.cardBody}>
                 It started {formatDay(open.start, { weekday: true })} and hasn&apos;t been ended. Until
                 you say, I&apos;m assuming it lasted your usual {view.typicalBleed} days.
@@ -330,6 +385,7 @@ export default function CycleScreen() {
                 label="Pick the last day"
                 size="sm"
                 variant="tonal"
+                fullWidth={false}
                 onPress={() => setQuestion({ kind: "end", from: open.start })}
                 style={styles.cardCta}
               />
@@ -372,12 +428,12 @@ export default function CycleScreen() {
         ))}
 
         {/* ── 4. Today ────────────────────────────────────────────────── */}
-        {!paused && (view.headsUps.length > 0 || view.ease || view.todayLog) ? (
+        {!paused && (todayUps.length > 0 || view.ease || view.todayLog) ? (
           <Reveal index={3}>
             <View style={styles.section}>
               <SectionHeader title="Today" subtitle="From your own logs" weight="700" />
               <Card padding="lg">
-                {view.headsUps.map((h) => (
+                {todayUps.map((h) => (
                   <View key={h.id} style={styles.lineRow}>
                     <Ionicons name="sparkles-outline" size={16} color={palette.period} />
                     <AppText variant="subhead" style={styles.flex}>
@@ -419,6 +475,30 @@ export default function CycleScreen() {
           </Reveal>
         ) : null}
 
+        {/* ── 4a. The one new suggestion ────────────────────────────────
+            Late, a trip, the water reading, "what helped?", the hungrier
+            week: whichever matters most today, and never more than one. */}
+        {!paused && suggestion === "late" && late ? (
+          <Reveal index={3}>
+            <LateSection context={late} style={styles.section} />
+          </Reveal>
+        ) : null}
+        {!paused && showTrip && nextUp ? (
+          <ComingUpCard item={nextUp} patterns={patterns} style={styles.suggestion} />
+        ) : null}
+        {!paused && suggestion === "water" && view.water ? (
+          <WaterCard moment={view.water} style={styles.suggestion} />
+        ) : null}
+        {!paused && suggestion === "relief" ? (
+          <ReliefQuestion style={styles.suggestion} onAnswer={() => setReliefTouched(true)} />
+        ) : null}
+        {!paused && suggestion === "hungry" && view.hungryOffer ? (
+          <HungryOfferCard offer={view.hungryOffer} style={styles.suggestion} />
+        ) : null}
+        {!paused && suggestion === "hungry" && !view.hungryOffer && hungryToday ? (
+          <HungryPlanCard kcal={hungryToday} style={styles.suggestion} />
+        ) : null}
+
         {/* ── 4b. "Let Gozlin see your cycle?" ────────────────────────────
             Directly under what she logged, because that is what makes it a
             question with an obvious point. It renders nothing unless today is
@@ -448,7 +528,7 @@ export default function CycleScreen() {
                   Periods usually last {p.periodLength} days
                   {p.periodBasis > 0 ? " (from the ones you've ended)" : " (what you told me)"}.
                 </AppText>
-                {settings.showFertileWindow ? (
+                {view.showFertile ? (
                   <View style={[styles.fertile, { backgroundColor: palette.fertileSoft }]}>
                     <AppText variant="footnote" weight="700" style={{ color: palette.fertile }}>
                       Fertile window {formatRange(p.fertileStart, p.fertileEnd)}
@@ -529,8 +609,9 @@ export default function CycleScreen() {
             ) : (
               <Card padding="lg">
                 <AppText variant="subhead" color="secondary">
-                  After two or three cycles of logs, your own patterns show up here: when symptoms tend
-                  to come, and how your mood, sleep and training move with your cycle.
+                  {logOnly
+                    ? "On hormonal contraception your bleeding follows the method, so there's no cycle to read patterns from. Everything you log is still kept, and it's all in the summary for your doctor."
+                    : "After two or three cycles of logs, your own patterns show up here: when symptoms tend to come, and how your mood, sleep and training move with your cycle."}
                 </AppText>
               </Card>
             )}
@@ -681,7 +762,9 @@ export default function CycleScreen() {
                 onNext={() => setCursor((c) => shiftMonthCursor(c, 1))}
                 today={today}
                 paint={paint}
-                showFertile={settings.showFertileWindow}
+                showFertile={view.showFertile}
+                predicting={s.predicting}
+                bleedLabel={words.label}
                 onSelect={setLogDate}
               />
             </Card>
@@ -797,6 +880,7 @@ const styles = StyleSheet.create({
   },
   flex: { flex: 1 },
   askCard: { marginBottom: Spacing.xl },
+  suggestion: { marginTop: Spacing.xl },
   readRow: {
     flexDirection: "row",
     alignItems: "center",

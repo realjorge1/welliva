@@ -1,8 +1,8 @@
 /**
  * MealsList — today's meals as a stack of premium swipeable cards.
  *
- * Each meal owns its own card (rounded, bordered, subtly elevated) rather than
- * sharing one panel, so completion tints, swipe actions and reflow read per
+ * Each meal owns its own card (black, a thin white edge — Home's instrument
+ * surface; see MealCard) rather than sharing one panel, so completion tints, swipe actions and reflow read per
  * meal. The list keys on the stable slot so a swap updates a card in place
  * (no reload); adds/removes fade + reflow via each card's layout transition.
  *
@@ -72,8 +72,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.sm,
-    padding: Spacing.md,
-    borderRadius: Radius.md,
+    padding: Spacing.lg,
+    borderRadius: Radius.xl,
     borderWidth: 1,
   },
 });

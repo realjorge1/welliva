@@ -13,8 +13,8 @@ import { useWorkout } from "@/contexts/AppContext";
 import { EXERCISE_DATABASE, ExerciseDBEntry } from "@/constants/ExerciseDatabase";
 import { Palette, Spacing, type ThemeColors } from "@/constants/theme";
 import { ExerciseFigure } from "@/fitness/components/ExerciseFigure";
-import type { FigureMotion } from "@/fitness/animation/movementProfiles";
-import type { PlannedExercise } from "@/models/workout";
+import { resolveFigureMotion } from "@/fitness/animation/movementProfiles";
+import type { MovementPattern, PlannedExercise } from "@/models/workout";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useMemo } from "react";
@@ -217,13 +217,20 @@ export default function ExerciseDetailScreen() {
               movement on one rep clock. Resolves from the movement pattern;
               the muscles it trains are the MuscleMap section below. */}
           <View style={styles.demo}>
-            {/* The pattern is passed ONLY for AI exercises. It overrides id
-                resolution, and a catalogued move resolves to its own authored
-                movement — forcing the pattern here would put every cardio
-                exercise back on one shared loop. */}
+            {/* An AI exercise resolves by its NAME first, then its pattern: a
+                catalogued move resolves to its own authored movement by id,
+                and forcing the bare pattern put every AI cardio exercise back
+                on one shared loop whatever it was called. */}
             <ExerciseFigure
               exerciseId={id}
-              motion={view.isAi ? (view.movementPattern as FigureMotion) : undefined}
+              motion={
+                view.isAi
+                  ? resolveFigureMotion(id, undefined, {
+                      name: view.name,
+                      pattern: view.movementPattern as MovementPattern,
+                    })
+                  : undefined
+              }
               size={172}
             />
           </View>

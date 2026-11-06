@@ -31,6 +31,7 @@ import {
   OnTimeCard,
   useExactAlarmStatus,
 } from "@/components/notifications/center/OnTimeCard";
+import { PauseCard } from "@/components/notifications/center/PauseCard";
 import {
   HabitRemindersCard,
   MealRemindersCard,
@@ -38,6 +39,13 @@ import {
 } from "@/components/notifications/center/ReminderCards";
 import { StatusHero } from "@/components/notifications/center/StatusHero";
 import { useNotificationCenter } from "@/components/notifications/center/useNotificationCenter";
+import { GozlinToast, useToast } from "@/components/gozlin/GozlinToast";
+import { ReminderMoveCard } from "@/components/smart/ReminderMoveCard";
+import { useReceipts } from "@/components/smart/receipt";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useReminderMoveActions, useReminderMoves } from "@/components/smart/useReminderMoves";
+import { useSmartMoment } from "@/components/smart/useSmartMoment";
+import type { MoveTarget } from "@/services/smart";
 import { AppText, Reveal, Screen, useColors } from "@/components/ui";
 import { Spacing } from "@/constants/theme";
 import { useHabits } from "@/contexts/HabitsContext";
@@ -53,6 +61,29 @@ export default function NotificationsScreen() {
   const exact = useExactAlarmStatus();
   const { views } = useHabits();
   const { permission } = center;
+
+  // Reminders that move themselves (services/smart): any habit, meal slot or
+  // first water check-in whose time is far from when the thing actually
+  // happens. At most one is offered, above the card it belongs to.
+  const moves = useReminderMoves({
+    meals: center.loaded ? center.meals : null,
+    water: center.loaded ? center.water : null,
+  });
+  const offer = useSmartMoment("reminders", moves);
+  const toast = useToast();
+  const insets = useSafeAreaInsets();
+  const show = useReceipts(toast);
+  const { move, keep } = useReminderMoveActions({
+    show,
+    meals: center.meals,
+    water: center.water,
+    applyMeals: center.applyMeals,
+    applyWater: center.applyWater,
+  });
+  const offerFor = (kind: MoveTarget["kind"]) =>
+    offer && offer.target.kind === kind ? (
+      <ReminderMoveCard move={offer} where="list" onMove={move} onKeep={keep} style={styles.offer} />
+    ) : null;
 
   const blocked = permission.status === "denied" || permission.status === "unavailable";
 
@@ -103,13 +134,26 @@ export default function NotificationsScreen() {
   );
 
   return (
+    <>
     <Screen header={header}>
       <Reveal index={0}>
         <StatusHero center={center} exact={exact} />
         {/* Asked only when it would change something: Android, allowed, a
             reminder actually pending, and timing not yet exact. */}
-        {permission.status === "granted" && exact === "inexact" && center.queue.length > 0 ? (
+        {permission.status === "granted" &&
+        !center.paused &&
+        exact === "inexact" &&
+        center.queue.length > 0 ? (
           <OnTimeCard />
+        ) : null}
+        {/* One switch for all of it. Only offered once notifications are
+            allowed — before that there is nothing to pause. */}
+        {permission.status === "granted" ? (
+          <PauseCard
+            paused={center.paused}
+            onChange={(v) => void center.setPaused(v)}
+            disabled={!center.loaded}
+          />
         ) : null}
       </Reveal>
 
@@ -118,18 +162,23 @@ export default function NotificationsScreen() {
           label="Finish from the lock screen"
           hint="One tap on the notification logs it — streaks and rings update straight away"
         />
+        {offerFor("habit")}
         <HabitRemindersCard views={views} blocked={blocked} />
+        {offerFor("meal")}
         <MealRemindersCard
           settings={center.meals}
           pending={mealPending}
           blocked={blocked}
+          paused={center.paused}
           loaded={center.loaded}
           ensurePermission={ensurePermission}
           apply={center.applyMeals}
         />
+        {offerFor("water")}
         <WaterRemindersCard
           settings={center.water}
           blocked={blocked}
+          paused={center.paused}
           loaded={center.loaded}
           ensurePermission={ensurePermission}
           apply={center.applyWater}
@@ -151,9 +200,12 @@ export default function NotificationsScreen() {
       <Reveal index={4} stagger={45}>
         <Section label="Also from welliva" />
         <View style={styles.gap} />
-        <CoachingCard blocked={blocked} />
+        <CoachingCard blocked={blocked} paused={center.paused} />
         <View style={styles.gap} />
-        <WorkoutsCard fitness={center.fitness} />
+        <WorkoutsCard
+          fitness={center.fitness}
+          waterCheckIns={center.water.enabled && center.water.times.length > 0}
+        />
       </Reveal>
 
       {permission.status === "granted" ? (
@@ -173,6 +225,9 @@ export default function NotificationsScreen() {
         </Pressable>
       ) : null}
     </Screen>
+    {/* Outside the scroll region, so it floats over the page, not its end. */}
+    <GozlinToast controller={toast} topOffset={insets.top} />
+    </>
   );
 }
 
@@ -205,6 +260,8 @@ const styles = StyleSheet.create({
   sectionLabel: { letterSpacing: 0.6 },
   sectionHint: { marginTop: 2 },
   gap: { height: Spacing.md },
+  // The category cards space themselves from the top; so does the offer.
+  offer: { marginTop: Spacing.md },
   osLink: {
     flexDirection: "row",
     alignItems: "center",

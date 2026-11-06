@@ -236,9 +236,9 @@ describe("export", () => {
       days: days(day("2026-09-02", { symptoms: ["cramps", "back_pain"], flow: "heavy" }), day("2026-09-03", {})),
     });
     const rows = csv.split("\n");
-    expect(rows[0]).toBe("type,date,end,flow,symptoms,mood,energy,ovulation_test");
-    expect(rows[1]).toBe("period,2026-09-01,2026-09-05,,,,,");
-    expect(rows[2]).toBe("day,2026-09-02,,Heavy,Cramps; Back pain,,,");
+    expect(rows[0]).toBe("type,date,end,flow,symptoms,mood,energy,ovulation_test,detail");
+    expect(rows[1]).toBe("period,2026-09-01,2026-09-05,,,,,,");
+    expect(rows[2]).toBe("day,2026-09-02,,Heavy,Cramps; Back pain,,,,");
     expect(rows).toHaveLength(3); // the cleared day is not exported
   });
 });

@@ -12,24 +12,12 @@ export { TrendCard } from "./TrendCard";
 export type { TrendCardProps } from "./TrendCard";
 export { MacroTrendCard } from "./MacroTrendCard";
 export type { MacroTrendCardProps, MacroTrendMetric } from "./MacroTrendCard";
-export { MultiTrendChart } from "./MultiTrendChart";
-export type { MultiTrendChartProps, MultiSeries } from "./MultiTrendChart";
-export { MacroTrendsCard } from "./MacroTrendsCard";
-export type {
-  MacroTrendsCardProps,
-  MacroDescriptor,
-  MacroRangeData,
-} from "./MacroTrendsCard";
 export { WeekPie } from "./WeekPie";
 export type { WeekPieProps } from "./WeekPie";
-export { WeekDonut } from "./WeekDonut";
-export type { WeekDonutProps } from "./WeekDonut";
 export { ActivityRings } from "./ActivityRings";
 export type { ActivityRingsProps, ActivityRingMetric } from "./ActivityRings";
 export { WeekBars } from "./WeekBars";
 export type { WeekBarsProps } from "./WeekBars";
-export { ConsistencyGraph } from "./ConsistencyGraph";
-export type { ConsistencyGraphProps } from "./ConsistencyGraph";
 export type { ChartPoint, TrendSeries } from "./types";
 export {
   buildAdherenceTrend,

@@ -108,13 +108,24 @@ async function main() {
       : null,
   );
 
+  // Tests the VALUE, not the key's presence: eas.json now carries the slot as ""
+  // so it is discoverable in the file you would actually go looking in, and an
+  // empty slot is not a key.
   const iosKey = profiles.some(([, p]) => p.env?.EXPO_PUBLIC_REVENUECAT_IOS_KEY);
   if (!iosKey) {
     report(
       WARN,
       "No iOS key (expected while the app is Android-only)",
-      "An iOS build with no key fails OPEN — every iPhone user would get Pro for free.\n" +
-        "Add EXPO_PUBLIC_REVENUECAT_IOS_KEY (appl_…) before the first iOS build ships.",
+      "This is not a dead Buy button — it is a money leak, and it is worth being\n" +
+        "exact about why. isGatingActive() is isBillingConfigured (gating.ts), and with\n" +
+        "gating off effectiveTier() returns \"pro\". So an iOS build with no key hands\n" +
+        "every iPhone user unlimited Pro, Gozlin included: we pay for their Haiku\n" +
+        "turns and cannot charge one of them. Nobody is blocked from buying — there\n" +
+        "is simply nothing to buy and no reason to want it.\n" +
+        "Add EXPO_PUBLIC_REVENUECAT_IOS_KEY (appl_…) to eas.json preview AND production\n" +
+        "before the first iOS build ships. RevenueCat → Project settings → API keys.\n" +
+        "After launch, free-tier rows in analytics_coach_load are this leak showing up\n" +
+        "as spend.",
     );
   }
 

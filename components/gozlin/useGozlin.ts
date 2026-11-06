@@ -41,6 +41,9 @@ import { makeWeighIn } from "@/services/BodyLogService";
 import { coachTransport } from "@/services/api";
 import { useBilling } from "@/contexts/BillingContext";
 import { useHabits } from "@/contexts/HabitsContext";
+import { useLateContext } from "@/components/cycle/useCycleInsights";
+import { useRoughToday } from "@/components/smart/useRoughDay";
+import { ROUGH_REASONS } from "@/services/smart/roughDay";
 import { useCycleOptional } from "@/contexts/CycleContext";
 import { buildCycleBrief } from "@/services/cycle/brief";
 import {
@@ -65,6 +68,7 @@ import { useMealPlan } from "@/contexts/MealPlanContext";
 import { catalogLogLabel } from "@/services/nutrition/FoodLogService";
 import { linkCatalogFood, resolveCatalogFood } from "@/services/nutrition/NutrientResolver";
 import { recordCareFlag } from "@/services/gozlin/ExperienceStore";
+import { phoneLanguage } from "@/utils/phoneLanguage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCuriosity, type UseCuriosity } from "./useCuriosity";
 import { useGozlinSnapshot } from "./useGozlinSnapshot";
@@ -353,6 +357,7 @@ export function useGozlin(): UseGozlin {
   const [noted, setNoted] = useState<{ id: string; label: string } | null>(null);
   const clearNoted = useCallback(() => setNoted(null), []);
 
+  const gentleToday = useRoughToday() !== null;
   const briefing = useMemo(
     () =>
       buildBriefing({
@@ -360,9 +365,9 @@ export function useGozlin(): UseGozlin {
         insights: app.coachInsights,
         dietHistory: app.dietHistory,
         workoutLog: app.workoutLog,
-        motivation: identity.motivation,
         journeyStartedAt: app.userGoals?.journeyStartedAt,
         weeklyWorkoutTarget: app.userGoals?.weeklyWorkoutsTarget ?? 3,
+        gentle: gentleToday,
       }),
     [
       twin,
@@ -370,7 +375,7 @@ export function useGozlin(): UseGozlin {
       app.dietHistory,
       app.workoutLog,
       app.userGoals,
-      identity.motivation,
+      gentleToday,
     ],
   );
 
@@ -392,6 +397,7 @@ export function useGozlin(): UseGozlin {
   // (consent cycle_gozlin, off by default). Off — or not tracking — and the
   // brief is absent, so the coach has nothing to say about it.
   const cycle = useCycleOptional();
+  const lateReading = useLateContext();
   const cycleBrief = useMemo(
     () =>
       cycle && cycle.settings.enabled && cycle.shareWithGozlin
@@ -399,10 +405,33 @@ export function useGozlin(): UseGozlin {
             status: cycle.view.status,
             prediction: cycle.view.prediction,
             todayLog: cycle.view.todayLog,
-            showFertileWindow: cycle.settings.showFertileWindow,
+            // The view's flag, not the setting: never a fertile window in a logging-only mode.
+            showFertileWindow: cycle.view.showFertile,
+            relief: cycle.view.relief,
+            late: lateReading,
+            comingUp: cycle.view.comingUp,
+            weightPattern: cycle.view.weightPattern,
+            water: cycle.view.water,
+            hungryPlan: {
+              on: cycle.settings.planHungryWeek,
+              todayKcal: cycle.settings.hungryLedger[cycle.today] ?? 0,
+            },
           })
         : undefined,
-    [cycle],
+    [cycle, lateReading],
+  );
+
+  // A rough day they marked: the coach goes gentle for the rest of it.
+  const roughToday = useRoughToday();
+  const roughBrief = useMemo(
+    () =>
+      roughToday
+        ? {
+            reasonLabel: ROUGH_REASONS.find((r) => r.value === roughToday.reason)?.label,
+            streakPaused: roughToday.protected,
+          }
+        : undefined,
+    [roughToday],
   );
 
   const chatContext = useMemo<GozlinChatContext>(
@@ -414,8 +443,12 @@ export function useGozlin(): UseGozlin {
       checkins,
       habits: habitBrief,
       cycle: cycleBrief,
+      roughDay: roughBrief,
       experiences: curiosity.brief,
       conversation: messages,
+      // Read once per launch and never changes while the app runs, so it is
+      // not a dependency of this memo.
+      language: phoneLanguage() ?? undefined,
       weekStart: currentWeekStart(),
       weeklyWorkoutTarget: app.userGoals?.weeklyWorkoutsTarget ?? 3,
     }),
@@ -427,6 +460,7 @@ export function useGozlin(): UseGozlin {
       checkins,
       habitBrief,
       cycleBrief,
+      roughBrief,
       curiosity.brief,
       messages,
       app.userGoals,
@@ -882,7 +916,12 @@ export function useGozlin(): UseGozlin {
       if (!question) question = "Explain what you just told me.";
 
       const res = await runDeepDive(
-        { question, answer: message.content, twin, context: { snapshot, identity } },
+        {
+          question,
+          answer: message.content,
+          twin,
+          context: { snapshot, identity, language: phoneLanguage() ?? undefined },
+        },
         { transport: coachTransport, onDelta },
       );
       if (!res.ok || !res.text) {

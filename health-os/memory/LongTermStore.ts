@@ -45,7 +45,7 @@ export const LongTermStore = {
   rememberPreference,
   /** Remove the stored "why". */
   async clearMotivation(): Promise<void> {
-    await saveIdentity({ motivation: undefined });
+    await saveIdentity({ motivation: undefined, motivationAt: undefined, motivationQuotedAt: undefined });
   },
   /** Drop one stated preference. */
   async removePreference(pref: string): Promise<GozlinIdentityMemory> {

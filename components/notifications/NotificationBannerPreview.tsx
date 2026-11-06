@@ -23,14 +23,28 @@ import {
   Animated,
   Easing,
   Image,
+  Platform,
   StyleSheet,
   View,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
 
-// The launcher icon at banner size: the gold wordmark on black.
+/**
+ * What heads the banner is the platform's call, so the mock follows it:
+ *   · ANDROID draws the notification's own icons — the Gozlin diamond as a
+ *     one-colour silhouette in the header (Android only ever uses the alpha of
+ *     that one, tinted with the accent) and in full colour beside the text
+ *     (the large icon, plugins/withNotificationLargeIcon).
+ *   · iOS always heads a notification with the APP icon — the gold wordmark.
+ *     No app can swap it.
+ */
+const ANDROID = Platform.OS === "android";
 const APP_ICON = require("@/assets/images/icon-wordmark-96.png");
+const SMALL_ICON = require("@/assets/images/notification-icon.png");
+const LARGE_ICON = require("@/assets/images/notification-large-icon.png");
+/** The accent Android tints the small icon with (app.json / NOTIFICATION_ACCENT). */
+const ACCENT = "#EDB623";
 
 export interface NotificationBannerPreviewProps {
   title: string;
@@ -85,7 +99,11 @@ export function NotificationBannerPreview({
       ]}
     >
       <View style={styles.head}>
-        <Image source={APP_ICON} style={styles.icon} />
+        {ANDROID ? (
+          <Image source={SMALL_ICON} style={[styles.smallIcon, { tintColor: ACCENT }]} />
+        ) : (
+          <Image source={APP_ICON} style={styles.icon} />
+        )}
         <AppText variant="caption" color="tertiary" uppercase style={styles.app}>
           welliva
         </AppText>
@@ -94,12 +112,17 @@ export function NotificationBannerPreview({
         </AppText>
       </View>
 
-      <AppText variant="callout" style={styles.title}>
-        {title}
-      </AppText>
-      <AppText variant="footnote" color="secondary">
-        {body}
-      </AppText>
+      <View style={styles.content}>
+        <View style={styles.text}>
+          <AppText variant="callout" style={styles.title}>
+            {title}
+          </AppText>
+          <AppText variant="footnote" color="secondary">
+            {body}
+          </AppText>
+        </View>
+        {ANDROID ? <Image source={LARGE_ICON} style={styles.largeIcon} /> : null}
+      </View>
 
       <View style={[styles.divider, { backgroundColor: colors.divider }]} />
       <View style={styles.action}>
@@ -121,7 +144,11 @@ const styles = StyleSheet.create({
   },
   head: { flexDirection: "row", alignItems: "center", marginBottom: Spacing.sm },
   icon: { width: 18, height: 18, borderRadius: 4, marginRight: Spacing.sm },
+  smallIcon: { width: 16, height: 16, marginRight: Spacing.sm },
   app: { flex: 1, letterSpacing: 0.6 },
+  content: { flexDirection: "row", alignItems: "flex-start", gap: Spacing.md },
+  text: { flex: 1 },
+  largeIcon: { width: 40, height: 40, borderRadius: Radius.sm },
   title: { fontWeight: "700", marginBottom: 2 },
   divider: { height: StyleSheet.hairlineWidth, marginTop: Spacing.lg },
   action: {

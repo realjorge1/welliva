@@ -42,12 +42,18 @@ export interface BriefingInput {
   dietHistory: DietHistoryEntry[];
   /** Workout log — for the Yesterday Summary. */
   workoutLog: WorkoutLogEntry[];
-  /** The user's stated motivation, if remembered. */
-  motivation?: string;
   /** Journey start (YYYY-MM-DD) — drives the "Day N" header. */
   journeyStartedAt?: string;
   /** Sessions/week the user aims for — for the missed-training risk alert. */
   weeklyWorkoutTarget?: number;
+  /**
+   * Today is a rough day (services/smart/roughDay). The briefing keeps what is
+   * simply true about yesterday and drops every ask, risk and nudge.
+   *
+   * Their "why" is deliberately not an input: this runs every day, and their words
+   * come back at most once a month, on a wobbly day (services/smart/why).
+   */
+  gentle?: boolean;
   now?: Date;
 }
 
@@ -202,7 +208,7 @@ function buildNutritionFocus(twin: GozlinTwin): BriefingLine {
   return { icon: "nutrition-outline", text: base, tone: "steady" };
 }
 
-function buildMotivation(twin: GozlinTwin, motivation: string | undefined, seed: string): string {
+function buildMotivation(twin: GozlinTwin, seed: string): string {
   const f = new Set(twin.flags);
   let line = `Your consistency is ${twin.momentum.adherence7d}%.`;
 
@@ -216,7 +222,6 @@ function buildMotivation(twin: GozlinTwin, motivation: string | undefined, seed:
     line += " Small consistent choices are doing the work.";
   }
 
-  if (motivation) line += ` Still aiming at ${motivation}.`;
   return line;
 }
 
@@ -334,14 +339,32 @@ export function buildBriefing(input: BriefingInput): GozlinBriefing {
     headlineKind = "on-track";
     tone = "steady";
   } else {
-    headline = input.motivation
-      ? `Still aiming at ${input.motivation} — today's a small step toward it.`
-      : "Small consistent choices beat big occasional ones.";
+    headline = "Small consistent choices beat big occasional ones.";
     headlineKind = "motivation";
     tone = "warm";
   }
   // A non–dead-end thread, except on celebration where the win is the point.
   if (headlineKind !== "celebration") headline += ` ${closer(seed)}`;
+
+  if (input.gentle) {
+    return {
+      __kind: "briefing",
+      greeting,
+      dayCount,
+      journeyLabel,
+      headline: "A gentle day. Nothing needs doing today.",
+      headlineKind: "motivation",
+      yesterday: buildYesterday(input, today),
+      todayFocus: "Taking it easy",
+      workoutFocus: { icon: "leaf-outline", text: "A gentle walk or rest. Your plan can wait.", tone: "warm" },
+      nutritionFocus: { icon: "restaurant-outline", text: "Eat well enough. No targets to chase today.", tone: "warm" },
+      motivation: "Looking after yourself is the plan today.",
+      riskAlerts: [],
+      adjustments: [],
+      microAction: "Nothing today, unless you feel like it.",
+      tone: "warm",
+    };
+  }
 
   return {
     __kind: "briefing",
@@ -354,7 +377,7 @@ export function buildBriefing(input: BriefingInput): GozlinBriefing {
     todayFocus: buildTodayFocus(twin),
     workoutFocus: buildWorkoutFocus(twin),
     nutritionFocus: buildNutritionFocus(twin),
-    motivation: buildMotivation(twin, input.motivation, seed),
+    motivation: buildMotivation(twin, seed),
     riskAlerts: buildRiskAlerts(twin, input.weeklyWorkoutTarget ?? 3, goal),
     adjustments: buildAdjustments(input),
     microAction: microAction(twin),

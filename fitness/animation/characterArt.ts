@@ -7,38 +7,40 @@
  * Skia or Reanimated: every part is an SVG path string with a fill, expressed in
  * the rig's own 0–100 box units, in the frame of the bone it rides.
  *
- * ── HOW IT IS BUILT (the Duolingo method, not the Duolingo character) ─────────
+ * ── AN ATHLETE, DRAWN FLAT ─────────────────────────────────────────────────────
  *
- *   · FEW SHAPES, ALL ROUND. Circles, rounded rectangles and soft tapers — no
- *     points, no outlines. A limb is a tapered rounded bar, a hand a mitt, a head
- *     a squircle, the hair a cloud of circles.
- *   · SILHOUETTE FIRST. The curly hair, the chunky trainers and the fat mitts are
- *     exaggerated on purpose; they are what you read at 60pt.
- *   · COLOUR BLOCKS, SEPARATED. Skin / tee / shorts / trainers never share a hue
- *     next to each other, so a pose reads as a flat silhouette.
- *   · A RIG, NOT A PICTURE. Every limb is a part parented to a bone.
+ * The figure is held to the swimmer in the owner's "glide" reference: a real
+ * body in a flat illustration — slim, long-limbed, quietly shaped — not a
+ * cartoon. It used to be a 4-heads-tall character with shoulders over half its
+ * own height apart, limbs as wide as half its head and trainers twice the
+ * length of a foot; the owner's verdict was "too fat". Now:
+ *
+ *   · HUMAN PROPORTIONS. About seven heads tall, shoulders a quarter of the
+ *     height across, limbs a person's width. Measured in the tests.
+ *   · LIMBS WITH A SHAPE. A limb is a soft taper with its muscle belly on it —
+ *     a calf behind the shin, a forearm thicker at the elbow, a biceps under the
+ *     sleeve — so a bending knee or elbow reads as a joint, not a hose.
+ *   · FLAT COLOUR, ONE SHADE. Skin / tee / shorts / trainers are blocks, each with
+ *     one shade a step down for the far limbs, hems and collar. No gradients,
+ *     no outlines — except a hairline rim on the sleeve and the hand, which is
+ *     what keeps a teal sleeve legible over a teal tee and a hand over a face.
+ *   · THE KIT IS UNCHANGED. Same tee, shorts, socks and trainers; only cut to the
+ *     body now wearing them.
  *
  * ── THIS FIGURE DEMONSTRATES; IT DOES NOT PERFORM ────────────────────────────
  *
- * Its whole job is to show a movement clearly — which way an arm travels, how
- * far the knee bends, where the torso is square and where it twists. Everything
- * that competes with that is gone:
- *
- *   · NO ACTING FACE. The face is two eyes and a closed mouth, drawn once and
- *     never animated. There were blinks, glances, brows, four swapping mouths
- *     and a lolling tongue; all of it pulled the eye to the head at exactly the
- *     moment the limbs were doing the thing worth watching. The eyes stay only
- *     because they say which way the body faces.
- *   · HUMAN PROPORTIONS. The head is a head, not a balloon (see HEAD_SCALE), so
- *     the arms and legs get the share of the silhouette they need to read.
- *   · CLOTHING THAT READS AS CLOTHING. The sleeve is one shape with the shoulder
- *     it sits on, hemmed in a deeper shade of its own colour — not a pale sliver
- *     over bare skin, which at demo size looked like a torn seam.
+ * Its whole job is to show a movement clearly. The face is two eyes and a
+ * closed mouth, drawn once and never animated: the eyes say which way the body
+ * faces, and nothing on the head moves while the limbs do the thing worth
+ * watching. The hair is cropped close, so it has nothing to swing.
  *
  * Bone frame: origin at the bone's start, +x along the bone to its tip, +y across
- * it (the bone's right-hand side). Head frame: radius 1 at the head's centre,
- * "up" is −y (toward the crown along the neck), the front of the face is +x.
+ * it (the bone's right-hand side) — for a limb of the side-on figure that is the
+ * BACK of it, where the calf is. Head frame: radius 1 = half the head's height,
+ * at its centre; "up" is −y (toward the crown along the neck), the front of the
+ * face is +x.
  */
+import { sideFacing } from "./facing";
 import type { FigureMotion } from "./movementProfiles";
 import type { Rig } from "./rig";
 
@@ -52,20 +54,16 @@ export type FigureLook = "character" | "pictogram";
 /**
  * Fixed hexes, like the flame and the badge metals: the athlete wears the same
  * kit in either theme. Each colour is a BLOCK with a shade one step down for the
- * hems and the cast shadows — the single flat shadow an illustrator gives a
- * character instead of a gradient.
+ * hems and the far limbs — the single flat shadow an illustrator gives a figure
+ * instead of a gradient.
  */
 export const KIT = {
   skin: "#C98B5F",
   skinShade: "#A8693F",
   skinDeep: "#8C5230",
-  blush: "#F0846C",
   hair: "#2A1F1F",
   hairLight: "#5A4743",
   tee: "#17B8A3",
-  /** The ringer trim on the cuffs and the collar. */
-  teeTrim: "#D9F8F1",
-  teeTrimShade: "#9FDDD0",
   teeShade: "#0E8E7F",
   teeDeep: "#0A6B5F",
   shorts: "#5560D8",
@@ -82,21 +80,14 @@ export const KIT = {
 } as const;
 
 /**
- * The head, relative to the rig's own head radius.
+ * The head's half-height, relative to the rig's own head radius.
  *
- * It used to be 1.75 — a deliberately huge character head, on the theory that a
- * character is read by its face. For a figure whose entire purpose is to
- * demonstrate a movement that was backwards: the head took better than a third
- * of the figure's height, so the arms came to a quarter of it and the legs to
- * well under half, and the whole athlete read as stubby. Worse, a head that big
- * sits ON the shoulders and cut across the sleeves, which is what made the kit
- * look torn.
- *
- * At 1.05 the head is about a quarter of the standing height — still stylised,
- * still friendly at 60pt, but the limbs now carry the silhouette. Measured in
- * `fitness/__tests__/characterArt.test.ts`.
+ * It was 1.75 (a cartoon head, more than a third of the figure), then 1.05 (a
+ * quarter of it — still a 4-heads-tall character). At 0.58 the head is about a
+ * seventh of the standing height: an athlete's head, the share a person's has.
+ * Measured in `fitness/__tests__/rig.test.ts`.
  */
-export const HEAD_SCALE = 1.05;
+export const HEAD_SCALE = 0.58;
 
 /** One drawn shape. `d` is an SVG path in its frame; fills are flat. */
 export interface Shape {
@@ -107,8 +98,8 @@ export interface Shape {
   stroke?: { color: string; width: number };
   /**
    * Decoration that is invisible below ~100px — a cuff, a lace, a toe cap, a
-   * cheek, a catch-light. A list thumbnail skips it: dozens of rows are mounted
-   * at once on a 1 GB phone, and a node nobody can see is still a node.
+   * waistband, a highlight. A list thumbnail skips it: dozens of rows are
+   * mounted at once on a 1 GB phone, and a node nobody can see is still a node.
    */
   fine?: boolean;
 }
@@ -122,8 +113,9 @@ const f = (v: number): string => String(Math.round(v * 1000) / 1000);
 
 /*
  * EVERY SHAPE WINDS CLOCKWISE (sweep 1, in screen space). Several of these are
- * concatenated into one path — a mitt and its thumb, a cloud of curls — and the
- * default fill rule cancels the overlap of two opposite windings into a hole.
+ * concatenated into one path — a limb and its muscle, a mitt and its thumb —
+ * and the default fill rule cancels the overlap of two opposite windings into a
+ * hole.
  */
 
 /** A circle. */
@@ -151,7 +143,7 @@ export function rrect(x0: number, y0: number, x1: number, y1: number, r: number)
 /**
  * A rounded bar along +x from x0 to x1: radius r0 at the start, r1 at the end,
  * both ends fully round and the sides running tangent between them — a limb, a
- * sleeve, a sausage. Exact external-tangent construction, so a taper never kinks.
+ * neck. Exact external-tangent construction, so a taper never kinks.
  */
 export function taper(x0: number, x1: number, r0: number, r1: number): string {
   const d = Math.max(0.01, x1 - x0);
@@ -169,11 +161,11 @@ export function taper(x0: number, x1: number, r0: number, r1: number): string {
 
 /**
  * Scale a path made only of absolute x,y pairs (M, L, C, Z) by `k`, then drop it
- * `dy` — how a hand-authored outline is built up to a new size.
+ * `dy` — how a hand-authored outline is cut to a new size.
  */
-export function scalePath(d: string, k: number, dy = 0): string {
+export function scalePath(d: string, k: number, dy = 0, ky = k): string {
   let i = 0;
-  return d.replace(/-?\d*\.?\d+/g, (m) => f(Number(m) * k + (i++ % 2 === 1 ? dy : 0)));
+  return d.replace(/-?\d*\.?\d+/g, (m) => (i++ % 2 === 1 ? f(Number(m) * ky + dy) : f(Number(m) * k)));
 }
 
 /**
@@ -181,51 +173,75 @@ export function scalePath(d: string, k: number, dy = 0): string {
  * r0 at the start, r1 at the end — a sleeve, a leg of shorts, anything hemmed.
  */
 export function hemmed(x0: number, x1: number, r0: number, r1: number, c = 1.2): string {
-  const k0 = Math.min(c, r0);
-  const k1 = Math.min(c, r1);
+  return slab(x0, x1, r0, r0, r1, r1, c);
+}
+
+/**
+ * `hemmed` with its two sides set separately: `back0`/`back1` is how far it
+ * reaches to −y at the start/end, `front0`/`front1` to +y. A torso seen
+ * side-on — a back and a belly that are not the same distance from the spine.
+ */
+export function slab(
+  x0: number,
+  x1: number,
+  back0: number,
+  front0: number,
+  back1: number,
+  front1: number,
+  c = 1.2,
+): string {
+  const k = (r: number) => Math.min(c, r, (x1 - x0) / 2);
+  const [b0, b1, f0, f1] = [k(back0), k(back1), k(front0), k(front1)];
   return (
-    `M${f(x0)} ${f(-r0 + k0)}Q${f(x0)} ${f(-r0)} ${f(x0 + k0)} ${f(-r0)}` +
-    `L${f(x1 - k1)} ${f(-r1)}Q${f(x1)} ${f(-r1)} ${f(x1)} ${f(-r1 + k1)}` +
-    `L${f(x1)} ${f(r1 - k1)}Q${f(x1)} ${f(r1)} ${f(x1 - k1)} ${f(r1)}` +
-    `L${f(x0 + k0)} ${f(r0)}Q${f(x0)} ${f(r0)} ${f(x0)} ${f(r0 - k0)}Z`
+    `M${f(x0)} ${f(-back0 + b0)}Q${f(x0)} ${f(-back0)} ${f(x0 + b0)} ${f(-back0)}` +
+    `L${f(x1 - b1)} ${f(-back1)}Q${f(x1)} ${f(-back1)} ${f(x1)} ${f(-back1 + b1)}` +
+    `L${f(x1)} ${f(front1 - f1)}Q${f(x1)} ${f(front1)} ${f(x1 - f1)} ${f(front1)}` +
+    `L${f(x0 + f0)} ${f(front0)}Q${f(x0)} ${f(front0)} ${f(x0)} ${f(front0 - f0)}Z`
   );
 }
 
 /* ───────────────────────────────── Parts ─────────────────────────────────── */
 
 /**
- * Limb measurements, in box units — radii, not widths. Chunky on purpose: the
- * bones are the rig's (arms 25 long, legs 36), so the build is what makes a body
- * stout rather than lanky, and a thin limb disappears at thumbnail size long
- * before a thick one does.
+ * Limb measurements, in box units — radii (half-widths), not widths. The
+ * standing figure is about 84 units tall, so an upper arm is ~6% of the height
+ * across and a thigh ~10%: a fit person's, not a cartoon's.
  */
 const ARM = {
-  upper: [5.5, 4.8] as const,
-  fore: [4.7, 3.9] as const,
-  /**
-   * The sleeve is only just proud of the arm inside it. It used to be a tube
-   * half again as wide as the limb, which read as a shoulder pad rather than a
-   * t-shirt and left a wide step down to bare skin at the hem.
-   */
-  sleeve: [5.9, 5.2] as const,
+  /** Deltoid → just above the elbow. */
+  upper: [2.55, 2.05] as const,
+  /** The biceps' belly, under the sleeve's hem. */
+  belly: 2.3,
+  /** Below the elbow → the wrist, and the forearm's belly near the elbow. */
+  fore: [2.15, 1.45] as const,
+  foreBelly: 2.3,
+  /** The short sleeve: just proud of the arm, so it reads as cloth. */
+  sleeve: [3.05, 2.75] as const,
   sleeveEnd: 0.46,
-  cuff: 1.3,
-  hand: [5.3, 4.8] as const,
-  thumb: 2.2,
-  rim: 0.85,
+  cuff: 0.7,
+  /** The hand: a small mitt, about a forearm's width. */
+  hand: [2.0, 1.45] as const,
+  thumb: 0.75,
+  /** The hairline outline on a sleeve and a hand. */
+  rim: 0.32,
 };
 const LEG = {
-  thigh: [6.2, 5.1] as const,
-  shin: [5.1, 4.2] as const,
-  shorts: [7.6, 8.1] as const,
-  shortsEnd: 0.64,
-  hem: 1.4,
+  /** Hip → just above the knee. */
+  thigh: [4.0, 2.65] as const,
+  /** Below the knee → the ankle, and the calf's belly behind it. */
+  shin: [2.4, 1.4] as const,
+  calf: 2.7,
+  shorts: [4.75, 4.35] as const,
+  shortsEnd: 0.5,
+  hem: 0.75,
 };
 
 /** How far under the ankle the trainer's sole lies, in box units — the floor. */
-export const SOLE_BELOW = 5.9;
-/** The side-on trainer, built up from its 1:1 outline. */
-const SHOE_SCALE = 1.2;
+export const SOLE_BELOW = 3.8;
+/** The side-on trainer, cut down from its 1:1 outline to the size of a foot… */
+const SHOE_SCALE = 0.68;
+/** …and to a running shoe's height. */
+const SHOE_HEIGHT = 0.54;
 
 /** Which way a hand's thumb points, in the forearm's frame: toward the body. */
 function thumbSide(boneName: string, view: FigureView): 1 | -1 {
@@ -240,128 +256,250 @@ interface Layered {
 }
 
 /**
- * The upper arm: the skin bar with the tee's short sleeve over its top.
+ * The upper arm: the skin with its biceps, and the tee's short sleeve over the
+ * top of it.
  *
- * THE SLEEVE AND THE SHOULDER ARE ONE PATH. They used to be two: a cap disc
- * drawn behind the head, and a sleeve with a FLAT cut across its top drawn in
- * front of it. Anything that landed between those two layers — and with the old
- * head size that was the head itself, every time an arm came up — showed as a
- * straight slice through the shoulder with bare skin under it. It read exactly
- * like a torn seam, which is what it was. `disc ∪ hemmed` (both wound clockwise,
- * so they union) gives one shape with a round shoulder and a hemmed cuff, and
- * nothing can be drawn into the join because there is no join.
- *
- * The cuff is a DEEPER shade of the tee, not the near-white ringer trim it was.
- * At demo size a pale sliver between a mid-teal sleeve and bare skin was the
- * other half of the ripped look; a darker hem says "the sleeve stops here"
- * without ever reading as a hole.
+ * THE SLEEVE AND THE SHOULDER ARE ONE PATH (`disc ∪ hemmed`, both clockwise, so
+ * they union): a round shoulder and a hemmed cuff with no join for anything to
+ * be drawn into — two separate pieces once read as a torn seam. A hairline rim
+ * a shade down runs round it, because a teal sleeve lying over a teal tee (the
+ * whole near arm, side-on) is otherwise invisible.
  */
 function upperArm(L: number, far: boolean, wholeBehind: boolean): Layered {
   const skin = far ? KIT.skinShade : KIT.skin;
   const sleeve = far ? KIT.teeShade : KIT.tee;
-  const cuff = far ? KIT.teeDeep : KIT.teeShade;
+  const edge = far ? KIT.teeDeep : KIT.teeShade;
   const e = ARM.sleeveEnd * L;
   const [s0, s1] = ARM.sleeve;
+  const g = ARM.rim;
+  // FRONT-ON THE SLEEVE HAS NO RIM ROUND ITS CROWN. There the arm hangs beside
+  // the body, never across it, and a dark ring round the top of the shoulder
+  // stood the crown up off the tee like a shoulder pad. Without it the sleeve
+  // runs on from the tee's shoulder as one piece of cloth, the way a tee does;
+  // the cuff keeps its band. Side-on, the near arm lies over the tee, and the
+  // rim is the only thing that keeps a teal sleeve visible on a teal chest.
+  const rim: Shape[] = wholeBehind
+    ? []
+    : [{ d: disc(0, 0, s0 + g) + hemmed(0, e + g, s0 + g, s1 + g, 1.1), fill: edge }];
   const body: Shape[] = [
-    { d: taper(0, L, ARM.upper[0], ARM.upper[1]), fill: skin },
-    { d: disc(0, 0, s0) + hemmed(0, e, s0, s1, 1.6), fill: sleeve },
-    { d: hemmed(e - ARM.cuff, e, s1, s1, 0.5), fill: cuff, fine: true },
+    { d: taper(0, L, ARM.upper[0], ARM.upper[1]) + oval(0.6 * L, 0, 0.28 * L, ARM.belly), fill: skin },
+    ...rim,
+    { d: disc(0, 0, s0) + hemmed(0, e, s0, s1, 1.1), fill: sleeve },
+    { d: hemmed(e - ARM.cuff, e, s1, s1, 0.35), fill: edge, fine: true },
   ];
   // From the front an upper arm passes BESIDE the head, never across the face,
   // so all of it can sit behind the head (only the forearm and hand come in
   // front). From the side the near arm really is in front of the head, so there
-  // the whole arm is drawn in front — the shoulder's cap rides with it, so the
-  // head can no longer be drawn into the middle of the sleeve.
+  // the whole arm is drawn in front — the shoulder rides with it, so the head
+  // can never be drawn into the middle of the sleeve.
   return wholeBehind ? { behind: body, front: [] } : { behind: [], front: body };
 }
 
-/** A forearm and the mitt on the end of it. */
-function foreArm(L: number, far: boolean, side: 1 | -1): Shape[] {
-  const skin = far ? KIT.skinShade : KIT.skin;
-  const rim = far ? KIT.skinDeep : KIT.skinShade;
-  const [along, across] = ARM.hand;
-  // The mitt: an egg a touch longer than it is wide, and a thumb tucked against
-  // the palm on the inside.
-  const mitt = (grow: number): string =>
-    oval(L + 1.5, 0, along + grow, across + grow) +
-    disc(L + 0.2, side * (across - 0.5), ARM.thumb + grow);
+/** A forearm, wrist to elbow. The hand is a bone of its own, on the wrist. */
+function foreArm(L: number, far: boolean): Shape[] {
   return [
-    { d: taper(0, L, ARM.fore[0], ARM.fore[1]), fill: skin },
-    // The mitt is rimmed so a hand in front of a face or a tee stays a hand.
-    { d: mitt(ARM.rim), fill: rim },
-    { d: mitt(0), fill: skin },
+    {
+      d: taper(0, L, ARM.fore[0], ARM.fore[1]) + oval(0.3 * L, 0, 0.3 * L, ARM.foreBelly),
+      fill: far ? KIT.skinShade : KIT.skin,
+    },
   ];
 }
 
-/** A thigh with the shorts' leg over its top. */
+/**
+ * The hand, in its own bone's frame: origin at the wrist, fingers along +x. An
+ * egg a touch longer than it is wide, the thumb tucked against the palm on the
+ * inside, and rimmed so a hand in front of a face or a tee stays a hand.
+ */
+function hand(far: boolean, side: 1 | -1): Shape[] {
+  const [along, across] = ARM.hand;
+  const mitt = (grow: number): string =>
+    oval(HAND_CENTRE, 0, along + grow, across + grow) +
+    disc(0.2, side * (across - 0.25), ARM.thumb + grow);
+  return [
+    { d: mitt(ARM.rim), fill: far ? KIT.skinDeep : KIT.skinShade },
+    { d: mitt(0), fill: far ? KIT.skinShade : KIT.skin },
+  ];
+}
+
+/** How far the hand's egg sits past the wrist, along the fingers. */
+const HAND_CENTRE = 1.2;
+/** From the wrist to the fingertips, box units — the hand bone's length. */
+export const HAND_LENGTH = HAND_CENTRE + ARM.hand[0];
+
+/**
+ * How far below the wrist the hand reaches with its bone at `angle`: fingers
+ * down, the fingertips; flat, the palm. What the framing lays a hand on the
+ * floor with, and how low a planted wrist has to sit.
+ */
+export function handDepth(angle: number): number {
+  const s = Math.sin(angle);
+  const c = Math.cos(angle);
+  const [along, across] = ARM.hand;
+  return HAND_CENTRE * s + Math.hypot(along * s, across * c) + ARM.rim;
+}
+
+/**
+ * A thigh with the shorts' leg over its top.
+ *
+ * THE SHORTS' LEG STARTS WITH A ROUND SEAT (`disc ∪ hemmed`, one clockwise
+ * path, like the sleeve). It used to start just behind the hip joint with a
+ * square end, which left the round top of the thigh bare: front-on it showed as
+ * a hump of skin between the tee and the shorts at each hip, and side-on the
+ * far thigh — set back behind the body — stuck out as a bare bulge behind the
+ * seat of the shorts. Now the cloth covers the whole top of the leg at every
+ * angle the hip can take, and the far one reads as the far side of the shorts.
+ */
 function thigh(L: number, far: boolean): Shape[] {
   const skin = far ? KIT.skinShade : KIT.skin;
   const sh = far ? KIT.shortsShade : KIT.shorts;
   const hem = far ? KIT.shortsDeep : KIT.shortsShade;
   const e = LEG.shortsEnd * L;
+  const [r0, r1] = LEG.shorts;
   return [
     { d: taper(0, L, LEG.thigh[0], LEG.thigh[1]), fill: skin },
-    { d: hemmed(-2.5, e, LEG.shorts[0], LEG.shorts[1], 2.2), fill: sh },
-    { d: hemmed(e - LEG.hem, e, LEG.shorts[1], LEG.shorts[1], 0.7), fill: hem, fine: true },
-  ];
-}
-
-/** A shin, with a crew sock over its lower half — the trainer's partner. */
-function shin(L: number, far: boolean): Shape[] {
-  const x0 = L * 0.56;
-  const r = (x: number) => LEG.shin[0] + (LEG.shin[1] - LEG.shin[0]) * (x / L);
-  return [
-    { d: taper(0, L, LEG.shin[0], LEG.shin[1]), fill: far ? KIT.skinShade : KIT.skin },
-    { d: hemmed(x0, L + 0.6, r(x0) + 0.5, r(L) + 0.5, 1.4), fill: far ? KIT.soleShade : KIT.sole },
-    // The sock's ribbed top, in the trainers' coral.
-    { d: hemmed(x0, x0 + 1.5, r(x0) + 0.6, r(x0) + 0.6, 0.5), fill: far ? KIT.shoeShade : KIT.shoe, fine: true },
+    { d: disc(0, 0, r0) + hemmed(0, e, r0, r1, 1.4), fill: sh },
+    { d: hemmed(e - LEG.hem, e, r1, r1, 0.4), fill: hem, fine: true },
   ];
 }
 
 /**
- * The side view's trainer. The foot bone is always level, its origin at the
- * ankle, so the shoe is drawn in screen orientation: heel behind, toe in front,
- * sole on the floor, a toe cap and two laces.
+ * A shin, its calf, and a crew sock over its lower half — the trainer's
+ * partner. Side-on the calf sits behind the shin bone (+y); front-on it bulges
+ * evenly, as a lower leg does seen from in front.
+ */
+function shin(L: number, far: boolean, view: FigureView): Shape[] {
+  const x0 = L * 0.7;
+  const r = (x: number) => LEG.shin[0] + (LEG.shin[1] - LEG.shin[0]) * (x / L);
+  const calfY = view === "side" ? 0.5 : 0;
+  return [
+    {
+      d: taper(0, L, LEG.shin[0], LEG.shin[1]) + oval(0.3 * L, calfY, 0.27 * L, LEG.calf),
+      fill: far ? KIT.skinShade : KIT.skin,
+    },
+    { d: hemmed(x0, L + 0.5, r(x0) + 0.35, r(L) + 0.35, 0.8), fill: far ? KIT.soleShade : KIT.sole },
+    // The sock's ribbed top, in the trainers' coral.
+    {
+      d: hemmed(x0, x0 + 0.9, r(x0) + 0.4, r(x0) + 0.4, 0.3),
+      fill: far ? KIT.shoeShade : KIT.shoe,
+      fine: true,
+    },
+  ];
+}
+
+/**
+ * The side view's trainer, in the foot bone's frame: origin at the ankle, toe
+ * along +x, sole toward +y — heel behind, toe in front, a toe cap and two laces.
+ * Standing, the foot bone is level and this is a shoe flat on the floor; the
+ * rig turns it with the ankle everywhere else (rig.ts "The side feet").
  */
 function sideShoe(far: boolean): Shape[] {
   const body = far ? KIT.shoeShade : KIT.shoe;
   const cap = far ? KIT.shoeDeep : KIT.shoeLight;
   const sole = far ? KIT.soleShade : KIT.sole;
-  // Authored at 1:1, then built up to the chunky size and dropped so the sole's
-  // underside lands on the same line as the front-on trainer's.
+  // Authored at 1:1, then cut to a foot's length — and lower than it is long,
+  // a running shoe rather than a high-top — and dropped so the sole's underside
+  // lands on the same line as the front-on trainer's.
   const k = SHOE_SCALE;
-  const dy = SOLE_BELOW - 5.4 * k;
+  const ky = SHOE_HEIGHT;
+  const dy = SOLE_BELOW - 5.4 * ky;
   return [
     {
       d: scalePath(
         "M-5.8 -0.8C-5.8 -4.6 -3.8 -6 -1 -6L2.4 -6C4.2 -6 5.4 -4 8 -2.8C11 -1.6 12.6 0 12.6 2L12.6 4L-5.8 4Z",
         k,
         dy,
+        ky,
       ),
       fill: body,
     },
     // Toe cap: the rubber bumper over the front.
     {
-      d: scalePath("M7 -2.8C9.2 -1.9 10.4 -0.6 10.4 0.8L10.4 4L6 4C6.2 1.2 6.4 -1 7 -2.8Z", k, dy),
+      d: scalePath("M7 -2.8C9.2 -1.9 10.4 -0.6 10.4 0.8L10.4 4L6 4C6.2 1.2 6.4 -1 7 -2.8Z", k, dy, ky),
       fill: cap,
+      fine: true,
     },
     // Sole.
-    { d: rrect(-6.2 * k, 2.6 * k + dy, 13.1 * k, 5.4 * k + dy, 1.5 * k), fill: sole },
+    { d: rrect(-6.2 * k, 2.6 * ky + dy, 13.1 * k, 5.4 * ky + dy, 1.5 * ky), fill: sole },
     // Laces.
-    { d: rrect(0.2 * k, -4 * k + dy, 4.4 * k, -2.9 * k + dy, 0.6 * k), fill: sole, fine: true },
-    { d: rrect(1.7 * k, -2 * k + dy, 5.6 * k, -0.9 * k + dy, 0.6 * k), fill: sole, fine: true },
+    { d: rrect(0.2 * k, -4 * ky + dy, 4.4 * k, -2.9 * ky + dy, 0.5 * ky), fill: sole, fine: true },
+    { d: rrect(1.7 * k, -2 * ky + dy, 5.6 * k, -0.9 * ky + dy, 0.5 * ky), fill: sole, fine: true },
   ];
+}
+
+/**
+ * The side trainer's bounding box in the foot bone's frame (x0/x1 heel → toe,
+ * y0/y1 laces → sole), from the numbers `sideShoe` draws with.
+ */
+const SIDE_SHOE_BOX = {
+  x0: -6.2 * SHOE_SCALE,
+  x1: 13.1 * SHOE_SCALE,
+  y0: -6 * SHOE_HEIGHT + (SOLE_BELOW - 5.4 * SHOE_HEIGHT),
+  y1: SOLE_BELOW,
+} as const;
+
+/**
+ * How far below the ankle the side trainer reaches, box units, with the foot
+ * bone at `angle` — flat, that is the sole; kneeling with the sole up, the
+ * laces; on the toes, the toe. `facing` −1 is the turned-over art of a pose
+ * that faces −x. What the framing stands the figure on.
+ */
+export function sideShoeDepth(angle: number, facing: number): number {
+  const s = Math.sin(angle);
+  const c = Math.cos(angle) * (facing < 0 ? -1 : 1);
+  let low = -Infinity;
+  for (const x of [SIDE_SHOE_BOX.x0, SIDE_SHOE_BOX.x1]) {
+    for (const y of [SIDE_SHOE_BOX.y0, SIDE_SHOE_BOX.y1]) low = Math.max(low, x * s + y * c);
+  }
+  return low;
+}
+
+/**
+ * The steepest the side trainer can tip toe-down (radians) and still have its
+ * toe clear a floor `clearance` further below than a flat sole would sit — how
+ * high the heel of a foot on its toes can come up, given where the ankle is.
+ * 0 when the ankle is at standing height; the full tip once it is a foot's
+ * length up.
+ */
+export function sideShoeToeRoom(clearance: number): number {
+  const reach = Math.hypot(SIDE_SHOE_BOX.x1, SIDE_SHOE_BOX.y1);
+  const base = Math.atan2(SIDE_SHOE_BOX.y1, SIDE_SHOE_BOX.x1);
+  const s = (Math.max(0, clearance) + SIDE_SHOE_BOX.y1) / reach;
+  return s >= 1 ? Math.PI / 2 - base : Math.max(0, Math.asin(s) - base);
+}
+
+/** A kneeling knee rests on the floor this far under its joint — the shin's radius there. */
+export const KNEE_BELOW = LEG.shin[0];
+
+/**
+ * How far the front view's trainer turns with its shin, radians, given the
+ * shin's angle. A leg within 45° of hanging straight down stands on a level
+ * shoe (a squat, a jumping jack); a leg lying along the floor or raised in the
+ * air — a snow angel, a side plank, a windshield wiper, seen from in front or
+ * above — carries the shoe on the end of it, its top toward the knee. In
+ * between it blends, so a leg swinging up never snaps its foot round.
+ * A worklet: the Skia panel calls it every frame.
+ */
+export function frontShoeTurn(shinAngle: number): number {
+  "worklet";
+  let dev = shinAngle - Math.PI / 2;
+  while (dev > Math.PI) dev -= Math.PI * 2;
+  while (dev < -Math.PI) dev += Math.PI * 2;
+  const from = Math.PI / 4;
+  const span = (25 * Math.PI) / 180;
+  let w = (Math.abs(dev) - from) / span;
+  w = w < 0 ? 0 : w > 1 ? 1 : w;
+  return dev * w * w * (3 - 2 * w);
 }
 
 /** The front view's trainer, in screen orientation, centred under the ankle. */
 function frontShoe(): Shape[] {
   return [
-    { d: rrect(-9.8, -5.3, 9.8, 5.3, 5.3), fill: KIT.shoe },
+    { d: rrect(-2.8, -1.4, 2.8, 3.0, 1.7), fill: KIT.shoe },
     // Toe cap and the sole.
-    { d: oval(0, 0.8, 5.7, 3.1), fill: KIT.shoeLight, fine: true },
-    { d: rrect(-9.3, 2.5, 9.3, SOLE_BELOW, 1.7), fill: KIT.sole },
-    // The laces' pad at the top of the foot.
-    { d: rrect(-3.2, -4.3, 3.2, -2.5, 0.85), fill: KIT.sole, fine: true },
+    { d: oval(0, 1.5, 1.8, 1.0), fill: KIT.shoeLight, fine: true },
+    { d: rrect(-3.0, 2.5, 3.0, SOLE_BELOW, 0.6), fill: KIT.sole },
+    // The laces' pad up the front of the foot.
+    { d: rrect(-1.0, -1.0, 1.0, 0.3, 0.35), fill: KIT.sole, fine: true },
   ];
 }
 
@@ -374,89 +512,89 @@ function frontShoe(): Shape[] {
 function frontLowerSpine(L: number): Shape[] {
   return [
     // Shorts over the hips, running down into the legs.
-    { d: rrect(-7.4, -13.4, 5.8, 13.4, 6.4), fill: KIT.shorts },
-    // The shadow the tee's hem casts on them…
-    { d: rrect(-2.2, -12.8, 4.4, 12.8, 1.3), fill: KIT.shortsShade, fine: true },
-    // …and the tee itself, flaring a touch toward the chest.
-    { d: hemmed(4.2, L + 2, 14.4, 15, 3), fill: KIT.tee },
+    { d: rrect(-4.8, -9.2, 4.4, 9.2, 3.8), fill: KIT.shorts },
+    // The waistband, in the shadow of the tee's hem…
+    { d: rrect(2.6, -8.6, 4.4, 8.6, 0.6), fill: KIT.shortsShade, fine: true },
+    // …and the tee itself, from the waist up to the ribs.
+    { d: hemmed(3.6, L + 2, 7.9, 8.6, 1.4), fill: KIT.tee },
   ];
 }
 
+/**
+ * The chest, the shoulders' slope and the base of the neck. The shoulder seam
+ * runs out to where the sleeve's crown is, so a sleeve meets the tee flush
+ * instead of standing proud of it like a pad.
+ */
 function frontUpperSpine(L: number): Shape[] {
-  const top = L + 3.6;
+  const t = L + 2.6;
   return [
     {
       d:
-        `M-2 -14.8L${f(L - 3.8)} -16.4Q${f(L + 0.4)} -16.4 ${f(top - 0.9)} -10.6` +
-        `Q${f(top + 0.7)} -5.2 ${f(top + 0.7)} 0Q${f(top + 0.7)} 5.2 ${f(top - 0.9)} 10.6` +
-        `Q${f(L + 0.4)} 16.4 ${f(L - 3.8)} 16.4L-2 14.8Z`,
+        `M-2 -8.4L${f(L - 4)} -9.6Q${f(L - 0.4)} -10.2 ${f(L + 1.9)} -8.6` +
+        `L${f(t)} -3.6Q${f(t + 0.4)} 0 ${f(t)} 3.6` +
+        `L${f(L + 1.9)} 8.6Q${f(L - 0.4)} 10.2 ${f(L - 4)} 9.6L-2 8.4Z`,
       fill: KIT.tee,
     },
   ];
 }
 
+/** Side-on, −y is the back and +y the front: glutes behind, a belly in front. */
 function sideLowerSpine(L: number): Shape[] {
   return [
-    { d: rrect(-7.4, -10.6, 6, 11.4, 5.8), fill: KIT.shorts },
-    { d: rrect(-2.2, -11.4, 4.4, 12.4, 1.3), fill: KIT.shortsShade, fine: true },
-    { d: hemmed(4.2, L + 2, 11.6, 12, 2.8), fill: KIT.tee },
+    { d: slab(-4.8, 4.4, 6.3, 4.9, 5.2, 4.7, 3.2), fill: KIT.shorts },
+    { d: slab(2.6, 4.4, 5.1, 4.6, 5.1, 4.6, 0.5), fill: KIT.shortsShade, fine: true },
+    { d: slab(3.6, L + 2, 4.8, 4.6, 5.3, 5.2, 1.4), fill: KIT.tee },
   ];
 }
 
+/** Side-on: the upper back, the chest in front of it, the slope up to the neck. */
 function sideUpperSpine(L: number): Shape[] {
-  const top = L + 3.6;
+  const t = L + 2.3;
   return [
     {
       d:
-        `M-2 -11.8L${f(L - 3.8)} -12.6Q${f(L + 0.7)} -12.6 ${f(top - 0.7)} -8.6` +
-        `Q${f(top + 0.7)} -4 ${f(top + 0.7)} 0.5Q${f(top + 0.7)} 5.4 ${f(top - 0.9)} 9.8` +
-        `Q${f(L + 0.7)} 13.4 ${f(L - 3.8)} 13.4L-2 12.2Z`,
+        `M-2 -4.9L${f(L - 3.5)} -5.5Q${f(L + 0.4)} -5.7 ${f(t)} -3L${f(t + 0.1)} 1.6` +
+        `Q${f(L + 1)} 6 ${f(L - 3.2)} 6.1Q${f(L - 6.5)} 6.1 ${f(L - 8)} 5.3L-2 4.8Z`,
       fill: KIT.tee,
     },
   ];
 }
 
 /**
- * The neck and the tee's collar round its base. The collar is a deeper shade of
- * the tee rather than the near-white ringer it was: with the head down to a
- * human size the neckline is no longer hidden behind a chin, and a pale band
- * across the chest read as a second rip.
+ * The neck, coming up out of the tee's crew collar — a band a shade deeper
+ * than the tee, laid OVER the base of the neck. The neck is in the shadow the
+ * chin casts.
+ *
+ * It used to be the other way round: the neck drawn over the collar, starting
+ * at the shoulder line, so its lower half lay on the front of the tee as a
+ * brown tab — front-on it read as a bib hanging from the chin. Now the neck
+ * starts under the collar and only shows above it.
  */
+const NECK_BASE = 1.8;
 function neck(L: number): Shape[] {
+  const top = Math.max(NECK_BASE + 1, L * 0.8);
   return [
-    { d: oval(1.6, 0, 3.6, 8.4), fill: KIT.teeShade, fine: true },
-    // The neck, in the shadow the chin casts.
-    { d: taper(0.6, L * 0.7, 4.1, 4.1), fill: KIT.skinShade },
+    { d: taper(NECK_BASE, top, 2.1, 1.95), fill: KIT.skinShade },
+    { d: oval(NECK_BASE + 0.6, 0, 0.95, 3.0), fill: KIT.teeShade },
   ];
 }
 
 /* ───────────────────────────────── The head ──────────────────────────────── */
 
 export interface HeadArt {
-  /** Behind the skull — the hair's puffs (they sway). */
-  puffs: Shape[];
   /** Behind the skull — the ears of a front-on head. */
   back: Shape[];
-  /** The skull. */
+  /** The skull (and, side-on, the ear on it). */
   skull: Shape[];
   /**
    * The face: the eyes and the one closed mouth, drawn over the skull and under
-   * the hair. A FLAT, FIXED set of shapes — there is nothing here to drive.
-   *
-   * It was a rig of its own once: a clipped white, a pupil that glanced about,
-   * an upper lid that blinked, a lower lid the cheeks pushed up, two brows that
-   * raised and frowned, and four mouths that swapped through a rep (a grin, an
-   * "oh", gritted teeth, a closed smile). All of it worked, and all of it was
-   * wrong for this figure: the one thing moving in a frame pulls the eye, and
-   * the thing moving must be the arm, the knee or the waist. The eyes stay
-   * because without them a head has no front, and the mouth stays because a
-   * head with eyes and no mouth reads as a mask.
+   * the hair. A FLAT, FIXED set of shapes — there is nothing here to drive. The
+   * eyes stay because without them a head has no front, and the mouth because
+   * a head with eyes and no mouth reads as a mask.
    */
   face: Shape[];
-  /** Over the skull — the hair's cap. */
+  /** Over the skull — the hair, cropped close. */
   front: Shape[];
-  /** Where the hair's puffs pivot as they sway. */
-  swayPivot: readonly [number, number];
   /** Furthest the art reaches from the centre, in head radii (framing). */
   reach: { up: number; down: number; side: number };
 }
@@ -471,95 +609,70 @@ function mouth(x0: number, x1: number, y: number, dip: number): Shape {
   const cx = (x0 + x1) / 2;
   return {
     d: `M${f(x0)} ${f(y)}Q${f(cx)} ${f(y + dip)} ${f(x1)} ${f(y)}`,
-    stroke: { color: KIT.mouth, width: 0.085 },
+    stroke: { color: KIT.mouth, width: 0.055 },
   };
 }
 
+/** Front-on: an oval face a little narrower than it is tall. */
 function frontHead(): HeadArt {
-  const puffs: [number, number, number][] = [
-    [-0.92, -0.42, 0.34],
-    [0.92, -0.42, 0.34],
-    [-0.64, -0.86, 0.42],
-    [0.64, -0.86, 0.42],
-    [0, -1.04, 0.5],
-  ];
-  const fringe: [number, number, number][] = [
-    [-0.66, -0.58, 0.19],
-    [-0.24, -0.62, 0.19],
-    [0.24, -0.62, 0.19],
-    [0.66, -0.58, 0.19],
-  ];
   return {
-    puffs: [{ d: puffs.map(([x, y, r]) => disc(x, y, r)).join(""), fill: KIT.hair }],
     back: [
-      // Ears peek out behind the skull.
-      { d: disc(-1.0, 0.14, 0.2), fill: KIT.skinShade },
-      { d: disc(1.0, 0.14, 0.2), fill: KIT.skinShade },
+      { d: disc(-0.79, 0.06, 0.17), fill: KIT.skinShade },
+      { d: disc(0.79, 0.06, 0.17), fill: KIT.skinShade },
     ],
     skull: [
       {
-        d: "M-1.06 0.06C-1.06 -0.56 -0.62 -1 0 -1C0.62 -1 1.06 -0.56 1.06 0.06C1.06 0.64 0.64 1 0 1C-0.64 1 -1.06 0.64 -1.06 0.06Z",
+        d: "M-0.8 -0.06C-0.8 -0.62 -0.44 -1 0 -1C0.44 -1 0.8 -0.62 0.8 -0.06C0.8 0.42 0.52 0.86 0 1C-0.52 0.86 -0.8 0.42 -0.8 -0.06Z",
         fill: KIT.skin,
       },
     ],
-    face: [eye(-0.33, 0.1, 0.115, 0.155), eye(0.33, 0.1, 0.115, 0.155), mouth(-0.19, 0.19, 0.58, 0.1)],
+    face: [eye(-0.29, 0.08, 0.075, 0.1), eye(0.29, 0.08, 0.075, 0.1), mouth(-0.14, 0.14, 0.56, 0.06)],
     front: [
-      // The cap: hair over the crown, curving in at the temples to a high hairline…
+      // Short hair: a close cap over the crown, down to the temples.
       {
         d:
-          "M-1.06 0.02C-1.1 -0.62 -0.64 -1.06 0 -1.06C0.64 -1.06 1.1 -0.62 1.06 0.02" +
-          "C1.04 -0.12 0.98 -0.26 0.88 -0.36C0.8 -0.46 0.74 -0.56 0.62 -0.6L-0.62 -0.6" +
-          "C-0.74 -0.56 -0.8 -0.46 -0.88 -0.36C-0.98 -0.26 -1.04 -0.12 -1.06 0.02Z",
+          "M-0.86 0.02C-0.9 -0.66 -0.48 -1.12 0 -1.12C0.48 -1.12 0.9 -0.66 0.86 0.02" +
+          "C0.8 -0.16 0.76 -0.3 0.68 -0.4C0.46 -0.54 0.22 -0.5 0 -0.52" +
+          "C-0.22 -0.5 -0.46 -0.54 -0.68 -0.4C-0.76 -0.3 -0.8 -0.16 -0.86 0.02Z",
         fill: KIT.hair,
       },
-      // …a curly fringe along it…
-      { d: fringe.map(([x, y, r]) => disc(x, y, r)).join(""), fill: KIT.hair },
-      // …and a stroke of light across the curls.
-      { d: "M-0.46 -0.9C-0.28 -0.99 -0.08 -1.01 0.12 -0.99", stroke: { color: KIT.hairLight, width: 0.09 }, fine: true },
+      { d: "M-0.38 -0.94C-0.2 -1.03 0.04 -1.05 0.22 -1", stroke: { color: KIT.hairLight, width: 0.07 }, fine: true },
     ],
-    swayPivot: [0, 0.1],
-    reach: { up: 1.54, down: 1, side: 1.26 },
+    reach: { up: 1.12, down: 1, side: 0.96 },
   };
 }
 
+/** Side-on, facing +x: the back of the skull, a brow, a nose, lips and a chin. */
 function sideHead(): HeadArt {
-  const puffs: [number, number, number][] = [
-    [-0.8, -0.14, 0.4],
-    [-0.66, -0.68, 0.46],
-    [-0.14, -1.0, 0.5],
-    [0.42, -0.86, 0.42],
-    [-0.9, 0.3, 0.3],
-  ];
   return {
-    puffs: [{ d: puffs.map(([x, y, r]) => disc(x, y, r)).join(""), fill: KIT.hair }],
     back: [],
     skull: [
       {
-        // Back and crown round, a clear forehead, a small nose, a lip, a chin.
         d:
-          "M-0.98 0.1C-0.98 -0.55 -0.58 -1 0 -1C0.58 -1 0.98 -0.62 1 -0.12" +
-          "C1.01 0 1.1 0.1 1.11 0.22C1.12 0.32 1.04 0.36 0.99 0.37" +
-          "C1.01 0.45 1.02 0.56 0.97 0.64C1 0.76 0.95 0.9 0.82 0.96" +
-          "C0.66 1.04 0.34 1.02 0.1 1C-0.6 1 -0.98 0.64 -0.98 0.1Z",
+          "M-0.92 -0.04C-0.92 -0.64 -0.52 -1 0.04 -1C0.54 -1 0.8 -0.68 0.8 -0.3L0.8 -0.14" +
+          "C0.84 -0.04 0.93 0.1 0.95 0.2C0.96 0.27 0.9 0.31 0.84 0.32" +
+          "C0.86 0.4 0.86 0.48 0.81 0.54C0.84 0.64 0.8 0.82 0.62 0.92" +
+          "C0.46 1 0.22 0.98 0.06 0.86C-0.18 0.72 -0.34 0.74 -0.6 0.62" +
+          "C-0.84 0.48 -0.92 0.26 -0.92 -0.04Z",
         fill: KIT.skin,
       },
-      // The ear: a shaded crescent with the lit ear inside it.
-      { d: disc(-0.12, 0.2, 0.19), fill: KIT.skinShade },
-      { d: disc(-0.09, 0.2, 0.125), fill: KIT.skin },
+      // The ear: a shaded disc with the lit ear inside it.
+      { d: disc(-0.08, 0.1, 0.17), fill: KIT.skinShade },
+      { d: disc(-0.06, 0.1, 0.1), fill: KIT.skin, fine: true },
     ],
-    face: [eye(0.56, 0.1, 0.1, 0.155), mouth(0.68, 0.94, 0.58, 0.1)],
+    face: [eye(0.56, 0.02, 0.06, 0.1), mouth(0.7, 0.81, 0.56, 0.05)],
     front: [
       {
         d:
-          "M-0.98 0.2C-1.06 -0.6 -0.6 -1.06 0.02 -1.06C0.6 -1.06 1.0 -0.7 1.02 -0.4" +
-          "C0.9 -0.52 0.74 -0.58 0.58 -0.5C0.42 -0.42 0.3 -0.3 0.16 -0.14C0.04 0 -0.1 -0.06 -0.2 -0.12" +
-          "C-0.34 -0.08 -0.5 0 -0.6 0.14C-0.7 0.3 -0.86 0.34 -0.98 0.2Z",
+          "M-0.97 0.26C-1.04 -0.52 -0.6 -1.12 0.04 -1.12C0.58 -1.12 0.9 -0.78 0.88 -0.38" +
+          "C0.66 -0.48 0.44 -0.46 0.26 -0.34C0.14 -0.24 0.12 -0.04 0.14 0.12L0.04 0.14" +
+          "C0 -0.06 -0.16 -0.14 -0.3 -0.1C-0.44 -0.04 -0.48 0.24 -0.58 0.5" +
+          "C-0.74 0.52 -0.9 0.44 -0.97 0.26Z",
         fill: KIT.hair,
       },
-      { d: "M-0.4 -0.88C-0.2 -0.99 0.1 -1.01 0.3 -0.95", stroke: { color: KIT.hairLight, width: 0.09 }, fine: true },
+      { d: "M-0.42 -0.9C-0.22 -1.02 0.08 -1.04 0.3 -0.98", stroke: { color: KIT.hairLight, width: 0.07 }, fine: true },
     ],
-    swayPivot: [-0.3, 0.1],
-    reach: { up: 1.5, down: 1, side: 1.2 },
+    reach: { up: 1.12, down: 1, side: 1 },
   };
 }
 
@@ -603,7 +716,6 @@ function thinHead(h: HeadArt): HeadArt {
   const thin = (shapes: Shape[]) => shapes.filter((s) => !s.fine);
   return {
     ...h,
-    puffs: thin(h.puffs),
     back: thin(h.back),
     skull: thin(h.skull),
     front: thin(h.front),
@@ -635,9 +747,10 @@ export function buildCharacterArt(
       behind[i] = keep(arm.behind);
       return keep(arm.front);
     }
-    if (/^(foreArm|farForeArm)/.test(n)) return keep(foreArm(L, far, thumbSide(n, view)));
+    if (/^(foreArm|farForeArm)/.test(n)) return keep(foreArm(L, far));
+    if (/^(hand|farHand)/.test(n)) return keep(hand(far, thumbSide(n, view)));
     if (/^(thigh|farThigh)/.test(n)) return keep(thigh(L, far));
-    if (/^(shin|farShin)/.test(n)) return keep(shin(L, far));
+    if (/^(shin|farShin)/.test(n)) return keep(shin(L, far, view));
     if (/^(foot|farFoot)/.test(n)) return keep(sideShoe(far));
     return [];
   });
@@ -649,30 +762,29 @@ export function buildCharacterArt(
     bones,
     behind,
     layers: {
-      far: view === "side" ? [...pick(/^far(Thigh|Shin|Foot)/), ...pick(/^far(UpArm|ForeArm)/)] : [],
+      far: view === "side" ? [...pick(/^far(Thigh|Shin|Foot)/), ...pick(/^far(UpArm|ForeArm|Hand)/)] : [],
       legs: pick(/^(thigh|shin|foot)/),
       torso: pick(/Spine$/),
       caps: pick(/^upArm/, behind),
       collar: pick(/^neck$/),
-      arms: pick(/^(upArm|foreArm)/),
+      arms: pick(/^(upArm|foreArm|hand)/),
     },
     shoes:
       view === "front" ? pick(/^shin/).map((bone) => ({ bone, shapes: keep(frontShoe()) })) : [],
     head: detail === "thumb" ? thinHead(head) : head,
-    // Centred on the ankle; splayed outward so two wide trainers don't become one.
+    // Centred under the ankle, turned out a touch the way feet stand.
     shoeDrop: 0,
-    shoeOut: 4.8,
+    shoeOut: 0.8,
   };
 }
 
 /**
- * Poses whose authored side view puts the head on the opposite side of their
- * facing. Everything else turns its face along the neck's normal.
+ * Poses whose authored side view faces −x (animation/facing.ts): the face is
+ * mirrored, and the renderers turn every side bone's art over to match.
+ * Everything else turns its face along the neck's normal.
  *   cobra / yRaise — lying FACE DOWN, but authored with the head on the left.
  *   invertedRow    — hanging FACE UP under the bar, head on the right.
  */
-const FACE_MIRRORED = new Set<FigureMotion>(["cobra", "yRaise", "invertedRow"]);
-
 export function faceMirrored(motion: FigureMotion, view: FigureView): boolean {
-  return view === "side" && FACE_MIRRORED.has(motion);
+  return view === "side" && sideFacing(motion) < 0;
 }

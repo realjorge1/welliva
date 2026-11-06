@@ -9,13 +9,14 @@
 import { useCycle } from "@/contexts/CycleContext";
 import { AppText, Button, Card, IconBadge, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
-import { cycleHeadline, dialModel } from "@/services/cycle";
+import { bleedWords, cycleHeadline, dialModel, glanceConfidence } from "@/services/cycle";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useMemo } from "react";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useMemo } from "react";
 import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { CycleDial } from "./CycleDial";
 import { useCyclePalette } from "./cycleTheme";
+import { ReliefQuestion } from "./ReliefQuestion";
 
 export function CycleHomeCard({ style }: { style?: StyleProp<ViewStyle> }) {
   const { colors } = useColors();
@@ -25,20 +26,35 @@ export function CycleHomeCard({ style }: { style?: StyleProp<ViewStyle> }) {
   const s = view.status;
 
   const model = useMemo(
-    () => dialModel({ episodes: data.periods, view, today, showFertile: settings.showFertileWindow }),
-    [data.periods, view, today, settings.showFertileWindow],
+    () => dialModel({ episodes: data.periods, view, today, showFertile: view.showFertile }),
+    [data.periods, view, today],
+  );
+
+  // A trip added elsewhere can change today's heads-up; Life Context has no signal.
+  const { refreshMoments } = cycle;
+  const tracking = settings.enabled;
+  useFocusEffect(
+    useCallback(() => {
+      if (tracking) void refreshMoments();
+    }, [tracking, refreshMoments]),
   );
 
   if (!cycle.ready || !settings.enabled || view.mode === "pregnancy") return null;
 
   // The ring already shows the day, so the eyebrow names the card instead of
   // repeating the number; during a period the title says which day of it.
-  const headline = cycleHeadline(view, settings.showFertileWindow);
+  const headline = cycleHeadline(view, view.showFertile);
   const copy = {
     eyebrow: "Your cycle",
-    title: s.inPeriod && s.periodDay !== null && !s.periodStale ? `Period, day ${s.periodDay}` : headline.title,
+    title:
+      s.inPeriod && s.periodDay !== null && !s.periodStale
+        ? `${bleedWords(view.mode).label}, day ${s.periodDay}`
+        : headline.title,
     detail: headline.detail,
   };
+  // How sure the window in the title is — the cycle screen's confidence line,
+  // in two words. Null whenever the card shows no window.
+  const sure = glanceConfidence(view);
   const headsUp = view.headsUps[0]?.text ?? null;
 
   // The one tap that matters today: "It started" once the window is open (or
@@ -55,7 +71,7 @@ export function CycleHomeCard({ style }: { style?: StyleProp<ViewStyle> }) {
       // pushing one from Home would hand it a back arrow where the hamburger
       // belongs.
       onPress={() => router.navigate("/cycle" as never)}
-      accessibilityLabel={`Your cycle. ${copy.title}. ${copy.detail}`}
+      accessibilityLabel={`Your cycle. ${copy.title}. ${copy.detail}${sure ? `. ${sure}` : ""}`}
       accessibilityHint="Opens your cycle"
     >
       <View style={styles.row}>
@@ -80,6 +96,14 @@ export function CycleHomeCard({ style }: { style?: StyleProp<ViewStyle> }) {
           <AppText variant="footnote" color="secondary" numberOfLines={2}>
             {copy.detail}
           </AppText>
+          {sure ? (
+            <View style={styles.sureRow}>
+              <View style={[styles.sureDot, { backgroundColor: palette.period }]} />
+              <AppText variant="caption" color="tertiary" numberOfLines={1}>
+                {sure}
+              </AppText>
+            </View>
+          ) : null}
         </View>
         <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
       </View>
@@ -93,11 +117,15 @@ export function CycleHomeCard({ style }: { style?: StyleProp<ViewStyle> }) {
         </View>
       ) : null}
 
+      {/* "Yesterday's cramps: what helped most?" — renders nothing unless
+          today is the day after one, and keeps its "Noted" after the tap. */}
+      <ReliefQuestion compact />
+
       {canStart || canEnd ? (
         <Pressable
           onPress={() => void (canEnd ? cycle.endPeriod() : cycle.startPeriod())}
           accessibilityRole="button"
-          accessibilityLabel={canEnd ? "Log that your period ended today" : "Log that your period started today"}
+          accessibilityLabel={`Log that your ${bleedWords(view.mode).noun} ${canEnd ? "ended" : "started"} today`}
           style={({ pressed }) => [
             styles.quick,
             { backgroundColor: alpha(palette.period, pressed ? 0.26 : 0.16) },
@@ -135,7 +163,13 @@ export function CycleOfferCard({ style }: { style?: StyleProp<ViewStyle> }) {
           onPress={() => router.push("/cycle/setup" as never)}
           style={styles.flex}
         />
-        <Button label="Not now" size="sm" variant="ghost" onPress={() => void cycle.dismissOffer()} />
+        <Button
+          label="Not now"
+          size="sm"
+          variant="ghost"
+          fullWidth={false}
+          onPress={() => void cycle.dismissOffer()}
+        />
       </View>
     </Card>
   );
@@ -147,6 +181,8 @@ const styles = StyleSheet.create({
   text: { flex: 1, gap: 1 },
   title: { marginTop: 1 },
   flex: { flex: 1 },
+  sureRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
+  sureDot: { width: 6, height: 6, borderRadius: 3 },
   headsUp: {
     flexDirection: "row",
     alignItems: "center",

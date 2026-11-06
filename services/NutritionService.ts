@@ -97,8 +97,7 @@ export function calculateNutritionTargets(bio: UserBio): NutritionTargets {
     conditionSurplus = 400;
   }
 
-  const minCalories =
-    isPregnant || isPostpartum ? 1800 : bio.sex === "male" ? 1500 : 1200;
+  const minCalories = calorieFloor(bio);
   // Allow the pregnancy/postpartum surplus to land without being clamped away.
   const maxCalories = (bio.sex === "male" ? 3200 : 2800) + conditionSurplus;
   const targetCalories = Math.round(
@@ -234,6 +233,16 @@ export function getBaselineTargets(sex: Sex): NutritionTargets {
 /**
  * Calculate progress percentage
  */
+/**
+ * The daily calorie floor (common WHO/AHA minimums): no target, and no day moved
+ * by the hungrier-week plan, goes below it.
+ */
+export function calorieFloor(bio: Pick<UserBio, "sex" | "medicalConditions">): number {
+  const conditions = bio.medicalConditions ?? [];
+  if (conditions.includes("pregnancy") || conditions.includes("postpartum")) return 1800;
+  return bio.sex === "male" ? 1500 : 1200;
+}
+
 export function calculateProgress(current: number, target: number): number {
   if (target <= 0) return 0;
   return Math.min(Math.round((current / target) * 100), 100);

@@ -6,16 +6,30 @@
  * white screen, force-quit, and we learned nothing. Now every crash caught by
  * an <AppErrorBoundary> lands here first.
  *
- * Same privacy rule as SyncTelemetry: nothing leaves the device. This is health
- * data, and app/privacy.tsx promises it stays local. We record the SURFACE that
- * broke, the error message and the component stack — never field values. A
- * message can technically carry a value a throw site interpolated, which is why
- * `truncate` caps it: enough to debug, not enough to be a data export.
+ * We record the SURFACE that broke, the error message and the component stack —
+ * never field values. A message can technically carry a value a throw site
+ * interpolated, which is why `truncate` caps it: enough to debug, not enough to
+ * be a data export.
+ *
+ * THIS LOG IS LOCAL. A COPY NOW LEAVES, IF THE USER LET IT (changed 30 Oct 2026).
+ * The ring buffer below is still the device-local black box, and still the thing a
+ * debug screen reads. But a local-only crash log answers "why did it break on MY
+ * phone" and never "how often does this break for everyone", and an app shipping
+ * with the second question unanswerable is how a crash on a device you don't own
+ * stays invisible forever. So `reportCrash` also hands the record to
+ * Analytics.uploadCrash, which:
+ *   - sends to OUR Supabase `crash_reports`, never a third-party crash service
+ *     (constants/legal.ts promises no third-party analytics, and that holds);
+ *   - sends only if `crash_diagnostics` consent is granted, checked per crash;
+ *   - fails silently, because this runs while the app is already broken.
+ * Writing the local record NEVER depends on the upload — see the ordering below.
  *
  * Fail-soft, absolutely: this module runs while the app is already broken. Every
  * path swallows its own errors. A crash logger that throws is worse than none.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
+
+import { uploadCrash } from "./Analytics";
 
 /** Device-local by nature — see DEVICE_LOCAL_KEYS in services/sync/syncKeys. */
 export const CRASH_LOG_KEY = "@welliva_crash_log";
@@ -80,6 +94,18 @@ export async function reportCrash(input: {
     list.unshift(record);
     if (list.length > MAX_CRASHES) list.length = MAX_CRASHES;
     await AsyncStorage.setItem(CRASH_LOG_KEY, JSON.stringify(list));
+
+    // Ship a copy, consent permitting. LAST and un-awaited on purpose: the local
+    // record is the guarantee and must already be on disk before we touch the
+    // network. If this line were first, a hung request would cost us the one
+    // artefact we are sure to be able to keep.
+    void uploadCrash({
+      surface: record.surface,
+      message: record.message,
+      stack: record.stack,
+      componentStack: record.componentStack,
+      at: record.at,
+    });
   } catch {
     // A crash logger that throws is worse than no crash logger.
   }

@@ -11,7 +11,9 @@ import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
 import { COACHES } from "@/fitness/data/coaches";
 import { WORKOUTS } from "@/fitness/data/workouts";
 import {
+  everySetDone,
   filterWorkouts,
+  finishedCounts,
   flattenWorkout,
   getAllWorkouts,
   getWorkout,
@@ -21,6 +23,7 @@ import {
   workoutSuitability,
   workoutToPlayerParams,
 } from "@/fitness/services/WorkoutCatalog";
+import type { ExerciseSessionResult } from "@/models/session";
 import type { UserBio } from "@/models/user";
 
 const DB_IDS = new Set(EXERCISE_DATABASE.map((e) => e.id));
@@ -253,5 +256,58 @@ describe("personal suitability", () => {
     const injured = workoutSuitability(w, { ...BIO, injuries: ["shoulder"] });
     expect(injured.percent).toBeLessThan(healthy.percent);
     expect(injured.cautions.length).toBeGreaterThan(0);
+  });
+});
+
+describe("finished counts — Explore's check mark", () => {
+  /** A run's per-set record, as the session history keeps it. */
+  const run = (id: string, sets: [done: number, of: number], skipped = false) => ({
+    sessionRunId: id,
+    setsCompleted: sets[0],
+    totalSets: sets[1],
+    exerciseResults: [{ skipped } as ExerciseSessionResult],
+  });
+
+  it("counts runs stamped every-set-done, per workout", () => {
+    const counts = finishedCounts([
+      { id: "a", sessionId: "lib_sweat-twelve", allSetsDone: true },
+      { id: "b", sessionId: "lib_sweat-twelve", allSetsDone: true },
+      // Abandoned two moves in: real work, but not the workout finished.
+      { id: "c", sessionId: "lib_calorie-furnace", allSetsDone: false },
+      // A plan session and a single exercise are not catalogue workouts.
+      { id: "d", sessionId: "session_2_2026-10-26", allSetsDone: true },
+      { id: "e", sessionId: "single", allSetsDone: true },
+    ]);
+    expect(counts.get("sweat-twelve")).toBe(2);
+    expect([...counts.keys()]).toEqual(["sweat-twelve"]);
+  });
+
+  it("judges an older, unstamped run from its per-set history", () => {
+    const log = [
+      { id: "full", sessionId: "lib_sweat-twelve" },
+      // Every move "completed" by the engine's count, a set short in fact.
+      { id: "short", sessionId: "lib_final-five" },
+      { id: "skipped", sessionId: "lib_core-reset" },
+      // Too old to still be in the history: never claimed.
+      { id: "gone", sessionId: "lib_morning-ignition" },
+    ];
+    const counts = finishedCounts(log, [
+      run("full", [18, 18]),
+      run("short", [20, 21]),
+      run("skipped", [12, 12], true),
+    ]);
+    expect([...counts.entries()]).toEqual([["sweat-twelve", 1]]);
+  });
+
+  it("everySetDone needs every set and no skip — not the completion percent", () => {
+    expect(everySetDone(run("x", [9, 9]))).toBe(true);
+    expect(everySetDone(run("x", [7, 9]))).toBe(false);
+    expect(everySetDone(run("x", [9, 9], true))).toBe(false);
+    expect(everySetDone(run("x", [0, 0]))).toBe(false);
+  });
+
+  it("keys by the same id the catalog resolves", () => {
+    const [id] = [...finishedCounts([{ id: "r", sessionId: "lib_morning-ignition", allSetsDone: true }]).keys()];
+    expect(workoutFromSessionId(`lib_${id}`)?.id).toBe(id);
   });
 });

@@ -2,37 +2,46 @@
  * BADGE — an achievement, struck as an object you'd want to hold.
  *
  * The owner (2026-10-16), after the flame: "clean up the achievement badges to
- * be just as cool — without changing it entirely." So the badge is still the
- * round medallion in its own material with its glyph cut into the face (see
- * services/achievementBadges) — every badge is recognisably the one you
- * earned — but it is drawn in the flame's language now instead of as a
- * gradient disc:
+ * be just as cool — without changing it entirely." So the badge is drawn in
+ * the flame's language instead of as a gradient disc:
  *
  *   · FLAT TONES, NOT A GRADIENT. The material's three stops become three
  *     flat shapes: the rim in the deep stop, the face in the body, and a flat
  *     crescent of shadow along the face's lower edge where it is struck down
  *     into the rim. A gradient disc reads as a button; flat tones read as an
  *     illustrated object, like the flame.
- *   · A LIP. The coin stands on its own thickness — a darker edge below it —
+ *   · A LIP. The plate stands on its own thickness — a darker edge below it —
  *     so it has weight. (The same lip the session ring and its slab carry.)
  *   · TWO STROKES OF SHINE, one on the rim and one on the face, from the top
  *     left — the flame's single shine stroke, once per surface.
+ *
+ * And then (2026-11-01, Duolingo as the reference — "appears premium, but
+ * poor"): every badge was the same round coin, so a shelf of them read as a
+ * list of coloured circles. Now —
+ *
+ *   · A SHAPE PER TIER (see badgeGeometry): coin, hexagon, shield, rosette,
+ *     star. The rank is legible before a word is read, the way Duolingo gives
+ *     every league its own emblem.
+ *   · A RIBBON with the rank written on it, across the badge's foot — the
+ *     band Duolingo writes "LEVEL 3" on. Optional: below about 60 points wide
+ *     the letters stop being letters, so small badges go without.
+ *   · AN EMBOSSED GLYPH: drawn twice, the second a hair lower in the metal's
+ *     light (on a dark glyph — engraved) or its shadow (on a light one —
+ *     raised). Flat glyph-on-disc was the "app icon" look; this is struck.
  *
  * `BadgeArt` is the drawing alone: no hooks, one Svg plus the glyph, cheap
  * enough for every tile on the Profile shelf. `Badge` is the hero for the
  * unlock moment, and arrives the way the flame does — see below.
  *
- * Geometry: a 100 × 108 box. The coin is a 46-radius disc centred at (50, 50);
- * the lip is the same disc dropped 6 below it; the face is a 37-radius disc,
- * and the lit part of the face a 34.8 disc nudged up-left inside it.
+ * Geometry: a 100 × 108 box (see badgeGeometry), sized by width.
  */
 import { useColors } from "@/components/ui/useColors";
 import { alpha } from "@/constants/theme";
-import type { BadgeFinish } from "@/services/achievementBadges";
+import type { BadgeFinish, BadgeShape } from "@/services/achievementBadges";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect } from "react";
-import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import Animated, {
   Easing,
   cancelAnimation,
@@ -47,22 +56,13 @@ import Animated, {
   withSpring,
   withTiming,
 } from "react-native-reanimated";
-import Svg, { Circle, Path } from "react-native-svg";
+import Svg, { Path } from "react-native-svg";
+import { BADGE_ASPECT, BADGE_BOX_H, badgeGeometry } from "./badgeGeometry";
 
-/** Height : width of the drawing (the lip hangs below the coin). */
-export const BADGE_ASPECT = 1.08;
+export { BADGE_ASPECT };
 
-/** The lit face's centre and radius, in the 100-wide box — where the glyph sits. */
-const FACE = { cx: 48.4, cy: 48.4, r: 34.8 } as const;
-/** The glyph, as a fraction of the badge's width. */
-const GLYPH = 0.4;
-
-/**
- * How far below the box's middle the FACE sits, as a fraction of the badge's
- * width — for callers that centre the face (not the box) inside something
- * round, like the detail sheet's progress ring.
- */
-export const BADGE_FACE_OFFSET = (BADGE_ASPECT * 100) / 2 - FACE.cy;
+/** Below this width a ribbon's letters stop being legible — the ribbon goes. */
+const RIBBON_MIN_SIZE = 56;
 
 /* ── Colour helpers (a finish is plain hexes) ─────────────────────────────── */
 
@@ -80,42 +80,138 @@ const mix = (a: string, b: string, t: number) => {
   const y = rgb(b);
   return toHex(x.map((v, i) => v * t + y[i] * (1 - t)));
 };
+const lightness = (hex: string) => {
+  const [r, g, b] = rgb(hex);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+};
 
-/** An arc of a circle as SVG path data, clockwise from `a0` to `a1` degrees. */
-function arc(cx: number, cy: number, r: number, a0: number, a1: number): string {
-  const p = (a: number) => [cx + r * Math.cos((a * Math.PI) / 180), cy + r * Math.sin((a * Math.PI) / 180)];
-  const [x0, y0] = p(a0);
-  const [x1, y1] = p(a1);
-  return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+/**
+ * The glyph's second impression: a dark glyph gets the metal's light a hair
+ * below it (cut INTO the face), a light glyph gets the metal's shadow (raised
+ * OFF it). Either way the glyph has an edge, which is what makes it struck.
+ */
+function emboss(finish: BadgeFinish): { color: string; opacity: number } {
+  return lightness(finish.ink) < 0.5
+    ? { color: finish.ramp[0], opacity: 0.55 }
+    : { color: deepen(finish.ramp[2], 0.35), opacity: 0.7 };
 }
-const RIM_SHINE = arc(50, 50, 41.5, 198, 258);
-const FACE_SHINE = arc(FACE.cx, FACE.cy, 28, 200, 250);
 
 /* ── The drawing ──────────────────────────────────────────────────────────── */
 
-/** The coin without its glyph — static Svg, so it can sit under a moving glyph. */
-function Coin({ finish, size }: { finish: BadgeFinish; size: number }) {
+/** The plate without its glyph — static Svg, so it can sit under a moving glyph. */
+function Plate({
+  finish,
+  size,
+  shape,
+  label,
+}: {
+  finish: BadgeFinish;
+  size: number;
+  shape: BadgeShape;
+  label?: string;
+}) {
   const [light, body, deep] = finish.ramp;
+  const g = badgeGeometry(shape, !!label);
+  const k = size / 100;
+  const t = g.ribbon?.text;
   return (
-    <Svg width={size} height={size * BADGE_ASPECT} viewBox={`0 0 100 ${100 * BADGE_ASPECT}`}>
-      {/* The lip — the coin's own thickness, under it. */}
-      <Circle cx={50} cy={56} r={46} fill={deepen(deep, 0.32)} />
-      {/* The rim, and the light catching it. */}
-      <Circle cx={50} cy={50} r={46} fill={deep} />
-      <Path d={RIM_SHINE} stroke={light} strokeWidth={3.6} strokeLinecap="round" fill="none" opacity={0.75} />
-      {/* The face, struck down into the rim: a flat crescent of shadow along its
-          lower edge, then the lit body. */}
-      <Circle cx={50} cy={50} r={37} fill={mix(body, deep, 0.55)} />
-      <Circle cx={FACE.cx} cy={FACE.cy} r={FACE.r} fill={body} />
-      <Path d={FACE_SHINE} stroke={light} strokeWidth={4.2} strokeLinecap="round" fill="none" opacity={0.95} />
-    </Svg>
+    <>
+      <Svg width={size} height={size * BADGE_ASPECT} viewBox={`0 0 100 ${BADGE_BOX_H}`}>
+        {/* The lip — the plate's own thickness, under it. */}
+        <Path d={g.lip} fill={deepen(deep, 0.32)} />
+        {/* The rim, and the light catching it. */}
+        <Path d={g.rim} fill={deep} />
+        <Path
+          d={g.rimShine}
+          stroke={light}
+          strokeWidth={3.6}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+          opacity={0.75}
+        />
+        {/* The face, struck down into the rim: a flat crescent of shadow along
+            its lower edge, then the lit body. */}
+        <Path d={g.faceShadow} fill={mix(body, deep, 0.55)} />
+        <Path d={g.face} fill={body} />
+        <Path
+          d={g.faceShine}
+          stroke={light}
+          strokeWidth={4.2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+          opacity={0.95}
+        />
+        {/* The ribbon: its tails behind, the folds where it turns under, then
+            the band the rank is written on. */}
+        {g.ribbon ? (
+          <>
+            <Path d={g.ribbon.tails} fill={deepen(deep, 0.25)} />
+            <Path d={g.ribbon.folds} fill={deepen(deep, 0.5)} />
+            <Path d={g.ribbon.band} fill={deep} />
+          </>
+        ) : null}
+      </Svg>
+      {label && t ? (
+        // Part of the drawing, not body text: it must not grow with the OS
+        // font size, or the word would run off its own ribbon.
+        <Text
+          allowFontScaling={false}
+          numberOfLines={1}
+          style={[
+            styles.abs,
+            styles.ribbonText,
+            {
+              left: (t.cx - t.width / 2) * k,
+              width: t.width * k,
+              top: (t.cy - t.size * 0.62) * k,
+              height: t.size * 1.24 * k,
+              fontSize: t.size * k,
+              lineHeight: t.size * 1.24 * k,
+              letterSpacing: t.size * k * 0.06,
+              color: finish.ribbonInk ?? light,
+            },
+          ]}
+        >
+          {label}
+        </Text>
+      ) : null}
+    </>
   );
 }
 
 /** Where the glyph sits on a badge `size` wide. */
-function glyphBox(size: number) {
-  const g = Math.round(size * GLYPH);
-  return { left: (FACE.cx / 100) * size - g / 2, top: (FACE.cy / 100) * size - g / 2, g };
+function glyphBox(size: number, shape: BadgeShape, labelled: boolean) {
+  const { glyph } = badgeGeometry(shape, labelled);
+  const g = Math.round((glyph.size / 100) * size);
+  return { left: (glyph.cx / 100) * size - g / 2, top: (glyph.cy / 100) * size - g / 2, g };
+}
+
+/** The glyph, struck: its embossed second impression, then the glyph itself. */
+function Glyph({
+  finish,
+  icon,
+  size,
+  g,
+}: {
+  finish: BadgeFinish;
+  icon: keyof typeof Ionicons.glyphMap;
+  size: number;
+  g: number;
+}) {
+  const e = emboss(finish);
+  return (
+    <>
+      <Ionicons
+        name={icon}
+        size={g}
+        color={e.color}
+        style={[styles.abs, { left: 0, top: size * 0.022, opacity: e.opacity }]}
+      />
+      <Ionicons name={icon} size={g} color={finish.ink} style={[styles.abs, { left: 0, top: 0 }]} />
+    </>
+  );
 }
 
 /**
@@ -126,19 +222,28 @@ export function BadgeArt({
   finish,
   icon,
   size,
+  shape = "coin",
+  label,
   style,
 }: {
   finish: BadgeFinish;
   icon: keyof typeof Ionicons.glyphMap;
   /** Width in points; the height is `size * BADGE_ASPECT`. */
   size: number;
+  /** The outline — one per tier (see TIER_SHAPE). */
+  shape?: BadgeShape;
+  /** The word on the ribbon. Dropped on a badge too small to read it. */
+  label?: string;
   style?: StyleProp<ViewStyle>;
 }) {
-  const { left, top, g } = glyphBox(size);
+  const ribbon = size >= RIBBON_MIN_SIZE ? label : undefined;
+  const { left, top, g } = glyphBox(size, shape, !!ribbon);
   return (
     <View style={[{ width: size, height: size * BADGE_ASPECT }, style]}>
-      <Coin finish={finish} size={size} />
-      <Ionicons name={icon} size={g} color={finish.ink} style={[styles.abs, { left, top }]} />
+      <Plate finish={finish} size={size} shape={shape} label={ribbon} />
+      <View style={[styles.abs, { left, top, width: g, height: g }]}>
+        <Glyph finish={finish} icon={icon} size={size} g={g} />
+      </View>
     </View>
   );
 }
@@ -151,11 +256,11 @@ const FALL_MS = 300;
 const FLOAT_MS = 3600;
 
 /**
- * THE BADGE, ARRIVING — the flame's choreography, for a coin.
+ * THE BADGE, ARRIVING — the flame's choreography, for a badge.
  *
  *   · It DROPS from above, stretched thin by the speed; its shadow on the
  *     floor grows and darkens as it comes.
- *   · It LANDS: squashed wide on its lip, then springs back to round.
+ *   · It LANDS: squashed wide on its lip, then springs back into shape.
  *   · The GLYPH pops a beat later — so the badge lands as two objects (the
  *     same trick as the flame's heart), which is what makes it feel struck
  *     rather than scaled.
@@ -171,6 +276,8 @@ export function Badge({
   finish,
   icon,
   size,
+  shape = "coin",
+  label,
   delay = 0,
   float = true,
   onLanded,
@@ -179,6 +286,10 @@ export function Badge({
   icon: keyof typeof Ionicons.glyphMap;
   /** Width in points; the height is `size * BADGE_ASPECT`. */
   size: number;
+  /** The outline — one per tier (see TIER_SHAPE). */
+  shape?: BadgeShape;
+  /** The word on the ribbon. Dropped on a badge too small to read it. */
+  label?: string;
   delay?: number;
   /** The slow idle bob once landed. */
   float?: boolean;
@@ -209,7 +320,7 @@ export function Badge({
 
     shown.value = withDelay(delay, withTiming(1, { duration: 90 }));
     drop.value = withDelay(delay, withTiming(0, { duration: FALL_MS, easing: Easing.in(Easing.quad) }));
-    // Thin while it falls, squashed wide on impact, then round again.
+    // Thin while it falls, squashed wide on impact, then back into shape.
     sy.value = withDelay(
       lands,
       withSequence(withTiming(0.8, { duration: 90, easing: Easing.out(Easing.quad) }), withSpring(1, settle)),
@@ -266,13 +377,15 @@ export function Badge({
     };
   });
 
-  const faceD = (FACE.r / 100) * size * 2;
+  const ribbon = size >= RIBBON_MIN_SIZE ? label : undefined;
+  const { faceDisc } = badgeGeometry(shape, !!ribbon);
+  const faceD = (faceDisc.r / 100) * size * 2;
   const sheenStyle = useAnimatedStyle(() => ({
     opacity: interpolate(sheen.value, [0, 0.18, 0.82, 1], [0, 0.55, 0.55, 0]),
     transform: [{ translateX: (sheen.value - 0.5) * faceD * 1.7 }, { rotate: "18deg" }],
   }));
 
-  const { left, top, g } = glyphBox(size);
+  const { left, top, g } = glyphBox(size, shape, !!ribbon);
   const h = size * BADGE_ASPECT;
 
   return (
@@ -294,15 +407,15 @@ export function Badge({
         ]}
       />
       <Animated.View style={[{ width: size, height: h }, styles.origin, bodyStyle]}>
-        <Coin finish={finish} size={size} />
-        {/* One pass of light across the face, clipped to it. */}
+        <Plate finish={finish} size={size} shape={shape} label={ribbon} />
+        {/* One pass of light across the face, clipped to its round heart. */}
         <View
           style={[
             styles.abs,
             styles.faceClip,
             {
-              left: ((FACE.cx - FACE.r) / 100) * size,
-              top: ((FACE.cy - FACE.r) / 100) * size,
+              left: ((faceDisc.cx - faceDisc.r) / 100) * size,
+              top: ((faceDisc.cy - faceDisc.r) / 100) * size,
               width: faceD,
               height: faceD,
               borderRadius: faceD / 2,
@@ -319,7 +432,7 @@ export function Badge({
           </Animated.View>
         </View>
         <Animated.View style={[styles.abs, { left, top, width: g, height: g }, glyphStyle]}>
-          <Ionicons name={icon} size={g} color={finish.ink} />
+          <Glyph finish={finish} icon={icon} size={size} g={g} />
         </Animated.View>
       </Animated.View>
     </View>
@@ -328,9 +441,10 @@ export function Badge({
 
 const styles = StyleSheet.create({
   abs: { position: "absolute" },
-  /** The coin squashes on its lip — the bottom of the drawing, not its middle. */
+  /** The badge squashes on its lip — the bottom of the drawing, not its middle. */
   origin: { transformOrigin: "50% 95%" },
   floor: { position: "absolute" },
   faceClip: { overflow: "hidden", alignItems: "center", justifyContent: "center" },
   sheen: { position: "absolute" },
+  ribbonText: { fontWeight: "800", textAlign: "center", includeFontPadding: false },
 });

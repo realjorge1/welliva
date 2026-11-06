@@ -13,8 +13,10 @@
  * person. "Trust" is a noun like every other row in the menu, and it points at what
  * the user is granting rather than at what the machine is doing.
  *
- * THREE GROUPS, NOT FIVE. Senses (what comes in), Reach (what goes out), and a
- * single honest line for what isn't collected at all. `local_processing` used to
+ * FOUR GROUPS, NOT SEVEN. Senses (what comes in), Reach (what goes out),
+ * Measurement (the two that send event names and crashes to our own server, and
+ * the only ones here that start ON), and a single honest line for what is not
+ * collected at all. `local_processing` used to
  * render as a Switch that could never move — a permanently-disabled control reads
  * as a bug, not a guarantee — so it is the promise card at the top instead. The
  * legal documents live here rather than in Settings: they are the promise, these
@@ -56,6 +58,8 @@ export default function PrivacyScreen() {
     (r) => r.group === "integration" && r.category !== "proactive_notifications",
   );
   const future = c.rows.filter((r) => r.group === "future");
+  /** The two that send data and start ON. Their own card, named plainly. */
+  const measurement = c.rows.filter((r) => r.group === "measurement");
   /** How Gozlin acts on what it already sees — the one group that starts on. */
   const coaching = c.rows.filter((r) => r.group === "coaching");
   /** Her cycle in Gozlin chats — shown only to someone who tracks one. */
@@ -145,6 +149,17 @@ export default function PrivacyScreen() {
       {/* What goes out — cloud chat and out-of-app reach are the same question. */}
       <ReachCard notif={notif} cloudAi={cloudAi} onToggle={c.toggle} cycleShare={cycleShare} />
 
+      {/* The two switches that send something and start ON. They get a card of
+        their own rather than a line inside Senses: a default-on switch buried in
+        a list of default-off ones is how a screen like this loses its credibility.
+        The footnote states the default instead of letting the user discover it. */}
+      <ConsentGroupCard
+        title="Measurement"
+        rows={measurement}
+        onToggle={c.toggle}
+        footnote="On from the start, and ours alone — no tracking company is involved. Event names and crashes only: never a weight, a meal, a mood or a cycle date."
+      />
+
       {/* What Gozlin does with what it already has. On until you say otherwise,
         and the note under it says so — a default-on switch that doesn't admit
         it is the kind of thing this screen exists to prevent. */}
@@ -156,11 +171,18 @@ export default function PrivacyScreen() {
       />
 
       {/* One line, not a card of switches nobody can move. */}
+      {/* Count-aware on purpose. Crash reports used to sit here as "not collected
+        at all", and when they became real this list dropped to ONE item while the
+        copy still read "Neither … both" — a grammatical tell that the sentence had
+        stopped describing the screen. The honesty of this line is the whole point
+        of it, so it cannot be a fixed string. */}
       {future.length > 0 ? (
         <AppText variant="footnote" color="tertiary" style={styles.futureLine}>
           Not collected at all:{" "}
-          {future.map((r) => r.label.toLowerCase()).join(" and ")}. Neither is built yet —
-          both are named here so this list stays complete rather than flattering.
+          {future.map((r) => r.label.toLowerCase()).join(" and ")}.{" "}
+          {future.length === 1
+            ? "It isn't built yet — named here so this list stays complete rather than flattering."
+            : "Neither is built yet — both are named here so this list stays complete rather than flattering."}
         </AppText>
       ) : null}
 

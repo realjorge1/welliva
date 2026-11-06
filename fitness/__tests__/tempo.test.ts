@@ -1,29 +1,29 @@
 /**
- * TEMPO (animation/tempo.ts) is what makes the figure move like a character
- * rather than a ping-pong: a feel per movement, a speed budget, and a life layer
- * that runs on top. The things that can quietly go wrong are all about TIME:
- * a frozen frame that isn't the authored pose, a rep timeline with a jump in it,
- * a movement that comes out faster than it was authored, a face that shows two
- * mouths at once or is caught mid-blink on the first frame.
+ * TEMPO (animation/tempo.ts) is what keeps the figure in ONE rhythm: every rep a
+ * step of the beat grid, one human curve per feel, every joint on it together,
+ * and a speed budget that only ever slows a movement to the next step. The
+ * things that can quietly go wrong are all about TIME: a rep off the grid, a
+ * curve with a jump or an overshoot in it, a frozen frame that isn't the
+ * authored pose, a movement that strobes.
  */
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  CYCLE_MS,
   FEEL_CODE,
   FX,
   LUT_N,
-  boneFeel,
+  REP_GRID_MS,
+  arcAt,
   buildCurve,
   feelFor,
-  hashOf,
   lifeAt,
   lutAt,
   peakSlope,
   resolveTempo,
   speedBudget,
-  strainOf,
   type FeelName,
   type LifeKit,
   type MotionMetrics,
@@ -56,8 +56,6 @@ function kitFor(feel: FeelName): LifeKit {
     macroMs: t.macroMs,
     loopMs: t.loopMs,
     base: t.curve.base,
-    strain: strainOf(t.feel),
-    drag: 3.5,
     hop: t.hop,
   };
 }
@@ -84,7 +82,7 @@ describe("worklet discipline", () => {
     const calls = (body: string, name: string) => new RegExp(`\\b${name}\\s*\\(`).test(body);
 
     it(`${rel}: has worklets to check`, () => {
-      expect(fns.filter((f) => f.worklet).length).toBeGreaterThanOrEqual(5);
+      expect(fns.filter((f) => f.worklet).length).toBeGreaterThanOrEqual(4);
     });
 
     it(`${rel}: every worklet is declared before the worklets that call it`, () => {
@@ -113,67 +111,70 @@ describe("worklet discipline", () => {
   }
 });
 
-describe("the rep timelines", () => {
+describe("the rep curves", () => {
   for (const feel of FEELS) {
     describe(feel, () => {
       const c = buildCurve(feel);
 
-      it("starts at pose A and has pose B at the middle of the rep", () => {
+      it("starts at pose A and has pose B at the middle of the rep, exactly", () => {
         expect(c.base).toHaveLength(LUT_N + 1);
-        expect(c.extra).toHaveLength(LUT_N + 1);
         expect(c.base[0]).toBe(0);
         expect(c.base[LUT_N / 2]).toBe(1);
         expect(c.base[LUT_N]).toBe(0);
-        // A frozen frame at 0 or 0.5 is the authored pose, not a pose mid-overshoot.
-        expect(c.extra[0]).toBeCloseTo(0, 9);
-        expect(c.extra[LUT_N / 2]).toBeCloseTo(0, 9);
-        expect(c.extra[LUT_N]).toBeCloseTo(0, 9);
       });
 
-      it("never jumps: the whole curve is continuous", () => {
+      it("never overshoots: the body goes from one pose to the other and no further", () => {
+        for (const t of c.base) {
+          expect(t).toBeGreaterThanOrEqual(-1e-9);
+          expect(t).toBeLessThanOrEqual(1 + 1e-9);
+        }
+      });
+
+      it("only ever travels one way between the two ends — no dip, no rebound", () => {
+        for (let i = 1; i <= LUT_N / 2; i++) expect(c.base[i]).toBeGreaterThanOrEqual(c.base[i - 1] - 1e-12);
+        for (let i = LUT_N / 2 + 1; i <= LUT_N; i++) expect(c.base[i]).toBeLessThanOrEqual(c.base[i - 1] + 1e-12);
+      });
+
+      it("is smooth: it never jumps, and it eases out of and into each end", () => {
         let worst = 0;
-        for (let i = 1; i <= LUT_N; i++) {
-          worst = Math.max(
-            worst,
-            Math.abs(c.base[i] + c.extra[i] - c.base[i - 1] - c.extra[i - 1]),
-          );
-        }
-        // The steepest feel (a bounce's airborne swing) still moves < 7% of the
-        // way per 1/240 of a rep.
-        expect(worst).toBeLessThan(0.07);
+        for (let i = 1; i <= LUT_N; i++) worst = Math.max(worst, Math.abs(c.base[i] - c.base[i - 1]));
+        // The steepest feel moves under 3% of the way per 1/240 of a rep.
+        expect(worst).toBeLessThan(0.03);
+        // Zero speed at both poses: the first and the middle step barely move.
+        expect(c.base[1] - c.base[0]).toBeLessThan(0.002);
+        expect(c.base[LUT_N / 2] - c.base[LUT_N / 2 - 1]).toBeLessThan(0.002);
       });
 
-      it("stays near the two poses — overshoot is a nudge, not a lunge", () => {
-        for (let i = 0; i <= LUT_N; i++) {
-          const t = c.base[i] + c.extra[i];
-          expect(t).toBeGreaterThan(-0.12);
-          expect(t).toBeLessThan(1.12);
-        }
+      it("is symmetric: the way back is the way down, reversed", () => {
+        for (let i = 0; i <= LUT_N / 2; i++) expect(c.base[LUT_N - i]).toBeCloseTo(c.base[i], 9);
       });
     });
   }
 
-  it("lifts hold the top and the bottom instead of reversing on the spot", () => {
+  it("a lift rests at both ends, a little longer standing tall than at the bottom", () => {
     const c = buildCurve("lift");
-    // The bottom is held across the middle of the rep…
-    for (const p of [0.43, 0.5, 0.57]) expect(lutAt(c.base, p)).toBe(1);
-    // …and the top is held through the end of one rep and the start of the next.
-    for (const p of [0.92, 0.98, 0.02, 0.06]) expect(lutAt(c.base, p)).toBe(0);
+    // Still at the top through the turn of one rep into the next…
+    for (const p of [0.97, 0.99, 0.01, 0.03]) expect(lutAt(c.base, p)).toBe(0);
+    // …and still at the bottom across the middle.
+    for (const p of [0.48, 0.5, 0.52]) expect(lutAt(c.base, p)).toBe(1);
+    expect(lutAt(c.base, 0.07)).toBeGreaterThan(0);
+    expect(lutAt(c.base, 0.45)).toBeLessThan(1);
   });
 
-  it("a lift settles past the top after the drive, then comes back", () => {
+  it("a lift moves on the minimum-jerk path: halfway there at the middle of its travel", () => {
     const c = buildCurve("lift");
-    let past = 0;
-    for (let i = Math.floor(0.9 * LUT_N); i <= LUT_N; i++) past = Math.min(past, c.extra[i]);
-    expect(past).toBeLessThan(-0.04);
-    expect(c.extra[LUT_N]).toBeCloseTo(0, 9);
+    // Rest 0.06 at the start, travel 0.40, rest 0.04 before B.
+    expect(lutAt(c.base, 0.06 + 0.2)).toBeCloseTo(0.5, 3);
+    // The quintic is faster through its middle than a sine would be.
+    expect(peakSlope(c)).toBeCloseTo(1.875 / 0.4, 1);
   });
 
-  it("a lift dips the wrong way before it drives down (anticipation)", () => {
-    const c = buildCurve("lift");
-    let dip = 0;
-    for (let i = 0; i <= Math.floor(0.1 * LUT_N); i++) dip = Math.min(dip, c.extra[i]);
-    expect(dip).toBeLessThan(-0.04);
+  it("continuous work is a plain harmonic swing — it never stops", () => {
+    const c = buildCurve("steady");
+    expect(peakSlope(c)).toBeCloseTo(Math.PI, 1);
+    for (const p of [0.1, 0.25, 0.4, 0.6, 0.75, 0.9]) {
+      expect(lutAt(c.base, p)).toBeCloseTo(0.5 - 0.5 * Math.cos(2 * Math.PI * p), 3);
+    }
   });
 
   it("samples between table entries", () => {
@@ -182,16 +183,6 @@ describe("the rep timelines", () => {
     const b = lutAt(c.base, 2 / LUT_N);
     const mid = lutAt(c.base, 1.5 / LUT_N);
     expect(mid).toBeCloseTo((a + b) / 2, 9);
-  });
-
-  it("no feel is a plain ping-pong: the others pack their movement into part of the rep", () => {
-    // The steadiest feel is a sine: its peak slope is pi. A lift and a bounce hold
-    // part of the rep still, so the rest of it has to move faster.
-    expect(peakSlope(buildCurve("steady"))).toBeCloseTo(Math.PI, 1);
-    expect(peakSlope(buildCurve("lift"))).toBeGreaterThan(Math.PI * 1.3);
-    expect(peakSlope(buildCurve("bounce"))).toBeGreaterThan(Math.PI * 1.3);
-    // Flow and hold are the gentle ones.
-    expect(peakSlope(buildCurve("hold"))).toBeCloseTo(Math.PI, 1);
   });
 });
 
@@ -231,156 +222,116 @@ describe("which feel a movement has", () => {
   });
 });
 
-describe("the speed budget", () => {
-  it("slows a movement whose joints would turn too fast, and never speeds one up", () => {
-    // A jumping jack was authored at 700 ms: its forearm turned 900°/s.
-    const jack = resolveTempo("jumpingJack", metrics(700, 171));
-    expect(jack.loopMs).toBeGreaterThanOrEqual(1200);
-    // A rep authored slower than the budget needs is left exactly as it was.
-    expect(resolveTempo("squat", metrics(5000, 82, 10)).loopMs).toBe(5000);
-    // Even a sluggish rep is never shortened.
+describe("one rhythm", () => {
+  it("every step of the grid is a whole number of 500 ms beats and divides the clock's cycle", () => {
+    for (const ms of REP_GRID_MS) {
+      expect(ms % 500).toBe(0);
+      expect(CYCLE_MS % ms).toBe(0);
+    }
+  });
+
+  it("gives each feel its own pace: a beat for cardio, three for strength, six for a stretch", () => {
+    expect(resolveTempo("highKnee", metrics(620, 60)).loopMs).toBe(1000);
+    expect(resolveTempo("squat", metrics(2400, 82, 10)).loopMs).toBe(3000);
+    expect(resolveTempo("downDog", metrics(3200, 23)).loopMs).toBe(6000);
+    expect(resolveTempo("plank", metrics(4200, 2, 0.9)).loopMs).toBe(6000);
+  });
+
+  it("gives controlled core work its own slow pace — a dead bug is not a sprint", () => {
+    // A rep is both sides; a second would be half a second a side.
+    expect(resolveTempo("deadBug", metrics(2600, 90)).loopMs).toBe(3000);
+    expect(resolveTempo("birdDog", metrics(2800, 90)).loopMs).toBe(3000);
+    expect(resolveTempo("windshieldWiper", metrics(2600, 90)).loopMs).toBe(3000);
+    expect(resolveTempo("broadJump", metrics(1600, 90)).loopMs).toBe(2000);
+    // Still on the grid, so still on the beat.
+    expect(REP_GRID_MS as readonly number[]).toContain(resolveTempo("russianTwist", metrics(1600, 60)).loopMs);
+  });
+
+  it("ignores the authored length: a hand-typed 2350 ms no longer puts one move off the beat", () => {
+    for (const authored of [1800, 2200, 2350, 2600, 3000]) {
+      expect(resolveTempo("squat", metrics(authored, 82, 10)).loopMs).toBe(3000);
+    }
+  });
+
+  it("runs every movement's clock on the same 12 s cycle, a whole number of reps", () => {
     for (const [m, ms, sw] of [
       ["squat", 2400, 82],
-      ["curl", 2000, 165],
-      ["highKnee", 620, 100],
+      ["jumpingJack", 700, 171],
       ["plank", 4200, 2],
+      ["downDog", 3200, 23],
+      ["torsoTwist", 2400, 150],
     ] as const) {
-      expect(resolveTempo(m, metrics(ms, sw)).loopMs).toBeGreaterThanOrEqual(ms);
+      const t = resolveTempo(m, metrics(ms, sw));
+      expect(t.macroMs).toBe(CYCLE_MS);
+      expect(Number.isInteger(t.reps)).toBe(true);
+      expect(t.reps * t.loopMs).toBe(CYCLE_MS);
     }
+  });
+});
+
+describe("the speed budget", () => {
+  it("moves a movement whose joints would turn too fast to the next step of the grid", () => {
+    // A jumping jack's forearm sweeps 171°: a 1 s rep would turn it 537°/s.
+    const jack = resolveTempo("jumpingJack", metrics(700, 171));
+    expect(jack.loopMs).toBe(1500);
+    // A torso twist swings 150° — too much for a 1 s swing (471°/s), fine over
+    // the next step, 1.5 s (314°/s).
+    expect(resolveTempo("torsoTwist", metrics(2400, 150)).loopMs).toBe(1500);
+    // Never below the feel's own pace, however small the swing.
+    expect(resolveTempo("squat", metrics(900, 10)).loopMs).toBe(3000);
   });
 
   it("holds every feel to its angular speed at the curve's steepest", () => {
     for (const [motion, ms, sw] of [
       ["squat", 1500, 120],
+      ["squat", 1500, 200],
       ["highKnee", 400, 120],
       ["jumpingJack", 500, 175],
       ["downDog", 1500, 120],
     ] as const) {
       const t = resolveTempo(motion, metrics(ms, sw));
       const peak = (sw * t.slope) / (t.loopMs / 1000);
-      // Rounded to 50 ms, so allow a hair over.
-      expect(peak, motion).toBeLessThanOrEqual(speedBudget(t.feel) * 1.04);
+      expect(peak, motion).toBeLessThanOrEqual(speedBudget(t.feel) * 1.001);
+      expect(REP_GRID_MS as readonly number[]).toContain(t.loopMs);
     }
   });
 
-  it("keeps a short loop from strobing: every feel has a floor", () => {
-    expect(resolveTempo("fastFeet", metrics(420, 98)).loopMs).toBeGreaterThanOrEqual(800);
-    expect(resolveTempo("highKnee", metrics(620, 100)).loopMs).toBeGreaterThanOrEqual(1000);
-    expect(resolveTempo("squat", metrics(900, 10)).loopMs).toBeGreaterThanOrEqual(1800);
-  });
-
-  it("rounds to 50 ms and runs the clock over several reps", () => {
-    for (const [m, ms, sw] of [
-      ["squat", 2400, 82],
-      ["jumpingJack", 700, 171],
-      ["plank", 4200, 2],
-      ["downDog", 3200, 23],
-    ] as const) {
-      const t = resolveTempo(m, metrics(ms, sw));
-      expect(t.loopMs % 50).toBe(0);
-      expect(t.reps).toBeGreaterThanOrEqual(2);
-      expect(t.reps).toBeLessThanOrEqual(6);
-      expect(t.macroMs).toBe(t.loopMs * t.reps);
-    }
+  it("never strobes: nothing repeats faster than once a second", () => {
+    expect(Math.min(...REP_GRID_MS)).toBe(1000);
+    expect(resolveTempo("fastFeet", metrics(420, 98)).loopMs).toBeGreaterThanOrEqual(1000);
   });
 });
 
-describe("how loose each bone is", () => {
-  it("an elbow or a knee overshoots less than a shoulder or a hip", () => {
-    expect(boneFeel("foreArmR").gain).toBeLessThan(boneFeel("upArmR").gain);
-    expect(boneFeel("shin").gain).toBeLessThan(boneFeel("thigh").gain);
-    expect(boneFeel("farForeArm").gain).toBe(boneFeel("foreArm").gain);
-  });
-
-  it("each level of the chain trails the one above it, by a believable amount", () => {
-    expect(boneFeel("upperSpine").lagMs).toBeGreaterThan(boneFeel("lowerSpine").lagMs);
-    expect(boneFeel("foreArm").lagMs).toBeGreaterThan(boneFeel("upArm").lagMs);
-    expect(boneFeel("shin").lagMs).toBeGreaterThan(boneFeel("thigh").lagMs);
-    for (const n of ["lowerSpine", "upperSpine", "neck", "upArm", "foreArm", "thigh", "shin", "foot", "clavR"]) {
-      const { lagMs } = boneFeel(n);
-      expect(lagMs).toBeGreaterThanOrEqual(0);
-      expect(lagMs).toBeLessThanOrEqual(100);
-    }
-  });
-
-  it("positioning bones never overshoot", () => {
-    expect(boneFeel("pelvisR").gain).toBe(0);
-  });
-});
-
-describe("the life layer", () => {
+describe("the life layer is the breath, and nothing else", () => {
   for (const feel of FEELS) {
-    describe(feel, () => {
+    it(`${feel}: breathes with the rep — out at the top, in at the bottom — and is finite`, () => {
       const k = kitFor(feel);
-      const frames: number[][] = [];
-      const N = 600;
-      for (let i = 0; i <= N; i++) {
-        const p = i / N;
-        const q = (p * k.reps) % 1;
-        frames.push(lifeAt(k, p, q, 0.02, 0.5));
+      expect(FX.LENGTH).toBe(1);
+      for (let i = 0; i <= 240; i++) {
+        const q = i / 240;
+        const f = lifeAt(k, q);
+        expect(f).toHaveLength(FX.LENGTH);
+        expect(Number.isFinite(f[FX.BREATH])).toBe(true);
+        expect(f[FX.BREATH]).toBeCloseTo(lutAt(k.base, q), 12);
       }
-
-      it("is finite everywhere", () => {
-        for (const f of frames) {
-          expect(f).toHaveLength(FX.LENGTH);
-          for (const v of f) expect(Number.isFinite(v)).toBe(true);
-        }
-      });
-
-      it("rests on the first frame: a frozen figure is not mid-anything", () => {
-        expect(Math.abs(frames[0][FX.SWAY])).toBeLessThan(0.1);
-        expect(frames[0][FX.EFFORT]).toBeLessThan(0.15);
-      });
-
-      it("ends the macro cycle as it began, so the loop has no seam", () => {
-        const a = frames[0];
-        const z = lifeAt(k, 0.999999, ((0.999999 * k.reps) % 1), 0.02, 0.5);
-        for (const s of [FX.BREATH, FX.SQUASH, FX.SHADOW, FX.EFFORT]) {
-          expect(Math.abs(a[s] - z[s]), `channel ${s}`).toBeLessThan(0.08);
-        }
-      });
+      expect(lifeAt(k, 0)[FX.BREATH]).toBe(0);
     });
   }
+});
 
-  it("works the body on the drive of a lift, not on the way down", () => {
-    const k = kitFor("lift");
-    const at = (q: number) => lifeAt(k, q / k.reps, q, 0, 0)[FX.EFFORT];
-    expect(at(0)).toBe(0);
-    expect(at(0.2)).toBe(0);
-    expect(at(0.66)).toBeGreaterThan(0.8);
-    expect(at(0.95)).toBe(0);
-  });
-
-  it("the hair trails a head that turns and hangs when the body drops", () => {
-    const k = kitFor("lift");
-    const turning = lifeAt(k, 0, 0.3, 0.1, 0);
-    const still = lifeAt(k, 0, 0.3, 0, 0);
-    expect(turning[FX.SWAY]).toBeLessThan(0);
-    expect(still[FX.SWAY]).toBeCloseTo(0, 9);
-    // Up is −y in the head's frame: falling hangs the hair up.
-    expect(lifeAt(k, 0, 0.3, 0, 3)[FX.BOB]).toBeLessThan(0);
-    // Clamped, so a hard turn cannot fling it.
-    expect(Math.abs(lifeAt(k, 0, 0.3, 5, 99)[FX.SWAY])).toBeLessThanOrEqual(0.24);
-  });
-
-  it("only hops squash and stretch, and the shadow shrinks as the body rises", () => {
-    const lift = kitFor("lift");
-    const jump = kitFor("bounce");
-    let liftSquash = 0;
-    let squashLo = 0;
-    let squashHi = 0;
-    let shadowLo = 1;
-    for (let i = 0; i <= 300; i++) {
-      const q = i / 300;
-      liftSquash = Math.max(liftSquash, Math.abs(lifeAt(lift, q / lift.reps, q, 0, 0)[FX.SQUASH]));
-      const f = lifeAt(jump, q / jump.reps, q, 0, 0);
-      squashLo = Math.min(squashLo, f[FX.SQUASH]);
-      squashHi = Math.max(squashHi, f[FX.SQUASH]);
-      shadowLo = Math.min(shadowLo, f[FX.SHADOW]);
+describe("the hop", () => {
+  it("lifts a bounce and bobs a step between the poses, and lands on each", () => {
+    for (const feel of [FEEL_CODE.bounce, FEEL_CODE.steady]) {
+      expect(arcAt(feel, 0)).toBe(0);
+      expect(arcAt(feel, 0.5)).toBeCloseTo(0, 12);
+      expect(arcAt(feel, 0.25)).toBeCloseTo(1, 12);
+      expect(arcAt(feel, 0.75)).toBeCloseTo(1, 12);
     }
-    expect(liftSquash).toBe(0);
-    expect(squashLo).toBeLessThan(-0.04);
-    expect(squashHi).toBeGreaterThan(0.02);
-    expect(shadowLo).toBeLessThan(0.8);
+  });
+
+  it("keeps everything else on the floor", () => {
+    for (const feel of [FEEL_CODE.lift, FEEL_CODE.flow, FEEL_CODE.hold]) {
+      for (const q of [0, 0.25, 0.5, 0.75]) expect(arcAt(feel, q)).toBe(0);
+    }
   });
 });

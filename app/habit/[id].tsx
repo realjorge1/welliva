@@ -21,6 +21,27 @@
  */
 import { HabitHeatmap } from "@/components/habits/HabitHeatmap";
 import { HabitWeekStrip } from "@/components/habits/HabitWeekStrip";
+import { GozlinToast, useToast } from "@/components/gozlin/GozlinToast";
+import { ReminderMoveCard } from "@/components/smart/ReminderMoveCard";
+import { useReceipts } from "@/components/smart/receipt";
+import { SmartCard } from "@/components/smart/SmartCard";
+import { useAnchorChoices } from "@/components/smart/useAnchors";
+import { useSmartLedger, useSmartMoment } from "@/components/smart/useSmartMoment";
+import {
+  ANCHOR_OFFER_PRIORITY,
+  KEEP_DAYS,
+  anchorCopy,
+  anchorReminder,
+  answerFor,
+  answerSmart,
+  habitDayCopy,
+  habitDayOffer,
+  isStruggling,
+  type AnchorOffer,
+  type HabitDayOffer,
+  type MoveSuggestion,
+} from "@/services/smart";
+import { useReminderMoveActions, useReminderMoves } from "@/components/smart/useReminderMoves";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { ConfirmSheet } from "@/components/ui/ConfirmSheet";
@@ -35,8 +56,9 @@ import { frequencyLabel, retiredSummaryLine } from "@/models/habit";
 import { buildHeatWeeks, monthLabels, retiredRecordFor } from "@/services/HabitService";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, View, type LayoutChangeEvent } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const HISTORY_WEEKS = 20;
 
@@ -50,7 +72,7 @@ export default function HabitDetailScreen() {
   const router = useRouter();
   const { colors } = useColors();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { getView, toggleToday, deleteHabit } = useHabits();
+  const { getView, toggleToday, updateHabit, deleteHabit, paused } = useHabits();
   const { currentDate } = useSystem();
 
   // The width the page actually gives its content, measured once on layout.
@@ -61,6 +83,101 @@ export default function HabitDetailScreen() {
     setContentWidth(e.nativeEvent.layout.width);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Reminders that move themselves: this habit's offer, if it has one and the
+  // quiet layer lets it through today (services/smart). Hooks before the
+  // not-found return below.
+  const moves = useReminderMoves();
+  const ownMoves = useMemo(
+    () => moves.filter((m) => m.target.kind === "habit" && m.target.habitId === String(id)),
+    [moves, id],
+  );
+  // …and a weekday it keeps being missed on: "Move it off Thursdays?"
+  const ownView = getView(String(id));
+  const dayOffer = useMemo(
+    () =>
+      ownView
+        ? habitDayOffer({ habit: ownView.habit, done: ownView.done, paused, today: currentDate })
+        : null,
+    [ownView, paused, currentDate],
+  );
+  // …and, when it's struggling, one offer to tie it to something they already
+  // do. Asked once: any answer ends it.
+  const [topAnchor] = useAnchorChoices(String(id));
+  const { answers } = useSmartLedger();
+  const anchorOffer = useMemo<AnchorOffer | null>(() => {
+    if (!ownView || !topAnchor) return null;
+    const offerId = `anchor-offer:${ownView.habit.id}`;
+    if (answerFor(answers, offerId)) return null;
+    if (!isStruggling(ownView.habit, ownView.done, paused, currentDate)) return null;
+    return {
+      id: offerId,
+      feature: "anchor",
+      kind: "offer",
+      priority: ANCHOR_OFFER_PRIORITY,
+      habitId: ownView.habit.id,
+      habitName: ownView.habit.name,
+      anchor: topAnchor,
+    };
+  }, [ownView, topAnchor, answers, paused, currentDate]);
+  const candidates = useMemo<(MoveSuggestion | HabitDayOffer | AnchorOffer)[]>(
+    () => [...ownMoves, ...(dayOffer ? [dayOffer] : []), ...(anchorOffer ? [anchorOffer] : [])],
+    [ownMoves, dayOffer, anchorOffer],
+  );
+  const offer = useSmartMoment("habit", candidates);
+  const toast = useToast();
+  const insets = useSafeAreaInsets();
+  const show = useReceipts(toast);
+  const { move, keep } = useReminderMoveActions({ show });
+
+  // Undo runs seconds later: it must act on the habit as it is THEN (new
+  // notification ids), not as it was when the move was made.
+  const latestView = useRef(getView);
+  latestView.current = getView;
+  const moveOffDay = useCallback(
+    async (o: HabitDayOffer) => {
+      const habit = latestView.current(o.habitId)?.habit;
+      if (!habit) return;
+      const before = habit.days;
+      await updateHabit({ ...habit, days: before.filter((d) => d !== o.weekday) });
+      await answerSmart({ id: o.id, feature: "hard-day", answer: "accepted" });
+      show({
+        message: habitDayCopy(o).done,
+        onUndo: async () => {
+          const now = latestView.current(o.habitId)?.habit;
+          if (now) await updateHabit({ ...now, days: before });
+          await answerSmart({ id: o.id, feature: "hard-day", answer: "declined", coolDownDays: KEEP_DAYS });
+        },
+      });
+    },
+    [updateHabit, show],
+  );
+  const tieToAnchor = useCallback(
+    async (o: AnchorOffer) => {
+      const habit = latestView.current(o.habitId)?.habit;
+      if (!habit) return;
+      const prior = { anchor: habit.anchor ?? null, reminder: habit.reminder };
+      await updateHabit({
+        ...habit,
+        anchor: {
+          kind: o.anchor.kind,
+          label: o.anchor.label,
+          ...(o.anchor.habitId ? { habitId: o.anchor.habitId } : {}),
+        },
+        reminder: anchorReminder(o.anchor),
+      });
+      await answerSmart({ id: o.id, feature: "anchor", answer: "accepted" });
+      show({
+        message: `${anchorCopy(o.anchor).accept}. Reminder moved to match.`,
+        onUndo: async () => {
+          const now = latestView.current(o.habitId)?.habit;
+          if (now) await updateHabit({ ...now, ...prior });
+          await answerSmart({ id: o.id, feature: "anchor", answer: "declined" });
+        },
+      });
+    },
+    [updateHabit, show],
+  );
 
   const view = getView(String(id));
   if (!view) {
@@ -75,7 +192,7 @@ export default function HabitDetailScreen() {
   }
 
   const { habit, stats, done } = view;
-  const weeks = buildHeatWeeks(habit, done, currentDate, HISTORY_WEEKS);
+  const weeks = buildHeatWeeks(habit, done, currentDate, HISTORY_WEEKS, paused);
   const months = monthLabels(weeks);
   const isManual = habit.source === "manual";
   const quota = habit.weeklyGoal != null;
@@ -132,6 +249,7 @@ export default function HabitDetailScreen() {
   );
 
   return (
+    <>
     <Screen header={header}>
       {/* Hero identity. It also doubles as the ruler: it's a full-width block
           with no gutter of its own, so its measured width IS the width the
@@ -151,6 +269,44 @@ export default function HabitDetailScreen() {
       <Card padding="lg" style={styles.weekCard}>
         <HabitWeekStrip habit={habit} stats={stats} done={done} today={currentDate} />
       </Card>
+
+      {/* A reminder that could move to when this habit actually happens —
+          shown only when the pattern is steady and the quiet layer allows it. */}
+      {offer && isManual && offer.feature === "reminder-move" && (
+        <ReminderMoveCard move={offer} where="own" onMove={move} onKeep={keep} style={styles.offer} />
+      )}
+      {offer && isManual && offer.feature === "anchor" && (
+        <SmartCard
+          icon="link-outline"
+          message={anchorCopy(offer.anchor).strugglingOffer}
+          source={anchorCopy(offer.anchor).source}
+          primary={{ label: anchorCopy(offer.anchor).accept, onPress: () => void tieToAnchor(offer) }}
+          secondary={{
+            label: anchorCopy(offer.anchor).decline,
+            onPress: () => void answerSmart({ id: offer.id, feature: "anchor", answer: "declined" }),
+          }}
+          style={styles.offer}
+        />
+      )}
+      {offer && isManual && offer.feature === "hard-day" && (
+        <SmartCard
+          icon="calendar-outline"
+          message={habitDayCopy(offer).message}
+          source={habitDayCopy(offer).source}
+          primary={{ label: habitDayCopy(offer).accept, onPress: () => void moveOffDay(offer) }}
+          secondary={{
+            label: habitDayCopy(offer).decline,
+            onPress: () =>
+              void answerSmart({
+                id: offer.id,
+                feature: "hard-day",
+                answer: "declined",
+                coolDownDays: KEEP_DAYS,
+              }),
+          }}
+          style={styles.offer}
+        />
+      )}
 
       {/* Stat tiles */}
       <View style={styles.tiles}>
@@ -231,6 +387,9 @@ export default function HabitDetailScreen() {
         }}
       />
     </Screen>
+    {/* Outside the scroll region, so it floats over the page, not its end. */}
+    <GozlinToast controller={toast} topOffset={insets.top} />
+    </>
   );
 }
 
@@ -279,6 +438,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xl,
   },
   weekCard: { marginBottom: Spacing.sm },
+  offer: { marginBottom: Spacing.sm },
   tiles: {
     flexDirection: "row",
     gap: Spacing.sm,

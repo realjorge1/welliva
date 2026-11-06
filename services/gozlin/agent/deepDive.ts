@@ -102,8 +102,11 @@ export interface DeepDiveInput {
   /** The coach reply this dive explains. */
   answer: string;
   twin: GozlinTwin;
-  /** Optional identity/snapshot, so the state block can carry clinical rules. */
-  context?: Pick<GozlinChatContext, "snapshot" | "identity">;
+  /**
+   * Optional identity/snapshot, so the state block can carry clinical rules —
+   * and the phone's language, so the dive is written in the one the reply was.
+   */
+  context?: Pick<GozlinChatContext, "snapshot" | "identity" | "language">;
 }
 
 export type DeepDiveFailure =

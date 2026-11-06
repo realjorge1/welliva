@@ -1,9 +1,9 @@
 /**
- * THE RAIL — four destinations and one action, at three altitudes.
+ * THE RAIL — three destinations and one action, at three altitudes.
  *
- *   A · AT REST      [ ⌂ Home   Diet   Fitness   Gozlin ]  ( + )
- *   B · FOLDED       [ ⌂    ▤    ⬛    ✦ ]                  ( + )
- *   C · FOLDED + CUE [ ⌂ ] [ ▸ Log lunch          12:40 ]  ( + )
+ *   A · AT REST      [ ⌂ Home   Diet   Fitness ]  ( + )
+ *   B · FOLDED       [ ⌂    ▤    ⬛ ]              ( + )
+ *   C · FOLDED + CUE [ ⌂ ] [ ▸ Log lunch   12:40 ]  ( + )
  *
  * On the compact destinations (`COMPACT_RAIL_PATHS` — Habits, Logs, Upgrade,
  * Settings, Profile) the Deck holds the rail at C whatever the scroll, so the
@@ -13,7 +13,7 @@
  * THE RULE THAT MAKES IT NOT A SECOND NAVIGATION SYSTEM. Every tab here is an
  * entry from `RAIL_ITEMS`, which is `PRIMARY_ITEMS` filtered — the same data the
  * swipe menu renders, lit with the same gold, reading the same pathname. The
- * drawer is the map (eleven destinations); the rail is the fast lane to four of
+ * drawer is the map (eleven destinations); the rail is the fast lane to three of
  * them. A person who learns either one has learned the other.
  *
  * IT IS OPAQUE, AND THAT IS A DECISION. The first build floated the tabs on a
@@ -71,9 +71,9 @@ import type { NextMove } from "./nextMove";
  *
  * IT IS SMALLER THAN THE RAIL IS TALL. It used to be a perfect 62pt circle
  * matching the pill's height, which looked balanced in isolation and starved
- * the tabs: four labels sharing what was left put "Fitness" and "Gozlin" hard
- * against their edges. Eight points off the button is eight points onto every
- * label, and 54 is still well over the 44pt touch floor.
+ * the tabs: the labels sharing what was left sat hard against their edges.
+ * Eight points off the button is eight points onto every label, and 54 is
+ * still well over the 44pt touch floor.
  */
 const ACTION = 54;
 const ACTION_FOLDED = 48;
@@ -168,14 +168,7 @@ function Tab({
       hitSlop={6}
     >
       <View style={styles.glyph}>
-        {item.mark === "gozlin" ? (
-          // Gozlin's mark is the diamond artwork itself, in its own colours —
-          // the owner's call ("exactly as is"), which retired the monochrome
-          // bolt. "You are here" is still said in gold, by the label below.
-          <AILogoIcon size={21} />
-        ) : (
-          <Ionicons name={active ? item.activeIcon : item.icon} size={21} color={tint} />
-        )}
+        <Ionicons name={active ? item.activeIcon : item.icon} size={21} color={tint} />
       </View>
       <Animated.View style={[styles.labelBox, labelStyle]}>
         <AppText
@@ -314,19 +307,11 @@ export function Rail({ folded, inlineCue, onCue, onAction, onActionHold }: RailP
               pressed && styles.pressed,
             ]}
           >
-            {activeItem.mark === "gozlin" ? (
-              <AILogoIcon size={21} />
-            ) : (
-              <Ionicons
-                name={
-                  activeItem.href === pathname ? activeItem.activeIcon : activeItem.icon
-                }
-                size={21}
-                color={
-                  activeItem.href === pathname ? colors.primary : colors.textTertiary
-                }
-              />
-            )}
+            <Ionicons
+              name={activeItem.href === pathname ? activeItem.activeIcon : activeItem.icon}
+              size={21}
+              color={activeItem.href === pathname ? colors.primary : colors.textTertiary}
+            />
           </Pressable>
 
           <Pressable
@@ -457,8 +442,8 @@ const styles = StyleSheet.create({
   /** Capped: a long meal name must never squeeze the verb to an ellipsis. */
   cueCaption: { flexShrink: 1, minWidth: 0, maxWidth: "46%" },
 
-  // Even quarters, so "Fitness" and "Gozlin" get exactly as much room as
-  // "Home" — a `minWidth` per tab left the longer two crowding their edges.
+  // Even thirds, so "Fitness" gets exactly as much room as "Home" — a
+  // `minWidth` per tab left the longer labels crowding their edges.
   tab: { flex: 1, alignItems: "center", justifyContent: "center" },
   glyph: {
     width: GLYPH,

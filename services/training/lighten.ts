@@ -159,3 +159,89 @@ export function lightenSession(
     changes,
   };
 }
+
+/** What goes first when a session has to fit a shorter slot. */
+const DROP_FIRST: readonly NonNullable<PlannedExercise["role"]>[] = [
+  "finisher",
+  "mobility",
+  "balance",
+  "accessory",
+  "main",
+];
+
+/**
+ * The same session, fitted into `targetMinutes` — "a 15-minute Thursday".
+ *
+ * Built only from what the session already holds: nothing new is written, and
+ * no move is swapped. Sets come down first (never below two), least important
+ * move first; then whole moves go, finishers before accessories before mains,
+ * and the last main always stays. Warm-up and cool-down are kept, for the same
+ * reason the lighter version keeps them.
+ *
+ * The result is about the target, not exactly it, and `totalDurationMinutes`
+ * states what it really came to. Null when the session already fits.
+ */
+export function shortenSession(
+  session: WorkoutSession,
+  targetMinutes: number,
+  pool: ExerciseDBEntry[],
+  reason: LightenReason,
+): LighterSession | null {
+  const byId = new Map(pool.map((e) => [e.id, e]));
+  const seconds = (p: PlannedExercise) => secondsFor(p, byId.get(p.exerciseId));
+  const budget = targetMinutes * 60;
+  const totalOf = (list: PlannedExercise[]) => list.reduce((sum, p) => sum + seconds(p), 0);
+  if (totalOf(session.exercises) <= budget) return null;
+
+  const isWork = (p: PlannedExercise) => (p.block ?? "main") === "main";
+  const rank = (p: PlannedExercise) => DROP_FIRST.indexOf(p.role ?? "main");
+  const before = session.exercises.filter(isWork).length;
+  let exercises = session.exercises.map((p) => ({ ...p }));
+  let setsCut = 0;
+
+  // Sets first, a round at a time, so no one move is gutted while another keeps
+  // everything.
+  for (let cut = true; cut && totalOf(exercises) > budget; ) {
+    cut = false;
+    const byImportance = exercises
+      .filter((p) => isWork(p) && p.sets > 2)
+      .sort((a, b) => rank(a) - rank(b));
+    for (const p of byImportance) {
+      if (totalOf(exercises) <= budget) break;
+      p.sets -= 1;
+      setsCut += 1;
+      cut = true;
+    }
+  }
+
+  // Then whole moves, the least important and latest first. The last one stays.
+  while (totalOf(exercises) > budget && exercises.filter(isWork).length > 1) {
+    const work = exercises.filter(isWork);
+    const next = work.reduce((worst, p) => (rank(p) <= rank(worst) ? p : worst));
+    exercises = exercises.filter((p) => p !== next);
+  }
+
+  const after = exercises.filter(isWork).length;
+  for (const p of exercises) {
+    if (!isWork(p)) continue;
+    p.doseReason = reason.dose;
+    p.durationMinutes = Math.max(1, Math.round(seconds(p) / 60));
+  }
+
+  const total = totalOf(exercises);
+  const changes = [
+    reason.headline,
+    after < before ? `${after} ${after === 1 ? "move" : "moves"} instead of ${before}` : null,
+    setsCut > 0 ? "Fewer sets on each move" : null,
+    `About ${Math.max(1, Math.round(total / 60))} minutes`,
+  ].filter((c): c is string => c !== null);
+
+  return {
+    session: {
+      ...session,
+      exercises,
+      totalDurationMinutes: Math.max(1, Math.round(total / 60)),
+    },
+    changes,
+  };
+}

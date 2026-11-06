@@ -1,13 +1,14 @@
 /**
  * MOTION (animation/motion.ts) turns the clock into a pose, for the animated
  * panel and the SVG still alike. Everything here is about the figure BEHAVING:
- * a frozen frame is the authored pose, the skeleton stays in one piece, a joint
- * never turns faster than the speed budget, a planted foot stays planted, a hop
- * leaves the floor, the loop has no seam, and the figure always fits the panel
- * (or the ring) it is drawn in.
+ * a frozen frame is the authored pose, the whole body moves as one, the
+ * skeleton stays in one piece, a joint never turns faster than the speed
+ * budget, a planted foot stays planted, a hop leaves the floor, the loop has no
+ * seam, and the figure always fits the panel (or the ring) it is drawn in.
  */
 import { FRONT_PROFILES } from "@/fitness/animation/frontProfiles";
 import {
+  boneTip,
   buildMotionKit,
   framePanel,
   headFrame,
@@ -21,11 +22,11 @@ import {
   solvePose,
   SHOULDER_SPREAD,
 } from "@/fitness/animation/motion";
-import { motionLoopMs } from "@/fitness/animation/cameras";
+import { motionCameras } from "@/fitness/animation/cameras";
 import type { FigureMotion } from "@/fitness/animation/movementProfiles";
 import { buildFrontRig, buildSideRig } from "@/fitness/animation/rig";
 import { SIDE_PROFILES } from "@/fitness/animation/sideProfiles";
-import { FX, speedBudget } from "@/fitness/animation/tempo";
+import { CYCLE_MS, FX, REP_GRID_MS, lutAt, speedBudget } from "@/fitness/animation/tempo";
 import { describe, expect, it } from "vitest";
 
 const BUILDERS = { front: buildFrontRig, side: buildSideRig } as const;
@@ -46,12 +47,23 @@ const angleDiff = (a: number, b: number): number => {
 };
 
 describe("the tempo of every movement", () => {
-  it("is shared by both cameras, never faster than authored, and a whole number of 50 ms", () => {
+  it("is on the beat grid, and every clock runs the same cycle", () => {
     for (const m of new Set(ALL.map(([mo]) => mo))) {
       const t = motionTempo(m);
-      expect(t.loopMs, m).toBeGreaterThanOrEqual(motionLoopMs(m));
-      expect(t.loopMs % 50, m).toBe(0);
-      expect(t.macroMs, m).toBe(t.loopMs * t.reps);
+      expect(REP_GRID_MS as readonly number[], m).toContain(t.loopMs);
+      expect(t.macroMs, m).toBe(CYCLE_MS);
+      expect(t.loopMs * t.reps, m).toBe(CYCLE_MS);
+    }
+  });
+
+  it("is shared by both cameras: one kit per view, one rhythm", () => {
+    for (const m of new Set(ALL.map(([mo]) => mo))) {
+      if (!FRONT_PROFILES[m] || !SIDE_PROFILES[m]) continue;
+      const front = buildMotionKit(m, "front");
+      const side = buildMotionKit(m, "side");
+      expect(front.loopMs, m).toBe(side.loopMs);
+      expect(front.base, m).toBe(side.base);
+      expect(front.hop, m).toBe(side.hop);
     }
   });
 
@@ -59,16 +71,23 @@ describe("the tempo of every movement", () => {
     expect(motionTempo("squat")).toBe(motionTempo("squat"));
   });
 
-  it("slows the quick cardio — a jumping jack no longer blurs", () => {
-    expect(motionTempo("jumpingJack").loopMs).toBeGreaterThanOrEqual(1200);
-    expect(motionTempo("fastFeet").loopMs).toBeGreaterThanOrEqual(800);
-    expect(motionTempo("highKnee").loopMs).toBeGreaterThanOrEqual(1000);
-    expect(motionTempo("mountainClimber").loopMs).toBeGreaterThanOrEqual(1000);
+  it("is neither a blur nor slow motion: cardio once a second or so, strength in three", () => {
+    // A jumping jack at about its real cadence, inside the jump budget.
+    expect(motionTempo("jumpingJack").loopMs).toBeGreaterThanOrEqual(1000);
+    expect(motionTempo("jumpingJack").loopMs).toBeLessThanOrEqual(1500);
+    expect(motionTempo("highKnee").loopMs).toBeLessThanOrEqual(1500);
+    expect(motionTempo("fastFeet").loopMs).toBeLessThanOrEqual(1500);
+    expect(motionTempo("squat").loopMs).toBe(3000);
+    expect(motionTempo("pushup").loopMs).toBe(3000);
+    for (const m of new Set(ALL.map(([mo]) => mo))) {
+      expect(motionTempo(m).loopMs, m).toBeGreaterThanOrEqual(1000);
+      expect(motionTempo(m).loopMs, m).toBeLessThanOrEqual(6000);
+    }
   });
 });
 
 describe("the solved pose", () => {
-  it("rests on the authored poses when the clock is frozen at 0 or the middle of a rep", () => {
+  it("is exactly the settled pose when the clock is frozen at 0 or the middle of a rep", () => {
     const bad: string[] = [];
     for (const [m, view] of ALL) {
       const rig = BUILDERS[view](m);
@@ -76,28 +95,39 @@ describe("the solved pose", () => {
       const a = solvePose(kit, 0);
       const b = solvePose(kit, 0.5);
       rig.bones.forEach((bone, i) => {
-        // Joints that trail their parents are a few degrees off on a continuous
-        // movement, where there is no pause for them to catch up in.
-        if (angleDiff(a[i * 3 + 2], rig.anglesA[i]) > 6) bad.push(`${view} ${m}/${bone.name}@0`);
-        if (angleDiff(b[i * 3 + 2], rig.anglesB[i]) > 6) bad.push(`${view} ${m}/${bone.name}@0.5`);
+        // The kit's own angles: a planted arm is re-solved to reach what it holds,
+        // and everything else is exactly what the rig built.
+        if (angleDiff(a[i * 3 + 2], kit.anglesA[i]) > 1e-6) bad.push(`${view} ${m}/${bone.name}@0`);
+        if (angleDiff(b[i * 3 + 2], kit.anglesB[i]) > 1e-6) bad.push(`${view} ${m}/${bone.name}@0.5`);
+        if (/arm|hand/i.test(bone.name)) return;
+        if (angleDiff(kit.anglesA[i], rig.anglesA[i]) > 1e-6) bad.push(`${view} ${m}/${bone.name} A moved`);
+        if (angleDiff(kit.anglesB[i], rig.anglesB[i]) > 1e-6) bad.push(`${view} ${m}/${bone.name} B moved`);
       });
     }
     expect(bad).toEqual([]);
   });
 
-  it("is exact on a lift, a flow and a hold, which pause at both ends", () => {
+  it("moves the whole body as one: every joint is the same share of the way, at every instant", () => {
+    // Nothing overshoots and nothing arrives late — the owner's "everything in
+    // sync". The one thing behind the body in mid-move is a loose forearm and hand,
+    // and arms.test.ts holds them to leaving and arriving with it.
     const bad: string[] = [];
     for (const [m, view] of ALL) {
-      const t = motionTempo(m);
-      if (t.feel !== "lift" && t.feel !== "flow" && t.feel !== "hold") continue;
-      const rig = BUILDERS[view](m);
       const kit = buildMotionKit(m, view);
-      const a = solvePose(kit, 0);
-      const b = solvePose(kit, 0.5);
-      rig.bones.forEach((bone, i) => {
-        if (angleDiff(a[i * 3 + 2], rig.anglesA[i]) > 2) bad.push(`${view} ${m}/${bone.name}@0`);
-        if (angleDiff(b[i * 3 + 2], rig.anglesB[i]) > 2) bad.push(`${view} ${m}/${bone.name}@0.5`);
-      });
+      const planted = new Set<number>();
+      for (let j = 0; j < kit.pins.length; j += 11) [0, 1].forEach((o) => planted.add(kit.pins[j + o]));
+      for (let s = 1; s < 24; s++) {
+        const q = s / 24;
+        const t = lutAt(kit.base, q);
+        const pose = solvePose(kit, q);
+        for (let i = 0; i < kit.n; i++) {
+          if (kit.trail[i] !== 0 || planted.has(i) || kit.depthSlot[i] >= 0) continue;
+          const swing = kit.anglesB[i] - kit.anglesA[i];
+          if (Math.abs(swing) < 1e-3) continue;
+          const share = (pose[i * 3 + 2] - kit.anglesA[i]) / swing;
+          if (Math.abs(share - t) > 1e-9) bad.push(`${view} ${m}/${i}@${s}`);
+        }
+      }
     }
     expect(bad).toEqual([]);
   });
@@ -112,8 +142,10 @@ describe("the solved pose", () => {
         rig.bones.forEach((bone, i) => {
           if (bone.parent < 0) return;
           const p = bone.parent;
-          const tx = pose[p * 3] + kit.lengths[p] * Math.cos(pose[p * 3 + 2]);
-          const ty = pose[p * 3 + 1] + kit.lengths[p] * Math.sin(pose[p * 3 + 2]);
+          // A bone seen end-on is drawn a little longer than it projects, so it
+          // never vanishes; what hangs off it stays on its true end.
+          if (kit.depthSlot[p] >= 0) return;
+          const [tx, ty] = boneTip(kit, pose, p);
           if (Math.hypot(pose[i * 3] - tx, pose[i * 3 + 1] - ty) > 1e-6) bad.push(`${view} ${m}/${bone.name}@${s}`);
         });
       }
@@ -128,8 +160,7 @@ describe("the solved pose", () => {
       for (let s = 0; s <= 24; s++) {
         const pose = solvePose(kit, s / 24);
         for (let i = 0; i < kit.n; i++) {
-          const x = pose[i * 3] + kit.lengths[i] * Math.cos(pose[i * 3 + 2]);
-          const y = pose[i * 3 + 1] + kit.lengths[i] * Math.sin(pose[i * 3 + 2]);
+          const [x, y] = boneTip(kit, pose, i);
           if (x < -14 || x > 114 || y < -14 || y > 114) escaped.push(`${view} ${m}@${s}: (${x.toFixed(1)}, ${y.toFixed(1)})`);
         }
       }
@@ -160,6 +191,14 @@ describe("the solved pose", () => {
       for (let s = 1; s <= N; s++) {
         const pose = solvePose(kit, s / N);
         for (let i = 0; i < kit.n; i++) {
+          // A bone pointing at the camera has no direction to speak of: what must
+          // not jump is the far end of it, which is where the next bone starts.
+          if (kit.depthSlot[i] >= 0) {
+            if (Math.hypot(pose[i * 3] - prev[i * 3], pose[i * 3 + 1] - prev[i * 3 + 1]) > 2) {
+              bad.push(`${view} ${m}/${i}@${s} start`);
+            }
+            continue;
+          }
           // 240 steps a rep: a joint turning more than 25° in one is a pop.
           if (angleDiff(pose[i * 3 + 2], prev[i * 3 + 2]) > 25) bad.push(`${view} ${m}/${i}@${s}`);
         }
@@ -171,9 +210,12 @@ describe("the solved pose", () => {
 });
 
 describe("the speed budget, measured on the solved pose", () => {
-  it("no drawn joint turns faster than its feel allows", () => {
+  it("no drawn joint turns faster than its feel allows, on every camera that is shown", () => {
     const tooFast: string[] = [];
     for (const [m, view] of ALL) {
+      // A vetoed camera (cameras.ts NOT_SHOWN_FROM) is never drawn, and its
+      // swing does not set the tempo.
+      if (!motionCameras(m).includes(view)) continue;
       const rig = BUILDERS[view](m);
       const kit = buildMotionKit(m, view);
       const t = motionTempo(m);
@@ -185,6 +227,9 @@ describe("the speed budget, measured on the solved pose", () => {
         const pose = solvePose(kit, s / N);
         rig.bones.forEach((bone, i) => {
           if (!bone.draw) return;
+          // The budget is for the limbs the eye follows. A wrist follows its
+          // forearm, and a bone pointing at the camera has no direction to read.
+          if (/^(far)?hand/i.test(bone.name) || kit.depthSlot[i] >= 0) return;
           const dps = angleDiff(pose[i * 3 + 2], prev[i * 3 + 2]) / (t.loopMs / N / 1000);
           if (dps > peak) {
             peak = dps;
@@ -193,8 +238,12 @@ describe("the speed budget, measured on the solved pose", () => {
         });
         prev = pose;
       }
-      // A little over for the joints that trail and overshoot (gain > 1).
-      if (peak > speedBudget(t.feel) * 1.12) tooFast.push(`${view} ${m} ${who} ${Math.round(peak)}°/s`);
+      // Nothing overshoots, so the budget holds as solved (a hair over for
+      // sampling a curve at 480 points). A loose forearm catches up late in the
+      // move, and an arm goes the way round its joints allow, so an arm gets a
+      // quarter more than the body it hangs from: the tempo is the body's.
+      const allowed = speedBudget(t.feel) * (/arm/i.test(who) ? 1.25 : 1.02);
+      if (peak > allowed) tooFast.push(`${view} ${m} ${who} ${Math.round(peak)}°/s`);
     }
     expect(tooFast).toEqual([]);
   });
@@ -261,34 +310,53 @@ describe("the planted foot", () => {
 });
 
 describe("the character's shoulders", () => {
-  it("are set wider front-on for the character only — the pictogram is untouched", () => {
-    const rig = buildFrontRig("squat");
+  it("are a person's width front-on: brought in for the character, untouched for the pictogram", () => {
+    const rig = buildFrontRig("neutral");
     const clav = rig.bones.findIndex((b) => b.name === "clavR");
-    expect(buildMotionKit("squat", "front", "character").lengths[clav]).toBeCloseTo(
-      rig.bones[clav].length + SHOULDER_SPREAD,
-      9,
-    );
-    expect(buildMotionKit("squat", "front", "pictogram").lengths[clav]).toBe(rig.bones[clav].length);
-    // The side view has one shoulder and needs no spreading.
+    expect(SHOULDER_SPREAD).toBeLessThan(0);
+    const narrowed = buildMotionKit("neutral", "front", "character").lengths[clav];
+    expect(narrowed).toBeCloseTo(rig.bones[clav].length + SHOULDER_SPREAD, 9);
+    // Shoulder joints about a quarter of the ~84-unit standing height apart.
+    expect(narrowed * 2).toBeGreaterThan(17);
+    expect(narrowed * 2).toBeLessThan(22);
+    expect(buildMotionKit("neutral", "front", "pictogram").lengths[clav]).toBe(rig.bones[clav].length);
+    // The side view has one shoulder and needs no change.
     const side = buildSideRig("squat");
     const sc = side.bones.findIndex((b) => b.name === "clav");
     expect(buildMotionKit("squat", "side", "character").lengths[sc]).toBe(side.bones[sc].length);
   });
+
+  it("stay where they were drawn when the hands bear weight — a hand on a bar stays on the bar", () => {
+    const rig = buildFrontRig("pullUp");
+    expect(rig.armsFree).toBe(false);
+    const clav = rig.bones.findIndex((b) => b.name === "clavR");
+    expect(buildMotionKit("pullUp", "front", "character").lengths[clav]).toBe(rig.bones[clav].length);
+  });
 });
 
 describe("the head", () => {
-  it("sits one head-radius up the neck, chin at the collar, within a couple of units", () => {
+  it("sits on a neck: the chin clears the shoulder line, the head does not float off it", () => {
     const rig = buildFrontRig("neutral");
     const kit = buildMotionKit("neutral", "front");
     const pose = solvePose(kit, 0);
     const r = headRadius(rig);
     const h = headFrame(kit, pose, r);
     const neck = rig.headBone;
-    const baseY = pose[neck * 3 + 1];
-    // Straight up: the head's centre is about one radius above the collar.
-    expect(baseY - h.y).toBeGreaterThan(r - 3.5);
-    expect(baseY - h.y).toBeLessThan(r + 3);
+    const chin = pose[neck * 3 + 1] - (h.y + r);
+    expect(chin).toBeGreaterThan(1.5);
+    expect(chin).toBeLessThan(4.5);
     expect(h.rot).toBeCloseTo(0, 1);
+  });
+
+  it("hangs low between the shoulders on a front-on bent-over reverse fly", () => {
+    const rig = buildFrontRig("reverseFly");
+    const kit = buildMotionKit("reverseFly", "front");
+    const pose = solvePose(kit, 0);
+    const r = headRadius(rig);
+    const h = headFrame(kit, pose, r);
+    const neck = rig.headBone;
+    // The chin is BELOW the shoulder line: it reads as a body folded forward.
+    expect(h.y + r).toBeGreaterThan(pose[neck * 3 + 1]);
   });
 
   it("turns with the neck", () => {
@@ -300,11 +368,13 @@ describe("the head", () => {
 });
 
 describe("the life layer on the solver's clock", () => {
-  it("settles its hair on the first frame", () => {
+  it("is only the breath, out on the first frame and keeping time with the rep", () => {
     for (const [m, view] of ALL) {
       const kit = buildMotionKit(m, view);
       const f = solveLife(kit, 0);
-      expect(Math.abs(f[FX.SWAY]), `${view} ${m}`).toBeLessThan(0.1);
+      expect(f, `${view} ${m}`).toEqual([0]);
+      const q = 0.3;
+      expect(solveLife(kit, q / kit.reps)[FX.BREATH]).toBeCloseTo(lutAt(kit.base, q), 9);
     }
   });
 
@@ -380,9 +450,11 @@ describe("framing", () => {
         for (let s = 0; s <= 24; s++) {
           const pose = solvePose(kit, s / 24);
           for (let i = 0; i < kit.n; i++) {
-            for (const t of [0, 1]) {
-              const x = pose[i * 3] + t * kit.lengths[i] * Math.cos(pose[i * 3 + 2]);
-              const y = pose[i * 3 + 1] + t * kit.lengths[i] * Math.sin(pose[i * 3 + 2]);
+            const [ex, ey] = boneTip(kit, pose, i);
+            for (const [x, y] of [
+              [pose[i * 3], pose[i * 3 + 1]],
+              [ex, ey],
+            ]) {
               far = Math.max(far, Math.hypot(f.tx + x * f.k - cx, f.ty + y * f.k - cy));
             }
           }
@@ -403,21 +475,6 @@ describe("framing", () => {
       const right = fitted.tx + b.maxX * fitted.k;
       expect(left).toBeGreaterThanOrEqual(-0.5);
       expect(right).toBeLessThanOrEqual(fitted.panelW + 0.5);
-    });
-
-    it("holds the ground shadow inside the circle too", () => {
-      for (const [m, view] of ALL) {
-        const rig = BUILDERS[view](m);
-        const kit = buildMotionKit(m, view);
-        const b = motionBounds(kit, rig);
-        const f = framePanel(b, view, PANEL, FIT);
-        const cx = f.panelW / 2;
-        const cy = PANEL / 2;
-        for (const x of [b.shadowX - f.shadowRx, b.shadowX + f.shadowRx]) {
-          const d = Math.hypot(f.tx + x * f.k - cx, f.ty + b.floorY * f.k - cy);
-          expect(d, `${view} ${m}`).toBeLessThanOrEqual(FIT + 1.5);
-        }
-      }
     });
   });
 

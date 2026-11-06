@@ -12,6 +12,7 @@
  *   training — whether she trains less in the first days of her period, or
  *              keeps going through it
  *   trend    — cycles drifting steadily longer or shorter
+ *   weight   — whether her weight rises before her period and settles after it
  *
  * THE STANDARD (welliva-no-cosmetic-counters): every pattern states its exact
  * scope — "in 3 of your last 4 cycles" — counted over COMPLETED cycles only,
@@ -20,18 +21,19 @@
  * anecdote. Nothing here says why: a pattern is a timing, not a cause.
  */
 
-import { addDays, daysBetween } from "./dates";
-import { STATS_WINDOW, type CycleRecord } from "./predict";
+import { addDays, daysBetween, minDate } from "./dates";
+import { median, STATS_WINDOW, type CycleRecord } from "./predict";
 import {
   isEmptyDayLog,
   SYMPTOMS,
   SYMPTOM_LABEL,
   type CycleDayLog,
   type CycleDays,
+  type Flow,
   type Symptom,
 } from "./types";
 
-export type PatternKind = "timing" | "mood" | "sleep" | "training" | "trend";
+export type PatternKind = "timing" | "mood" | "sleep" | "training" | "trend" | "weight";
 
 /**
  * Where a timing pattern sits. `start`: days of the period, 1 = its first day.
@@ -54,6 +56,11 @@ export interface CyclePattern {
   /** Timing patterns only. */
   subject?: Subject;
   window?: TimingWindow;
+  /** Training pattern only: does she keep going, or ease off, early in a period? */
+  trainingHabit?: "keeps" | "eases";
+  /** Weight pattern only: the typical rise, and the period day it has usually gone by. */
+  riseKg?: number;
+  settledByDay?: number | null;
   /** Cycles that showed it, for ranking. */
   hits: number;
   observed: number;
@@ -226,6 +233,194 @@ export function timingPatterns(cycles: readonly CycleRecord[], days: CycleDays):
     .sort((a, b) => b.hits / b.observed - a.hits / a.observed || b.hits - a.hits);
 }
 
+/* ───────────────────────────── weight ───────────────────────────── */
+
+export interface WeighInPoint {
+  date: string;
+  kg: number;
+}
+
+/** Her weight before anything premenstrual: cycle days 6 to 12, past the period. */
+export const WEIGHT_BASE_FIRST_DAY = 6;
+export const WEIGHT_BASE_LAST_DAY = 12;
+/** In a short cycle the baseline stops this many days before the next start, clear of the rise. */
+const WEIGHT_BASE_STOP_BEFORE = 8;
+/** The rise is read from this many days before the next start... */
+export const WEIGHT_PRE_DAYS = 5;
+/** ...through this day of the period itself. */
+export const WEIGHT_PRE_THROUGH_DAY = 2;
+/** Weigh-ins needed in EACH of those two stretches, or the cycle is not evidence either way. */
+export const WEIGHT_MIN_READINGS = 2;
+/** A rise this size is more than day-to-day scale noise (the filter's own σ is 0.5 kg). */
+export const WEIGHT_JUMP_KG = 0.5;
+/** "Gone" = back within this of her baseline: a reading can't be asked to land exactly on it. */
+const WEIGHT_SETTLED_KG = 0.3;
+/** "Gone by day N" is read from this day of the period; before it she's still in the rise. */
+const WEIGHT_SETTLE_FROM_DAY = 3;
+/** ...and no later than this: past it, a lower reading is no longer about this period. */
+const WEIGHT_SETTLE_LAST_DAY = 10;
+/** Cycles that must show the rise, and that must know when it settled, before either is said. */
+export const WEIGHT_MIN_CYCLES = 2;
+/**
+ * And the rise must show in at least half the cycles that could have shown it:
+ * "most likely water" can't rest on 2 of 6. Stricter than the two-cycle floor
+ * alone, for the same reason timing patterns ask for 60%.
+ */
+export const WEIGHT_MIN_SHARE = 0.5;
+
+/** Cycle days 6–12 of the cycle running from `start` to `nextStart`. */
+export function weightBaseSpan(start: string, nextStart: string): { from: string; to: string } {
+  return {
+    from: addDays(start, WEIGHT_BASE_FIRST_DAY - 1),
+    to: minDate(addDays(start, WEIGHT_BASE_LAST_DAY - 1), addDays(nextStart, -WEIGHT_BASE_STOP_BEFORE)),
+  };
+}
+
+/** The 5 days before `nextStart`, through day 2 of that period. */
+export function weightPreSpan(nextStart: string): { from: string; to: string } {
+  return { from: addDays(nextStart, -WEIGHT_PRE_DAYS), to: addDays(nextStart, WEIGHT_PRE_THROUGH_DAY - 1) };
+}
+
+/**
+ * Does her weight rise before her period and settle after it? Completed cycles
+ * only, and the denominator is the cycles with enough weigh-ins, never the ones
+ * without.
+ *
+ * A SLOW GAIN IS NOT A MONTHLY RISE. Someone gaining 0.2 kg a week reads half a
+ * kilo higher before every period from the trend alone, and telling her that is
+ * "most likely water" would be false. So where the NEXT cycle's baseline is known,
+ * each cycle is read against the line between the two baselines; only a bump that
+ * sits above that line and comes back down to it counts. (The latest cycle has no
+ * next baseline yet and is read against its own, which alone can't reach the
+ * two-cycle gate.) A steady loss hiding a real rise is found the same way.
+ */
+export function weightPattern(
+  cycles: readonly CycleRecord[],
+  weighIns: readonly WeighInPoint[],
+): CyclePattern | null {
+  const kgOn = new Map<string, number>();
+  for (const w of weighIns) if (Number.isFinite(w.kg) && w.kg > 0) kgOn.set(w.date, w.kg);
+  const readings = (span: { from: string; to: string }) =>
+    [...kgOn].filter(([d]) => d >= span.from && d <= span.to);
+  const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
+
+  let observed = 0;
+  const rises: number[] = [];
+  const settled: number[] = [];
+  for (const c of patternCycles(cycles)) {
+    const base = readings(weightBaseSpan(c.start, c.nextStart));
+    const pre = readings(weightPreSpan(c.nextStart));
+    if (base.length < WEIGHT_MIN_READINGS || pre.length < WEIGHT_MIN_READINGS) continue;
+    observed += 1;
+
+    // Her expected weight on a date: the baseline, carried along her trend if known.
+    const kgOf = (rs: [string, number][]) => mean(rs.map(([, kg]) => kg));
+    const dayOf = (rs: [string, number][]) => mean(rs.map(([d]) => daysBetween(c.start, d)));
+    const baseKg = kgOf(base);
+    const baseDay = dayOf(base);
+    const next = readings(weightBaseSpan(c.nextStart, addDays(c.nextStart, c.length)));
+    const perDay = next.length >= WEIGHT_MIN_READINGS ? (kgOf(next) - baseKg) / (dayOf(next) - baseDay) : 0;
+    const expected = (date: string) => baseKg + perDay * (daysBetween(c.start, date) - baseDay);
+
+    const rise = mean(pre.map(([d, kg]) => kg - expected(d)));
+    if (rise < WEIGHT_JUMP_KG) continue;
+    rises.push(rise);
+    for (let day = WEIGHT_SETTLE_FROM_DAY; day <= WEIGHT_SETTLE_LAST_DAY; day += 1) {
+      const date = addDays(c.nextStart, day - 1);
+      const kg = kgOn.get(date);
+      if (kg !== undefined && kg - expected(date) <= WEIGHT_SETTLED_KG) {
+        settled.push(day);
+        break;
+      }
+    }
+  }
+  const hitCount = rises.length;
+  if (hitCount < WEIGHT_MIN_CYCLES || hitCount < WEIGHT_MIN_SHARE * observed) return null;
+
+  const riseKg = Math.round(median(rises) * 10) / 10;
+  const settledByDay = settled.length >= WEIGHT_MIN_CYCLES ? Math.ceil(median(settled)) : null;
+  const scope = `${hitCount} of your last ${observed} cycles with enough weigh-ins`;
+  return {
+    id: "weight",
+    kind: "weight",
+    icon: "scale-outline",
+    title: "Your weight rises before your period",
+    body: `Your weight rises about ${riseKg} kg before your period${
+      settledByDay ? ` and settles by day ${settledByDay}` : ""
+    }, in ${scope}.`,
+    scope,
+    riseKg,
+    settledByDay,
+    hits: hitCount,
+    observed,
+  };
+}
+
+/* ───────────────────────────── the heaviest day ───────────────────────────── */
+
+const FLOW_RANK: Record<Flow, number> = { spotting: 0, light: 1, medium: 2, heavy: 3 };
+/** Only the first days of a cycle can be its bleed's heaviest. */
+const HEAVIEST_WITHIN_DAYS = 7;
+
+export interface HeaviestDay {
+  /** 1 = the first day of her period. */
+  day: number;
+  hits: number;
+  observed: number;
+  /** "On your last 3 periods, day 2 was your heaviest day." */
+  line: string;
+}
+
+/**
+ * Which day of her period is usually heaviest, if one consistently is. A cycle
+ * counts only when she logged flow on at least two of its days (one logged day
+ * can't show which was heaviest), and a cycle with a tie for heaviest counts in
+ * the denominator without voting for a day.
+ */
+export function heaviestDayPattern(cycles: readonly CycleRecord[], days: CycleDays): HeaviestDay | null {
+  const pool = patternCycles(cycles);
+  const votes = new Map<number, number>();
+  let observed = 0;
+  for (const c of pool) {
+    const flows: { day: number; rank: number }[] = [];
+    for (let i = 0; i < Math.min(c.length, HEAVIEST_WITHIN_DAYS); i += 1) {
+      const flow = days[addDays(c.start, i)]?.flow;
+      if (flow) flows.push({ day: i + 1, rank: FLOW_RANK[flow] });
+    }
+    if (flows.length < 2) continue;
+    observed += 1;
+    const top = Math.max(...flows.map((f) => f.rank));
+    const peak = flows.filter((f) => f.rank === top);
+    if (peak.length === 1) votes.set(peak[0].day, (votes.get(peak[0].day) ?? 0) + 1);
+  }
+  if (observed < 2) return null;
+
+  let day = 0;
+  let hitCount = 0;
+  let tied = false;
+  for (const [d, n] of votes) {
+    if (n > hitCount) {
+      day = d;
+      hitCount = n;
+      tied = false;
+    } else if (n === hitCount) {
+      tied = true;
+    }
+  }
+  if (tied || hitCount < 2 || hitCount < 0.6 * observed) return null;
+
+  const scope = observed === pool.length ? `your last ${observed} periods` : `the ${observed} recent periods you logged flow in`;
+  return {
+    day,
+    hits: hitCount,
+    observed,
+    line:
+      hitCount === observed
+        ? `On ${scope}, day ${day} was your heaviest day.`
+        : `On ${hitCount} of ${scope}, day ${day} was your heaviest day.`,
+  };
+}
+
 /* ───────────────────────── mood & sleep (from Mind) ───────────────────────── */
 
 export interface MindPoint {
@@ -366,6 +561,7 @@ export function trainingPattern(
       id: "training",
       kind: "training",
       icon: "barbell-outline",
+      trainingHabit: "eases",
       title: "You train less early in your period",
       body: `Across ${scope} you trained on ${earlyTrained} of the ${earlyDays} first three days, against about ${perWeek} days a week otherwise. Your plan eases off on any day you log cramps or a heavy flow.`,
       scope,
@@ -378,6 +574,7 @@ export function trainingPattern(
       id: "training",
       kind: "training",
       icon: "barbell-outline",
+      trainingHabit: "keeps",
       title: "You keep training through your period",
       body: `Across ${scope} you trained on ${earlyTrained} of the ${earlyDays} first three days, the same rhythm as the rest of your cycle.`,
       scope,
@@ -414,8 +611,11 @@ export function allPatterns(input: {
   days: CycleDays;
   mind?: readonly MindPoint[];
   workouts?: readonly WorkoutPoint[];
+  /** Already read by the view (`weightPattern`), so both say the same thing. */
+  weight?: CyclePattern | null;
 }): CyclePattern[] {
   const out: CyclePattern[] = [...timingPatterns(input.cycles, input.days).slice(0, 4)];
+  if (input.weight) out.push(input.weight);
   if (input.mind) {
     const mood = moodPattern(input.cycles, input.mind);
     if (mood) out.push(mood);

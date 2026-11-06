@@ -49,6 +49,7 @@ describe("isSyncedKey — device-local state that must NOT travel", () => {
     "@welliva_fitness_notification_ids", // per-device notification ids
     "@welliva_notifications_ledger", // per-device delivery ledger
     "@welliva_home_greeting_rotation",
+    "@welliva_water_pours", // one phone's drink list — the total syncs on its own
     "@welliva_exercise_media_v1", // prefix-denied cache
     "@gozlin_forecast_cache",
     // engine bookkeeping

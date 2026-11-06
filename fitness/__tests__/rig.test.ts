@@ -163,7 +163,20 @@ describe("figure rig", () => {
       for (const motion of MOTIONS_BY_VIEW[view as keyof typeof MOTIONS_BY_VIEW]) {
         const rig = build(motion);
         rig.bones.forEach((bone, i) => {
+          // An arm goes the way its joints let it, which can be the long way round
+          // (hanging to overhead through the front, not behind the back). That is
+          // held by arms.test.ts.
+          if (/arm|hand/i.test(bone.name)) return;
           const swing = Math.abs(rig.anglesB[i] - rig.anglesA[i]);
+          // A FOOT turning about half a circle (planted ↔ sole up behind) is
+          // routed through toes-down, the way an ankle points, even when that
+          // is a hair past π — the other way round flips it over toes-up.
+          if (/^(far)?foot$/i.test(bone.name) && swing > Math.PI) {
+            const mid = (rig.anglesA[i] + rig.anglesB[i]) / 2;
+            expect(Math.sin(mid), `${motion}/${bone.name} swings toes-down`).toBeGreaterThan(0);
+            expect(swing, `${motion}/${bone.name}`).toBeLessThan((210 * Math.PI) / 180);
+            return;
+          }
           expect(swing, `${motion}/${bone.name}`).toBeLessThanOrEqual(Math.PI + 1e-9);
         });
       }
@@ -220,8 +233,11 @@ describe("the figure is built like a person", () => {
     expect(leg / height).toBeGreaterThan(0.44);
   });
 
-  it("keeps the head a quarter of the figure, not better than a third", () => {
-    expect(headDiameter / height).toBeLessThan(0.3);
+  it("gives it an athlete's head — about a seventh of its height, not a quarter", () => {
+    // A quarter (and before that a third) is a character four heads tall: the
+    // owner's "too fat". A person is seven to eight heads; the figure is ~6.5–7.
+    expect(headDiameter / height).toBeGreaterThan(0.12);
+    expect(headDiameter / height).toBeLessThan(0.18);
   });
 
   it("stands a push-up on the floor it was drawn against, arms and all", () => {
@@ -254,5 +270,98 @@ describe("the figure is built like a person", () => {
         span(squatFrames[1], 2, 3)) /
       2;
     expect(squatArm / squatDrawn).toBeGreaterThan(1.1);
+  });
+});
+
+/**
+ * THE SIDE FEET (rig.ts "The side feet"). The owner's report: "the feet face
+ * backward and the body faces forward". Every side foot used to be a standing
+ * foot — level, toes toward +x — on every leg in every pose. These lock the
+ * ankle back in: standing flat, kneeling on the tops of the feet, toes up on
+ * the back, on the toes in a plank, and never turned over mid-rep.
+ */
+describe("the side feet are set by the ankle", () => {
+  const footAngles = (motion: FigureMotion, which: "foot" | "farFoot") => {
+    const rig = buildSideRig(motion);
+    const i = rig.bones.findIndex((b) => b.name === which);
+    return [rig.anglesA[i], rig.anglesB[i]] as const;
+  };
+  const deg = (r: number) => (r * 180) / Math.PI;
+  /** Smallest angle between two directions, degrees. */
+  const off = (a: number, b: number) => {
+    const d = Math.abs(a - b) % (Math.PI * 2);
+    return deg(d > Math.PI ? Math.PI * 2 - d : d);
+  };
+
+  it("stands flat, toes forward, when standing", () => {
+    for (const m of ["squat", "hinge", "curl", "row", "gobletSquat", "wallSit"] as FigureMotion[]) {
+      for (const a of footAngles(m, "foot")) expect(off(a, 0), m).toBeLessThan(1);
+    }
+  });
+
+  it("kneels on the tops of the feet, toes pointing back, sole up", () => {
+    for (const [m, which] of [
+      ["catCow", "foot"],
+      ["threadNeedle", "foot"],
+      ["childsPose", "foot"],
+      ["kneelingLunge", "farFoot"],
+      ["birdDog", "foot"],
+    ] as const) {
+      expect(off(footAngles(m, which)[0], Math.PI), m).toBeLessThan(5);
+    }
+  });
+
+  it("points the toes up, lying or sitting with the legs out", () => {
+    for (const m of ["legRaise", "vUp", "seatedFold", "hollowHold", "deadBug"] as FigureMotion[]) {
+      // Up the screen is −y: a toe pointing up has a negative sine.
+      expect(Math.sin(footAngles(m, "foot")[0]), m).toBeLessThan(-0.5);
+    }
+  });
+
+  it("stays on the toes in a plank — never on the tops of the feet, at either end of the rep", () => {
+    for (const m of ["pushup", "plank", "forearmPlank", "shoulderTap", "mountainClimber", "plankUpDown"] as FigureMotion[]) {
+      for (const which of ["foot", "farFoot"] as const) {
+        for (const a of footAngles(m, which)) {
+          expect(deg(a), `${m}/${which}`).toBeGreaterThanOrEqual(-1);
+          expect(deg(a), `${m}/${which}`).toBeLessThan(90);
+        }
+      }
+    }
+  });
+
+  it("rests a left-facing body's feet away from its head", () => {
+    for (const m of ["cobra", "yRaise"] as FigureMotion[]) {
+      expect(buildSideRig(m).facing, m).toBe(-1);
+      expect(off(footAngles(m, "foot")[0], 0), m).toBeLessThan(10);
+    }
+    expect(buildSideRig("invertedRow").facing).toBe(-1);
+    expect(buildSideRig("squat").facing).toBe(1);
+    expect(buildFrontRig("squat").facing).toBe(1);
+  });
+
+  it("never turns a foot over between a planted end and a resting one", () => {
+    // Reps whose foot is on the floor at both ends, with the leg nearly level
+    // at one of them — where "resting on its top" would otherwise win there
+    // and flip the shoe over mid-rep. (A foot in the air may swing sole-up, as
+    // a butt kick's does; the long-way-round test routes that through toes-down.)
+    const onTheFloor: [FigureMotion, "foot" | "farFoot"][] = [
+      ["pushup", "foot"],
+      ["lunge", "farFoot"],
+      ["jumpLunge", "foot"],
+      ["jumpLunge", "farFoot"],
+      ["hinduPushup", "foot"],
+      ["squatThrust", "foot"],
+      ["sprawl", "foot"],
+      ["plankUpDown", "foot"],
+    ];
+    for (const [m, which] of onTheFloor) {
+      const [a, b] = footAngles(m, which);
+      expect(off(a, b), `${m}/${which}`).toBeLessThan(30);
+      for (const x of [a, b]) expect(off(x, Math.PI), `${m}/${which}`).toBeGreaterThan(90);
+    }
+  });
+
+  it("hangs the feet free from a bar — nothing to stand on", () => {
+    for (const a of footAngles("pullUp", "foot")) expect(Math.sin(a)).toBeGreaterThan(0.5);
   });
 });

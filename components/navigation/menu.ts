@@ -131,26 +131,31 @@ export function primaryItems(options: { cycle: boolean }): MenuItem[] {
 }
 
 /**
- * THE FOUR ON THE RAIL — a pinned SUBSET of the list above, not a second list.
+ * THE THREE ON THE RAIL — a pinned SUBSET of the list above, not a second list.
  *
  * This is the whole reason a bottom rail and a swipe menu can coexist instead
  * of competing: the rail renders these entries out of `PRIMARY_ITEMS` by route
  * name, lights them with the same gold, and reads its active state from the
  * same navigator. One vocabulary, two altitudes. The drawer stays the map —
- * eleven destinations — and the rail is the fast lane to four of them.
+ * eleven destinations — and the rail is the fast lane to three of them.
  *
  * THE TEST FOR A SLOT. A tab is a screen you open WITHOUT a reason: an ambient
  * check, several times a day. Habits and Logs fail it — they are screens you
  * open to answer a question, and a question is exactly what the drawer is for.
- * Gozlin passes it twice over: it is the thing people come back to, and it is
- * what Pro is, so one thumb-tap away on every screen is where it belongs.
  *
- * FOUR, AND NOT FIVE. The fifth slot at the base of the screen is the gold
- * action, which is not a destination at all — see the Deck. A rail of five tabs
- * plus an action is one object too many for a 393pt phone, and the labels start
- * truncating, which is where a tab bar stops looking premium.
+ * GOZLIN IS NOT ON THE RAIL (owner, 2026-10-31). It held the fourth slot, and it
+ * is still the thing people come back to — but Home, Diet and Fitness, the three
+ * screens the rail is built around, each carry their own Gozlin button in the
+ * header, so a permanent tab was a second door to a room that already had one.
+ * Gozlin stays in the drawer, and the coach itself has no rail at all
+ * (`RAILLESS_ROUTES`), so nothing here changes how you leave it. (Foods, Memory
+ * and Cycle keep the full rail but have no Gozlin button: there it is the menu.)
+ *
+ * THREE, AND THE ACTION. The fourth object at the base of the screen is the gold
+ * action, which is not a destination at all — see the Deck. Three tabs share the
+ * pill in even thirds, so every label has room to sit on one line.
  */
-export const RAIL_ROUTES: readonly string[] = ["index", "diet", "exercise", "gozlin"];
+export const RAIL_ROUTES: readonly string[] = ["index", "diet", "exercise"];
 
 export const RAIL_ITEMS: MenuItem[] = RAIL_ROUTES.map((route) => {
   const item = PRIMARY_ITEMS.find((i) => i.route === route);

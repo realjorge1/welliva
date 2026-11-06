@@ -80,7 +80,9 @@ export default function FitnessSettingsScreen() {
       await update({ reminders: patch });
       const result = await syncFitnessReminders(await loadFitnessProfile());
 
-      if (turningOn && result.status !== "ok") {
+      // "paused": saved, and laid the moment notifications are resumed — the
+      // switch is honest as it stands.
+      if (turningOn && result.status !== "ok" && result.status !== "paused") {
         // The schedule didn't take — roll the switch back rather than leave it
         // claiming a reminder that will never arrive.
         await update({ reminders: { ...patch, ...offSwitches(patch) } });

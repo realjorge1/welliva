@@ -117,7 +117,14 @@ function register(ledger: NumberLedger, source: NumberSource): void {
  * payloads carry pre-formatted copy ("trending 0.4 kg/week down") and those
  * figures are citable, so they need a receipt too.
  */
-import { extractNumbers, isProseNumber, matchesEvidence, spokenForms } from "./grounding";
+import {
+  extractNumbers,
+  isProseNumber,
+  matchesEvidence,
+  numberSpans,
+  readingsOf,
+  spokenForms,
+} from "./grounding";
 
 /**
  * Fields that NAME the thing an object describes, in order of preference. The
@@ -218,13 +225,20 @@ export function receiptsFor(reply: string, ledger: NumberLedger): Receipt[] {
   const out: Receipt[] = [];
   const seen = new Set<number>();
 
-  for (const n of extractNumbers(reply)) {
+  for (const span of numberSpans(reply)) {
     // Small integers are prose, not measurements — grounding skips them, so do we.
-    if (isProseNumber(n)) continue;
-    if (seen.has(n)) continue;
-    seen.add(n);
-    const sources = sourcesFor(n, ledger);
-    if (sources.length > 0) out.push({ shown: n, sources });
+    if (isProseNumber(span.value)) continue;
+    // "1.840" is 1.84 or 1840 depending on who wrote it; the reading the
+    // evidence backs is the one that was meant, and the one the receipt shows.
+    for (const n of readingsOf(span)) {
+      const sources = sourcesFor(n, ledger);
+      if (sources.length === 0) continue;
+      if (!seen.has(n)) {
+        seen.add(n);
+        out.push({ shown: n, sources });
+      }
+      break;
+    }
   }
   return out;
 }

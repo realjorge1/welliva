@@ -52,6 +52,13 @@ export const HABIT_REMINDER_CATEGORY = "welliva.habit-reminder";
 /** Category carried by every meal reminder that names a planned meal. */
 export const MEAL_REMINDER_CATEGORY = "welliva.meal-reminder";
 
+/**
+ * Category carried by a meal reminder that offers the person's USUAL instead
+ * (services/smart/usual): someone who logs that meal freely, not off a plan.
+ * Its own category because its button says a different sentence.
+ */
+export const MEAL_USUAL_CATEGORY = "welliva.meal-usual";
+
 /** Category carried by every water reminder. */
 export const WATER_REMINDER_CATEGORY = "welliva.water-reminder";
 
@@ -65,6 +72,7 @@ export const CYCLE_ENDED_CATEGORY = "welliva.cycle-ended";
 export const ACTION_MARK_DONE = "MARK_DONE";
 export const ACTION_SNOOZE = "SNOOZE";
 export const ACTION_LOG_MEAL = "LOG_MEAL";
+export const ACTION_LOG_USUAL = "LOG_USUAL";
 export const ACTION_LOG_WATER = "LOG_WATER";
 /** Yes/no for both cycle questions — `data.kind` says which one was asked. */
 export const ACTION_CYCLE_YES = "CYCLE_YES";
@@ -116,6 +124,21 @@ async function register(): Promise<void> {
       // it is the honest description of what the button records.
       identifier: ACTION_LOG_MEAL,
       buttonTitle: "Ate it",
+      options: { opensAppToForeground: false },
+    },
+    {
+      identifier: ACTION_SNOOZE,
+      buttonTitle: `Not yet (${MEAL_SNOOZE_MINUTES}m)`,
+      options: { opensAppToForeground: false },
+    },
+  ]);
+
+  await Notifications.setNotificationCategoryAsync(MEAL_USUAL_CATEGORY, [
+    {
+      // A statement, like "Ate it" — and it says WHAT it logs: the meal the
+      // reminder's own text just named ("Your usual? Oats with milk, coffee").
+      identifier: ACTION_LOG_USUAL,
+      buttonTitle: "Had my usual",
       options: { opensAppToForeground: false },
     },
     {

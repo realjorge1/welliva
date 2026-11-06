@@ -51,10 +51,12 @@ import {
   ACTION_CYCLE_NO,
   ACTION_CYCLE_YES,
   ACTION_LOG_MEAL,
+  ACTION_LOG_USUAL,
   ACTION_LOG_WATER,
   ACTION_MARK_DONE,
   ACTION_SNOOZE,
 } from "./categories";
+import { logUsualFromNotification } from "./usualActions";
 import {
   declineCycleQuestion,
   logPeriodEndFromNotification,
@@ -69,6 +71,7 @@ import { fireDateOf } from "./fireTime";
 import { mayWriteFor } from "./owner";
 import { presentFollowUp, snoozeReminder } from "./send";
 import { logWaterFromNotification } from "./waterActions";
+import { syncWaterReminders } from "./waterReminders";
 
 /** Keys of responses already applied — bounded, device-local. */
 export const HANDLED_KEY = "@welliva_notif_handled";
@@ -335,7 +338,9 @@ async function onMarkDone(n: NormalizedResponse): Promise<PipelineOutcome> {
   const habitId = typeof n.data.habitId === "string" ? n.data.habitId : null;
   if (!habitId) return report({ kind: "ignored", reason: "malformed" });
 
-  const result = await markHabitDoneFromNotification(habitId, effectiveFiredAt(n));
+  // The day comes from effectiveFiredAt (a snoozed copy keeps its first day);
+  // the raw fire time is this notification's own, for the routine clock.
+  const result = await markHabitDoneFromNotification(habitId, effectiveFiredAt(n), n.firedAt);
   if (result.ok) {
     const detail = result.alreadyDone
       ? "Already done — nothing changed"
@@ -425,6 +430,54 @@ async function onLogMeal(n: NormalizedResponse): Promise<PipelineOutcome> {
   return report({ kind: "meal", ok: false, title, detail });
 }
 
+/**
+ * "Had my usual" — log the meal the reminder named, exactly as last time.
+ * The usual's entries ride in `data.usual` (snapshotted at schedule time), so
+ * nothing here resolves a food.
+ */
+async function onLogUsual(n: NormalizedResponse): Promise<PipelineOutcome> {
+  await dismiss(n.identifier);
+  if (n.data.test === true) return answerTest();
+
+  const slot = typeof n.data.slot === "string" && n.data.slot in SLOT_LABEL ? n.data.slot : null;
+  const label = slot ? SLOT_LABEL[slot] : "meal";
+  const title = `Your usual ${label}`;
+
+  // Dated by the day the reminder was for — never later than today.
+  const result = await logUsualFromNotification(n.data.usual, effectiveFiredAt(n));
+  if (result.ok) {
+    const detail = result.alreadyLogged ? `Already logged as ${label}` : `Logged as ${label}`;
+    await journal(n, { kind: "meal", date: result.date, title: result.label || title, detail, ok: true });
+    return report({ kind: "meal", ok: true, title, detail });
+  }
+
+  if (result.reason === "closed") {
+    const when = result.date ? prettyDay(result.date) : "that day";
+    await presentFollowUp({
+      title: "Too late to log that one",
+      body: `That reminder was for ${when}, which is now closed for logging.`,
+      route: "/(tabs)/diet",
+    });
+    const detail = "Day already closed — not counted";
+    await journal(n, { kind: "meal", date: result.date ?? "", title, detail, ok: false });
+    return report({ kind: "meal", ok: false, title, detail });
+  }
+
+  // Forgotten since this reminder was laid, or it couldn't save: nothing was
+  // logged, and the user just said they ate. Take them to log what they had.
+  await presentFollowUp({
+    title: result.reason === "forgotten" ? "Not your usual any more" : "That didn't save",
+    body: `Tap to log what you had for ${label} — it takes a few seconds.`,
+    route: "/diet/log-food",
+  });
+  const detail =
+    result.reason === "forgotten"
+      ? "No longer your usual — sent a link to log it"
+      : "Couldn't save — sent a link to log it";
+  await journal(n, { kind: "meal", date: result.date ?? "", title, detail, ok: false });
+  return report({ kind: "meal", ok: false, title, detail });
+}
+
 async function onLogWater(n: NormalizedResponse): Promise<PipelineOutcome> {
   await dismiss(n.identifier);
   if (n.data.test === true) return answerTest();
@@ -433,6 +486,11 @@ async function onLogWater(n: NormalizedResponse): Promise<PipelineOutcome> {
   if (result.ok) {
     const detail = `+${result.ml} ml`;
     await journal(n, { kind: "water", date: result.date, title: "Water", detail, ok: true });
+    // Re-plan the check-ins around this glass, here and now — the app may not
+    // open today. The next one names its time ("since 4:02 PM"), anything in
+    // the next 90 minutes is skipped, and a met goal ends the day's asks.
+    // Never throws (fail-soft inside).
+    await syncWaterReminders();
     return report({ kind: "water", ok: true, title: "Water", detail });
   }
   await presentFollowUp({
@@ -563,6 +621,7 @@ export function processNotificationResponse(
     const writes =
       n.actionIdentifier === ACTION_MARK_DONE ||
       n.actionIdentifier === ACTION_LOG_MEAL ||
+      n.actionIdentifier === ACTION_LOG_USUAL ||
       n.actionIdentifier === ACTION_LOG_WATER ||
       // ACTION_CYCLE_NO writes nothing, but it is checked with its sibling on
       // purpose: a leftover reminder from a signed-out account must not leave a
@@ -583,6 +642,8 @@ export function processNotificationResponse(
         return onMarkDone(n);
       case ACTION_LOG_MEAL:
         return onLogMeal(n);
+      case ACTION_LOG_USUAL:
+        return onLogUsual(n);
       case ACTION_LOG_WATER:
         return onLogWater(n);
       case ACTION_CYCLE_YES:

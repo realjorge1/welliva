@@ -15,11 +15,14 @@ import {
   buildCharacterArt,
   disc,
   faceMirrored,
+  frontShoeTurn,
   hemmed,
   isFarBone,
   oval,
   rrect,
   scalePath,
+  sideShoeDepth,
+  sideShoeToeRoom,
   taper,
   type CharacterArt,
   type Shape,
@@ -48,7 +51,6 @@ const allShapes = (art: CharacterArt): Shape[] => [
   ...art.bones.flat(),
   ...art.behind.flat(),
   ...art.shoes.flatMap((s) => s.shapes),
-  ...art.head.puffs,
   ...art.head.back,
   ...art.head.skull,
   ...art.head.face,
@@ -141,8 +143,8 @@ describe("thumbnail detail", () => {
     // The face is already down to what a head needs to read as a head, so a
     // thumbnail has nothing left to drop from it.
     expect(thumb.face).toEqual(full.face);
-    // The hair is the silhouette: its mass stays, only the highlight goes.
-    expect(thumb.puffs).toEqual(full.puffs);
+    // The hair is the silhouette: its cap stays, only the highlight goes.
+    expect(thumb.front.filter((s2) => s2.fill === KIT.hair)).toEqual(full.front.filter((s2) => s2.fill === KIT.hair));
     expect(thumb.front.length).toBeLessThan(full.front.length);
   });
 });
@@ -192,7 +194,7 @@ describe("the layers sit on the right side of the head", () => {
     const rig = buildFrontRig("squat");
     const art = buildCharacterArt(rig, "front");
     const name = (i: number) => rig.bones[i].name;
-    expect(art.layers.arms.map(name).sort()).toEqual(["foreArmL", "foreArmR"]);
+    expect(art.layers.arms.map(name).sort()).toEqual(["foreArmL", "foreArmR", "handL", "handR"]);
     expect(art.layers.caps.map(name).sort()).toEqual(["upArmL", "upArmR"]);
     for (const i of art.layers.caps) {
       // The skin, the sleeve (shoulder and all, in ONE path) and the cuff.
@@ -205,7 +207,7 @@ describe("the layers sit on the right side of the head", () => {
     const rig = buildSideRig("squat");
     const art = buildCharacterArt(rig, "side");
     const name = (i: number) => rig.bones[i].name;
-    expect(art.layers.arms.map(name)).toEqual(["upArm", "foreArm"]);
+    expect(art.layers.arms.map(name)).toEqual(["upArm", "foreArm", "hand"]);
     // The shoulder used to be held back on its own layer, with the sleeve's flat
     // cut drawn in front of whatever landed between them. It rides with the arm
     // now, so nothing can be drawn through the shoulder.
@@ -218,7 +220,7 @@ describe("the layers sit on the right side of the head", () => {
   it("side-on, the far limbs are their own layer, behind everything, and every far bone is far", () => {
     const rig = buildSideRig("lunge");
     const art = buildCharacterArt(rig, "side");
-    expect(art.layers.far.length).toBe(5);
+    expect(art.layers.far.length).toBe(6);
     for (const i of art.layers.far) expect(isFarBone(rig.bones[i].name)).toBe(true);
     for (const i of [...art.layers.legs, ...art.layers.arms]) expect(isFarBone(rig.bones[i].name)).toBe(false);
   });
@@ -233,9 +235,19 @@ describe("the layers sit on the right side of the head", () => {
     expect(side.layers.legs).toContain(foot);
   });
 
-  it("splays the front-on trainers, so two wide shoes do not merge into one", () => {
-    const art = buildCharacterArt(buildFrontRig("squat"), "front");
-    expect(art.shoeOut).toBeGreaterThan(3);
+  it("draws trainers the size of a foot — they were twice that, under a cartoon", () => {
+    // The furthest any coordinate of a path reaches from the ankle, box units.
+    const reach = (shapes: Shape[]) =>
+      Math.max(...shapes.flatMap((sh) => (sh.d.match(/-?\d*\.?\d+/g) ?? []).map((n) => Math.abs(Number(n)))));
+    // Front-on, a foot is about six units wide on a figure ~84 tall…
+    const front = buildCharacterArt(buildFrontRig("squat"), "front");
+    expect(reach(front.shoes[0].shapes)).toBeLessThan(4.5);
+    // …and side-on about thirteen long, heel to toe.
+    const rig = buildSideRig("squat");
+    const foot = rig.bones.findIndex((b) => b.name === "foot");
+    expect(reach(buildCharacterArt(rig, "side").bones[foot])).toBeLessThan(10);
+    // Turned out a touch, as feet stand — not splayed to keep two clown shoes apart.
+    expect(front.shoeOut).toBeLessThan(2);
   });
 });
 
@@ -271,11 +283,18 @@ describe("the face demonstrates nothing, so it does nothing", () => {
     expect(Object.keys(front)).not.toContain("mouth");
   });
 
-  it("is a head, not a balloon: the figure demonstrates, so the limbs carry it", () => {
-    // It was 1.75 and took better than a third of the figure's height, which is
-    // the height the arms and legs needed in order to read.
-    expect(HEAD_SCALE).toBeLessThan(1.2);
-    expect(HEAD_SCALE).toBeGreaterThan(0.9);
+  it("is an athlete's head, not a character's: the figure demonstrates, so the body carries it", () => {
+    // It was 1.75 (over a third of the figure), then 1.05 (a quarter — a figure
+    // four heads tall, which the owner called fat). Now about a seventh.
+    expect(HEAD_SCALE).toBeLessThan(0.7);
+    expect(HEAD_SCALE).toBeGreaterThan(0.5);
+  });
+
+  it("has nothing to swing: no hair puffs, no sway pivot", () => {
+    for (const h of [front, side]) {
+      expect(Object.keys(h)).not.toContain("puffs");
+      expect(Object.keys(h)).not.toContain("swayPivot");
+    }
   });
 });
 
@@ -457,7 +476,9 @@ function lowestY(d: string): number {
 
 describe("the floor", () => {
   it("lines the trainers' soles up front-on and side-on, so a figure never stands on a different floor", () => {
-    expect(SOLE_BELOW).toBeGreaterThan(4);
+    // About an ankle's height off the floor on a figure ~84 units tall.
+    expect(SOLE_BELOW).toBeGreaterThan(3);
+    expect(SOLE_BELOW).toBeLessThan(5);
     const lowest = (shapes: Shape[]) => Math.max(...shapes.map((s) => lowestY(s.d)));
     // The front trainer's sole is the lowest thing in its art…
     const front = buildCharacterArt(buildFrontRig("squat"), "front").shoes[0].shapes;
@@ -467,5 +488,93 @@ describe("the floor", () => {
     const art = buildCharacterArt(rig, "side");
     const foot = rig.bones.findIndex((b) => b.name === "foot");
     expect(lowest(art.bones[foot])).toBeCloseTo(SOLE_BELOW, 1);
+  });
+});
+
+/**
+ * The 2026-11-03 clothing and feet pass. Owner: "some the clothing looks
+ * awkward and ripped". At full size it was: the bare round top of each thigh
+ * showing between tee and shorts (front) and as a skin bulge behind the seat
+ * (side, the far thigh); a dark ring standing the sleeve's crown off the tee
+ * like a shoulder pad (front); and the neck drawn over the tee as a bib.
+ */
+describe("the kit covers the body it is on", () => {
+  const thighShorts = (art: CharacterArt, rig: Rig, name: string): Shape => {
+    const i = rig.bones.findIndex((b) => b.name === name);
+    return art.bones[i].find((s) => s.fill === KIT.shorts || s.fill === KIT.shortsShade)!;
+  };
+
+  it("starts each leg of the shorts with a seat that covers the top of the thigh", () => {
+    // The thigh's top is a round cap of radius 4; the shorts' leg now opens
+    // with a disc at the hip joint at least that big, so no angle of the hip
+    // can show skin past it.
+    const rig = buildSideRig("squat");
+    const art = buildCharacterArt(rig, "side");
+    for (const name of ["thigh", "farThigh"]) {
+      const d = thighShorts(art, rig, name).d;
+      const m = /^M(-?[\d.]+) 0a([\d.]+) /.exec(d);
+      expect(m, name).not.toBeNull();
+      expect(Number(m![2]), name).toBeGreaterThanOrEqual(4);
+      expect(Number(m![1]), name).toBeCloseTo(-Number(m![2]), 6);
+    }
+  });
+
+  it("draws no rim round the sleeve's crown front-on, and keeps it side-on", () => {
+    // The rim is a tee-shade shape opening with a disc round the shoulder joint
+    // (`M-r 0a r r …`); the cuff band and the collar are not.
+    const crownRims = (rig: Rig, art: CharacterArt) =>
+      rig.bones.flatMap((b, i) =>
+        /^upArm/.test(b.name)
+          ? [...art.behind[i], ...art.bones[i]].filter(
+              (s) => s.fill === KIT.teeShade && /^M-[\d.]+ 0a/.test(s.d),
+            )
+          : [],
+      );
+    const frontRig = buildFrontRig("squat");
+    const sideRig = buildSideRig("squat");
+    expect(crownRims(frontRig, buildCharacterArt(frontRig, "front"))).toHaveLength(0);
+    expect(crownRims(sideRig, buildCharacterArt(sideRig, "side"))).toHaveLength(1);
+  });
+
+  it("lays the collar over the base of the neck, not the neck over the tee", () => {
+    const rig = buildFrontRig("squat");
+    const art = buildCharacterArt(rig, "front");
+    const neck = art.bones[rig.bones.findIndex((b) => b.name === "neck")];
+    const skin = neck.findIndex((s) => s.fill === KIT.skinShade);
+    const collar = neck.findIndex((s) => s.fill === KIT.teeShade);
+    expect(skin).toBeGreaterThanOrEqual(0);
+    expect(collar).toBeGreaterThan(skin);
+    // …and the neck starts under the collar, off the shoulder line.
+    expect(Number(/^M(-?[\d.]+)/.exec(neck[skin].d)![1])).toBeGreaterThan(1);
+  });
+});
+
+describe("the trainers follow the ankle", () => {
+  it("measures a flat side trainer a sole under the ankle, a sole-up one less", () => {
+    expect(sideShoeDepth(0, 1)).toBeCloseTo(SOLE_BELOW, 6);
+    expect(sideShoeDepth(Math.PI, 1)).toBeLessThan(SOLE_BELOW);
+    // Turned over for a left-facing body, the sole is under a foot pointing −x.
+    expect(sideShoeDepth(Math.PI, -1)).toBeCloseTo(SOLE_BELOW, 6);
+  });
+
+  it("gives a foot on its toes only the heel lift the floor allows", () => {
+    expect(sideShoeToeRoom(0)).toBeCloseTo(0, 6);
+    const lift = sideShoeToeRoom(2);
+    expect(lift).toBeGreaterThan(0);
+    // At that tilt the toe just touches a floor 2 lower than a flat sole's.
+    expect(sideShoeDepth(lift, 1)).toBeLessThanOrEqual(SOLE_BELOW + 2 + 1e-6);
+    expect(sideShoeToeRoom(50)).toBeLessThanOrEqual(Math.PI / 2);
+  });
+
+  it("keeps the front trainer level on a standing leg and carries it on a lying one", () => {
+    const down = Math.PI / 2;
+    expect(frontShoeTurn(down)).toBe(0);
+    expect(frontShoeTurn(down + Math.PI / 6)).toBe(0); // a jumping jack's 30°
+    expect(frontShoeTurn(Math.PI)).toBeCloseTo(Math.PI / 2, 6); // a leg along the floor
+    expect(frontShoeTurn(0)).toBeCloseTo(-Math.PI / 2, 6);
+    // Blends — no snap — between the two.
+    const mid = frontShoeTurn(down + (57 * Math.PI) / 180);
+    expect(mid).toBeGreaterThan(0);
+    expect(mid).toBeLessThan((57 * Math.PI) / 180);
   });
 });

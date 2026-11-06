@@ -14,6 +14,8 @@ import { parseLocalDate, readJSON, writeJSON, remove } from "../OfflineStorage";
 import { deriveConversationTitle } from "./conversationTitle";
 import { EXPERIENCE_KEYS, announceExperiences } from "./ExperienceStore";
 import { INSIGHT_LEDGER_KEY, announceLedger } from "./InsightLedger";
+import { clearSmartLedger } from "../smart/ledger";
+import { clearForgottenUsuals } from "../smart/usualStore";
 import type {
   GozlinCheckin,
   GozlinEpisode,
@@ -79,8 +81,12 @@ export async function saveIdentity(
 }
 
 /** Record the user's stated "why" (motivation). */
-export async function rememberMotivation(motivation: string): Promise<void> {
-  await saveIdentity({ motivation: motivation.trim() });
+export async function rememberMotivation(motivation: string, now: Date = new Date()): Promise<void> {
+  const words = motivation.trim();
+  const current = await loadIdentity();
+  // The day they said it stays the day they said it, unless the words change.
+  if (current.motivation === words && current.motivationAt) return;
+  await saveIdentity({ motivation: words, motivationAt: now.toISOString() });
 }
 
 /** Append a de-duplicated preference the user told Gozlin. */
@@ -351,4 +357,8 @@ export async function clearGozlinMemory(): Promise<void> {
   // A coach screen still mounted holds the questions and memories just wiped.
   announceExperiences();
   announceLedger();
+  // What they told the smart layer ("Not now", "not my usual") is memory too. The
+  // running records (rough days, a fresh start, an accepted shorter day) are not:
+  // wiping those would change their streak and their plan, not what's remembered.
+  await Promise.all([clearSmartLedger(), clearForgottenUsuals()]);
 }

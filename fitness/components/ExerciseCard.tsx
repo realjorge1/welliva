@@ -10,8 +10,12 @@
  * A still rather than the animated figure on purpose: a list mounts dozens of
  * rows while scrolling, and a Skia canvas per row is not something the 1 GB
  * test phone can carry. The still is one SVG, drawn once.
+ *
+ * On the black instrument surface since 2026-11-01 (see MediaCard): the hue is
+ * its light end and the words are the card's fixed light tones in both themes.
  */
 
+import { HOME_ORANGE } from "@/components/home/surface";
 import { AppText, useColors } from "@/components/ui";
 import { alpha } from "@/constants/theme";
 import type { FigureMotion } from "@/fitness/animation/movementProfiles";
@@ -23,7 +27,7 @@ import { StyleSheet, View } from "react-native";
 import { artAccent } from "./ArtTile";
 import { LEVEL_LABEL, LEVEL_RANK, PATTERN_HUE, PATTERN_LABEL, equipmentLabel } from "./cardCopy";
 import { FigureStill, primaryView, stillFrame } from "./ExerciseFigure";
-import { LevelBars, MEDIA_RADIUS, MediaCard } from "./MediaCard";
+import { LevelBars, MEDIA_RADIUS, MediaCard, ON_CARD } from "./MediaCard";
 
 /** Width of the figure edge, and the figure's height inside it. */
 const FIGURE_EDGE = 76;
@@ -52,8 +56,9 @@ export const ExerciseCard = React.memo(function ExerciseCard({
   item: ExerciseCardData;
   onPress: (id: string) => void;
 }) {
-  const { colors, isDark } = useColors();
-  const accent = artAccent(PATTERN_HUE[item.pattern] ?? "brand", isDark);
+  const { colors } = useColors();
+  // The light end of the family's ramp: the card is black in both themes.
+  const accent = artAccent(PATTERN_HUE[item.pattern] ?? "brand", true);
   const level = LEVEL_LABEL[item.difficulty];
   const gear = equipmentLabel(item.equipment);
   const needsGear = item.equipment.some((e) => e && e !== "none");
@@ -77,7 +82,7 @@ export const ExerciseCard = React.memo(function ExerciseCard({
           style={[
             styles.figureEdge,
             {
-              backgroundColor: alpha(accent, isDark ? 0.14 : 0.1),
+              backgroundColor: alpha(accent, 0.14),
               borderTopLeftRadius: MEDIA_RADIUS,
               borderBottomLeftRadius: MEDIA_RADIUS,
             },
@@ -94,15 +99,15 @@ export const ExerciseCard = React.memo(function ExerciseCard({
         </View>
       }
     >
-      <AppText variant="body" weight="700" numberOfLines={2} style={styles.title}>
+      <AppText variant="body" weight="700" color={ON_CARD.title} numberOfLines={2} style={styles.title}>
         {item.name}
       </AppText>
-      <AppText variant="footnote" color="secondary" numberOfLines={1} style={styles.muscles}>
+      <AppText variant="footnote" color={ON_CARD.body} numberOfLines={1} style={styles.muscles}>
         {muscles}
       </AppText>
       <View style={styles.meta}>
         <LevelBars rank={LEVEL_RANK[item.difficulty]} color={accent} />
-        <AppText variant="footnote" color="tertiary" numberOfLines={1} style={styles.flex}>
+        <AppText variant="footnote" color={ON_CARD.meta} numberOfLines={1} style={styles.flex}>
           <AppText variant="footnote" color={accent} weight="700">
             {PATTERN_LABEL[item.pattern] ?? item.pattern}
           </AppText>
@@ -111,7 +116,7 @@ export const ExerciseCard = React.memo(function ExerciseCard({
           {needsGear ? ` · ${gear}` : ""}
         </AppText>
         {showMatch && (
-          <AppText variant="footnote" color="brand" weight="700">
+          <AppText variant="footnote" color={HOME_ORANGE} weight="700">
             {item.match}% match
           </AppText>
         )}

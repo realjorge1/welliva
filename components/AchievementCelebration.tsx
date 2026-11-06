@@ -38,7 +38,7 @@ import { RollingNumber, enterRise } from "@/components/motion";
 import { AppText, Button, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useSystem } from "@/contexts/AppContext";
-import type { BadgeFinish } from "@/services/achievementBadges";
+import type { BadgeFinish, BadgeShape } from "@/services/achievementBadges";
 import type { Celebration } from "@/services/CelebrationService";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -182,7 +182,13 @@ function BadgeHero({ celebration: c }: { celebration: Celebration }) {
         </AppText>
       </Animated.View>
 
-      <Medallion finish={c.finish} icon={c.icon} size={height < 700 ? 112 : 136} />
+      <Medallion
+        finish={c.finish}
+        icon={c.icon}
+        shape={c.shape}
+        label={c.ribbon}
+        size={height < 700 ? 112 : 136}
+      />
 
       <Animated.View entering={enterRise(3)} style={styles.badgeText}>
         <AppText variant="title" align="center">
@@ -221,10 +227,15 @@ function BadgeHero({ celebration: c }: { celebration: Celebration }) {
 function Medallion({
   finish,
   icon,
+  shape,
+  label,
   size,
 }: {
   finish: BadgeFinish;
   icon: keyof typeof Ionicons.glyphMap;
+  /** The tier's outline and the rank on its ribbon; a coin with none otherwise. */
+  shape?: BadgeShape;
+  label?: string;
   size: number;
 }) {
   const reduceMotion = useReducedMotion();
@@ -253,7 +264,7 @@ function Medallion({
           poolStyle,
         ]}
       />
-      <Badge finish={finish} icon={icon} size={size} delay={140} />
+      <Badge finish={finish} icon={icon} shape={shape} label={label} size={size} delay={140} />
     </View>
   );
 }

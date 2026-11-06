@@ -192,7 +192,6 @@ function briefingInput(ctx: GozlinToolContext, now: Date): BriefingInput {
     insights: ctx.insights,
     dietHistory: ctx.snapshot.dietHistory,
     workoutLog: ctx.snapshot.workoutLog,
-    motivation: ctx.identity.motivation,
     journeyStartedAt: ctx.snapshot.goals.journeyStartedAt,
     weeklyWorkoutTarget: ctx.weeklyWorkoutTarget,
     now,
@@ -251,7 +250,7 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
         dietHistory: ctx.snapshot.dietHistory,
         workoutLog: ctx.snapshot.workoutLog,
         sessionHistory: ctx.snapshot.sessionHistory,
-        bodyLogs: ctx.snapshot.bodyLogs,
+        bodyLogs: ctx.snapshot.trendBodyLogs ?? ctx.snapshot.bodyLogs,
         weeklyWorkoutTarget: ctx.weeklyWorkoutTarget,
         // The argument used to be echoed back and otherwise ignored, so a
         // strength question could get a weight plateau as its root cause.
@@ -426,7 +425,7 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
       const f = buildForecast({
         twin: ctx.twin,
         dietHistory: ctx.snapshot.dietHistory,
-        bodyLogs: ctx.snapshot.bodyLogs,
+        bodyLogs: ctx.snapshot.trendBodyLogs ?? ctx.snapshot.bodyLogs,
         calorieTarget: ctx.snapshot.targets?.calories ?? 0,
         goal: ctx.twin.goal,
         weeklyWorkoutTarget: ctx.weeklyWorkoutTarget,
