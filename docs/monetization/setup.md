@@ -414,11 +414,17 @@ Add to [.env.example](../../.env.example) and your local `.env`:
 # server-side against Google, not in the client.
 # Leave UNSET to disable billing entirely — the app runs fully free-tier.
 EXPO_PUBLIC_REVENUECAT_ANDROID_KEY=
-EXPO_PUBLIC_REVENUECAT_IOS_KEY=
+# EXPO_PUBLIC_REVENUECAT_IOS_KEY=   (off until the first iOS build)
 ```
 
 Then add the same keys to each `env` block in [eas.json](../../eas.json), so
 builds carry them.
+
+> **The iOS key stays commented out until the first iOS build.** It is parked as
+> a `//` line in eas.json's `preview` and `production` blocks. Never leave it as
+> `""`: EAS rejects an empty value and no profile will build, Android included.
+> Switch it on before iOS ships, because an iOS build with no key gives every
+> iPhone user Pro for free.
 
 > **BOTH places, not either.** eas.json only reaches builds that embed their
 > own JS bundle (EAS `preview` / `production`). Any build whose JS comes from

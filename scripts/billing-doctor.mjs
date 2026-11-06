@@ -82,7 +82,10 @@ async function main() {
   );
 
   // ── 2. The key EAS builds embed ──────────────────────────────────────────
-  const eas = JSON.parse(readFileSync(join(root, "eas.json"), "utf8"));
+  // eas.json holds whole-line // comments (the parked iOS key). EAS reads the file
+  // as JSON5 but JSON.parse does not, so drop those lines first. Whole lines only,
+  // which leaves the // inside a https:// value alone.
+  const eas = JSON.parse(readFileSync(join(root, "eas.json"), "utf8").replace(/^\s*\/\/.*$/gm, ""));
   const profiles = Object.entries(eas.build ?? {});
   const missing = profiles.filter(([, p]) => !p.env?.[KEY_VAR]?.startsWith("goog_")).map(([n]) => n);
   const mismatched = profiles
@@ -108,10 +111,10 @@ async function main() {
       : null,
   );
 
-  // Tests the VALUE, not the key's presence: eas.json now carries the slot as ""
-  // so it is discoverable in the file you would actually go looking in, and an
-  // empty slot is not a key.
-  const iosKey = profiles.some(([, p]) => p.env?.EXPO_PUBLIC_REVENUECAT_IOS_KEY);
+  // eas.json parks this key as a // comment, so it is discoverable in the file you
+  // would go looking in. Never park it as "": EAS rejects an empty value and every
+  // profile stops building. Tests the prefix so the unfilled placeholder is no key.
+  const iosKey = profiles.some(([, p]) => p.env?.EXPO_PUBLIC_REVENUECAT_IOS_KEY?.startsWith("appl_"));
   if (!iosKey) {
     report(
       WARN,
@@ -122,7 +125,8 @@ async function main() {
         "every iPhone user unlimited Pro, Gozlin included: we pay for their Haiku\n" +
         "turns and cannot charge one of them. Nobody is blocked from buying — there\n" +
         "is simply nothing to buy and no reason to want it.\n" +
-        "Add EXPO_PUBLIC_REVENUECAT_IOS_KEY (appl_…) to eas.json preview AND production\n" +
+        "Uncomment EXPO_PUBLIC_REVENUECAT_IOS_KEY in eas.json preview AND production and\n" +
+        "paste the appl_… key there\n" +
         "before the first iOS build ships. RevenueCat → Project settings → API keys.\n" +
         "After launch, free-tier rows in analytics_coach_load are this leak showing up\n" +
         "as spend.",
