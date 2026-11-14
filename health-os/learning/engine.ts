@@ -612,7 +612,12 @@ export interface IntelligenceSnapshot {
     evidence: number;
   };
   /** A genuine shift in behaviour, if one crossed the threshold. */
-  drift: (ChangePoint & { metric: string; label: string }) | null;
+  drift: (ChangePoint & {
+    metric: string;
+    label: string;
+    /** The local date (YYYY-MM-DD) the shift began; `at` is only an index. */
+    date: string;
+  }) | null;
 }
 
 const ARM_LABEL: Record<ArmId, string> = {
@@ -770,7 +775,7 @@ function latestFeatures(
  * deviation — on Bernoulli draws the sample estimate produces false alarms on
  * half of all stable windows (see changepoint.ts).
  */
-function detectDrift(series: DayRow[]): (ChangePoint & { metric: string; label: string }) | null {
+function detectDrift(series: DayRow[]): IntelligenceSnapshot["drift"] {
   const candidates: { metric: string; label: string; found: ChangePoint | null }[] = [
     {
       metric: "session_completed",
@@ -791,11 +796,11 @@ function detectDrift(series: DayRow[]): (ChangePoint & { metric: string; label: 
     },
   ];
 
-  let best: (ChangePoint & { metric: string; label: string }) | null = null;
+  let best: IntelligenceSnapshot["drift"] = null;
   for (const c of candidates) {
     if (!c.found) continue;
     if (!best || c.found.magnitude > best.magnitude) {
-      best = { ...c.found, metric: c.metric, label: c.label };
+      best = { ...c.found, metric: c.metric, label: c.label, date: series[c.found.at]?.date ?? "" };
     }
   }
   return best;

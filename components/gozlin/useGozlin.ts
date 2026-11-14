@@ -46,6 +46,8 @@ import { useRoughToday } from "@/components/smart/useRoughDay";
 import { ROUGH_REASONS } from "@/services/smart/roughDay";
 import { useCycleOptional } from "@/contexts/CycleContext";
 import { buildCycleBrief } from "@/services/cycle/brief";
+import { readIntelligence } from "@/health-os";
+import { maintenanceTdee } from "@/services/NutritionService";
 import {
   checkCoachQuota,
   checkDeepDive,
@@ -54,9 +56,10 @@ import {
   spendDeepDive,
   type MeteredState,
 } from "@/services/billing";
-import { runAgentTurn, runDeepDive } from "@/services/gozlin/agent";
+import { buildLearnedBrief, runAgentTurn, runDeepDive } from "@/services/gozlin/agent";
 import type {
   GozlinToolActions,
+  LearnedBrief,
   ToolConfirmRequest,
 } from "@/services/gozlin/agent";
 import {
@@ -434,6 +437,32 @@ export function useGozlin(): UseGozlin {
     [roughToday],
   );
 
+  // What the learning models have earned the right to say: maintenance by
+  // their logs, their fatigue curve, a recent shift (agent/learned.ts). Read,
+  // never refit (the rollover refits once a day), and re-read when the day
+  // changes so the morning's refit reaches the coach. On any failure the coach
+  // simply works without it.
+  const learnBio = snapshot.bio;
+  const mifflinTdee = useMemo(
+    () => (learnBio ? maintenanceTdee(learnBio) : 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [learnBio?.sex, learnBio?.weightKg, learnBio?.heightCm, learnBio?.age, learnBio?.activityLevel],
+  );
+  const [learnedBrief, setLearnedBrief] = useState<LearnedBrief | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    readIntelligence({ mifflinTdee })
+      .then((snap) => {
+        if (live) setLearnedBrief(buildLearnedBrief(snap, { today: app.currentDate }));
+      })
+      .catch(() => {
+        // Learning is a bonus for the coach, never a dependency of it.
+      });
+    return () => {
+      live = false;
+    };
+  }, [mifflinTdee, app.currentDate]);
+
   const chatContext = useMemo<GozlinChatContext>(
     () => ({
       twin,
@@ -444,6 +473,7 @@ export function useGozlin(): UseGozlin {
       habits: habitBrief,
       cycle: cycleBrief,
       roughDay: roughBrief,
+      learned: learnedBrief,
       experiences: curiosity.brief,
       conversation: messages,
       // Read once per launch and never changes while the app runs, so it is
@@ -461,6 +491,7 @@ export function useGozlin(): UseGozlin {
       habitBrief,
       cycleBrief,
       roughBrief,
+      learnedBrief,
       curiosity.brief,
       messages,
       app.userGoals,

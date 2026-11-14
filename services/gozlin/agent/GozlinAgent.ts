@@ -277,6 +277,8 @@ export async function runAgentTurn(
     experiences: experience.facts,
     // Her cycle, when she shares it — the same object the state block renders.
     cycle: ctx.cycle ?? null,
+    // What the learning models know, past their gates: the block renders the same brief.
+    learned: ctx.learned ?? null,
   });
   // The same evidence, indexed by WHERE each figure came from. Built in
   // lockstep with the allowed-set above so that anything grounding lets
@@ -290,6 +292,7 @@ export async function runAgentTurn(
   }
   collectWithProvenance(experience.facts, "experience-log", ledger);
   if (ctx.cycle) collectWithProvenance(ctx.cycle, "cycle-log", ledger);
+  if (ctx.learned) collectWithProvenance(ctx.learned, "learning", ledger);
   addDerivedGaps(allowed, [
     ctx.twin.today.calories,
     ctx.twin.today.protein,

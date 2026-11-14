@@ -54,6 +54,9 @@ export {
 } from "./context";
 export type { WireMessage } from "./context";
 
+export { buildLearnedBrief, learnedStateLines } from "./learned";
+export type { LearnedBrief } from "./learned";
+
 export { conditionRules, screenForClinicalRisk } from "./clinical";
 export type { ClinicalRisk, ClinicalRiskKind } from "./clinical";
 

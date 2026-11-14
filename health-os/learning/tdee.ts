@@ -200,10 +200,13 @@ export function tdeeDisclosure(
   if (!r.confident) return null;
   const diff = r.learnedTdee - mifflinEstimate;
   if (Math.abs(diff) < 75) return null; // not different enough to be worth saying
-  const weeks = Math.floor(r.observations / 7);
+  // Weigh-ins, not weeks: `observations` counts scale readings, so dividing by
+  // 7 told someone who weighs weekly, 14 readings in, they'd been tracked for 2
+  // weeks. And no "so I've been aiming at it": targets are still built from the
+  // signup formula (tdeeForTargets has no caller), so claiming otherwise was untrue.
   return (
-    `I've been tracking you for ${weeks} weeks. Based on what you've eaten and how your ` +
-    `weight has actually moved, your maintenance looks closer to ${r.learnedTdee} than the ` +
-    `${mifflinEstimate} I estimated at signup — so I've been aiming at the real number.`
+    `Across ${r.observations} weigh-ins and what you've logged eating, your ` +
+    `maintenance looks closer to ${r.learnedTdee} than the ${mifflinEstimate} I ` +
+    `estimated at signup. Your daily targets still start from that signup estimate.`
   );
 }

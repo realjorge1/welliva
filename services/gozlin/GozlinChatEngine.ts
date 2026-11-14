@@ -21,6 +21,7 @@ import { buildHabitReport } from "./GozlinHabitEngine";
 import type { HabitTrackerBrief } from "./GozlinTrackerHabits";
 import type { ExperienceBrief } from "./novelty/types";
 import type { CycleBrief } from "../cycle/brief";
+import type { LearnedBrief } from "./agent/learned";
 import { closer } from "./GozlinPersona";
 import {
   buildWeeklyReview,
@@ -73,6 +74,12 @@ export interface GozlinChatContext {
    * Absent means say nothing about it — never infer one.
    */
   cycle?: CycleBrief;
+  /**
+   * What the learning models have earned the right to say (./agent/learned.ts):
+   * maintenance by their logs, their fatigue curve, a recent shift. Absent
+   * until the models know them; the offline path ignores it.
+   */
+  learned?: LearnedBrief;
   /**
    * Today is a rough day the user marked (services/smart/roughDay): the coach
    * goes gentle for the day. Absent on any other day.

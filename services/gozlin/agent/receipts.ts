@@ -271,6 +271,8 @@ const ORIGIN_LABEL: Record<string, string> = {
   "experience-log": "What you told me about trying things",
   // Her cycle, only when she shares it with Gozlin (consent cycle_gozlin).
   "cycle-log": "Your cycle log",
+  // The learning models' read on them (agent/learned.ts).
+  learning: "What the app has learned from your logs",
   note_experience: "What you just told me",
 };
 
@@ -319,6 +321,16 @@ const PATH_LABEL: Record<string, string> = {
   "today.protein.over": "Protein over target (g)",
   "today.water.left": "Water left today (ml)",
   "today.water.over": "Water over goal (ml)",
+  // What the learning models know (services/gozlin/agent/learned.ts).
+  "maintenance.kcal": "Maintenance by your logs (kcal/day)",
+  "maintenance.plusMinus": "Give or take (kcal)",
+  "maintenance.signupKcal": "Signup estimate (kcal/day)",
+  "maintenance.weighIns": "Weigh-ins it learned from",
+  "maintenanceLearning.weighIns": "Weigh-ins so far",
+  "maintenanceLearning.needed": "Weigh-ins it needs",
+  "training.fatigueClearsDays": "Days your fatigue takes to clear",
+  "training.sessions": "Sessions it learned from",
+  "shift.daysAgo": "Days since the change began",
   // The fixture shape (services/gozlin/agent/__tests__/receipts.test.ts).
   "today.calories": "Calories logged today",
   "today.protein": "Protein logged today",

@@ -35,6 +35,7 @@ import { conditionRules } from "./clinical";
 import { experienceEvidence } from "./experiences";
 import { replyLanguageLines } from "./replyLanguage";
 import { cycleStateLines } from "../../cycle/brief";
+import { learnedStateLines } from "./learned";
 
 // ════════════════════════════════════════════════════════════════
 // TIER 1 — frozen. Cache breakpoint goes here.
@@ -197,7 +198,7 @@ export function twinStateMessage(
   twin: GozlinTwin,
   ctx?: Pick<
     GozlinChatContext,
-    "snapshot" | "identity" | "habits" | "experiences" | "cycle" | "language" | "now" | "roughDay"
+    "snapshot" | "identity" | "habits" | "experiences" | "cycle" | "language" | "now" | "roughDay" | "learned"
   >,
   /** The message being answered — enables the habit cross-reference and recall. */
   userText?: string,
@@ -255,6 +256,10 @@ export function twinStateMessage(
   // in these lines is a field of the brief, which GozlinAgent adds to the
   // grounding set, so "day 12" is citable exactly when it was shown.
   lines.push(...cycleStateLines(ctx?.cycle));
+
+  // What the learning models know about them, past each model's own gate
+  // (./learned.ts). The agent loop grounds against the same brief.
+  lines.push(...learnedStateLines(ctx?.learned));
 
   // A rough day they marked themselves (services/smart/roughDay). It changes
   // how to talk today, not what is true: the logged numbers above still stand.

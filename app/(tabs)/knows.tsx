@@ -846,7 +846,7 @@ function IntelligenceHero({
     }
     if (snap.adherence.action.kind === "shrink") return snap.adherence.action.reason;
     if (snap.training.fitted) {
-      return `Your fatigue clears in about ${snap.training.tau2} days, which is your number, not the average. I time your hard days around it.`;
+      return `Your fatigue clears in about ${snap.training.tau2} days, which is your number, not the average.`;
     }
     if (snap.delivery.best && snap.outcomes.resolved >= 20) {
       return `You respond best when I'm ${snap.delivery.best.arm.replace("nudge:", "")}. I've stopped guessing at that.`;
