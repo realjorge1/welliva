@@ -33,7 +33,8 @@ import {
   type Symptom,
 } from "./types";
 
-export type PatternKind = "timing" | "mood" | "sleep" | "training" | "trend" | "weight";
+/** "signs": the mid-cycle twinge and discharge, read against her estimated ovulation (./signs). */
+export type PatternKind = "timing" | "mood" | "sleep" | "training" | "trend" | "weight" | "signs";
 
 /**
  * Where a timing pattern sits. `start`: days of the period, 1 = its first day.
@@ -224,7 +225,15 @@ export function timingPattern(
   };
 }
 
-export const TIMING_SUBJECTS: readonly Subject[] = [...SYMPTOMS, "low_energy", "low_mood"];
+/**
+ * Everything timed against the period. Not the mid-cycle twinge: it belongs
+ * to ovulation, and ./signs reads it against that instead.
+ */
+export const TIMING_SUBJECTS: readonly Subject[] = [
+  ...SYMPTOMS.filter((s) => s !== "mid_cycle_pain"),
+  "low_energy",
+  "low_mood",
+];
 
 /** Every timing pattern she has, strongest first. */
 export function timingPatterns(cycles: readonly CycleRecord[], days: CycleDays): CyclePattern[] {
@@ -613,8 +622,11 @@ export function allPatterns(input: {
   workouts?: readonly WorkoutPoint[];
   /** Already read by the view (`weightPattern`), so both say the same thing. */
   weight?: CyclePattern | null;
+  /** The twinge and discharge patterns, already read by the view (`signs`). */
+  signs?: readonly CyclePattern[];
 }): CyclePattern[] {
   const out: CyclePattern[] = [...timingPatterns(input.cycles, input.days).slice(0, 4)];
+  if (input.signs) out.push(...input.signs);
   if (input.weight) out.push(input.weight);
   if (input.mind) {
     const mood = moodPattern(input.cycles, input.mind);

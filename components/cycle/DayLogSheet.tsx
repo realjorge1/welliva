@@ -13,6 +13,8 @@ import { Spacing, alpha } from "@/constants/theme";
 import {
   bleedWords,
   daysBetween,
+  DISCHARGES,
+  DISCHARGE_LABEL,
   ENERGIES,
   ENERGY_LABEL,
   episodeOn,
@@ -22,9 +24,12 @@ import {
   liveEpisodes,
   MOODS,
   MOOD_LABEL,
+  spottingNote,
   SYMPTOMS,
   SYMPTOM_LABEL,
+  twingeLines,
   type CycleMood,
+  type Discharge,
   type Energy,
   type Flow,
   type OvulationTest,
@@ -32,7 +37,7 @@ import {
 } from "@/services/cycle";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo } from "react";
-import { ScrollView, StyleSheet, Switch, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Switch, View } from "react-native";
 import { useCyclePalette } from "./cycleTheme";
 
 export interface DayLogSheetProps {
@@ -44,6 +49,7 @@ const FLOW_OPTIONS = FLOWS.map((v) => ({ value: v, label: FLOW_LABEL[v] }));
 const SYMPTOM_OPTIONS = SYMPTOMS.map((v) => ({ value: v, label: SYMPTOM_LABEL[v] }));
 const MOOD_OPTIONS = MOODS.map((v) => ({ value: v, label: MOOD_LABEL[v] }));
 const ENERGY_OPTIONS = ENERGIES.map((v) => ({ value: v, label: ENERGY_LABEL[v] }));
+const DISCHARGE_OPTIONS = DISCHARGES.map((v) => ({ value: v, label: DISCHARGE_LABEL[v] }));
 const TEST_OPTIONS: { value: OvulationTest; label: string }[] = [
   { value: "positive", label: "Positive" },
   { value: "negative", label: "Negative" },
@@ -79,6 +85,19 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
   const title = d === today ? "Today" : daysBetween(d, today) === 1 ? "Yesterday" : formatDay(d, { weekday: true });
 
   const recalls = view.relief.filter((r) => !!log?.symptoms?.includes(r.symptom));
+  /** "Kept me from school, work or plans" is offered once Cramps is ticked. */
+  const crampsOn = !!log?.symptoms?.includes("cramps");
+  /** A ticked mid-cycle twinge: the calm line near ovulation, and the safety line every time. */
+  const twinge = twingeLines({ date: d, log, mode: view.mode, prediction: view.prediction, cycles: view.cycles });
+  /** Spotting right around ovulation is explained here, never counted as a worry. */
+  const spotting = spottingNote({
+    date: d,
+    log,
+    inPeriod,
+    mode: view.mode,
+    prediction: view.prediction,
+    cycles: view.cycles,
+  });
 
   const toggleSymptom = (s: Symptom) => {
     const current = log?.symptoms ?? [];
@@ -135,6 +154,14 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
             tone={palette.period}
             size="sm"
           />
+          {spotting ? (
+            <View style={styles.recall}>
+              <Ionicons name="information-circle-outline" size={14} color={colors.textTertiary} />
+              <AppText variant="footnote" color="secondary" style={styles.flex}>
+                {spotting}
+              </AppText>
+            </View>
+          ) : null}
         </Group>
 
         <Group label="Body">
@@ -144,6 +171,40 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
             onToggle={toggleSymptom}
             size="sm"
           />
+          {/* Whether the cramps stopped her day: the question a doctor asks
+              first. Only beside cramps, and dropped with them. */}
+          {crampsOn ? (
+            <Pressable
+              onPress={() => void cycle.logDay(d, { stoppedDay: log?.stoppedDay ? null : true })}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: log?.stoppedDay === true }}
+              accessibilityLabel="Cramps kept me from school, work or plans"
+              style={({ pressed }) => [
+                styles.stopped,
+                {
+                  backgroundColor: log?.stoppedDay ? alpha(palette.period, 0.14) : alpha(colors.text, 0.05),
+                  opacity: pressed ? 0.75 : 1,
+                },
+              ]}
+            >
+              <Ionicons
+                name={log?.stoppedDay ? "checkbox" : "square-outline"}
+                size={18}
+                color={log?.stoppedDay ? palette.period : colors.textTertiary}
+              />
+              <AppText variant="footnote" weight="600" style={styles.flex}>
+                Kept me from school, work or plans
+              </AppText>
+            </Pressable>
+          ) : null}
+          {twinge.map((line) => (
+            <View key={line} style={styles.recall}>
+              <Ionicons name="information-circle-outline" size={14} color={colors.textTertiary} />
+              <AppText variant="footnote" color="secondary" style={styles.flex}>
+                {line}
+              </AppText>
+            </View>
+          ))}
           {/* Her own answers, said back under the symptom she just ticked —
               only once the same thing has helped most on two or more days. */}
           {recalls.map((r) => (
@@ -175,7 +236,29 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
         </Group>
 
         {view.showFertile ? (
-          <Group label="Ovulation test" hint="Two positive tests in different cycles teach me your own ovulation timing.">
+          <Group
+            label="Discharge"
+            hint="Optional. Clear, stretchy days usually come before ovulation. It's a check on the estimate, never a date."
+          >
+            <ChipGrid<Discharge>
+              options={DISCHARGE_OPTIONS}
+              selected={(v) => log?.discharge === v}
+              onToggle={(v) => void cycle.logDay(d, { discharge: log?.discharge === v ? null : v })}
+              tone={palette.fertile}
+              size="sm"
+            />
+          </Group>
+        ) : null}
+
+        {view.showFertile ? (
+          <Group
+            label="Ovulation test"
+            hint={
+              view.pcos
+                ? "With PCOS, these tests can read positive without ovulation, so a positive doesn't move your dates."
+                : "A positive moves this cycle's dates. Positives in two cycles teach me your own timing."
+            }
+          >
             <ChipGrid<OvulationTest>
               options={TEST_OPTIONS}
               selected={(v) => log?.ovulationTest === v}
@@ -227,5 +310,14 @@ const styles = StyleSheet.create({
   groupLabel: { marginBottom: Spacing.sm },
   groupHint: { marginTop: -4, marginBottom: Spacing.sm },
   recall: { flexDirection: "row", alignItems: "center", gap: Spacing.sm, marginTop: Spacing.sm },
+  stopped: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: 12,
+  },
   saved: { marginTop: Spacing.xl, marginBottom: Spacing.md },
 });

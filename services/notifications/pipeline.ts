@@ -558,7 +558,8 @@ async function onCycleAnswer(n: NormalizedResponse, yes: boolean): Promise<Pipel
     title: "That didn't save",
     body:
       result.reason === "no-period"
-        ? "There's no period open to end. Tap to check your log."
+        ? // A lock-screen notification: never "period", whatever the discreet setting.
+          "There was nothing open to end. Tap to check your log."
         : "Tap to log it in welliva — it takes a second.",
     route: "/cycle",
   });

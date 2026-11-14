@@ -34,7 +34,8 @@ import {
   subscribeFitnessProfile,
   updateFitnessProfile,
 } from "../../fitness/services/FitnessProfileStore";
-import { KEYS, currentWeekStart, readJSON, writeJSON } from "../../services/OfflineStorage";
+import { KEYS, currentWeekStart, readJSON, todayDate, writeJSON } from "../../services/OfflineStorage";
+import { withRestingAreas } from "../../services/training/pain";
 import { generateWorkoutWeek } from "../../services/PlanSync";
 import { recordActivity, StreakData } from "../../services/StreakService";
 import { SessionService } from "../../services/SessionService";
@@ -158,11 +159,16 @@ export function useWorkoutState({
     const run = (async () => {
       do {
         again.current = false;
-        const bio = bioRef.current;
-        if (!bio) return;
+        const own = bioRef.current;
+        if (!own) return;
         let plan = planRef.current;
         if (!plan) plan = await readJSON<GeneratedWorkoutPlan | null>(KEYS.WORKOUT_PLAN, null);
-        const prefs = resolveTrainingPrefs(bio, await loadFitnessProfile());
+        const profile = await loadFitnessProfile();
+        // An area that hurt after a recent session is kept out like an injury
+        // (services/training/pain). It's part of the fingerprint, so a new
+        // answer — or the rest window ending at a day change — rebuilds.
+        const bio = withRestingAreas(own, profile.painHistory, todayDate());
+        const prefs = resolveTrainingPrefs(bio, profile);
         if (shouldRegenerateWorkoutPlan(plan, bio, currentWeekStart(), prefs)) {
           planRef.current = plan;
           await rebuild(bio);
@@ -207,12 +213,13 @@ export function useWorkoutState({
   /** Rebuild now, from the current inputs (the old "Regenerate" path). */
   const regenerateWorkoutPlan = useCallback(async () => {
     try {
-      const bio = bioRef.current;
-      if (!bio) {
+      const own = bioRef.current;
+      if (!own) {
         console.warn("regenerateWorkoutPlan: no userBio, skipping");
         return;
       }
-      await rebuild(bio);
+      const profile = await loadFitnessProfile();
+      await rebuild(withRestingAreas(own, profile.painHistory, todayDate()));
     } catch (error) {
       console.error("regenerateWorkoutPlan failed:", error);
     }

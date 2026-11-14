@@ -89,8 +89,9 @@ export function useCyclePatterns(): CyclePattern[] {
             mind: mind ?? undefined,
             workouts: workoutLog.map((w) => ({ date: w.date })),
             weight: view.weightPattern,
+            signs: view.signs,
           }),
-    [logOnly, view.cycles, view.weightPattern, data.days, mind, workoutLog],
+    [logOnly, view.cycles, view.weightPattern, view.signs, data.days, mind, workoutLog],
   );
 }
 

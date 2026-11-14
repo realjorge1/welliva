@@ -34,6 +34,8 @@ export const SYMPTOMS = [
   "acne",
   "cravings",
   "nausea",
+  // 2026-11-13: a one-sided ache around the middle of the cycle (./signs). Not a relief symptom.
+  "mid_cycle_pain",
 ] as const;
 export type Symptom = (typeof SYMPTOMS)[number];
 
@@ -61,6 +63,21 @@ export const SYMPTOM_LABEL: Record<Symptom, string> = {
   acne: "Breakouts",
   cravings: "Cravings",
   nausea: "Nausea",
+  mid_cycle_pain: "Mid-cycle twinge",
+};
+
+/**
+ * Discharge, noted only with the fertile window on (2026-11-13). A CHECK on
+ * the ovulation estimate (./signs), never an input to it.
+ */
+export const DISCHARGES = ["dry", "sticky", "creamy", "clear_stretchy"] as const;
+export type Discharge = (typeof DISCHARGES)[number];
+
+export const DISCHARGE_LABEL: Record<Discharge, string> = {
+  dry: "Dry",
+  sticky: "Sticky",
+  creamy: "Creamy",
+  clear_stretchy: "Clear and stretchy",
 };
 
 export const MOOD_LABEL: Record<CycleMood, string> = {
@@ -124,6 +141,13 @@ export interface CycleDayLog {
   ovulationTest?: OvulationTest;
   /** "What helped most?", answered the next day — at most one entry per symptom logged here. */
   relief?: ReliefNote[];
+  /**
+   * "Kept me from school, work or plans", ticked under Cramps. Only ever
+   * stored beside cramps: un-ticking Cramps drops it, like `relief`.
+   */
+  stoppedDay?: true;
+  /** Only offered with the fertile window on. A check on the ovulation estimate, never an input. */
+  discharge?: Discharge;
   updatedAt: string;
 }
 
@@ -376,6 +400,8 @@ export function normalizeDayLog(date: string, raw: unknown): CycleDayLog | null 
   const mood = oneOf(raw.mood, MOODS);
   const energy = oneOf(raw.energy, ENERGIES);
   const test = oneOf(raw.ovulationTest, ["positive", "negative"] as const);
+  const discharge = oneOf(raw.discharge, DISCHARGES);
+  if (discharge) log.discharge = discharge;
   if (flow) log.flow = flow;
   if (symptoms.length) log.symptoms = symptoms;
   if (mood) log.mood = mood;
@@ -384,6 +410,8 @@ export function normalizeDayLog(date: string, raw: unknown): CycleDayLog | null 
   // An answer about a symptom this day doesn't carry is an answer about nothing.
   const relief = normalizeRelief(raw.relief).filter((r) => symptoms.includes(r.symptom));
   if (relief.length) log.relief = relief;
+  // "Kept me from my day" is about the cramps: without them it says nothing.
+  if (raw.stoppedDay === true && symptoms.includes("cramps")) log.stoppedDay = true;
   return log;
 }
 
@@ -410,7 +438,12 @@ export function normalizeDays(raw: unknown): CycleDays {
   return out;
 }
 
-/** A day log that records nothing — a cleared day, kept only as a merge tombstone. */
+/**
+ * A day log that records nothing — a cleared day, kept only as a merge tombstone.
+ * A day holding only `stoppedDay` is NOT empty: it records something (it can't
+ * outlive its cramps once normalized, but an empty-looking day must never be
+ * pruned while it still says anything).
+ */
 export function isEmptyDayLog(log: CycleDayLog | undefined | null): boolean {
   if (!log) return true;
   return (
@@ -418,6 +451,8 @@ export function isEmptyDayLog(log: CycleDayLog | undefined | null): boolean {
     !(log.symptoms && log.symptoms.length) &&
     !log.mood &&
     !log.energy &&
-    !log.ovulationTest
+    !log.ovulationTest &&
+    !log.stoppedDay &&
+    !log.discharge
   );
 }

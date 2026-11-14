@@ -28,6 +28,7 @@ import { buildNutritionAdaptations } from "../GozlinAdaptiveNutritionEngine";
 import { buildWorkoutAdaptations } from "../GozlinAdaptiveWorkoutEngine";
 import { buildBriefing, type BriefingInput } from "../GozlinBriefingEngine";
 import { buildDetectiveReport, type DetectiveFocus } from "../GozlinDetectiveEngine";
+import { noteForecastSaid } from "../../body/forecastMemory";
 import { buildForecast } from "../GozlinForecastEngine";
 import { buildHabitReport } from "../GozlinHabitEngine";
 import { buildWeeklyReview } from "../GozlinProgressEngine";
@@ -421,7 +422,7 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
       "when they're asking WHY rather than WHEN.",
     input_schema: NO_ARGS,
     readOnly: true,
-    run: (_input, ctx) => {
+    run: async (_input, ctx) => {
       const f = buildForecast({
         twin: ctx.twin,
         dietHistory: ctx.snapshot.dietHistory,
@@ -431,7 +432,18 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
         weeklyWorkoutTarget: ctx.weeklyWorkoutTarget,
         now: nowOf(ctx),
       });
+      // "We said / you did" (services/body/forecastMemory): the date given here
+      // is remembered, and when it has moved two weeks or more since the last
+      // one, the reason comes back with it for the reply to say.
+      const sinceLastTime =
+        f.goalWeightKg != null && f.expectedGoalDate && f.asOf
+          ? await noteForecastSaid(
+              { targetKg: f.goalWeightKg, eta: f.expectedGoalDate, ratePerWeek: f.projectedRatePerWeek },
+              f.asOf,
+            )
+          : null;
       return {
+        ...(sinceLastTime ? { sinceLastTime } : {}),
         summary: f.summary,
         ratePerWeekKg: f.projectedRatePerWeek,
         velocityTrend: f.velocity.trend,

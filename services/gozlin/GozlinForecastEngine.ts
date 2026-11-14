@@ -234,6 +234,7 @@ export function buildForecast(input: ForecastInput): GozlinForecast {
     oneLever: adjustments[0]?.text ?? "Keep logging — consistency is the lever now.",
     adjustments,
     adherenceLimited,
+    asOf: today,
   };
 }
 

@@ -257,8 +257,8 @@ generosity, so this is worth doing *before* deciding any cap is too expensive.
   (setup.md Part 6) before launch, not after.
 - **A native rebuild is required** for the camera path — `app.json` now declares
   `cameraPermission` on the `expo-image-picker` plugin.
-- **Two legal placeholders are unfilled** and are failing
-  `constants/__tests__/legal.test.ts` right now: `LEGAL_POSTAL_ADDRESS` and
-  `LEGAL_JURISDICTION` in [constants/legal.ts](../../constants/legal.ts). Both
-  render verbatim in the privacy policy, terms and disclaimer, and both will fail
-  store review.
+- **The two legal placeholders are resolved.** `LEGAL_JURISDICTION` was filled
+  ("Nigeria", 10 September 2026), and the postal address was taken out of the
+  documents by the owner's decision (14 November 2026; email is the contact).
+  `constants/__tests__/legal.test.ts` is green. See
+  [docs/legal/store-submission.md](../legal/store-submission.md) section 2.

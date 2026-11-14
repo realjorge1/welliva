@@ -71,6 +71,10 @@ const SURE_FOR_COACH: Record<ConfidenceWord, string> = {
   "Fairly sure": "fairly sure",
   "Still learning": "still learning her rhythm",
   "Varies for you": "her cycles vary, so the window is wide",
+  // Dated by a positive ovulation test this cycle. The coach-sees list covers
+  // "when your next period is likely", not her test results, so it hears only
+  // how sure the window is: a test-dated window is narrow.
+  "From your test": "fairly sure",
 };
 
 function phaseWords(phase: Phase | null, showFertile: boolean): string | null {

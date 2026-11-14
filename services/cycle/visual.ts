@@ -103,6 +103,8 @@ export interface DayPaint {
   ovulation: boolean;
   /** She noted something about the day. */
   hasLog: boolean;
+  /** She noted clear, stretchy discharge — marked only with the fertile window on. */
+  stretchy: boolean;
 }
 
 /** How many cycles ahead the calendar projects. Further than that is guesswork. */
@@ -142,6 +144,7 @@ export function paintDays(input: {
       fertile: !l && fertile.has(date),
       ovulation: !l && ovulation.has(date),
       hasLog: !isEmptyDayLog(input.days[date]),
+      stretchy: input.showFertile && input.days[date]?.discharge === "clear_stretchy",
     };
   };
 }

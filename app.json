@@ -49,6 +49,12 @@
       ],
       "expo-secure-store",
       [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "welliva uses Face ID to unlock your cycle log."
+        }
+      ],
+      [
         "expo-calendar",
         {
           "calendarPermission": "welliva reads your upcoming events so your coach can plan around what's ahead — travel, exams, big days. Nothing leaves your device."

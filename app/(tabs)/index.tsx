@@ -31,6 +31,7 @@ import { ScreenTopBar } from "@/components/navigation";
 import { SyncStatusPill } from "@/components/sync/SyncStatusPill";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { CoachDeepDive } from "@/components/home/CoachDeepDive";
+import { HealthNotes } from "@/components/checks/HealthNotes";
 import { CycleHomeCard, CycleOfferCard } from "@/components/cycle";
 import { CalorieHero } from "@/components/home/CalorieHero";
 import { CheckInBar } from "@/components/home/CheckInBar";
@@ -74,6 +75,7 @@ import { isInsightSeen, openInsight, unseenCards } from "@/services/gozlin/Insig
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useGamification, useNutrition, useProfile, useWorkout } from "@/contexts/AppContext";
 import { useDayAdjustments } from "@/contexts/domain/useDayTarget";
+import { useCycleHidden } from "@/contexts/CycleLockContext";
 import { dayCalorieDelta, dayTargetNote } from "@/services/nutrition/dayTargets";
 import { calculateProgress } from "@/services/NutritionService";
 import { todayDate } from "@/services/OfflineStorage";
@@ -371,6 +373,8 @@ export default function HomeScreen() {
   // A day can have its own calorie target (services/nutrition/dayTargets).
   const dayAdjustments = useDayAdjustments();
   const todayDelta = dayCalorieDelta(dayKey, dayAdjustments);
+  // "Lock my cycle" shut: the target stays right, its note doesn't say why.
+  const cycleHidden = useCycleHidden();
   useEffect(() => {
     let active = true;
     readDayIntake(shiftDay(dayKey, -1)).then(({ intake, foodLog }) => {
@@ -531,7 +535,7 @@ export default function HomeScreen() {
           remaining={remaining}
           percent={caloriePct}
           gentle={gentleToday}
-          targetNote={dayTargetNote(todayDelta)}
+          targetNote={dayTargetNote(todayDelta, { discreet: cycleHidden })}
         />
       </Reveal>
 
@@ -682,6 +686,13 @@ export default function HomeScreen() {
       <Reveal index={3}>
         <CycleHomeCard style={styles.cycleBlock} />
         <CycleOfferCard style={styles.cycleBlock} />
+      </Reveal>
+
+      {/* ── Worth mentioning to a doctor — weight, eating, mood and pain notes
+             from their own logs (components/checks/HealthNotes). Renders
+             nothing unless one of the checks is met, which is rare. ── */}
+      <Reveal index={3}>
+        <HealthNotes style={styles.cycleBlock} />
       </Reveal>
 
       {/* ── Hydration — the log card (components/hydration). Before Your week:

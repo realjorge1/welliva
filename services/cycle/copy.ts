@@ -44,16 +44,26 @@ export function bleedWords(mode: CycleMode): BleedWords {
     : { noun: "period", label: "Period", started: "Period started", ended: "Period ended", day: "Period day" };
 }
 
-export function phaseLabel(view: CycleView, showFertile: boolean): string | null {
+/**
+ * The phase names: the proper name, then what it means in plain words. The
+ * library's how-it-works page lists the same names (a test holds them together).
+ */
+export const PHASE_NAMES = {
+  follicular: "Follicular phase · building up to ovulation",
+  midCycle: "Mid-cycle · around ovulation",
+  luteal: "Luteal phase · after ovulation, before your period",
+} as const;
+
+export function phaseLabel(view: Pick<CycleView, "status">, showFertile: boolean): string | null {
   switch (view.status.phase) {
     case "period":
       return "Period";
     case "follicular":
-      return "Follicular phase";
+      return PHASE_NAMES.follicular;
     case "fertile":
-      return showFertile ? "Fertile window (estimate)" : "Mid-cycle";
+      return showFertile ? "Fertile window (estimate)" : PHASE_NAMES.midCycle;
     case "luteal":
-      return "Luteal phase";
+      return PHASE_NAMES.luteal;
     case "late":
       return "Later than usual";
     default:
@@ -148,9 +158,11 @@ export function cycleHeadline(view: CycleView, showFertile: boolean): CycleHeadl
  * late and hungry-week lines) speaks with THESE words, so no surface sounds
  * surer than the cycle screen does.
  */
-export type ConfidenceWord = "Fairly sure" | "Still learning" | "Varies for you";
+export type ConfidenceWord = "Fairly sure" | "Still learning" | "Varies for you" | "From your test";
 
 export function confidenceWord(p: Prediction): ConfidenceWord {
+  // A window a positive test dated this cycle is not the calendar's guess.
+  if (p.fromTest) return "From your test";
   switch (p.confidence) {
     case "confident":
       return "Fairly sure";
@@ -175,6 +187,7 @@ export function glanceConfidence(view: Pick<CycleView, "status" | "prediction">)
 
 /** How sure the prediction is, and why — the line that makes it trustworthy. */
 export function confidenceLine(p: Prediction): string {
+  if (p.fromTest) return `Updated from your ovulation test on ${formatDay(p.fromTest, { weekday: true })}.`;
   const n = p.basedOn;
   switch (p.confidence) {
     case "told":

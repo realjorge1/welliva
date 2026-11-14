@@ -14,6 +14,9 @@
 import { cycleEase, headsUps, ironMoment, type CycleEase, type HeadsUp, type IronReason } from "./care";
 import { daysBetween } from "./dates";
 import { doctorNotes, gapQuestions, visibleNotes, type DoctorNote } from "./flags";
+import { hormoneCard, type HormoneCard } from "./hormones";
+import { startReceipt, testingStartLine } from "./nextDates";
+import { dischargePattern, twingePattern } from "./signs";
 import {
   hungryAllowed,
   hungryOffer,
@@ -32,6 +35,7 @@ import {
   countFrom,
   cycleModeOf,
   fertileWindowAllowed,
+  lutealFor,
   predict,
   todayStatus,
   typicalPeriodLength,
@@ -90,6 +94,19 @@ export interface CycleView {
   hungryOffer: HungryOffer | null;
   /** Date → kcal for the period ahead, once she has said yes. */
   hungryPlan: Record<string, number>;
+  /**
+   * PCOS is on her profile: ovulation tests can read positive without
+   * ovulation, so a positive never moves her dates, and the screens say so.
+   */
+  pcos: boolean;
+  /** "What's at work today" (./hormones): the Today line and its card. Null when there's nothing to say. */
+  hormones: HormoneCard | null;
+  /** The mid-cycle twinge and discharge patterns (./signs), under the patterns standard. */
+  signs: CyclePattern[];
+  /** "We said the 14th. It came on the 15th." — on the day a start is logged (./nextDates). */
+  receipt: string | null;
+  /** "Test daily from Thu 14 Nov until you get a positive." — inside the fertile box (./nextDates). */
+  testingLine: string | null;
 }
 
 export function computeView(
@@ -120,7 +137,8 @@ export function computeView(
   const prediction = mode === "pregnancy" ? null : predict(input);
   const status = todayStatus(input, prediction);
   const cycles = buildCycles(periods, settings, today, since);
-  const allNotes = doctorNotes({ cycles, episodes: periods, today, mode, profile, days });
+  const typicalBleed = prediction?.periodLength ?? typicalPeriodLength(periods, settings).days;
+  const allNotes = doctorNotes({ cycles, episodes: periods, today, mode, profile, days, typicalBleed, since });
   const timing = logOnly ? [] : timingPatterns(cycles, days);
   const relief = reliefRecalls(days);
   // Beside a forecast, her own answer is said back — except a painkiller, so a
@@ -156,7 +174,7 @@ export function computeView(
 
   return {
     mode,
-    typicalBleed: prediction?.periodLength ?? typicalPeriodLength(periods, settings).days,
+    typicalBleed,
     cycles,
     prediction,
     status,
@@ -190,5 +208,37 @@ export function computeView(
     hungryAllowed: hungryAllowed(mode, profile),
     hungryOffer: hungryOffer({ ...hungryInput, settings, today }),
     hungryPlan: hungryPlanDays({ ...hungryInput, settings }),
+    pcos: !!profile.conditions?.includes("pcos"),
+    hormones: on
+      ? hormoneCard({
+          mode,
+          status,
+          prediction,
+          profile,
+          showFertile: fertileWindowAllowed(settings.showFertileWindow, mode),
+          todayLog: days[today],
+          typicalBleed,
+          today,
+        })
+      : null,
+    signs: on && (mode === "normal" || mode === "postpartum") ? signPatterns(cycles, days, prediction, settings.showFertileWindow) : [],
+    receipt: on ? startReceipt({ episodes: periods, days, settings, profile, today }) : null,
+    testingLine: on
+      ? testingStartLine({ prediction, days, showFertile: fertileWindowAllowed(settings.showFertileWindow, mode), today })
+      : null,
   };
+}
+
+/** The twinge pattern always; discharge only for someone who sees the fertile window (she can only log it there). */
+function signPatterns(
+  cycles: CycleRecord[],
+  days: CycleData["days"],
+  prediction: Prediction | null,
+  showFertile: boolean,
+): CyclePattern[] {
+  const luteal = prediction?.lutealDays ?? lutealFor(cycles, days).days;
+  return [
+    twingePattern(cycles, days, luteal, showFertile),
+    showFertile ? dischargePattern(cycles, days, luteal) : null,
+  ].filter((p): p is CyclePattern => p !== null);
 }

@@ -13,9 +13,11 @@ import { AppText, Button, Card, Screen, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useGamification, useProfile } from "@/contexts/AppContext";
 import type { PrimaryGoal } from "@/models/user";
+import { loadForecastMemory, saidBackLine } from "@/services/body/forecastMemory";
+import { todayDate } from "@/services/OfflineStorage";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Pressable, StyleSheet, TextInput, View } from "react-native";
 
 const GOALS: { id: PrimaryGoal; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -38,6 +40,22 @@ export default function NewChapterScreen() {
   );
   const [why, setWhy] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // "We said / you did": the first goal date Gozlin gave for this goal weight,
+  // against the day they got there (services/body/forecastMemory). Null for
+  // anyone who never saw a forecast for it, and then nothing is shown.
+  const [saidBack, setSaidBack] = useState<string | null>(null);
+  const reachedKg = userGoals.targetWeightKg;
+  useEffect(() => {
+    if (reachedKg == null) return;
+    let alive = true;
+    void loadForecastMemory().then((m) => {
+      if (alive) setSaidBack(saidBackLine(m, reachedKg, todayDate()));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [reachedKg]);
 
   const nextChapter = journeyChapter + 1;
 
@@ -71,6 +89,14 @@ export default function NewChapterScreen() {
         You reached your goal — that&apos;s rare air. The journey doesn&apos;t end
         here. Let&apos;s set what comes next.
       </AppText>
+      {saidBack ? (
+        <View style={[styles.saidBack, { backgroundColor: alpha(colors.gold, 0.1) }]}>
+          <Ionicons name="calendar-outline" size={16} color={colors.gold} />
+          <AppText variant="footnote" color="secondary" style={styles.saidBackText}>
+            {saidBack}
+          </AppText>
+        </View>
+      ) : null}
     </View>
   );
 
@@ -181,6 +207,15 @@ const styles = StyleSheet.create({
   },
   badgeText: { fontWeight: "800", letterSpacing: 1 },
   title: { marginTop: Spacing.xs },
+  saidBack: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    borderRadius: Radius.lg,
+    marginTop: Spacing.xs,
+  },
+  saidBackText: { flex: 1 },
   section: { marginTop: Spacing.xxl },
   label: { fontWeight: "700", letterSpacing: 1, marginBottom: Spacing.md },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.md },

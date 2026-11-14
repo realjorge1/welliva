@@ -9,7 +9,7 @@
  * its most frightening in the same sentence, and the only honest answer to
  * "worth mentioning to a doctor" is a page that says what is being mentioned.
  *
- * TWENTY PAGES, in four groups, each one reachable three ways: from the
+ * TWENTY-ONE PAGES, in four groups, each one reachable three ways: from the
  * library, from the flag that raised it (`READING_FOR_NOTE`), and from whatever
  * she logged today (`suggestedReading`).
  *
@@ -65,6 +65,7 @@ export type CycleArticleId =
   | "cycle-length"
   | "irregular-cycles"
   | "long-periods"
+  | "bleeding-between-periods"
   // life and context
   | "ovulation"
   | "contraception"
@@ -144,9 +145,21 @@ const ARTICLES: CycleArticle[] = [
         heading: "What the four phase names mean on your dial",
         points: [
           "Period — you are bleeding. Days 1 to about 5.",
-          "Follicular — after bleeding, before ovulation. The variable stretch.",
-          "Mid-cycle — around ovulation. Called the fertile window only if you've switched that on.",
-          "Luteal — after ovulation, before your next period. Where most premenstrual symptoms sit.",
+          "Follicular phase · building up to ovulation — after bleeding, before ovulation. The variable stretch.",
+          "Mid-cycle · around ovulation — called the fertile window only if you've switched that on.",
+          "Luteal phase · after ovulation, before your period — where most premenstrual symptoms sit.",
+        ],
+      },
+      {
+        heading: "The four hormones, and when each leads",
+        points: [
+          "FSH grows a few follicles in an ovary after your period. One of them takes the lead.",
+          "Oestrogen, made by that leading follicle, climbs through the first half and rebuilds the womb lining. It peaks just before ovulation.",
+          "LH surges when oestrogen peaks. Ovulation usually follows within about a day, and the egg lives for about a day. Ovulation tests detect this surge.",
+          "Progesterone leads the second half. It keeps the lining steady, peaks about a week after ovulation, and warms you up a little. If there's no pregnancy, it falls, and your period starts.",
+        ],
+        body: [
+          "The \"What's at work today\" card on your cycle screen shows these as typical shapes stretched to your own dates. They are never measured, and they never decide how you should feel, eat or train.",
         ],
       },
       {
@@ -273,6 +286,13 @@ const ARTICLES: CycleArticle[] = [
         ],
       },
       {
+        heading: "When cramps stop your day",
+        body: [
+          "Under Cramps there's one more tap: \"Kept me from school, work or plans\". It asks the question a doctor asks first, because pain that stops a normal day is the sign they look for. How bad pain feels is hard to compare from one person to the next; whether it stopped your day isn't.",
+          "If cramps keep you from your day in two of your last three periods with cramps, welliva says so, with your own numbers, so you have them ready for the appointment. Periods where you didn't log cramps aren't counted either way.",
+        ],
+      },
+      {
         heading: "Painful is common. This much pain isn't",
         body: [
           "Period pain that is bad enough to keep you off work or school, that painkillers barely touch, that has got noticeably worse over months or years, or that comes with pain during sex or when you go to the toilet, is worth a proper appointment rather than another month of paracetamol. Those are the patterns that have causes a doctor can look for and treat.",
@@ -301,6 +321,13 @@ const ARTICLES: CycleArticle[] = [
         body: [
           "Clinically, heavy means losing more than about 80 ml over a period — but nobody measures that, so what matters is whether it interferes with your life. The usual markers are soaking through a pad or tampon every hour or two for several hours, needing to double up, getting up at night to change, passing clots bigger than a ten-pence piece, or planning your days around it.",
           "By any of those, it is heavy, whatever the number would have said.",
+        ],
+      },
+      {
+        heading: "What welliva looks for",
+        body: [
+          "welliva mentions it when you log a heavy flow on three or more days in two of your last three periods. It only reads a period where you logged flow on at least two days, because a period with nothing logged says nothing about how heavy it was. It's about how much you bleed, not when, so it applies on hormonal contraception too.",
+          "If you've also logged low energy on two or more of those days, it adds that a simple blood test can check your iron. Heavy periods and tiredness together are one of the most common reasons iron runs low.",
         ],
       },
       {
@@ -789,6 +816,53 @@ const ARTICLES: CycleArticle[] = [
     ],
     seeAlso: ["heavy-bleeding", "food-and-iron", "seeing-a-doctor"],
   },
+  {
+    id: "bleeding-between-periods",
+    group: "changes",
+    title: "Bleeding between periods",
+    blurb: "What's common, what's worth raising, and why mid-cycle spotting is often nothing to worry about.",
+    icon: "calendar-clear-outline",
+    minutes: 3,
+    sections: [
+      {
+        heading: "What counts as between",
+        body: [
+          "Any bleeding on a day that isn't part of a period, spotting included. A little spotting in the two days either side of a period is ordinary, because the period is starting or finishing, so welliva leaves those days out.",
+          "Spotting you log outside a period stays spotting: it never starts a period in welliva, so it can be seen for what it is.",
+        ],
+      },
+      {
+        heading: "What's common",
+        points: [
+          "Light spotting around ovulation, in the middle of the cycle, when oestrogen dips briefly around the release of the egg. When you log spotting there, welliva says so instead of counting it.",
+          "Spotting in the first months of a hormonal method: the pill, the patch, the ring, the implant, the injection or a hormonal coil. It often settles by itself.",
+          "A missed or late pill, which can bring on a little bleeding.",
+        ],
+      },
+      {
+        heading: "What welliva looks for",
+        body: [
+          "welliva mentions bleeding between periods when it comes in two of your last three cycles, with the dates. It leaves out the two days either side of a period and the day either side of your estimated ovulation.",
+          "On hormonal contraception it doesn't raise this by itself, because bleeding between bleeds is common on most methods. That doesn't mean it never matters: the list below still applies.",
+        ],
+      },
+      {
+        heading: "Why it's worth raising",
+        body: [
+          "Bleeding between periods is one of the things a doctor always wants to hear about, even when it's light and even when it turns out to be nothing. It's usually quick to look into, and the common causes are very treatable. If a cervical screening test is due, it's a good moment to mention that too.",
+        ],
+      },
+    ],
+    seeSomeone: [
+      "Bleeding between periods in two or more cycles, even when it's light.",
+      "Bleeding after sex, more than once.",
+      "Any bleeding at all after menopause.",
+      "New bleeding between bleeds on a hormonal method you'd been settled on for months.",
+      "Bleeding with severe, sudden pain, especially one-sided, or with faintness — urgent.",
+      "Bleeding with pain when there's any chance you're pregnant — urgent.",
+    ],
+    seeAlso: ["heavy-bleeding", "contraception", "seeing-a-doctor"],
+  },
 
   /* ── life and context ──────────────────────────────────────────────── */
   {
@@ -817,7 +891,7 @@ const ARTICLES: CycleArticle[] = [
         heading: "Signs that are more reliable than a calendar",
         points: [
           "Cervical mucus becoming clear, stretchy and slippery in the days before ovulation — the most useful free sign.",
-          "Ovulation predictor kits, which detect the LH surge a day or so before. welliva takes a positive test and uses it to sharpen your estimate.",
+          "Ovulation predictor kits, which detect the LH surge a day or so before. welliva moves this cycle's dates from a positive test, and learns your own timing once two cycles have one. With PCOS these tests can read positive without ovulation, so there a positive is a hint, not a date.",
           "Basal body temperature, which rises slightly after ovulation — it confirms, rather than predicts.",
           "A mild one-sided ache mid-cycle, for some people. Suggestive, not definitive.",
         ],
@@ -1054,6 +1128,9 @@ export const READING_FOR_NOTE: Record<DoctorNoteId, CycleArticleId> = {
   missed: "late-period",
   menopause_bleeding: "perimenopause",
   cramps_unrelieved: "cramps",
+  cramps_disruptive: "cramps",
+  heavy_periods: "heavy-bleeding",
+  between_periods: "bleeding-between-periods",
 };
 
 /** The page a logged symptom leads to. */
@@ -1066,6 +1143,7 @@ const READING_FOR_SYMPTOM: Record<Symptom, CycleArticleId> = {
   acne: "bloating-and-skin",
   cravings: "food-and-iron",
   nausea: "cramps",
+  mid_cycle_pain: "ovulation",
 };
 
 /** The page about a symptom she logged — the "what tends to help" a relief answer links to. */

@@ -47,6 +47,19 @@ export const DEFAULT_LUTEAL_DAYS = 14;
 export const MIN_COUNTED_CYCLE = 15;
 /** "The median of her last 3–6 cycles." */
 export const STATS_WINDOW = 6;
+/**
+ * A positive ovulation test counts as a cycle's surge from this many days
+ * after the period started (cycle day 7): earlier is too soon to be it. The
+ * luteal learning and the live update share it, so both measure from the
+ * same test.
+ */
+export const LIVE_TEST_MIN_DAY = 6;
+/**
+ * Days either side of the likely start once a positive test has dated this
+ * cycle's ovulation: about 2 when the luteal length is her own; 3 on the
+ * textbook 14, which stands for the 11 to 16 days the library quotes.
+ */
+export const TEST_HALF_WIDTH = { personal: 2, default: 3 } as const;
 /** z for a two-sided 80% interval. */
 const Z80 = 1.2816;
 
@@ -226,6 +239,13 @@ export interface Prediction {
   lutealDays: number;
   /** True when the luteal length came from her own ovulation tests. */
   lutealPersonal: boolean;
+  /**
+   * The positive ovulation test this cycle's dates were moved by, or null when
+   * they come from the calendar alone. Every surface that shows the window
+   * says so (./copy).
+   */
+  fromTest: string | null;
+  /** How sure the CALENDAR estimate is. A test-dated window says "From your test" instead (./copy). */
   confidence: Confidence;
 }
 
@@ -270,6 +290,20 @@ export function typicalPeriodLength(
 }
 
 /**
+ * The positive ovulation test that dates a cycle's surge: the LAST positive
+ * logged from `from` to `to`. One rule for both readers — the luteal learning
+ * below and this cycle's live update in `predict` — so what she has learned
+ * and what she sees today measure from the same test.
+ */
+export function lastPositiveTest(days: CycleDays, from: string, to: string): string | null {
+  let lh: string | null = null;
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    if (days[d]?.ovulationTest === "positive") lh = d;
+  }
+  return lh;
+}
+
+/**
  * Her luteal phase from positive ovulation tests: LH surges, ovulation follows
  * about a day later, and the next period comes a luteal phase after that.
  */
@@ -277,16 +311,24 @@ export function personalLuteal(cycles: readonly CycleRecord[], days: CycleDays):
   const out: number[] = [];
   for (const c of cycles) {
     if (c.status !== "counted") continue;
-    let lh: string | null = null;
-    for (let i = 6; i <= c.length - 7; i += 1) {
-      const d = addDays(c.start, i);
-      if (days[d]?.ovulationTest === "positive") lh = d;
-    }
+    const lh = lastPositiveTest(days, addDays(c.start, LIVE_TEST_MIN_DAY), addDays(c.start, c.length - 7));
     if (!lh) continue;
     const luteal = daysBetween(addDays(lh, 1), c.nextStart);
     if (luteal >= 9 && luteal <= 17) out.push(luteal);
   }
   return out;
+}
+
+/**
+ * The luteal length the prediction uses: hers (the median from her positive
+ * tests) once two or more completed cycles have one, else the textbook 14.
+ * Anything that estimates when she ovulated in a PAST cycle (./doctorChecks)
+ * reads this too, so the two can never disagree.
+ */
+export function lutealFor(cycles: readonly CycleRecord[], days: CycleDays): { days: number; personal: boolean } {
+  const samples = personalLuteal(cycles, days);
+  const personal = samples.length >= 2;
+  return { days: personal ? Math.round(median(samples)) : DEFAULT_LUTEAL_DAYS, personal };
 }
 
 export function predict(input: PredictInput): Prediction | null {
@@ -327,13 +369,28 @@ export function predict(input: PredictInput): Prediction | null {
   const cycleLength = Math.round(meanLength);
 
   const last = live[live.length - 1];
-  const likely = addDays(last.start, cycleLength);
   const period = typicalPeriodLength(live, settings);
+  const { days: lutealDays, personal: lutealPersonal } = lutealFor(cycles, input.days);
 
-  const lutealSamples = personalLuteal(cycles, input.days);
-  const lutealPersonal = lutealSamples.length >= 2;
-  const lutealDays = lutealPersonal ? Math.round(median(lutealSamples)) : DEFAULT_LUTEAL_DAYS;
-  const ovulation = addDays(likely, -lutealDays);
+  // A positive test THIS cycle is evidence about this cycle: ovulation the day
+  // after it, the period a luteal phase later. It replaces the calendar's
+  // estimate even where the calendar's window was narrower. Not with PCOS on
+  // the profile, where LH tests can read positive without ovulation, and only
+  // in the modes that predict a cycle (menopause logs only).
+  const pcos = !!input.profile?.conditions?.includes("pcos");
+  const fromTest =
+    (mode === "normal" || mode === "postpartum") && !pcos
+      ? lastPositiveTest(input.days, addDays(last.start, LIVE_TEST_MIN_DAY), today)
+      : null;
+  const ovulation = fromTest
+    ? addDays(fromTest, 1)
+    : addDays(addDays(last.start, cycleLength), -lutealDays);
+  const likely = fromTest ? addDays(ovulation, lutealDays) : addDays(last.start, cycleLength);
+  const windowHalf = fromTest
+    ? lutealPersonal
+      ? TEST_HALF_WIDTH.personal
+      : TEST_HALF_WIDTH.default
+    : halfWidth;
   // The fertile window never reaches back into the period it follows.
   const floor = addDays(last.start, period.days);
   let fertileStart = addDays(ovulation, -5);
@@ -351,11 +408,11 @@ export function predict(input: PredictInput): Prediction | null {
     meanLength,
     cycleLength,
     sd,
-    halfWidth,
+    halfWidth: windowHalf,
     lastStart: last.start,
-    earliest: addDays(likely, -halfWidth),
+    earliest: addDays(likely, -windowHalf),
     likely,
-    latest: addDays(likely, halfWidth),
+    latest: addDays(likely, windowHalf),
     periodLength: period.days,
     periodBasis: period.basis,
     ovulation,
@@ -363,8 +420,26 @@ export function predict(input: PredictInput): Prediction | null {
     fertileEnd,
     lutealDays,
     lutealPersonal,
+    fromTest,
     confidence,
   };
+}
+
+/**
+ * Her estimated ovulation for the cycle `date` falls in: this cycle's from the
+ * prediction, a completed (counted) cycle's as its next start less the luteal
+ * length the prediction uses. Null with no prediction (the logging-only modes)
+ * or for a day in a gap, a pause or before her first logged period.
+ */
+export function ovulationFor(
+  date: string,
+  prediction: Prediction | null,
+  cycles: readonly CycleRecord[],
+): string | null {
+  if (!prediction) return null;
+  if (date >= prediction.lastStart) return prediction.ovulation;
+  const c = cycles.find((x) => x.status === "counted" && x.start <= date && date < x.nextStart);
+  return c ? addDays(c.nextStart, -prediction.lutealDays) : null;
 }
 
 /* ───────────────────────────── today ───────────────────────────── */
@@ -467,6 +542,8 @@ export function todayStatus(input: PredictInput, prediction: Prediction | null):
     toEarliest,
     toLatest,
     lateBy,
-    ringDays: Math.max(prediction.cycleLength, cycleDay),
+    // This cycle's expected length, so the top of the dial is the likely start
+    // even when a positive test has moved it off her usual length.
+    ringDays: Math.max(daysBetween(prediction.lastStart, prediction.likely), cycleDay),
   };
 }

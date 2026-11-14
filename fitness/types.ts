@@ -242,6 +242,28 @@ export interface FitnessProfile {
   recommendationHistory: RecommendationMemory[];
   /** How recent sessions felt — the completion screen's single question. */
   effortHistory: EffortMemory[];
+  /**
+   * "Did anything hurt?", answered on the session summary. Optional: profiles
+   * saved before 2026-11-14 don't have it. Read through services/training/pain.
+   */
+  painHistory?: PainMemory[];
+}
+
+/**
+ * One answer to "Did anything hurt?" after a session. One per session run: a
+ * changed answer replaces the earlier one. Values are storage strings — add
+ * new ones, never rename.
+ */
+export interface PainMemory {
+  date: string; // YYYY-MM-DD, the session's day
+  /** The session run it was about (SessionSummaryData.sessionRunId). */
+  runId: string;
+  /** "none" = nothing hurt; "sore" = sore muscles; "pain" = sharp or joint pain. */
+  answer: "none" | "sore" | "pain";
+  /** Where, for "pain". Ids from services/training/pain PAIN_AREAS. */
+  areas?: string[];
+  /** ISO time it was answered. */
+  at: string;
 }
 
 /**

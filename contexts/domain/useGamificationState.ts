@@ -36,6 +36,7 @@ import {
   celebrationFromAchievement,
   celebrationFromMoment,
 } from "../../services/CelebrationService";
+import { noteGoalReached } from "../../services/body/forecastMemory";
 import { readCommitment } from "../../services/commitment";
 import { subscribeExternalWrites } from "../../services/notifications/externalWrites";
 import {
@@ -436,6 +437,10 @@ export function useGamificationState({
       journeyRef.current = next;
       setJourney(next);
       saveJourney(next);
+      // The day of the weigh-in that got there, for "we said / you did" on the
+      // new-chapter screen (services/body/forecastMemory). Never throws.
+      const reachedOn = sorted[sorted.length - 1]?.date;
+      if (reachedOn) void noteGoalReached(target, reachedOn);
       if (achievementsReconciledRef.current) {
         pushCelebrations([
           celebrationForChapter({

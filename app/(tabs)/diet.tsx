@@ -65,6 +65,7 @@ import { HungryOfferCard } from "@/components/cycle/HungryCard";
 import { useSmartMoment } from "@/components/smart/useSmartMoment";
 import { useNutrition, useProfile, useSystem } from "@/contexts/AppContext";
 import { useCycleOptional } from "@/contexts/CycleContext";
+import { useCycleHidden } from "@/contexts/CycleLockContext";
 import { useDayCalorieDelta } from "@/contexts/domain/useDayTarget";
 import { dayTargetNote } from "@/services/nutrition/dayTargets";
 import { useMealPlan } from "@/contexts/MealPlanContext";
@@ -298,7 +299,10 @@ export default function DietScreen() {
 
   // The hungrier-week offer, through that same quiet layer. Never counted: when
   // it appears says where someone is in their cycle (services/smart/types).
-  const hungryOffer = useCycleOptional()?.view.hungryOffer ?? null;
+  // With "Lock my cycle" shut it waits, and the target's note doesn't say why.
+  const cycleHidden = useCycleHidden();
+  const cycleOffer = useCycleOptional()?.view.hungryOffer ?? null;
+  const hungryOffer = cycleHidden ? null : cycleOffer;
   const hasHungryOffer = hungryOffer !== null;
   const hungryCandidates = useMemo(
     () => (hasHungryOffer ? [{ id: "hungry-week", feature: "hungry-week" as const, priority: 1 }] : []),
@@ -1536,7 +1540,7 @@ export default function DietScreen() {
                     </AppText>
                     {todayCalorieDelta ? (
                       <AppText variant="caption" color="tertiary">
-                        {dayTargetNote(todayCalorieDelta)}
+                        {dayTargetNote(todayCalorieDelta, { discreet: cycleHidden })}
                       </AppText>
                     ) : null}
                     <View style={styles.heroChips}>

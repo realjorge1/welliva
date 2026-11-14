@@ -7,6 +7,7 @@
  * answered once. "Not now" means not again — Settings is always there.
  */
 import { useCycle } from "@/contexts/CycleContext";
+import { useCycleLockOptional, type CycleLockValue } from "@/contexts/CycleLockContext";
 import { AppText, Button, Card, IconBadge, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { bleedWords, cycleHeadline, dialModel, glanceConfidence } from "@/services/cycle";
@@ -38,8 +39,12 @@ export function CycleHomeCard({ style }: { style?: StyleProp<ViewStyle> }) {
       if (tracking) void refreshMoments();
     }, [tracking, refreshMoments]),
   );
+  const lock = useCycleLockOptional();
 
   if (!cycle.ready || !settings.enabled || view.mode === "pregnancy") return null;
+  // "Lock my cycle" shut: one quiet line and the way in. Nothing while the
+  // phone is still saying what it can ask for.
+  if (lock?.hidden) return lock.gate === "locked" ? <LockedCycleCard style={style} lock={lock} /> : null;
 
   // The ring already shows the day, so the eyebrow names the card instead of
   // repeating the number; during a period the title says which day of it.
@@ -78,8 +83,6 @@ export function CycleHomeCard({ style }: { style?: StyleProp<ViewStyle> }) {
         <CycleDial
           model={model}
           size={78}
-          strokeWidth={7}
-          todayTone={s.inPeriod ? palette.period : colors.primary}
           animate="intro"
         >
           <AppText variant="headline" style={styles.dayNumber} maxFontSizeMultiplier={1.1}>
@@ -136,6 +139,47 @@ export function CycleHomeCard({ style }: { style?: StyleProp<ViewStyle> }) {
             {canEnd ? "It ended today" : "It started today"}
           </AppText>
         </Pressable>
+      ) : null}
+
+      {/* "We said the 14th. It came on the 15th." — the day a start is logged. */}
+      {view.receipt ? (
+        <AppText variant="footnote" color="secondary" style={styles.receipt}>
+          {view.receipt}
+        </AppText>
+      ) : null}
+    </Card>
+  );
+}
+
+/**
+ * The card while "Lock my cycle" is shut: "Cycle · locked" and the way in,
+ * nothing else. A successful unlock goes straight to the cycle screen.
+ */
+function LockedCycleCard({ style, lock }: { style?: StyleProp<ViewStyle>; lock: CycleLockValue }) {
+  const palette = useCyclePalette();
+  const open = async () => {
+    if ((await lock.unlock()) === "ok") router.navigate("/cycle" as never);
+  };
+  return (
+    <Card style={style} padding="lg">
+      <View style={styles.lockedRow}>
+        <IconBadge name="lock-closed" tone={palette.period} size={40} />
+        <AppText variant="callout" style={styles.flex} accessibilityLabel="Cycle, locked">
+          Cycle · locked
+        </AppText>
+        <Button
+          label="Unlock"
+          size="sm"
+          variant="tonal"
+          fullWidth={false}
+          disabled={lock.prompting}
+          onPress={() => void open()}
+        />
+      </View>
+      {lock.failure ? (
+        <AppText variant="footnote" color="secondary" style={styles.lockedFailure}>
+          {lock.failure}
+        </AppText>
       ) : null}
     </Card>
   );
@@ -204,4 +248,7 @@ const styles = StyleSheet.create({
   offerHead: { flexDirection: "row", gap: Spacing.md, alignItems: "flex-start" },
   offerBody: { marginTop: 2 },
   offerActions: { flexDirection: "row", gap: Spacing.sm, marginTop: Spacing.lg, alignItems: "center" },
+  lockedRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
+  receipt: { marginTop: Spacing.md },
+  lockedFailure: { marginTop: Spacing.sm },
 });

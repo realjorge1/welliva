@@ -15,6 +15,7 @@
  * in full underneath, in reading order, so nothing is hidden behind a guess.
  */
 import { useCyclePalette } from "@/components/cycle";
+import { CycleLockGate } from "@/components/cycle/CycleLockGate";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { AppText, Card, IconBadge, Reveal, Screen, SectionHeader, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
@@ -31,7 +32,16 @@ import { router } from "expo-router";
 import React, { useMemo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
+/** Behind "Lock my cycle" when it's on (components/cycle/CycleLockGate). */
 export default function CycleLearnScreen() {
+  return (
+    <CycleLockGate variant="pushed">
+      <CycleLearnBody />
+    </CycleLockGate>
+  );
+}
+
+function CycleLearnBody() {
   const { colors } = useColors();
   const palette = useCyclePalette();
   const { view, settings } = useCycle();

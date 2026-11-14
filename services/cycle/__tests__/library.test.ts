@@ -19,6 +19,19 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BETWEEN_MARGIN_DAYS,
+  BETWEEN_MIN_CYCLES,
+  BETWEEN_WINDOW,
+  DISRUPTIVE_MIN_PERIODS,
+  DISRUPTIVE_WINDOW,
+  HEAVY_DAYS,
+  HEAVY_MIN_FLOW_DAYS,
+  HEAVY_MIN_PERIODS,
+  HEAVY_TIRED_DAYS,
+  HEAVY_WINDOW,
+  OVULATION_SPOTTING_DAYS,
+} from "../doctorChecks";
+import {
   CYCLE_ARTICLES,
   CYCLE_LIBRARY,
   GROUP_ORDER,
@@ -231,5 +244,54 @@ describe("suggestedReading", () => {
     for (const a of suggestedReading(view(), settings())) {
       expect(CYCLE_LIBRARY[a.id]).toBe(a);
     }
+  });
+});
+
+/* ── 2026-11-13: the three doctor checks quote the numbers they act on ── */
+
+const WORD: Record<number, string> = { 1: "one", 2: "two", 3: "three", 4: "four", 5: "five" };
+const pageText = (id: CycleArticleId) => {
+  const a = CYCLE_LIBRARY[id];
+  return [
+    a.blurb,
+    ...a.sections.flatMap((s) => [s.heading, ...(s.body ?? []), ...(s.points ?? [])]),
+    ...(a.seeSomeone ?? []),
+  ].join(" ");
+};
+
+describe("the doctor checks' pages", () => {
+  it("cramps: the same count the note uses", () => {
+    expect(pageText("cramps")).toContain(
+      `${WORD[DISRUPTIVE_MIN_PERIODS]} of your last ${WORD[DISRUPTIVE_WINDOW]} periods with cramps`,
+    );
+    expect(pageText("cramps")).toContain("Kept me from school, work or plans");
+  });
+
+  it("heavy bleeding: the same days, periods and iron line", () => {
+    const text = pageText("heavy-bleeding");
+    expect(text).toContain(
+      `${WORD[HEAVY_DAYS]} or more days in ${WORD[HEAVY_MIN_PERIODS]} of your last ${WORD[HEAVY_WINDOW]} periods`,
+    );
+    expect(text).toContain(`flow on at least ${WORD[HEAVY_MIN_FLOW_DAYS]} days`);
+    expect(text).toContain(`low energy on ${WORD[HEAVY_TIRED_DAYS]} or more of those days`);
+    expect(text).toContain("blood test can check your iron");
+  });
+
+  it("bleeding between periods: a page of its own, with the same margins", () => {
+    const text = pageText("bleeding-between-periods");
+    expect(CYCLE_LIBRARY["bleeding-between-periods"].group).toBe("changes");
+    expect(text).toContain(`${WORD[BETWEEN_MIN_CYCLES]} of your last ${WORD[BETWEEN_WINDOW]} cycles`);
+    expect(text).toContain(`${WORD[BETWEEN_MARGIN_DAYS]} days either side of a period`);
+    expect(OVULATION_SPOTTING_DAYS).toBe(1);
+    expect(text).toContain("the day either side of your estimated ovulation");
+    // What's common comes before what's worth raising, and the urgent signs are there.
+    expect(text).toMatch(/around ovulation/);
+    expect(text).toMatch(/urgent/);
+  });
+
+  it("every new note links to its page", () => {
+    expect(READING_FOR_NOTE.cramps_disruptive).toBe("cramps");
+    expect(READING_FOR_NOTE.heavy_periods).toBe("heavy-bleeding");
+    expect(READING_FOR_NOTE.between_periods).toBe("bleeding-between-periods");
   });
 });

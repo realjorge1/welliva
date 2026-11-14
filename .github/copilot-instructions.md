@@ -87,13 +87,16 @@ npm run lint            # eslint . — must have 0 errors
 npm test                # vitest run
 ```
 
-`npm test` fails **exactly three** assertions by design:
-`constants/__tests__/legal.test.ts` refuses to pass while
-`LEGAL_POSTAL_ADDRESS` and `LEGAL_JURISDICTION` hold placeholder text. **Never
-"fix" this by relaxing the gate** — those strings go verbatim into a privacy
-policy users must accept. See `docs/legal/store-submission.md`.
+`npm test` is fully green — anything red is a real regression.
+`constants/__tests__/legal.test.ts` refuses to pass while any legal identity
+constant or document line holds placeholder text. **Never "fix" a failure there
+by relaxing the gate** — those strings go verbatim into a privacy policy users
+must accept. See `docs/legal/store-submission.md`.
 
-Anything else red is a real regression.
+On Windows, run the tests from an uppercase `C:\` working directory. From a
+lowercase `c:\` (or Git Bash `/c/`) every test file fails on load with
+`Cannot read properties of undefined (reading 'config')` and zero tests run —
+Node loads vitest's runner twice. That is the path, not the code.
 
 ## Environment
 

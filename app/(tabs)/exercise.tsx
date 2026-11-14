@@ -50,6 +50,7 @@ import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useProfile, useSystem, useWorkout } from "@/contexts/AppContext";
 import { useAllows, useBilling } from "@/contexts/BillingContext";
 import { useCycleOptional } from "@/contexts/CycleContext";
+import { useCycleHidden } from "@/contexts/CycleLockContext";
 import { ArtTile } from "@/fitness/components/ArtTile";
 import { recoveryCopy } from "@/fitness/components/recoveryCopy";
 import { PlanReasons } from "@/fitness/components/PlanReasons";
@@ -162,6 +163,8 @@ export default function ExerciseScreen() {
   // eases today's session (services/cycle/care). Null when she doesn't track.
   const cycle = useCycleOptional();
   const cycleEase = cycle?.view.ease ?? null;
+  // "Lock my cycle" shut: the session still eases, but nothing says why.
+  const cycleHidden = useCycleHidden();
   // A rough day offers a gentle walk or rest in place of the workout; "anyway"
   // brings the workout back for the day (services/smart/roughDay).
   const { rough, chooseWorkout } = useRoughDay();
@@ -255,7 +258,9 @@ export default function ExerciseScreen() {
         { level: "amber", score: recovery.score },
         EXERCISE_DATABASE,
         userBio,
-        { headline: cycleEase.headline, dose: cycleEase.dose },
+        cycleHidden
+          ? { headline: "Lighter session today", dose: "Eased for today" }
+          : { headline: cycleEase.headline, dose: cycleEase.dose },
       );
       return l ? { ...l, source: "cycle" as const } : null;
     }
@@ -290,7 +295,7 @@ export default function ExerciseScreen() {
       return l ? { ...l, source: "recovery" as const } : null;
     }
     return null;
-  }, [adaptiveTraining, todaySession, userBio, recovery.level, recovery.score, cycleEase, freshDay, shortToday]);
+  }, [adaptiveTraining, todaySession, userBio, recovery.level, recovery.score, cycleEase, cycleHidden, freshDay, shortToday]);
   // Eased by default — unless she chose the full session on her last cramp or
   // heavy days; then the lighter one is offered and waits for her tap.
   const easeByDefault = lighter?.source !== "cycle" || !!cycleEase?.auto;
@@ -633,7 +638,7 @@ export default function ExerciseScreen() {
                       </View>
                     ) : lighter ? (
                       <>
-                        {lighter.source === "cycle" && cycleEase?.learnedNote ? (
+                        {lighter.source === "cycle" && cycleEase?.learnedNote && !cycleHidden ? (
                           <AppText variant="footnote" color="tertiary" style={styles.lighterToggle}>
                             {cycleEase.learnedNote}
                           </AppText>

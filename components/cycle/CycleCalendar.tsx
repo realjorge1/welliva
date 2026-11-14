@@ -39,6 +39,7 @@ function describe(date: string, paint: DayPaint, today: string, bleed: string): 
   else if (paint.period === "predicted") parts.push("predicted period");
   if (paint.ovulation) parts.push("estimated ovulation");
   else if (paint.fertile) parts.push("fertile window, an estimate");
+  if (paint.stretchy) parts.push("clear, stretchy discharge");
   if (paint.hasLog) parts.push("has notes");
   return parts.join(", ");
 }
@@ -161,10 +162,17 @@ export function CycleCalendar({
                     <View style={[styles.ovulation, { backgroundColor: palette.ovulation }]} />
                   ) : null}
                 </View>
+                {/* A clear, stretchy day: a short solid lilac bar where the notes dot goes. */}
                 <View
                   style={[
-                    styles.logDot,
-                    { backgroundColor: p.hasLog ? alpha(colors.text, 0.55) : "transparent" },
+                    p.stretchy ? styles.stretchy : styles.logDot,
+                    {
+                      backgroundColor: p.stretchy
+                        ? palette.fertile
+                        : p.hasLog
+                          ? alpha(colors.text, 0.55)
+                          : "transparent",
+                    },
                   ]}
                 />
               </Pressable>
@@ -177,6 +185,14 @@ export function CycleCalendar({
         <Legend color={palette.period} label={bleedLabel} />
         {predicting ? <Legend color={palette.predicted} label="Predicted" /> : null}
         {showFertile ? <Legend color={palette.fertileSoft} ink={palette.fertile} label="Fertile (estimate)" /> : null}
+        {showFertile ? (
+          <View style={styles.legendItem}>
+            <View style={[styles.legendStretchy, { backgroundColor: palette.fertile }]} />
+            <AppText variant="caption" color="tertiary">
+              Clear, stretchy
+            </AppText>
+          </View>
+        ) : null}
         <View style={styles.legendItem}>
           <View style={[styles.legendLogDot, { backgroundColor: alpha(colors.text, 0.55) }]} />
           <AppText variant="caption" color="tertiary">
@@ -218,6 +234,8 @@ const styles = StyleSheet.create({
   disc: { alignItems: "center", justifyContent: "center" },
   ovulation: { position: "absolute", bottom: 4, width: 4, height: 4, borderRadius: 2 },
   logDot: { width: 4, height: 4, borderRadius: 2, marginTop: 3 },
+  stretchy: { width: 10, height: 3, borderRadius: 1.5, marginTop: 3.5 },
+  legendStretchy: { width: 10, height: 3, borderRadius: 1.5 },
   legend: {
     flexDirection: "row",
     flexWrap: "wrap",

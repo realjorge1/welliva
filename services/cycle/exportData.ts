@@ -18,6 +18,7 @@ import type { DoctorNote } from "./flags";
 import { median, type CycleRecord, type Prediction } from "./predict";
 import { RELIEF_NOUN, RELIEF_OPTIONS, reliefRecalls } from "./relief";
 import {
+  DISCHARGE_LABEL,
   ENERGY_LABEL,
   FLOW_LABEL,
   isEmptyDayLog,
@@ -111,6 +112,11 @@ export function doctorSummary(input: {
     if (heavyDays) parts.push(`heavy flow (${heavyDays} day${heavyDays === 1 ? "" : "s"})`);
     lines.push(`Most logged: ${parts.join(", ")}.`);
   }
+  // Whether pain stops a normal day is the first thing a clinician asks about cramps.
+  const stoppedDays = Object.values(data.days).filter(
+    (log) => log.stoppedDay && log.symptoms?.includes("cramps"),
+  ).length;
+  if (stoppedDays) lines.push(`Days cramps stopped school, work or plans: ${stoppedDays}.`);
 
   // Only answers that met the standard (./relief): what a clinician asks next.
   const helped = reliefRecalls(data.days);
@@ -148,32 +154,59 @@ const CONTRACEPTION_CSV = {
   unsaid: "hormonal contraception: prefer not to say",
 } as const;
 
+/**
+ * The columns. New ones go on the END, so a sheet she made from an older
+ * export still lines up: `kept_from_day` ("Kept me from school, work or
+ * plans", ticked under Cramps) and `discharge` (fertile-window users only)
+ * joined on 2026-11-13.
+ */
+export const CSV_COLUMNS = [
+  "type",
+  "date",
+  "end",
+  "flow",
+  "symptoms",
+  "mood",
+  "energy",
+  "ovulation_test",
+  "detail",
+  "kept_from_day",
+  "discharge",
+] as const;
+
+/** One row, padded to every column, so a row that has nothing to say in the new ones still lines up. */
+function csvRow(cells: string[]): string {
+  const full = [...cells];
+  while (full.length < CSV_COLUMNS.length) full.push("");
+  return full.map(csvCell).join(",");
+}
+
 export function cycleCsv(data: CycleData): string {
-  const rows: string[] = ["type,date,end,flow,symptoms,mood,energy,ovulation_test,detail"];
+  const rows: string[] = [CSV_COLUMNS.join(",")];
   const c = data.settings.contraception;
   if (c) {
     const detail = c.restartFrom
       ? `${CONTRACEPTION_CSV[c.answer]}; cycles count from ${c.restartFrom}`
       : CONTRACEPTION_CSV[c.answer];
-    rows.push(["contraception", c.since, "", "", "", "", "", "", detail].map(csvCell).join(","));
+    rows.push(csvRow(["contraception", c.since, "", "", "", "", "", "", detail]));
   }
   const s = data.settings;
   if (s.planHungryWeek) {
-    rows.push(["hungrier_week_plan", s.hungryPlanFrom ?? "", "", "", "", "", "", "", "on"].map(csvCell).join(","));
+    rows.push(csvRow(["hungrier_week_plan", s.hungryPlanFrom ?? "", "", "", "", "", "", "", "on"]));
   }
   for (const date of Object.keys(s.hungryLedger).sort()) {
     const kcal = s.hungryLedger[date];
     const change = `calorie target ${kcal > 0 ? "+" : ""}${kcal} kcal`;
-    rows.push(["target_change", date, "", "", "", "", "", "", change].map(csvCell).join(","));
+    rows.push(csvRow(["target_change", date, "", "", "", "", "", "", change]));
   }
   for (const e of liveEpisodes(data.periods)) {
-    rows.push(["period", e.start, e.end ?? "", "", "", "", "", "", ""].map(csvCell).join(","));
+    rows.push(csvRow(["period", e.start, e.end ?? ""]));
   }
   for (const date of Object.keys(data.days).sort()) {
     const log = data.days[date];
     if (isEmptyDayLog(log)) continue;
     rows.push(
-      [
+      csvRow([
         "day",
         date,
         "",
@@ -183,9 +216,9 @@ export function cycleCsv(data: CycleData): string {
         log.energy ? ENERGY_LABEL[log.energy] : "",
         log.ovulationTest ?? "",
         reliefDetail(log),
-      ]
-        .map(csvCell)
-        .join(","),
+        log.stoppedDay ? "yes" : "",
+        log.discharge ? DISCHARGE_LABEL[log.discharge] : "",
+      ]),
     );
   }
   return rows.join("\n");

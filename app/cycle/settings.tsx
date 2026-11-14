@@ -16,6 +16,7 @@
  * this account's backup actually runs, "Reminders on" only with permission.
  */
 import { useCyclePalette } from "@/components/cycle";
+import { CycleLockGate } from "@/components/cycle/CycleLockGate";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { useReminderPermission } from "@/components/notifications/useReminderPermission";
 import {
@@ -31,6 +32,8 @@ import {
 } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useCycle } from "@/contexts/CycleContext";
+import { useCycleLockOptional } from "@/contexts/CycleLockContext";
+import { LOCK_TITLE, lockOfferReason } from "@/services/cycle/lockRules";
 import {
   CONTRACEPTION_HINT,
   CONTRACEPTION_OPTIONS,
@@ -46,7 +49,16 @@ import { router } from "expo-router";
 import React, { useState } from "react";
 import { Pressable, Share, StyleSheet, Switch, View } from "react-native";
 
+/** Behind "Lock my cycle" when it's on (components/cycle/CycleLockGate). */
 export default function CycleSettingsScreen() {
+  return (
+    <CycleLockGate variant="pushed">
+      <CycleSettingsBody />
+    </CycleLockGate>
+  );
+}
+
+function CycleSettingsBody() {
   const { colors } = useColors();
   const palette = useCyclePalette();
   const cycle = useCycle();
@@ -55,6 +67,12 @@ export default function CycleSettingsScreen() {
   const permission = useReminderPermission();
   const [confirm, setConfirm] = useState<"off" | "delete" | null>(null);
   const [busy, setBusy] = useState(false);
+  // "Lock my cycle": shown when this build can ask (or it's already on), on
+  // this phone only. Turning it on asks for one unlock first.
+  const lock = useCycleLockOptional();
+  const [lockBusy, setLockBusy] = useState(false);
+  const lockShown = !!lock && (lock.offer !== "unavailable" || lock.enabled);
+  const lockReason = lock && !lock.enabled ? lockOfferReason(lock.offer) : null;
 
   const switchTrack = { true: palette.period, false: alpha(colors.text, 0.18) };
   // Logging only: nothing is predicted, so the rows that hang off a
@@ -240,6 +258,26 @@ export default function CycleSettingsScreen() {
 
         <Label text="Privacy" />
         <ListGroup>
+          {lockShown && lock ? (
+            <ListRow
+              icon="lock-closed"
+              tone={palette.period}
+              title={LOCK_TITLE}
+              subtitle={lock.failure ?? lockReason ?? lock.copy.subtitle}
+              right={
+                <Switch
+                  value={lock.enabled}
+                  disabled={lockBusy || (!lock.enabled && lock.offer !== "offered")}
+                  onValueChange={(v) => {
+                    setLockBusy(true);
+                    void lock.setEnabled(v).finally(() => setLockBusy(false));
+                  }}
+                  trackColor={switchTrack}
+                  accessibilityLabel={LOCK_TITLE}
+                />
+              }
+            />
+          ) : null}
           <ListRow
             icon="cloud-upload"
             tone={colors.success}

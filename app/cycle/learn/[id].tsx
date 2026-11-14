@@ -15,6 +15,7 @@
  * library, never a blank screen.
  */
 import { useCyclePalette } from "@/components/cycle";
+import { CycleLockGate } from "@/components/cycle/CycleLockGate";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { AppText, Button, Card, IconBadge, Reveal, Screen, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
@@ -25,7 +26,16 @@ import { router, useLocalSearchParams } from "expo-router";
 import React from "react";
 import { Pressable, Share, StyleSheet, View } from "react-native";
 
+/** Behind "Lock my cycle" when it's on: the page carries the doctor-summary share button. */
 export default function CycleArticleScreen() {
+  return (
+    <CycleLockGate variant="pushed">
+      <CycleArticleBody />
+    </CycleLockGate>
+  );
+}
+
+function CycleArticleBody() {
   const { colors } = useColors();
   const palette = useCyclePalette();
   const { id } = useLocalSearchParams<{ id?: string }>();

@@ -12,6 +12,7 @@
 import { AppText, Button, Sheet } from "@/components/ui";
 import { Radius, Spacing } from "@/constants/theme";
 import { useCycleOptional } from "@/contexts/CycleContext";
+import { useCycleHidden } from "@/contexts/CycleLockContext";
 import { CYCLE_LIBRARY, type WaterMoment } from "@/services/cycle";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -82,7 +83,9 @@ const GIVE_UP_MS = 2500;
 export function WaterAfterWeighIn({ armed, onDone }: { armed: boolean; onDone: () => void }) {
   const palette = useCyclePalette();
   const cycle = useCycleOptional();
-  const moment = cycle?.settings.enabled ? cycle.view.water : null;
+  // "Lock my cycle" shut: the note doesn't show (and the one-time note isn't spent).
+  const hidden = useCycleHidden();
+  const moment = cycle?.settings.enabled && !hidden ? cycle.view.water : null;
   const [settled, setSettled] = useState(false);
   const open = armed && settled && !!moment && moment.date === cycle?.today;
 

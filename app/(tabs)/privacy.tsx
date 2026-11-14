@@ -27,8 +27,10 @@
  */
 import { AppText, Card, IconBadge, Screen, useColors } from "@/components/ui";
 import { ScreenTopBar } from "@/components/navigation";
+import { DownloadMyData } from "@/components/privacy/DownloadMyData";
 import { useConsent, type ConsentRow } from "@/components/privacy/useConsent";
 import { useCycleOptional } from "@/contexts/CycleContext";
+import { useCycleHidden } from "@/contexts/CycleLockContext";
 import { useLegalGate } from "@/components/legal";
 import { LEGAL_DOCS, LEGAL_DOC_ORDER, LEGAL_VERSION } from "@/constants/legal";
 import {
@@ -65,8 +67,11 @@ export default function PrivacyScreen() {
   /** Her cycle in Gozlin chats — shown only to someone who tracks one. */
   const cycle = useCycleOptional();
   const cycleRow = c.rows.find((r) => r.category === "cycle_gozlin");
+  // With "Lock my cycle" shut, this switch waits behind the lock, like its twin
+  // in Cycle settings: it changes what the coach is told about her cycle.
+  const cycleHidden = useCycleHidden();
   const cycleShare =
-    cycle?.settings.enabled && cycleRow
+    cycle?.settings.enabled && cycleRow && !cycleHidden
       ? { row: cycleRow, granted: cycle.shareWithGozlin, onToggle: cycle.setShareWithGozlin }
       : undefined;
 
@@ -185,6 +190,14 @@ export default function PrivacyScreen() {
             : "Neither is built yet — both are named here so this list stays complete rather than flattering."}
         </AppText>
       ) : null}
+
+      {/* A copy of everything, as a Word document saved where they choose
+        (components/privacy/DownloadMyData). The right to a copy used to mean
+        emailing us; the policy's "Your rights" now points here. */}
+      <AppText variant="caption" color="tertiary" uppercase style={styles.groupKicker}>
+        Your data
+      </AppText>
+      <DownloadMyData style={styles.block} />
 
       {/* The switches above are the enforcement. These are the promise. */}
       <AppText variant="caption" color="tertiary" uppercase style={styles.groupKicker}>

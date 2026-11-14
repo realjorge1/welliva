@@ -14,6 +14,7 @@
 import { NotificationBannerPreview } from "@/components/notifications/NotificationBannerPreview";
 import { AppText, Button, Card, Pill, useColors } from "@/components/ui";
 import { Spacing, alpha } from "@/constants/theme";
+import { useCycleHidden } from "@/contexts/CycleLockContext";
 import type { ExactAlarmStatus } from "@/services/notifications/exactAlarms";
 import type { QueuedNotification } from "@/services/notifications/queue";
 import { Ionicons } from "@expo/vector-icons";
@@ -36,7 +37,10 @@ export function StatusHero({
   // Paused only means something once notifications are allowed at all.
   const quiet = paused && status === "granted";
 
-  const next = queue.find((q) => q.next !== null) ?? null;
+  // "Lock my cycle" shut: a cycle reminder up next keeps its time, not its title.
+  const cycleHidden = useCycleHidden();
+  const found = queue.find((q) => q.next !== null) ?? null;
+  const next = found && cycleHidden && found.kind === "cycle" ? { ...found, title: "a private reminder" } : found;
   const tone = quiet
     ? colors.warning
     : status === "granted"

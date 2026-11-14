@@ -19,9 +19,6 @@
  * on next launch, because their stored acceptance records the version they saw.
  * See services/legal/LegalAcceptance.ts.
  *
- * ⚠️ BEFORE STORE SUBMISSION: fill in `LEGAL_POSTAL_ADDRESS` below — the last
- * unfilled identity constant. See docs/legal/store-submission.md.
- *
  * PUBLIC COPIES. Both stores and Facebook Login require the policy at a public
  * URL, not only in-app. `npm run legal:publish` renders THIS file to the static
  * site at LEGAL_SITE_URL (scripts/legal-site.mjs) — so after any change here,
@@ -33,21 +30,20 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * The operating entity's registered name, address and governing jurisdiction.
- * These strings are interpolated verbatim into the documents below, so a
- * placeholder left here ships as a placeholder.
+ * The operating entity's name, contact and governing jurisdiction. These
+ * strings are interpolated verbatim into the documents below, so a placeholder
+ * left here ships as a placeholder (constants/__tests__/legal.test.ts guards it).
  *
- * ONE IS STILL OUTSTANDING — and deliberately so. `LEGAL_POSTAL_ADDRESS` holds
- * bracketed text because the registered address is not yet decided, and the
- * owner's instruction is to leave it red rather than publish an invented one.
- * constants/__tests__/legal.test.ts therefore fails two assertions on purpose.
- * That is the intended state, not a regression to fix: do NOT invent an address,
- * and do NOT loosen the guard's regex. Replace the string with the real
- * registered address and both assertions go green on their own.
+ * NO POSTAL ADDRESS — by the owner's decision, 14 November 2026. The documents
+ * name the email above as the way to reach us, and nothing else. There used to
+ * be a `LEGAL_POSTAL_ADDRESS` holding "[… to be completed]" bracket text, which
+ * kept two guard assertions red for two months; the owner chose to leave the
+ * address out rather than publish one. If a real address is ever wanted, add the
+ * constant back with the REAL value, put it in the "Who we are" sentence, and
+ * add it to IDENTITY in the guard test. Never put an invented one here.
  */
 export const LEGAL_ENTITY = "welliva";
 export const LEGAL_CONTACT_EMAIL = "mrjorgeobika@gmail.com";
-export const LEGAL_POSTAL_ADDRESS = "[registered business address — to be completed]";
 export const LEGAL_JURISDICTION = "Nigeria";
 
 /**
@@ -62,11 +58,20 @@ export const TERMS_URL = `${LEGAL_SITE_URL}/terms/`;
 /** Facebook Login's "User data deletion → Data deletion instructions URL". */
 export const DATA_DELETION_URL = `${LEGAL_SITE_URL}/data-deletion/`;
 
-/** Bump on any material change → every user re-accepts. */
-export const LEGAL_VERSION = 4;
+/**
+ * Bump on any material change → every user re-accepts.
+ * 5 (14 November 2026): the cycle log can now hold whether cramps kept you
+ * from your day, and discharge (fertile-window users only). v4 had already
+ * shipped, so this one re-gates (owner, 2026-11-13). Folded into the same,
+ * still-unpublished v5 the same day: "anything hurt?" after a workout, the
+ * "worth mentioning to a doctor" notes, and Download my data, so users
+ * re-accept once, not twice. Also folded in, same day: the "Who we are" line
+ * no longer carries a postal address (owner's decision; email only).
+ */
+export const LEGAL_VERSION = 5;
 
 /** Shown in each document header. Update alongside LEGAL_VERSION. */
-export const LEGAL_LAST_UPDATED = "5 November 2026";
+export const LEGAL_LAST_UPDATED = "14 November 2026";
 
 /** Minimum age to hold an account (the onboarding age field enforces it too). */
 export const MINIMUM_AGE = 13;
@@ -132,7 +137,7 @@ const PRIVACY: LegalDoc = {
     {
       heading: "Who we are",
       body: [
-        `This app is operated by ${LEGAL_ENTITY} ("we", "us"). For privacy questions, or to exercise any right described below, contact ${LEGAL_CONTACT_EMAIL}. Postal: ${LEGAL_POSTAL_ADDRESS}.`,
+        `This app is operated by ${LEGAL_ENTITY} ("we", "us"). For privacy questions, or to exercise any right described below, contact ${LEGAL_CONTACT_EMAIL}.`,
         "Where data-protection law applies to you (for example the UK/EU GDPR, or comparable national law), we act as the controller of the personal data described here.",
       ],
     },
@@ -146,8 +151,8 @@ const PRIVACY: LegalDoc = {
         "Body and lifestyle: age, biological sex, height, weight, daily activity level, training experience, available equipment, goals and region",
         "Food: dietary style, cuisine preference, meals per day, allergies and foods you dislike",
         "Health context: medical conditions (including pregnancy and trimester, diabetes, kidney, liver, thyroid, digestive and hormonal conditions), injuries or pain areas, and medications or medication categories",
-        "Your logs: meals and foods eaten, water, workouts and sessions completed, body measurements and weigh-ins, habits, streaks, and mood/energy/sleep check-ins",
-        "Your cycle log, only if you switch cycle tracking on: the dates your periods start and end, flow, symptoms you note (such as cramps or headache), mood and energy, how long your cycle usually is, ovulation-test results if you turn on the fertile-window estimate, whether you use hormonal contraception (if you choose to say), what you said helped a symptom, and whether you asked welliva to plan for a hungrier week. Cycle tracking is off until you enable it",
+        "Your logs: meals and foods eaten, water, workouts and sessions completed (and, if you answer, whether anything hurt afterwards and where), body measurements and weigh-ins, habits, streaks, and mood/energy/sleep check-ins",
+        "Your cycle log, only if you switch cycle tracking on: the dates your periods start and end, flow, symptoms you note (such as cramps or headache), whether cramps kept you from school, work or plans, mood and energy, how long your cycle usually is, ovulation-test results and discharge if you turn on the fertile-window estimate, whether you use hormonal contraception (if you choose to say), what you said helped a symptom, and whether you asked welliva to plan for a hungrier week. Cycle tracking is off until you enable it",
         "Photos, if you add them: a profile picture, progress photos, and meal photos you ask the coach to analyse",
         "Messages you send to the AI coach",
       ],
@@ -170,7 +175,8 @@ const PRIVACY: LegalDoc = {
       heading: "Why we use it (and our legal basis)",
       bullets: [
         "To create your nutrition targets, meal plan and training plan — this is the service you asked for (performance of a contract)",
-        "To keep you safe: allergies, conditions, injuries and medications are used to filter foods and exercises out of your plan",
+        "To keep you safe: allergies, conditions, injuries and medications are used to filter foods and exercises out of your plan, and an area you say hurt after a workout is rested in your plan for two weeks",
+        "To point out, on your phone, things in your own logs that may be worth raising with a doctor, such as weight falling without trying, eating less than the least welliva would plan for you, low moods on most days for two weeks, or the same spot hurting after workouts. These are never a diagnosis",
         "To track your cycle, estimate when your next period is likely and, on days you log cramps or heavy flow, ease your workout; and to line your cycle up, on your phone, against your own weight, food, sleep, training, mood and trips, so welliva can explain what it sees and, if you ask it to, plan your calories around it — only if you switch cycle tracking on",
         "To sync your account across your devices and restore it if you change phone",
         "To send reminders you have enabled",
@@ -221,7 +227,7 @@ const PRIVACY: LegalDoc = {
     {
       heading: "Your rights",
       bullets: [
-        "Access a copy of what we hold about you",
+        "Access a copy of what we hold about you. Trust → Download my data saves it as a Word document, wherever you choose on your phone",
         "Correct anything wrong — most of it is editable in Settings",
         "Delete your data, or your whole account",
         "Withdraw a consent you gave, at any time, under More → Privacy",

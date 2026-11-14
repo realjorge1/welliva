@@ -50,6 +50,8 @@ import {
   useCyclePalette,
   WaterCard,
 } from "@/components/cycle";
+import { CycleLockGate } from "@/components/cycle/CycleLockGate";
+import { HormoneSheet } from "@/components/cycle/HormoneSheet";
 import { useCyclePatterns, useIronPicks, useLateContext } from "@/components/cycle/useCycleInsights";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { ScreenTopBar } from "@/components/navigation";
@@ -74,7 +76,9 @@ import {
   MOOD_LABEL,
   openEpisode,
   paintDays,
+  PCOS_TESTING_LINE,
   READING_FOR_NOTE,
+  shareDatesLine,
   shiftMonthCursor,
   suggestedReading,
   SYMPTOM_LABEL,
@@ -94,7 +98,16 @@ type DateQuestion =
   | { kind: "end"; from: string }
   | { kind: "missed"; gap: CycleRecord };
 
+/** Behind "Lock my cycle" when it's on (components/cycle/CycleLockGate). */
 export default function CycleScreen() {
+  return (
+    <CycleLockGate variant="tab">
+      <CycleScreenBody />
+    </CycleLockGate>
+  );
+}
+
+function CycleScreenBody() {
   const { colors } = useColors();
   const palette = useCyclePalette();
   const { width } = useWindowDimensions();
@@ -108,6 +121,8 @@ export default function CycleScreen() {
   const late = useLateContext();
 
   const [logDate, setLogDate] = useState<string | null>(null);
+  /** "What's at work today" (services/cycle/hormones), opened from Today or the phase name. */
+  const [hormonesOpen, setHormonesOpen] = useState(false);
   const [question, setQuestion] = useState<DateQuestion | null>(null);
   /** She answered "what helped?" here — keep its "Noted" in the slot until she leaves. */
   const [reliefTouched, setReliefTouched] = useState(false);
@@ -249,7 +264,8 @@ export default function CycleScreen() {
       : s.lateBy > 0
         ? `late by ${s.lateBy} ${s.lateBy === 1 ? "day" : "days"}`
         : p && s.predicting
-          ? `of about ${p.cycleLength}`
+          ? // This cycle's expected length: a positive test can move it off her usual one.
+            `of about ${daysBetween(p.lastStart, p.likely)}`
           : s.cycleDay === null
             ? "log your period"
             : " ";
@@ -289,7 +305,6 @@ export default function CycleScreen() {
                 <CycleDial
                   model={model}
                   size={dialSize}
-                  todayTone={s.inPeriod ? palette.period : colors.primary}
                   animate="always"
                   accessibilityLabel={dialLabel}
                 >
@@ -309,7 +324,19 @@ export default function CycleScreen() {
                 <AppText variant="headline" align="center" style={styles.heroTitle}>
                   {headline.title}
                 </AppText>
-                {headline.detail ? (
+                {headline.detail && view.hormones?.opens ? (
+                  // The phase name opens "What's at work today".
+                  <Pressable
+                    onPress={() => setHormonesOpen(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${headline.detail}. What's at work today`}
+                    hitSlop={8}
+                  >
+                    <AppText variant="subhead" color="secondary" align="center">
+                      {headline.detail}
+                    </AppText>
+                  </Pressable>
+                ) : headline.detail ? (
                   <AppText variant="subhead" color="secondary" align="center">
                     {headline.detail}
                   </AppText>
@@ -368,6 +395,12 @@ export default function CycleScreen() {
                   {showPeriodEnded ? "Ended on another day?" : "Started on another day?"}
                 </AppText>
               </Pressable>
+            ) : null}
+            {/* "We said the 14th. It came on the 15th." — the day a start is logged. */}
+            {view.receipt ? (
+              <AppText variant="footnote" color="secondary" align="center" style={styles.receipt}>
+                {view.receipt}
+              </AppText>
             ) : null}
           </Reveal>
         ) : null}
@@ -428,7 +461,7 @@ export default function CycleScreen() {
         ))}
 
         {/* ── 4. Today ────────────────────────────────────────────────── */}
-        {!paused && (todayUps.length > 0 || view.ease || view.todayLog) ? (
+        {!paused && (todayUps.length > 0 || view.ease || view.todayLog || view.hormones) ? (
           <Reveal index={3}>
             <View style={styles.section}>
               <SectionHeader title="Today" subtitle="From your own logs" weight="700" />
@@ -469,6 +502,29 @@ export default function CycleScreen() {
                     </AppText>
                     <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
                   </Pressable>
+                ) : null}
+                {/* "What's at work today": one quiet line. It explains the
+                    cycle; it never says how to feel, eat or train. */}
+                {view.hormones?.opens ? (
+                  <Pressable
+                    onPress={() => setHormonesOpen(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`What's at work today: ${view.hormones.line}`}
+                    style={styles.lineRow}
+                  >
+                    <Ionicons name="flask-outline" size={16} color={palette.period} />
+                    <AppText variant="subhead" style={styles.flex}>
+                      {view.hormones.line}
+                    </AppText>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                  </Pressable>
+                ) : view.hormones ? (
+                  <View style={styles.lineRow}>
+                    <Ionicons name="flask-outline" size={16} color={colors.textTertiary} />
+                    <AppText variant="subhead" color="secondary" style={styles.flex}>
+                      {view.hormones.line}
+                    </AppText>
+                  </View>
                 ) : null}
               </Card>
             </View>
@@ -535,10 +591,39 @@ export default function CycleScreen() {
                     </AppText>
                     <AppText variant="caption" color="secondary">
                       Ovulation around {formatDay(p.ovulation)}
-                      {p.lutealPersonal ? ", from your own ovulation tests" : ""}. An estimate, not birth
-                      control.
+                      {p.fromTest
+                        ? ", the day after your positive test"
+                        : p.lutealPersonal
+                          ? ", from your own ovulation tests"
+                          : ""}
+                      . An estimate, not birth control.
                     </AppText>
+                    {/* For someone who uses ovulation tests: when to start. In the app only. */}
+                    {view.testingLine ? (
+                      <AppText variant="caption" color="secondary" style={styles.testing}>
+                        {view.testingLine}
+                        {view.pcos ? ` ${PCOS_TESTING_LINE}` : ""}
+                      </AppText>
+                    ) : null}
                   </View>
+                ) : null}
+                {/* One line to the share sheet. Nothing stored, nothing counted. */}
+                {s.lateBy === 0 && shareDatesLine(p) ? (
+                  <Pressable
+                    onPress={() => {
+                      const message = shareDatesLine(p);
+                      if (message) void Share.share({ message }).catch(() => undefined);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Share your next dates"
+                    hitSlop={8}
+                    style={styles.share}
+                  >
+                    <Ionicons name="share-outline" size={16} color={colors.primary} />
+                    <AppText variant="footnote" color="brand" weight="600">
+                      Share dates
+                    </AppText>
+                  </Pressable>
                 ) : null}
               </Card>
             </View>
@@ -784,7 +869,7 @@ export default function CycleScreen() {
                       ? {
                           start: addDays(today, -(s.cycleDay - 1)),
                           day: s.cycleDay,
-                          expected: p?.cycleLength ?? s.ringDays,
+                          expected: p ? daysBetween(p.lastStart, p.likely) : s.ringDays,
                         }
                       : null
                   }
@@ -811,6 +896,7 @@ export default function CycleScreen() {
       </Screen>
 
       <DayLogSheet date={logDate} onClose={() => setLogDate(null)} />
+      <HormoneSheet card={view.hormones} visible={hormonesOpen} onClose={() => setHormonesOpen(false)} />
 
       <PickDateSheet
         visible={question !== null}
@@ -897,6 +983,9 @@ const styles = StyleSheet.create({
   heroTitle: { marginTop: Spacing.xl },
   actions: { flexDirection: "row", gap: Spacing.sm, marginTop: Spacing.xxl },
   otherDay: { alignSelf: "center", marginTop: Spacing.md, paddingVertical: 4 },
+  receipt: { marginTop: Spacing.sm, paddingHorizontal: Spacing.lg },
+  testing: { marginTop: Spacing.xs },
+  share: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", marginTop: Spacing.md, paddingVertical: 4 },
   cardBody: { marginTop: 4 },
   cardCta: { marginTop: Spacing.md, alignSelf: "flex-start" },
   gapActions: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm, marginTop: Spacing.md },

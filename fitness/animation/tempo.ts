@@ -176,6 +176,9 @@ const OWN_PACE_MS: Partial<Record<FigureMotion, (typeof REP_GRID_MS)[number]>> =
   boxing: 1500,
   kbSwing: 1500,
   bearCrawl: 1500,
+  // A rep is a step out one way and a step back: the feet take turns now
+  // (motion.ts "The feet"), so each step gets half a rep, not a quarter.
+  stepTouch: 2000,
 };
 
 /**

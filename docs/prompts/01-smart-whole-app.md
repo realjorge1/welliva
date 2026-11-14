@@ -99,7 +99,7 @@ Full specifications are below. The thresholds in them are **starting values**. K
   - If you must change Gozlin's prompt or tools on the server, that lives in the sibling repo `..\backend-welliva`, which auto-deploys from `main`. Both repos must change together with a contract-version bump on both sides, and **nothing is pushed without the owner's OK**.
 - **Analytics:** first-party `track()` from `services/telemetry/Analytics.ts` only, never a vendor SDK. Add one event per feature for shown, accepted and dismissed, so the owner can see which features people use. It respects the `measurement` consent.
 - **Tests:** vitest. Put new logic in pure modules with tests. Inject `today`/`now`. Build date fixtures from **local date parts**, never `toISOString()` (that slides dates a day west of Greenwich).
-- **Verification after every phase:** `npm run typecheck`, `npm run lint`, `npm test`. Exactly **2 tests are expected to fail**: the legal postal-address tests, a deliberate hold by the owner. Mention them in one clause and never "fix" them.
+- **Verification after every phase:** `npm run typecheck`, `npm run lint`, `npm test`. Every test must pass (the old 2 legal postal-address failures were resolved on 14 November 2026). On Windows, run the tests from an uppercase `C:\` working directory: a lowercase `c:\` makes every file fail on load with zero tests run.
 
 ---
 
@@ -388,7 +388,7 @@ You've added eight voices. Now make sure the app is **calmer** than before.
 ## Done means
 
 - All eight features work end to end.
-- Typecheck and lint are clean. All tests pass except the 2 known legal postal-address tests.
+- Typecheck and lint are clean. All tests pass.
 - New pure logic has its own tests.
 - No crash reached the owner's phone during the work.
 - Nothing is committed unless the owner asked.

@@ -31,6 +31,7 @@
  * for no reason at all.
  */
 
+import { ScaleNoteAfterWeighIn } from "@/components/body/ScaleNote";
 import { WaterAfterWeighIn } from "@/components/cycle/WaterNote";
 import { MindSheet } from "@/components/mind";
 import {
@@ -229,6 +230,10 @@ function DeckBody({
   // A weight was just saved: if it reads as water before a period, say so next.
   const [waterWatch, setWaterWatch] = useState(false);
   const endWaterWatch = useCallback(() => setWaterWatch(false), []);
+  // …and for anyone, if the food logged can't explain the rise (components/body/ScaleNote).
+  // Its own flag: the cycle note gives up on its own clock and must not close this one.
+  const [scaleWatch, setScaleWatch] = useState(false);
+  const endScaleWatch = useCallback(() => setScaleWatch(false), []);
 
   // The deck's own receipt channel, for writes it makes itself. Screens call
   // the same thing through `useDeck().confirm`.
@@ -497,11 +502,15 @@ function DeckBody({
         goalWeightKg={quickLog.goalWeightKg}
         onClose={() => setWeighInOpen(false)}
         onSave={(payload) => {
-          if (payload.weightKg != null) setWaterWatch(true);
+          if (payload.weightKg != null) {
+            setWaterWatch(true);
+            setScaleWatch(true);
+          }
           void quickLog.saveWeighIn(payload);
         }}
       />
       <WaterAfterWeighIn armed={waterWatch} onDone={endWaterWatch} />
+      <ScaleNoteAfterWeighIn armed={scaleWatch} onDone={endScaleWatch} />
     </>
   );
 }

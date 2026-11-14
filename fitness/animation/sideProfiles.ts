@@ -107,11 +107,18 @@ export const SIDE_PROFILES: SideProfileMap = {
     ],
     loopMs: 2200,
   },
-  // Core — standing knee tuck: the near knee drives up as the torso curls in.
+  // Core — standing knee tuck: the near knee drives up past the hip as the
+  // torso curls in to meet it, on a standing leg that stays planted. (It used
+  // to echo the near leg on the far side, so both legs tucked and the athlete
+  // levitated.)
   core: {
     frames: [
       P([50, 18], [50, 32], [50, 45], [51, 57], [50, 57], [50, 75], [50, 93]),
-      P([52, 24], [51, 37], [52, 48], [54, 57], [50, 55], [62, 58], [64, 70]),
+      P([60, 19.5], [55.2, 32.5], [58, 45.2], [62, 56.6], [50, 57], [66.8, 50.6], [66, 68.6]),
+    ],
+    framesFar: [
+      F([50, 45], [51, 57], [50, 75], [50, 93]),
+      F([58, 45.2], [62, 56.6], [51.2, 75], [50, 93]),
     ],
     loopMs: 1900,
   },
@@ -191,10 +198,12 @@ export const SIDE_PROFILES: SideProfileMap = {
     loopMs: 640,
   },
 
+  // The jump at the top, arms overhead; the plank at the bottom, hands and
+  // toes on the one floor (it was drawn with the feet ten units in the air).
   burpee: {
     frames: [
       P([50, 14], [50, 29], [54, 18], [58, 7], [50, 54], [50, 73], [50, 90]),
-      P([76, 58], [64, 62], [64, 74], [64, 86], [40, 68], [24, 72], [10, 76]),
+      P([77.3, 62.7], [62.6, 69], [62.6, 82], [62.6, 94], [39.6, 78.8], [22.1, 86.3], [6.5, 93]),
     ],
     loopMs: 2600,
   },
@@ -258,10 +267,13 @@ export const SIDE_PROFILES: SideProfileMap = {
     loopMs: 1400,
   },
 
+  // Folded over with the palms on the floor, then the hands walk out to a
+  // high plank; the feet stay where they stand. (The plank was drawn with the
+  // feet in the air and the fold with the hands at the shins.)
   inchworm: {
     frames: [
-      P([80, 44], [70, 52], [72, 64], [74, 76], [46, 58], [46, 76], [46, 93]),
-      P([80, 54], [68, 58], [68, 70], [68, 82], [44, 64], [28, 68], [12, 72]),
+      P([46.5, 82.4], [36.4, 70], [38, 82.9], [40.5, 94.6], [14.5, 58], [16, 76.9], [12, 93.5]),
+      P([82.8, 62.7], [68.1, 69], [68.1, 82], [68.1, 94], [45.1, 78.8], [27.6, 86.3], [12, 93]),
     ],
     loopMs: 3000,
   },
@@ -296,10 +308,13 @@ export const SIDE_PROFILES: SideProfileMap = {
     loopMs: 1600,
   },
 
+  // Side-on the feet jump out and in across the camera's line, so what shows
+  // is the plank with a hop through the hips. On the push-up's plank, hands and
+  // toes down (it was drawn with the feet ten units off the floor).
   plankJack: {
     frames: [
-      P([78, 58], [66, 62], [66, 74], [66, 86], [42, 66], [28, 70], [14, 74]),
-      P([78, 58], [66, 62], [66, 74], [66, 86], [42, 66], [28, 72], [14, 78]),
+      P([77, 54.5], [66, 60], [66, 73], [66, 86], [44.5, 71.4], [31.6, 78.2], [18.7, 85]),
+      P([77, 54.5], [66, 60], [66, 73], [66, 86], [43.6, 69.51], [33.02, 79.53], [19.5, 85]),
     ],
     loopMs: 800,
   },
@@ -326,15 +341,16 @@ export const SIDE_PROFILES: SideProfileMap = {
   },
 
   // Side view: the front leg steps forward to a 90° knee while the back knee
-  // drops toward the floor.
+  // drops toward the floor. The back foot stays where the athlete stood and
+  // the body travels forward over the step (both feet used to slide apart).
   lunge: {
     frames: [
-      P([50, 17], [50, 33], [50, 46], [51, 58], [50, 58], [50, 77], [50, 94]),
-      P([48, 32], [48, 48], [47.5, 61], [48.4, 73], [48, 73], [66.6, 77], [66, 94]),
+      P([36, 17], [36, 33], [36, 46], [37, 58], [36, 58], [36, 77], [36, 94]),
+      P([57, 32], [57, 48], [56.5, 61], [57.4, 73], [57, 73], [75.6, 77], [75, 94]),
     ],
     framesFar: [
-      F([50, 46], [51, 58], [50, 77], [50, 94]),
-      F([47.5, 61], [48.4, 73], [44, 91.6], [27, 92]),
+      F([36, 46], [37, 58], [36, 77], [36, 94]),
+      F([56.5, 61], [57.4, 73], [53, 91.6], [36, 92]),
     ],
     loopMs: 2400,
   },
@@ -1075,7 +1091,10 @@ export const SIDE_PROFILES: SideProfileMap = {
   // lower with control.
   hamstringCurl: {
     frames: [
-      P([50, 17], [50, 33], [54.4, 45.2], [63.6, 52.9], [50, 58], [44.6, 76.2], [51, 92]),
+      // The working foot just behind, toes down, the knee soft the right way
+      // (it was drawn bent backward, so the curl swung the shin through the
+      // front of the knee).
+      P([50, 17], [50, 33], [54.4, 45.2], [63.6, 52.9], [50, 58], [48.5, 76.9], [46, 93.7]),
       P([50, 17], [50, 33], [54.4, 45.2], [63.6, 52.9], [50, 58], [47.7, 76.9], [41.3, 61.1]),
     ],
     framesFar: [

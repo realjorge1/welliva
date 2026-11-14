@@ -12,11 +12,14 @@
  *   · reads the rep from a FEEL (tempo.ts) instead of one symmetric ease, and
  *     reads it ONCE for the whole skeleton — every joint at the same instant of
  *     the same curve, so the body moves as one piece and nothing arrives late;
- *   · PINS THE PLANTED FOOT. The rig averages bone lengths across the two
- *     authored poses, so its feet used to drift off the floor through a rep (a
- *     squat's rose five units — the athlete hovered at the bottom). When both
- *     authored poses stand the lowest ankle at the same height, the solver holds
- *     it there, and lets go for the airborne part of a hop;
+ *   · STANDS THE BODY ON ITS FLOOR, every frame. Whatever the body rests on —
+ *     the soles of its trainers, a kneeling knee, the seat of its shorts, its
+ *     back, its belly — is measured off the drawing itself and held exactly on
+ *     the floor, so nothing hovers and nothing sinks (see "The ground"). A jump
+ *     pushes off the floor before it leaves it;
+ *   · MOVES THE BODY FROM ITS PLANTED FOOT: where a foot stays put all rep, the
+ *     hips are placed by walking up the leg from it, so the foot cannot slide
+ *     and the hips travel the arc the joints really make (see "The feet");
  *   · PLANTS THE HANDS the same way, on a floor, a bar or a wall, and lets a free
  *     forearm and hand fall a little behind in the middle of a move (see "The
  *     hands" below);
@@ -29,6 +32,7 @@ import {
   HEAD_SCALE,
   KNEE_BELOW,
   SOLE_BELOW,
+  faceMirrored,
   handDepth,
   sideShoeDepth,
   type FigureLook,
@@ -37,7 +41,8 @@ import {
 import { motionCameras, motionLoopMs } from "./cameras";
 import type { FigureMotion } from "./movementProfiles";
 import { propsFor, type FigureProp } from "./props";
-import { buildFrontRig, buildSideRig, type Rig, type RigArm } from "./rig";
+import { HANGING, buildFrontRig, buildSideRig, type Rig, type RigArm } from "./rig";
+import { SUPPORT_STEPS, buildSupport } from "./support";
 import {
   FEEL_CODE,
   arcAt,
@@ -93,10 +98,45 @@ export interface MotionKit extends LifeKit {
   ankles: number[];
   footA: number;
   footB: number;
-  /** The build's own standing height, held even in the air — see Rig.standOffset. */
+  /** The build's own standing height — see Rig.standOffset. */
   stand: number;
-  /** 1 = keep the lowest ankle on its authored floor. */
+  /** 1 = the body rests on its floor the whole rep (`ground` 1). */
   lock: number;
+  /**
+   * THE GROUND — see "The ground" below. `supp`/`suppX` hold, for every bone
+   * and SUPPORT_STEPS angles of it, how far below the bone's start its drawing
+   * reaches and how far along x that lowest point is; `suppOn` marks the bones
+   * that draw anything.
+   */
+  supp: number[];
+  suppX: number[];
+  suppOn: number[];
+  suppN: number;
+  /** 1 for the parts the body rests its weight on (a planted leg answers to its foot instead). */
+  gset: number[];
+  /** The body's own height correction at each end, for when only planted legs carry it. */
+  cA: number;
+  cB: number;
+  /** 0 = nothing holds it up (it hangs, or is seen from above); 1 = it rests on its floor; 2 = it jumps. */
+  ground: number;
+  /** The floor line, box units. */
+  floor: number;
+  /** A jump: how far the lowest part is off the floor at each end of the rep. */
+  clearA: number;
+  clearB: number;
+  /** Equipment tops a part can rest on, three numbers each: x0, x1, top. */
+  surf: number[];
+  /** The planted and stepping feet, LEG_PIN_N numbers per leg — see "The feet" below. */
+  legPins: number[];
+  /**
+   * The planted foot the body moves from: the bones from it up to the root
+   * (toe → ankle → knee → hip), and where its far end stays. Empty: none.
+   */
+  anchor: number[];
+  anchorX: number;
+  anchorY: number;
+  /** Loose limbs kept out of the floor, FREE_N numbers each — see "The floor guard". */
+  free: number[];
   headBone: number;
   /**
    * Where the head's centre may sit along the neck, box units from the
@@ -210,8 +250,7 @@ export function buildMotionKit(
     footA: rig.footY[0],
     footB: rig.footY[1],
     stand: rig.standOffset,
-    // Both ends standing the lowest ankle at the same height = planted feet.
-    lock: Math.abs(rig.footY[0] - rig.footY[1]) <= 2.5 ? 1 : 0,
+    lock: 0,
     headBone: rig.headBone,
     headLo: down ? r * 0.35 : r + NECK_MIN,
     headHi: down ? r * 0.35 : r + NECK_MAX,
@@ -219,15 +258,47 @@ export function buildMotionKit(
     depthSlot,
     depthVec,
     pins: [],
+    supp: [],
+    suppX: [],
+    suppOn: rig.bones.map(() => 0),
+    suppN: SUPPORT_STEPS,
+    gset: rig.bones.map(() => 0),
+    cA: 0,
+    cB: 0,
+    ground: 0,
+    floor: 0,
+    clearA: 0,
+    clearB: 0,
+    surf: [],
+    legPins: [],
+    anchor: [],
+    anchorX: 0,
+    anchorY: 0,
+    free: [],
   };
+  const planted = settleGround(kit, rig, motion, view, look);
+  settleLegs(kit, rig, view, planted);
   settleHands(kit, rig, motion, view);
+  settleFree(kit, rig, view);
   return kit;
 }
 
 /* ─────────────────────────────── The solver ──────────────────────────────── */
 
+/** How many numbers one loose limb takes in `MotionKit.free`. */
+const FREE_N = 3;
 /** How many numbers one planted arm takes in `MotionKit.pins`. */
 const PIN_N = 11;
+/** …and one planted leg in `MotionKit.legPins`. */
+const LEG_PIN_N = 13;
+/** A part over a bench or a box rests on its top unless it is this far down inside it. */
+const SURFACE_SINK = 2;
+/** A jump's feet stay on the floor until the legs are this far through the push-off. */
+const TAKEOFF = 0.4;
+/** A planted leg reaches exactly as far as this share of its length, softly past it. */
+const LEG_SOFT_FROM = 0.995;
+/** How much of a placed leg's length the hips are kept within, so it always reaches its foot. */
+const LEG_REACH = 0.99;
 /** A planted arm reaches exactly as far as this share of its length, softly past it. */
 const ARM_SOFT_FROM = 0.985;
 
@@ -245,12 +316,151 @@ function lift(k: MotionKit, q: number): number {
   return k.hop * arc;
 }
 
-/** Smooth maximum of two heights, so the lowest foot hands over without a kink. */
-function softMax(a: number, b: number): number {
+/** How far below its start bone `i` reaches at angle `a` — its support table, read between samples. */
+function supportAt(k: MotionKit, i: number, a: number): number {
   "worklet";
-  const s = 0.7;
-  const m = a > b ? a : b;
-  return m + s * Math.log(1 + Math.exp(-Math.abs(a - b) / s));
+  const n = k.suppN;
+  let u = (a / (Math.PI * 2)) * n;
+  u -= Math.floor(u / n) * n;
+  const j = Math.floor(u);
+  const f = u - j;
+  const j2 = j + 1 >= n ? 0 : j + 1;
+  return k.supp[i * n + j] * (1 - f) + k.supp[i * n + j2] * f;
+}
+
+/** …and how far along x from its start that lowest point is. */
+function supportX(k: MotionKit, i: number, a: number): number {
+  "worklet";
+  const n = k.suppN;
+  let u = (a / (Math.PI * 2)) * n;
+  u -= Math.floor(u / n) * n;
+  const j = Math.floor(u);
+  const f = u - j;
+  const j2 = j + 1 >= n ? 0 : j + 1;
+  return k.suppX[i * n + j] * (1 - f) + k.suppX[i * n + j2] * f;
+}
+
+/**
+ * How low part `i` of a pose reaches, measured against what is under it: over a
+ * bench or a box, its top stands in for the floor.
+ */
+function partLow(k: MotionKit, out: number[], i: number): number {
+  "worklet";
+  const a = out[i * 3 + 2];
+  const y = out[i * 3 + 1] + supportAt(k, i, a);
+  if (k.surf.length === 0) return y;
+  const x = out[i * 3] + supportX(k, i, a);
+  for (let s = 0; s < k.surf.length; s += 3) {
+    if (x >= k.surf[s] && x <= k.surf[s + 1] && y <= k.surf[s + 2] + SURFACE_SINK) {
+      return y + k.floor - k.surf[s + 2];
+    }
+  }
+  return y;
+}
+
+/** The lowest of the parts the body rests on, in a pose. */
+function groundLow(k: MotionKit, out: number[]): number {
+  "worklet";
+  let low = -1e9;
+  for (let i = 0; i < k.n; i++) {
+    if (k.gset[i] === 0) continue;
+    const y = partLow(k, out, i);
+    if (y > low) low = y;
+  }
+  return low;
+}
+
+/**
+ * How far to move a pose down (+) so that the lowest of the parts it rests on
+ * lies exactly on the floor. With nothing left to rest on but placed legs, the
+ * body keeps to the line between its two end placements and the legs reach.
+ */
+function groundShift(k: MotionKit, out: number[], t: number): number {
+  "worklet";
+  let best = 1e9;
+  for (let i = 0; i < k.n; i++) {
+    if (k.gset[i] === 0) continue;
+    const d = k.floor - partLow(k, out, i);
+    if (d < best) best = d;
+  }
+  return best < 1e8 ? best : k.cA + (k.cB - k.cA) * t;
+}
+
+/**
+ * How much of a jump's height is in the air, at share `u` of the way to the end
+ * that is airborne: none until the legs have pushed off (TAKEOFF), then a
+ * smooth rise to all of it.
+ */
+function takeoff(u: number): number {
+  "worklet";
+  if (u <= TAKEOFF) return 0;
+  const w = (u - TAKEOFF) / (1 - TAKEOFF);
+  return w * w * (3 - 2 * w);
+}
+
+/**
+ * The thigh's angle that sets an ankle at (tx, ty) from a hip at (sx, sy), the
+ * knee folded `fold`'s way. Out of reach the leg goes straight at it: a leg is
+ * never stretched. The very last of its reach comes softly (LEG_SOFT_FROM), as
+ * an arm's does but much later: a knee solved all the way to locked whips
+ * through its last few degrees in a frame, and a standing knee is never quite
+ * locked anyway.
+ */
+function kneeFor(
+  sx: number,
+  sy: number,
+  tx: number,
+  ty: number,
+  L1: number,
+  L2: number,
+  fold: number,
+): number {
+  "worklet";
+  const dx = tx - sx;
+  const dy = ty - sy;
+  const full = L1 + L2;
+  const least = Math.abs(L1 - L2) + 1e-3;
+  const d0 = Math.sqrt(dx * dx + dy * dy);
+  const soft = full * LEG_SOFT_FROM;
+  const r = d0 > soft ? soft + (full - soft) * (1 - Math.exp(-(d0 - soft) / (full - soft))) : d0 < least ? least : d0;
+  const c = (L1 * L1 + r * r - L2 * L2) / (2 * L1 * r);
+  return Math.atan2(dy, dx) + fold * Math.acos(c > 1 ? 1 : c < -1 ? -1 : c);
+}
+
+/**
+ * Put one planted leg's ankle on its spot — or, for a stepping foot, on its way
+ * from one spot to the next, lifted clear of the floor — from wherever the hip
+ * is now.
+ */
+function placeLeg(k: MotionKit, out: number[], j: number, t: number): void {
+  "worklet";
+  const p = k.legPins;
+  const u = p[j];
+  const f = p[j + 1];
+  const ft = p[j + 2];
+  // A step happens in its own stretch of the rep: two feet that both move go
+  // one after the other, and each lands before the body leans on it.
+  let w = (t - p[j + 11]) / (p[j + 12] - p[j + 11]);
+  w = w < 0 ? 0 : w > 1 ? 1 : w;
+  const e = w * w * (3 - 2 * w);
+  const tx = p[j + 3] + (p[j + 5] - p[j + 3]) * e;
+  const ty = p[j + 4] + (p[j + 6] - p[j + 4]) * e - p[j + 10] * Math.sin(Math.PI * e);
+  const L1 = p[j + 7];
+  const L2 = p[j + 8];
+  const sx = out[u * 3];
+  const sy = out[u * 3 + 1];
+  const ua = kneeFor(sx, sy, tx, ty, L1, L2, p[j + 9]);
+  const ex = sx + L1 * Math.cos(ua);
+  const ey = sy + L1 * Math.sin(ua);
+  const fa = Math.atan2(ty - ey, tx - ex);
+  out[u * 3 + 2] = ua;
+  out[f * 3] = ex;
+  out[f * 3 + 1] = ey;
+  out[f * 3 + 2] = fa;
+  if (ft >= 0) {
+    out[ft * 3] = ex + L2 * Math.cos(fa);
+    out[ft * 3 + 1] = ey + L2 * Math.sin(fa);
+  }
 }
 
 /**
@@ -307,6 +517,80 @@ function placeArm(k: MotionKit, out: number[], j: number, t: number): void {
 }
 
 /**
+ * THE FLOOR GUARD. A limb that holds nothing swings on its joint angles alone,
+ * and between two poses a foot on its way up (a hamstring curl's kick) or a hand
+ * sweeping low (a thread-the-needle) can pass under the floor line. Where its
+ * end would, the whole limb lifts at the hip or shoulder, by just the angle
+ * that lets it skim the floor. It keeps its own shape — no joint is re-chosen,
+ * so nothing can flip — and the lift is nothing at all until it touches.
+ */
+function clampLimb(k: MotionKit, out: number[], j: number): void {
+  "worklet";
+  const g = k.free;
+  const u = g[j];
+  const f = g[j + 1];
+  const end = g[j + 2];
+  const c = end >= 0 ? end : f;
+  const sx = out[u * 3];
+  const sy = out[u * 3 + 1];
+  // Twice: once turned, the lowest point of the hand or shoe is a new one.
+  for (let pass = 0; pass < 2; pass++) {
+    const sink = partLow(k, out, c) - k.floor;
+    if (sink <= 1e-4) return;
+    const a = out[c * 3 + 2];
+    const rx = out[c * 3] + supportX(k, c, a) - sx;
+    const ry = out[c * 3 + 1] + supportAt(k, c, a) - sy;
+    const r = Math.sqrt(rx * rx + ry * ry);
+    if (r < 1e-3) return;
+    const phi = Math.atan2(ry, rx);
+    let v = (ry - sink) / r;
+    v = v > 1 ? 1 : v < -1 ? -1 : v;
+    const lifted = Math.cos(phi) >= 0 ? Math.asin(v) : Math.PI - Math.asin(v);
+    let d = lifted - phi;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    const cs = Math.cos(d);
+    const sn = Math.sin(d);
+    for (let b = 0; b < 3; b++) {
+      const i = b === 0 ? u : b === 1 ? f : end;
+      if (i < 0) continue;
+      out[i * 3 + 2] += d;
+      if (i === u) continue;
+      const x = out[i * 3] - sx;
+      const y = out[i * 3 + 1] - sy;
+      out[i * 3] = sx + x * cs - y * sn;
+      out[i * 3 + 1] = sy + x * sn + y * cs;
+    }
+  }
+}
+
+/**
+ * Where a placed foot cannot be reached — the hips have drifted out of a leg's
+ * length between two steps — how far the body must come down so that it can:
+ * the little dip a body makes between two steps.
+ */
+function stepDip(k: MotionKit, out: number[], t: number): number {
+  "worklet";
+  const p = k.legPins;
+  let down = 0;
+  for (let j = 0; j < p.length; j += LEG_PIN_N) {
+    let w = (t - p[j + 11]) / (p[j + 12] - p[j + 11]);
+    w = w < 0 ? 0 : w > 1 ? 1 : w;
+    const e = w * w * (3 - 2 * w);
+    const tx = p[j + 3] + (p[j + 5] - p[j + 3]) * e;
+    const ty = p[j + 4] + (p[j + 6] - p[j + 4]) * e - p[j + 10] * Math.sin(Math.PI * e);
+    const u = p[j];
+    const reach = (p[j + 7] + p[j + 8]) * LEG_REACH;
+    const dx = tx - out[u * 3];
+    const h = ty - out[u * 3 + 1];
+    if (Math.abs(dx) >= reach || dx * dx + h * h <= reach * reach) continue;
+    const need = h - Math.sqrt(reach * reach - dx * dx);
+    if (need > down) down = need;
+  }
+  return down;
+}
+
+/**
  * Walk the skeleton at rep position `q`, returning `[startX, startY, angle]` per
  * bone in box units, then one more number per bone: how much of its length shows
  * (1 unless it is swinging toward the camera). Everything the panel draws hangs
@@ -322,10 +606,22 @@ export function solvePose(k: MotionKit, q: number): number[] {
   // One reading of the curve for the whole body: every joint is at the same
   // point of the rep at the same instant.
   const t = lutAt(k.base, q);
-  const rootX = k.rootA[0] + (k.rootB[0] - k.rootA[0]) * t;
-  const rootY = k.rootA[1] + (k.rootB[1] - k.rootA[1]) * t;
   // How an arm follows through: see `trail` under "The hands".
   const behind = (q < 0.5 ? -t : t) * (1 - t);
+  let rootX = k.rootA[0] + (k.rootB[0] - k.rootA[0]) * t;
+  let rootY = k.rootA[1] + (k.rootB[1] - k.rootA[1]) * t;
+  // A body on a planted foot moves from it: walk up the leg from the foot, at
+  // this instant's angles, to find the hips (see "The feet").
+  if (k.anchor.length > 0) {
+    rootX = k.anchorX;
+    rootY = k.anchorY;
+    for (let j = 0; j < k.anchor.length; j++) {
+      const b = k.anchor[j];
+      const a = k.anglesA[b] + (k.anglesB[b] - k.anglesA[b]) * (t + k.trail[b] * behind);
+      rootX -= k.lengths[b] * Math.cos(a);
+      rootY -= k.lengths[b] * Math.sin(a);
+    }
+  }
 
   for (let i = 0; i < n; i++) {
     const share = t + k.trail[i] * behind;
@@ -361,22 +657,30 @@ export function solvePose(k: MotionKit, q: number): number[] {
     out[n * 3 + i] = shows;
   }
 
-  // Pin the planted foot, then lift the whole body for a hop. In the air the pin
-  // lets go (`1 - arc`), so a jump is not dragged back down to the floor.
-  const arc = arcAt(k.feel, q);
+  // Stand the body on its floor: what it rests on goes exactly onto the floor
+  // line (see "The ground"). A jump keeps its lowest part on the floor until
+  // the legs have pushed off, then rises to the height its pose was drawn at.
+  // A hop lifts the whole body on top of that.
   let dy = -lift(k, q);
-  if (k.lock > 0 && k.ankles.length > 0) {
-    let low = tipY[k.ankles[0]];
-    for (let j = 1; j < k.ankles.length; j++) low = softMax(low, tipY[k.ankles[j]]);
-    const target = k.footA + (k.footB - k.footA) * t;
-    // The build's own height is held the whole time; only the pose-by-pose part
-    // of the correction lets go in the air, or a jump would sag at its apex.
-    dy += k.stand + (target - low - k.stand) * (1 - arc);
+  if (k.ground === 2) {
+    const clear = k.clearA * takeoff(1 - t) + k.clearB * takeoff(t);
+    dy += k.floor - clear - groundLow(k, out);
+  } else if (k.ground === 1) {
+    dy += groundShift(k, out, t);
   }
   if (dy !== 0) for (let i = 0; i < n; i++) out[i * 3 + 1] += dy;
-  // A planted hand answers to the floor, not to the shoulder, so its arm is
-  // placed last, from wherever the body has ended up.
+  // Between two steps the body dips as far as it must for the feet to reach.
+  if (k.anchor.length === 0 && k.legPins.length > 0) {
+    const dip = stepDip(k, out, t);
+    if (dip > 0) for (let i = 0; i < n; i++) out[i * 3 + 1] += dip;
+  }
+  // A planted foot answers to the floor, not to the hip, and a planted hand to
+  // what it holds, not to the shoulder: those limbs are placed last, from
+  // wherever the body has ended up.
+  for (let j = 0; j < k.legPins.length; j += LEG_PIN_N) placeLeg(k, out, j, t);
   for (let j = 0; j < k.pins.length; j += PIN_N) placeArm(k, out, j, t);
+  // A loose foot or hand never goes through the floor: it skims it.
+  for (let j = 0; j < k.free.length; j += FREE_N) clampLimb(k, out, j);
   return out;
 }
 
@@ -446,6 +750,8 @@ const ARM_REACH_MID = 1.05;
 const ELBOW_EASE = 12 * RAD;
 /** How many points of the rep are checked for how far a planted arm must reach. */
 const REACH_SAMPLES = 12;
+/** An elbow this far into the floor folds the other way, if that clears it. */
+const ELBOW_SINKS = 0.5;
 /** How far a free forearm and hand trail, at most (see above)… */
 const TRAIL_FORE = 0.45;
 const TRAIL_HAND = 0.7;
@@ -563,6 +869,42 @@ function plantArm(
   k.pins.push(u, f, h, targets[0][0], targets[0][1], targets[1][0], targets[1][1], L1, L2, fold, lift);
 }
 
+/**
+ * Which way a planted arm's elbow should fold. Usually the rig's way (side-on,
+ * toward the front of the body). But an arm lying along the floor — beside a
+ * body on its back, under a cobra's chest — folded that way drives its elbow
+ * down through the floor; then it folds the other way, up off it.
+ */
+function clearFold(
+  k: MotionKit,
+  arm: RigArm,
+  rep: readonly number[][],
+  targets: readonly [[number, number], [number, number]],
+  lift: number,
+): 1 | -1 {
+  if (k.ground === 0) return arm.fold;
+  const L1 = k.lengths[arm.upper];
+  const L2 = k.lengths[arm.fore];
+  const sink = (fold: number) => {
+    let most = 0;
+    rep.forEach((pose, s) => {
+      const share = s / (rep.length - 1);
+      const tx = targets[0][0] + (targets[1][0] - targets[0][0]) * share;
+      const ty = targets[0][1] + (targets[1][1] - targets[0][1]) * share - lift * Math.sin(Math.PI * share);
+      const sx = pose[arm.upper * 3];
+      const sy = pose[arm.upper * 3 + 1];
+      const ua = reachFor(sx, sy, tx, ty, L1, L2, fold);
+      const ex = sx + L1 * Math.cos(ua);
+      const ey = sy + L1 * Math.sin(ua);
+      const fa = Math.atan2(ty - ey, tx - ex);
+      most = Math.max(most, sy + supportAt(k, arm.upper, ua) - k.floor, ey + supportAt(k, arm.fore, fa) - k.floor);
+    });
+    return most;
+  };
+  const own = sink(arm.fold);
+  return own > ELBOW_SINKS && sink(-arm.fold) < own - ELBOW_SINKS ? (-arm.fold as 1 | -1) : arm.fold;
+}
+
 /** Decide what each hand of a built kit is doing, and set it up to do that. */
 function settleHands(k: MotionKit, rig: Rig, motion: FigureMotion, view: FigureView): void {
   const A = solvePose(k, 0);
@@ -584,15 +926,16 @@ function settleHands(k: MotionKit, rig: Rig, motion: FigureMotion, view: FigureV
   measure(body, k, rig, A, false);
   measure(body, k, rig, B, false);
 
-  /** Where a wrist goes to hold `hold`, its hand set at `set`. */
-  const onto = (hold: Hold, wrist: [number, number], set: number): [number, number] => {
-    const depth = handDepth(set);
+  /** Where a wrist goes to hold `hold`, its hand (bone `h`) set at `set`. */
+  const onto = (hold: Hold, wrist: [number, number], set: number, h: number): [number, number] => {
+    // How far the hand's drawing reaches below the wrist, read off the art itself.
+    const depth = k.suppOn[h] ? supportAt(k, h, set) : handDepth(set);
     if (hold.kind === "wall" && hold.prop) return [hold.prop.x - WALL_PALM, wrist[1]];
     if (hold.kind === "top" && hold.prop) return [wrist[0], hold.prop.y - depth];
     if (hold.kind === "bar") return wrist;
     // Down to the body's floor. If the hands are the lowest thing (a handstand)
     // the body has no floor to offer, and where they were drawn stands.
-    const low = body.floorY - depth;
+    const low = (k.ground > 0 ? k.floor : body.floorY) - depth;
     return [wrist[0], low < wrist[1] - 3 ? wrist[1] : low];
   };
   /** How low a wrist at `x` can get, as far as its arm can grow, from both poses. */
@@ -622,7 +965,7 @@ function settleHands(k: MotionKit, rig: Rig, motion: FigureMotion, view: FigureV
         Math.hypot(w[0] - pose[u * 3], w[1] - pose[u * 3 + 1]);
       const anchor = reachOfEnd(A, wa) >= reachOfEnd(B, wb) ? wa : wb;
       let setA = handSet(holdA.kind, k.anglesA[f], view, c);
-      const target = onto(holdA, anchor, setA);
+      const target = onto(holdA, anchor, setA, h);
       if (holdA.kind === "floor") {
         // Only as low as the arm can reach, and the hand makes up the difference,
         // up on its fingers.
@@ -633,17 +976,19 @@ function settleHands(k: MotionKit, rig: Rig, motion: FigureMotion, view: FigureV
         }
       }
       const setB = view === "front" && holdA.kind !== "bar" ? handSet(holdA.kind, k.anglesB[f], view, c) : setA;
-      plantArm(k, arm, [A, B], rep, [target, target], [setA, setB], 0);
+      const fold = holdA.kind === "floor" ? clearFold(k, arm, rep, [target, target], 0) : arm.fold;
+      plantArm(k, { ...arm, fold }, [A, B], rep, [target, target], [setA, setB], 0);
       continue;
     }
     if (holdA?.kind === "floor" && holdB?.kind === "floor" && chord <= HAND_STEP_MOST) {
       const setA = handSet("floor", k.anglesA[f], view, c);
       const setB = handSet("floor", k.anglesB[f], view, c);
-      const toA = onto(holdA, wa, setA);
-      const toB = onto(holdB, wb, setB);
+      const toA = onto(holdA, wa, setA, h);
+      const toB = onto(holdB, wb, setB, h);
       toA[1] = Math.min(toA[1], lowestReach(arm, toA[0], wa[1]));
       toB[1] = Math.min(toB[1], lowestReach(arm, toB[0], wb[1]));
-      plantArm(k, arm, [A, B], rep, [toA, toB], [setA, setB], HAND_STEP_LIFT);
+      const fold = clearFold(k, arm, rep, [toA, toB], HAND_STEP_LIFT);
+      plantArm(k, { ...arm, fold }, [A, B], rep, [toA, toB], [setA, setB], HAND_STEP_LIFT);
       continue;
     }
 
@@ -669,6 +1014,352 @@ function settleHands(k: MotionKit, rig: Rig, motion: FigureMotion, view: FigureV
     // A hand that lands on the floor at one end of the rep lands flat.
     if (holdA && view === "side") k.anglesA[h] = nearest(handSet(holdA.kind, k.anglesA[f], view, c), k.anglesA[f]);
     if (holdB && view === "side") k.anglesB[h] = nearest(handSet(holdB.kind, k.anglesB[f], view, c), k.anglesB[f]);
+  }
+}
+
+/* ─────────────────────────────── The ground ────────────────────────────────
+ *
+ * A person is always standing, kneeling, sitting or lying ON something. The
+ * figure used to be stood on estimates — an ankle plus a sole, a knee plus a
+ * shin — and only through its feet, and only when both ends of a rep stood its
+ * feet at one height. Everything else floated where the averaged rig happened
+ * to put it: a superman's belly rose off the floor mid-rep, a V-up's seat
+ * hovered, a butterfly sat on air, a calf raise lifted the whole athlete.
+ *
+ * Now the drawing itself is measured (animation/support.ts), and each frame the
+ * body is set down so that the lowest of the parts it rests on lies exactly on
+ * the floor line. Which parts those are is read off the two poses: whatever
+ * touches the floor at both ends of the rep (a planted foot, a kneeling knee, a
+ * seat, a back). If nothing touches at both ends — the feet change over in a
+ * march, a climber swaps legs — whichever part is lower carries the body.
+ *
+ * A jump (JUMPS) has a pose in the air. Its lowest part stays on the floor
+ * while the legs push off, and only then rises to the height the pose was
+ * drawn at — a person leaves the ground at the END of the push; they don't
+ * float up from a standing start.
+ *
+ * Hanging from a bar, nothing is under the body; a view drawn from above has
+ * no "down" at all. Those keep the heights they were drawn at.
+ */
+/** Parts this close to the lowest point of a pose are resting on the floor… */
+const TOUCH = 2;
+/** …and this close at both ends, drawn a little off it: still what the body rests on. */
+const NEAR = 6;
+/**
+ * The movements that leave the floor in a pose of their own. Every other
+ * movement is on the floor at both ends of its rep, whatever its drawing says
+ * (a hop's air is the tempo's, added on top: see `lift`).
+ */
+const JUMPS = new Set<FigureMotion>(["tuckJump", "broadJump", "jumpSquat", "starJump", "burpee"]);
+/** Front views drawn from above, lying down: down the picture is not toward the floor. */
+const SEEN_FROM_ABOVE = new Set<FigureMotion>(["snowAngel", "windshieldWiper"]);
+/** The arm's bones: weight on a hand is the hand's business ("The hands"). */
+const ARM_BONE = /^(far)?(upArm|foreArm|hand)/i;
+
+/** How low every part of a pose reaches, against the floor `floor` (or a top under it). */
+function partLows(k: MotionKit, pose: number[]): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < k.n; i++) out.push(k.suppOn[i] ? partLow(k, pose, i) : -Infinity);
+  return out;
+}
+
+/**
+ * Measure the drawing, find the floor and decide what the body rests on. Returns
+ * the parts that touch the floor at BOTH ends of the rep — what can be planted.
+ */
+function settleGround(
+  k: MotionKit,
+  rig: Rig,
+  motion: FigureMotion,
+  view: FigureView,
+  look: FigureLook,
+): Set<number> {
+  const character = look === "character";
+  const neck = k.lengths[k.headBone];
+  const along = character ? (neck < k.headLo ? k.headLo : neck > k.headHi ? k.headHi : neck) : neck;
+  const tables = buildSupport(rig, view, look, rig.facing, {
+    bone: k.headBone,
+    along,
+    r: character ? headRadius(rig) : rig.headR,
+    mirror: character && faceMirrored(motion, view) ? -1 : 1,
+  });
+  k.supp = tables.depth;
+  k.suppX = tables.across;
+  k.suppOn = tables.has;
+  // Benches and boxes, not bars (thin) or walls (upright).
+  for (const p of propsFor(motion, view)) if (p.h > 5 && p.w > p.h * 0.5) k.surf.push(p.x, p.x + p.w, p.y);
+  if (HANGING.has(motion) || (view === "front" && SEEN_FROM_ABOVE.has(motion))) return new Set();
+
+  // Both ends of the rep at the height they were drawn at: the lowest ankle on
+  // the floor its pose was authored against.
+  const end = (q: number, footY: number): number[] => {
+    const pose = solvePose(k, q);
+    let low = -Infinity;
+    for (const a of k.ankles) low = Math.max(low, boneTip(k, pose, a)[1]);
+    const dy = Number.isFinite(low) ? footY - low : 0;
+    for (let i = 0; i < k.n; i++) pose[i * 3 + 1] += dy;
+    return pose;
+  };
+  const A = end(0, k.footA);
+  const B = end(0.5, k.footB);
+  const drawn = rig.bones.map((_, i) => k.suppOn[i] === 1);
+  // The body proper: the hands only carry it where nothing else can (a handstand).
+  const trunkAndLegs = rig.bones.map((b, i) => drawn[i] && !ARM_BONE.test(b.name));
+  const body = trunkAndLegs.some(Boolean) ? trunkAndLegs : drawn;
+  const bearing = drawn;
+
+  // The floor: the lowest part of either pose that is not over a bench or a box.
+  k.floor = -Infinity;
+  for (const pose of [A, B]) {
+    for (let i = 0; i < k.n; i++) {
+      if (!bearing[i]) continue;
+      const a = pose[i * 3 + 2];
+      const x = pose[i * 3] + supportX(k, i, a);
+      const onTop = k.surf.some((_, s) => s % 3 === 0 && x >= k.surf[s] && x <= k.surf[s + 1]);
+      if (!onTop) k.floor = Math.max(k.floor, pose[i * 3 + 1] + supportAt(k, i, a));
+    }
+  }
+  if (!Number.isFinite(k.floor)) {
+    for (const pose of [A, B]) for (let i = 0; i < k.n; i++) if (bearing[i]) k.floor = Math.max(k.floor, partLow(k, pose, i));
+  }
+  const lowsA = partLows(k, A);
+  const lowsB = partLows(k, B);
+  const top = (lows: number[], set: boolean[]) => Math.max(...lows.filter((_, i) => set[i]));
+
+  if (JUMPS.has(motion)) {
+    // A jump: whatever of the body is lowest lands, and takes off.
+    k.ground = 2;
+    k.clearA = Math.max(0, k.floor - top(lowsA, body));
+    k.clearB = Math.max(0, k.floor - top(lowsB, body));
+    k.gset = body.map((on) => (on ? 1 : 0));
+    return new Set();
+  }
+  // Each end of the rep sits on the floor; how far each part is off it there.
+  const LA = top(lowsA, bearing);
+  const LB = top(lowsB, bearing);
+  const offA = lowsA.map((y) => LA - y);
+  const offB = lowsB.map((y) => LB - y);
+  const touchA = offA.map((d, i) => bearing[i] && d <= TOUCH);
+  const touchB = offB.map((d, i) => bearing[i] && d <= TOUCH);
+  const planted = new Set<number>();
+  touchA.forEach((on, i) => on && touchB[i] && planted.add(i));
+  // What stays down at both ends carries the body — on the floor, or held just
+  // off it; failing that, whatever touches at either end (the lower of the feet
+  // in a march). The body before the hands.
+  const near = (i: number) => bearing[i] && offA[i] <= NEAR && offB[i] <= NEAR;
+  const pick = (ok: (i: number) => boolean) => rig.bones.flatMap((_, i) => (ok(i) ? [i] : []));
+  // In order: on the floor at both ends (the body, then the hands); drawn just
+  // off it at both ends (a back or a seat drawn a little high is still what the
+  // body lies or sits on, and is set down); failing that, whatever touches at
+  // either end — the feet of a march, each coming right down as it carries.
+  let carry = pick((i) => planted.has(i) && body[i]);
+  if (carry.length === 0) carry = pick((i) => near(i) && body[i]);
+  if (carry.length === 0) carry = pick((i) => planted.has(i));
+  if (carry.length === 0) carry = pick(near);
+  if (carry.length === 0) carry = pick((i) => (touchA[i] || touchB[i]) && body[i]);
+  if (carry.length === 0) carry = pick((i) => touchA[i] || touchB[i]);
+  k.ground = 1;
+  k.lock = 1;
+  k.gset = rig.bones.map((_, i) => (carry.includes(i) ? 1 : 0));
+  return planted;
+}
+
+/* ─────────────────────────────── The feet ──────────────────────────────────
+ *
+ * A planted foot used to be held only by height: the body was moved up or down
+ * to keep it on the floor, and between the two poses the averaged leg carried
+ * it along the floor — a pistol squat's standing foot skated five units, a
+ * cossack squat's nearly four, every split squat and goblet squat a couple.
+ *
+ * A body standing on a foot moves FROM it. So where a foot stays put all rep,
+ * that foot is the ANCHOR: each frame the hips are found by walking up the leg
+ * from it — toe, ankle, knee, hip — at that instant's joint angles, and the rest
+ * of the body hangs from the hips as before. The foot cannot slide; the hips
+ * travel the arc the joints really make (a squat sits back, a push-up pivots on
+ * its toes, a Nordic curl falls from its knees); and every joint still moves on
+ * the one beat, since only the path of the hips changed.
+ *
+ * Any other foot on the floor at both ends is then held to its spot (or, if it
+ * moves, stepped there, lifted on the way) by solving its leg from the hip.
+ */
+/** A foot that moves no more than this between the poses is standing in one place… */
+const FOOT_HOLDS = 4;
+/** …and up to this far, on the floor at both ends, it steps — lifted on the way. */
+const FOOT_STEP_MOST = 44;
+/** Two feet that both step: the first goes in this first share of the rep, the second in the last. */
+const STEP_FIRST = 0.62;
+/** A foot the body's own movement keeps within this of its path needs no solving… */
+const FOOT_STRAYS = 0.6;
+/** …checked at this many points of the rep. */
+const LEG_SAMPLES = 16;
+/** A foot that turns more than this between the poses is lifting its heel, not standing still. */
+const FOOT_TURNS = 10 * RAD;
+/** How high a stepping foot lifts: a little, and a little more for a long step. */
+const FOOT_LIFT_LEAST = 1.5;
+const FOOT_LIFT_PER = 0.08;
+
+/** Find the anchor, then plant or step every other foot on the floor. */
+function settleLegs(k: MotionKit, rig: Rig, view: FigureView, planted: Set<number>): void {
+  if (k.ground !== 1 || k.hop > 0 || planted.size === 0) return;
+  const index = (name: string) => rig.bones.findIndex((b) => b.name === name);
+  const legs: [number, number, number, number][] =
+    view === "side"
+      ? [
+          [index("thigh"), index("shin"), index("foot"), -rig.facing],
+          [index("farThigh"), index("farShin"), index("farFoot"), -rig.facing],
+        ]
+      : [
+          [index("thighR"), index("shinR"), -1, -1],
+          [index("thighL"), index("shinL"), -1, 1],
+        ];
+  const wrap = (a: number) => a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
+
+  // The anchor: the planted foot whose toe (side-on) or ankle (front-on) moves
+  // least between the poses — if it moves no more than FOOT_HOLDS.
+  const A0 = solvePose(k, 0);
+  const B0 = solvePose(k, 0.5);
+  let anchored = -1;
+  let least = FOOT_HOLDS;
+  let at: [number, number] = [0, 0];
+  legs.forEach(([u, f, ft], li) => {
+    if (u < 0 || f < 0) return;
+    const contact = ft >= 0 ? ft : f;
+    if (!planted.has(contact)) return;
+    const pa = boneTip(k, A0, contact);
+    const pb = boneTip(k, B0, contact);
+    const move = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
+    if (move <= least + 1e-9 && (anchored < 0 || move < least - 1e-6)) {
+      anchored = li;
+      least = move;
+      at = pa;
+    }
+  });
+  if (anchored >= 0) {
+    const [, f, ft] = legs[anchored];
+    for (let b = ft >= 0 ? ft : f; b >= 0; b = rig.bones[b].parent) k.anchor.push(b);
+    k.anchorX = at[0];
+    k.anchorY = at[1];
+    // The foot places the body now; nothing else may move it.
+    k.gset = k.gset.map(() => 0);
+    k.cA = 0;
+    k.cB = 0;
+  }
+
+  const A = solvePose(k, 0);
+  const B = solvePose(k, 0.5);
+  const found: number[][] = [];
+  for (const [li, [u, f, ft, knee]] of legs.entries()) {
+    if (li === anchored) continue;
+    if (u < 0 || f < 0) continue;
+    if (!planted.has(ft >= 0 ? ft : f)) continue;
+    const wa = boneTip(k, A, f);
+    const wb = boneTip(k, B, f);
+    const step = Math.hypot(wb[0] - wa[0], wb[1] - wa[1]);
+    if (step > FOOT_STEP_MOST) continue;
+    const reach = (pose: number[], w: [number, number]) => Math.hypot(w[0] - pose[u * 3], w[1] - pose[u * 3 + 1]);
+    // Standing in one place: one spot, where the leg is straightest, so a squat
+    // stands up onto a straight leg. Stepping: from where it was to where it goes.
+    // A heel that lifts (the foot turning on its toes) carries the ankle with it.
+    const turns = ft >= 0 && Math.abs(wrap(k.anglesB[ft] - k.anglesA[ft])) > FOOT_TURNS;
+    const holds = step <= FOOT_HOLDS && !turns;
+    const anchor = reach(A, wa) >= reach(B, wb) ? wa : wb;
+    const from = holds ? anchor : wa;
+    const to = holds ? anchor : wb;
+    const lift = holds || step <= FOOT_HOLDS ? 0 : FOOT_LIFT_LEAST + FOOT_LIFT_PER * step;
+    // Which way the knee goes: the way it was drawn bending, forward if never.
+    const bend = (pose: number[], w: [number, number]) =>
+      wrap(pose[u * 3 + 2] - Math.atan2(w[1] - pose[u * 3 + 1], w[0] - pose[u * 3]));
+    const ba = bend(A, wa);
+    const bb = bend(B, wb);
+    const big = Math.abs(ba) >= Math.abs(bb) ? ba : bb;
+    const fold = Math.abs(big) > RAD ? Math.sign(big) : knee;
+    // A leg that already keeps its foot where it belongs, all rep, is left to
+    // move with the body: solving it would only add a knee to watch.
+    let strays = 0;
+    for (let s = 1; s < LEG_SAMPLES; s++) {
+      const q = (s / LEG_SAMPLES) * 0.5;
+      const t = lutAt(k.base, q);
+      const [x, y] = boneTip(k, solvePose(k, q), f);
+      const px = from[0] + (to[0] - from[0]) * t;
+      const py = from[1] + (to[1] - from[1]) * t - lift * Math.sin(Math.PI * t);
+      strays = Math.max(strays, Math.hypot(x - px, y - py));
+    }
+    // A step is always placed: its whole point is to land somewhere else.
+    if (strays <= FOOT_STRAYS && step <= FOOT_HOLDS) continue;
+    // Which foot is free to go first: the one bearing less at the start — the
+    // higher of the two, a tapped toe rather than a planted heel.
+    const startLow = A[ft >= 0 ? ft * 3 + 1 : f * 3 + 1];
+    found.push([u, f, ft, from[0], from[1], to[0], to[1], k.lengths[u], k.lengths[f], fold, lift, 0, 1, step, startLow]);
+  }
+  if (found.length === 0) return;
+  // Two feet that both travel the same way take turns — a step-touch, a walk.
+  // Two going opposite ways switch together, as a climber's do.
+  const steppers = found.filter((p) => p[13] > FOOT_HOLDS);
+  const sameWay = (a: number[], b: number[]) => (a[5] - a[3]) * (b[5] - b[3]) + (a[6] - a[4]) * (b[6] - b[4]) > 0;
+  if (steppers.length === 2 && sameWay(steppers[0], steppers[1])) {
+    const [a, b] = steppers;
+    const first = Math.abs(a[14] - b[14]) > 0.5 ? (a[14] < b[14] ? a : b) : a[13] >= b[13] ? a : b;
+    const second = first === a ? b : a;
+    first[12] = STEP_FIRST;
+    second[11] = 1 - STEP_FIRST;
+  }
+  for (const p of found) p.length = LEG_PIN_N;
+  if (anchored < 0) {
+    // The body's own corrections at the two ends, taken while the feet still
+    // count — for when nothing but these legs is left to carry it. (How far each
+    // end was moved onto the floor: where its root ended up.)
+    k.cA = solvePose(k, 0)[1] - k.rootA[1];
+    k.cB = solvePose(k, 0.5)[1] - k.rootB[1];
+  }
+  // A placed leg answers to its foot, not to the ground: out of the set.
+  for (const [u, f, ft] of found) {
+    k.gset[u] = 0;
+    k.gset[f] = 0;
+    if (ft >= 0) k.gset[ft] = 0;
+  }
+  for (const pin of found) k.legPins.push(...pin);
+  // The two ends re-solved, so a frozen frame is the planted pose. Nothing that
+  // places the body reads these legs any more, so once is exact.
+  for (const [q, at] of [
+    [0, k.anglesA],
+    [0.5, k.anglesB],
+  ] as const) {
+    const pose = solvePose(k, q);
+    for (let j = 0; j < k.legPins.length; j += LEG_PIN_N) {
+      const u = k.legPins[j];
+      const f = k.legPins[j + 1];
+      // The foot keeps its own angle; only the leg above it moves.
+      at[u] = nearest(pose[u * 3 + 2], at[u]);
+      at[f] = nearest(pose[f * 3 + 2], at[f]);
+    }
+  }
+}
+
+/** Every limb that neither carries the body nor is placed: kept out of the floor. */
+function settleFree(k: MotionKit, rig: Rig, view: FigureView): void {
+  if (k.ground === 0) return;
+  const index = (name: string) => rig.bones.findIndex((b) => b.name === name);
+  const placed = new Set<number>(k.anchor);
+  for (let j = 0; j < k.legPins.length; j += LEG_PIN_N) placed.add(k.legPins[j]);
+  for (let j = 0; j < k.pins.length; j += PIN_N) placed.add(k.pins[j]);
+  const limbs: [number, number, number][] =
+    view === "side"
+      ? [
+          [index("thigh"), index("shin"), index("foot")],
+          [index("farThigh"), index("farShin"), index("farFoot")],
+        ]
+      : [
+          [index("thighR"), index("shinR"), -1],
+          [index("thighL"), index("shinL"), -1],
+        ];
+  for (const arm of rig.arms) limbs.push([arm.upper, arm.fore, arm.hand]);
+  for (const [u, f, end] of limbs) {
+    if (u < 0 || f < 0 || placed.has(u) || k.depthSlot[f] >= 0) continue;
+    // A foot or hand the body rests on is what the floor was found from: it
+    // cannot sink. (A thigh can carry the body through the seat of the shorts
+    // while its foot is free — a V-up's, a superman's — so only the end counts.)
+    if (k.gset[end >= 0 ? end : f]) continue;
+    k.free.push(u, f, end);
   }
 }
 
@@ -847,8 +1538,25 @@ function finish(e: Extents): MotionBounds {
  */
 export function motionBounds(k: MotionKit, rig: FramedRig): MotionBounds {
   const e = emptyExtents();
-  for (let s = 0; s <= FRAME_SAMPLES; s++) measure(e, k, rig, solvePose(k, s / FRAME_SAMPLES));
+  let low = -Infinity;
+  for (let s = 0; s <= FRAME_SAMPLES; s++) {
+    const pose = solvePose(k, s / FRAME_SAMPLES);
+    measure(e, k, rig, pose);
+    low = Math.max(low, drawnLow(k, pose));
+  }
+  // Where it stands is where the ground was solved — or, hanging, the lowest
+  // its drawing ever reaches.
+  e.floorY = k.ground > 0 ? k.floor : Number.isFinite(low) ? low : e.floorY;
   return finish(e);
+}
+
+/** The lowest point a pose's drawing reaches, box units — exact, from the support tables. */
+function drawnLow(k: MotionKit, pose: number[]): number {
+  let low = -Infinity;
+  for (let i = 0; i < k.n; i++) {
+    if (k.suppOn[i]) low = Math.max(low, pose[i * 3 + 1] + supportAt(k, i, pose[i * 3 + 2]));
+  }
+  return low;
 }
 
 /** The room ONE pose needs — what a thumbnail is fitted to. */
@@ -859,6 +1567,8 @@ export function poseBounds(
 ): MotionBounds {
   const e = emptyExtents();
   measure(e, k, rig, pose);
+  const low = drawnLow(k, pose);
+  if (Number.isFinite(low)) e.floorY = low;
   return finish(e);
 }
 

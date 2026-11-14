@@ -11,6 +11,7 @@
 import { useCyclePalette } from "@/components/cycle";
 import { AppText, Card, Divider, useColors } from "@/components/ui";
 import { Spacing, alpha } from "@/constants/theme";
+import { useCycleHidden } from "@/contexts/CycleLockContext";
 import type { JournalEntry } from "@/services/notifications/journal";
 import type { QueueKind, QueuedNotification } from "@/services/notifications/queue";
 import { Ionicons } from "@expo/vector-icons";
@@ -48,9 +49,18 @@ function useKindTone(): Record<QueueKind, string> {
 /** How many upcoming notifications the card lists. */
 const UP_NEXT_ROWS = 5;
 
+/**
+ * With "Lock my cycle" shut, a cycle row keeps its place and its time but not
+ * its words: with discreet wording off, its title names the period.
+ */
+const PRIVATE_REMINDER = "Private reminder";
+const PRIVATE_ENTRY = "Private entry";
+const PRIVATE_DETAIL = "Hidden while locked";
+
 export function UpNextCard({ queue }: { queue: QueuedNotification[] }) {
   const { colors } = useColors();
   const tone = useKindTone();
+  const cycleHidden = useCycleHidden();
   const rows = queue.slice(0, UP_NEXT_ROWS);
 
   return (
@@ -72,7 +82,7 @@ export function UpNextCard({ queue }: { queue: QueuedNotification[] }) {
               </View>
               <View style={styles.flex}>
                 <AppText variant="body" weight="600" numberOfLines={1}>
-                  {q.title || "Reminder"}
+                  {cycleHidden && q.kind === "cycle" ? PRIVATE_REMINDER : q.title || "Reminder"}
                 </AppText>
                 <AppText variant="caption" color="tertiary" numberOfLines={1}>
                   {q.next ? whenLabel(q.next) : "Shortly"}
@@ -106,6 +116,7 @@ const JOURNAL_ROWS = 6;
 export function LockScreenJournalCard({ journal }: { journal: JournalEntry[] }) {
   const { colors } = useColors();
   const tone = useKindTone();
+  const cycleHidden = useCycleHidden();
   const rows = journal.slice(0, JOURNAL_ROWS);
 
   return (
@@ -137,10 +148,10 @@ export function LockScreenJournalCard({ journal }: { journal: JournalEntry[] }) 
               </View>
               <View style={styles.flex}>
                 <AppText variant="body" weight="600" numberOfLines={1}>
-                  {e.title}
+                  {cycleHidden && e.kind === "cycle" ? PRIVATE_ENTRY : e.title}
                 </AppText>
                 <AppText variant="caption" color={e.ok ? "tertiary" : colors.warning}>
-                  {e.detail}
+                  {cycleHidden && e.kind === "cycle" ? PRIVATE_DETAIL : e.detail}
                 </AppText>
               </View>
               <AppText variant="caption" color="tertiary">

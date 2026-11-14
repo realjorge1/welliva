@@ -22,70 +22,44 @@ placeholder strings.
 The gate is version-pinned: bump `LEGAL_VERSION` in `constants/legal.ts` on any
 material wording change and every user re-accepts on next launch.
 
-## 2. Before submitting — the one that is still blocking
+## 2. Legal identity — settled
 
-`constants/legal.ts` holds four identity constants. **Three of them are real; one
-is still bracketed placeholder text, and CI is red because of it.**
+`constants/legal.ts` holds three identity constants. All three are real, and
+`constants/__tests__/legal.test.ts` is green.
 
-| Constant | State | Notes |
+| Constant | Value | Notes |
 |---|---|---|
-| `LEGAL_ENTITY` | `"welliva"` | Passes the gate. Replace if the registered name differs from the trading name. |
-| `LEGAL_CONTACT_EMAIL` | `"mrjorgeobika@gmail.com"` | Passes the gate. Must be a **monitored** mailbox — the policy commits to a 30-day response on rights requests. Was `privacy@welliva.app` until the domain lapsed (September 2026). |
-| `LEGAL_JURISDICTION` | `"Nigeria"` | Filled 10 September 2026. Renders as "the laws of Nigeria" in the Terms' governing-law section. |
-| `LEGAL_POSTAL_ADDRESS` | **placeholder** | Blocking. Required by GDPR-style transparency rules. |
+| `LEGAL_ENTITY` | `"welliva"` | Replace if the registered name differs from the trading name. |
+| `LEGAL_CONTACT_EMAIL` | `"mrjorgeobika@gmail.com"` | The **only** contact the documents give, so it must be a **monitored** mailbox — the policy commits to a 30-day response on rights requests. Was `privacy@welliva.app` until the domain lapsed (September 2026). |
+| `LEGAL_JURISDICTION` | `"Nigeria"` | Filled 10 September 2026. Renders as "the laws of Nigeria" in the Terms' governing-law section — keep that shape if it ever changes ("Nigerian law" would not read correctly). |
 
-### What the failure looks like
+### No postal address — the owner's decision, 14 November 2026
 
-`npm test` fails two assertions until the address is filled:
+There used to be a fourth constant, `LEGAL_POSTAL_ADDRESS`, holding the bracket
+text `"[registered business address — to be completed]"`. It kept two guard
+assertions red from 10 September to 14 November 2026, by the owner's instruction
+not to publish an invented address. On 14 November the owner chose to **leave
+the address out**: the Privacy Policy's "Who we are" line now gives the email as
+the way to reach us, and the constant is gone. The change was folded into the
+still-unpublished `LEGAL_VERSION` 5, so users re-accept once, not twice.
 
-```
-FAIL  constants/__tests__/legal.test.ts
-  › LEGAL_POSTAL_ADDRESS is filled in, not a placeholder
-  › renders no placeholder text in any document body
-```
+Store accounts are a separate matter: Google Play may still ask for a physical
+address in Play Console for a developer who sells subscriptions. That lives in
+the developer account, not in these documents.
 
-**This red is a standing, deliberate decision — not an unnoticed regression.**
-The owner's instruction is to keep it red rather than publish an invented
-address. Every session that runs the suite will see these two failures; report
-them as the known hold and move on. The test prints the same explanation in its
-own failure message (`KNOWN_HOLD` in
-[constants/\_\_tests\_\_/legal.test.ts](../../constants/__tests__/legal.test.ts)),
-so it travels with the CI log.
+**If a real address is ever wanted:** add the constant back with the **real**
+value, put it into the "Who we are" sentence, add it to `IDENTITY` in the guard
+test, and republish (section 3). The guard rejects square brackets anywhere in a
+value (so `"12 High St [Suite 4]"` fails) and `TODO`, `TBD`, `FIXME`, `XXX` or
+"to be completed". Adding a contact detail does not change any document's
+meaning, so it needs no `LEGAL_VERSION` bump of its own.
 
-**This gate is correct. Do not relax it, skip it, or loosen the `PLACEHOLDER`
-regex.** These strings are interpolated verbatim into the privacy policy and the
-terms — the two documents a user must accept before the app asks them about
-pregnancy, medication or kidney disease. A fabricated address in a live privacy
-policy is materially worse than a red test, which is precisely why the test was
-written to fail loudly rather than to warn.
-
-### The edit
-
-```diff
--export const LEGAL_POSTAL_ADDRESS = "[registered business address — to be completed]";
-+export const LEGAL_POSTAL_ADDRESS = "<street, city, postcode, Nigeria>";
-```
-
-Requirements the test enforces, so get them right first time:
-
-- **No square brackets anywhere in the value.** The guard treats bracketed text
-  as an unfilled field, so a value like `"12 High St [Suite 4]"` still fails.
-- No `TODO`, `TBD`, `FIXME`, `XXX`, or the phrase "to be completed".
-- The address must be the **registered** one for the operating entity, not a
-  mailbox or a co-working desk — a regulator writing to it has to reach you.
-- The jurisdiction is already filled as `"Nigeria"`, phrased to sit inside the
-  sentence *"These Terms are governed by the laws of ___"*. If you ever change
-  it, keep that shape: "Nigeria" reads correctly; "Nigerian law" does not.
-
-Then bump `LEGAL_LAST_UPDATED` to the date you made the change.
-
-### Do you also need to bump `LEGAL_VERSION`?
-
-**No — not for this.** `LEGAL_VERSION` gates re-consent: bumping it asks every
-existing user to accept the documents again on next launch. Filling a placeholder
-before the first release changes no substance for anyone, because nobody has
-accepted the placeholder version. Bump it only when the *meaning* of a document
-changes after release.
+**The gate is correct. Do not relax it, skip it, or loosen the `PLACEHOLDER`
+regex.** It scans every identity constant and every rendered line of the privacy
+policy, terms and disclaimer — the documents a user must accept before the app
+asks them about pregnancy, medication or kidney disease. Invented details in a
+live privacy policy are materially worse than a red test, which is why the test
+fails loudly rather than warning.
 
 ## 3. Host the same text publicly
 
@@ -228,7 +202,7 @@ data), **5.1.2** (health data not used for advertising).
 ### Legal identity (guarded by `constants/__tests__/legal.test.ts`)
 
 - [ ] `npm test` is green — the guard fails the build while any of
-      `LEGAL_ENTITY` / `LEGAL_CONTACT_EMAIL` / `LEGAL_POSTAL_ADDRESS` /
-      `LEGAL_JURISDICTION` still holds placeholder text
+      `LEGAL_ENTITY` / `LEGAL_CONTACT_EMAIL` / `LEGAL_JURISDICTION`, or any
+      line of the three documents, holds placeholder text
 - [ ] `PRIVACY_POLICY_URL` and `TERMS_URL` load publicly in a browser, signed
       out — both stores fetch them from the listing, not from the app

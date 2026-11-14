@@ -25,6 +25,17 @@
  * NOTHING_HELPED_NOTE or more of her recent answered days, more often than
  * anything else helped. The cramps page carries the same line and number.
  *
+ * Three more from what she logs around her periods (./doctorChecks, which
+ * holds the thresholds; 2026-11-13):
+ *   · cramps that kept her from her day, in 2 of her last 3 periods with cramps
+ *     (every mode that logs cramps; never in pregnancy)
+ *   · a heavy flow on 3 or more days, in 2 of her last 3 periods that logged
+ *     flow, with an iron blood test suggested when she also logged low energy
+ *     inside them (also on hormonal contraception: it is about how much, not when)
+ *   · bleeding between periods in 2 of her last 3 cycles, spotting right
+ *     around her estimated ovulation left out (off on hormonal contraception,
+ *     where bleeding between bleeds is common)
+ *
  * Every note says what was seen, in her numbers, and that it is worth raising —
  * it never names a condition. A dismissed note stays dismissed until its
  * evidence changes: the `signature` is built from the dates behind it, so a new
@@ -32,8 +43,24 @@
  */
 
 import { daysBetween, formatDay } from "./dates";
+import {
+  betweenPeriods,
+  completedPeriods,
+  disruptiveCramps,
+  HEAVY_DAYS,
+  heavyPeriods,
+  ofTheRecent,
+  ofYourLast,
+} from "./doctorChecks";
 import { liveEpisodes } from "./episodes";
-import { STATS_WINDOW, type CycleMode, type CycleProfile, type CycleRecord } from "./predict";
+import {
+  lutealFor,
+  POPULATION_PERIOD_DAYS,
+  STATS_WINDOW,
+  type CycleMode,
+  type CycleProfile,
+  type CycleRecord,
+} from "./predict";
 import { unrelieved } from "./relief";
 import type { CycleDays, CycleSettings, PeriodEpisode } from "./types";
 
@@ -44,7 +71,10 @@ export type DoctorNoteId =
   | "irregular"
   | "missed"
   | "menopause_bleeding"
-  | "cramps_unrelieved";
+  | "cramps_unrelieved"
+  | "cramps_disruptive"
+  | "heavy_periods"
+  | "between_periods";
 
 export interface DoctorNote {
   id: DoctorNoteId;
@@ -60,8 +90,12 @@ export interface NotesInput {
   today: string;
   mode: CycleMode;
   profile?: CycleProfile;
-  /** Her day logs — for what she said helped (./relief). */
+  /** Her day logs — for what she said helped (./relief), and what she logged around her periods. */
   days?: CycleDays;
+  /** Her typical bleed, which resolves the end of a period she never closed. */
+  typicalBleed?: number;
+  /** The first day her history counts from (after a birth, after stopping a method). */
+  since?: string | null;
 }
 
 /** FIGO 2018: a regular cycle varies by ≤7 days at 26–41, ≤9 days otherwise. */
@@ -172,6 +206,69 @@ export function doctorNotes(input: NotesInput): DoctorNote[] {
       title: "Cramps that nothing eased",
       body: `On ${pain.nothing} of the last ${pain.observed} days you had cramps, you told me nothing helped. Pain that nothing eases is worth mentioning to a doctor, who can look for the cause and what will help.`,
       signature: pain.dates.join(","),
+    });
+  }
+
+  // ── What she logged around her periods (./doctorChecks) ──
+  const days = input.days ?? {};
+  const spans = completedPeriods(
+    input.episodes,
+    today,
+    input.typicalBleed ?? POPULATION_PERIOD_DAYS,
+    input.since ?? null,
+  );
+  const noun = hormonal ? "bleeds" : "periods";
+
+  // Pain that stops her day: every mode where cramps are logged, never in pregnancy.
+  const stopped = mode !== "pregnancy" ? disruptiveCramps(spans, days) : null;
+  if (stopped) {
+    const n = stopped.days.length;
+    notes.push({
+      id: "cramps_disruptive",
+      title: "Cramps that stop your day",
+      body: `Cramps kept you from your day ${ofYourLast(stopped.hits, stopped.observed, `${noun} with cramps`)} (${n} ${
+        n === 1 ? "day" : "days"
+      } in all). Pain that stops your normal day is worth mentioning to a doctor. It's the sign they look for, and there's usually something that helps.`,
+      signature: stopped.days.join(","),
+    });
+  }
+
+  // How much she bleeds, not when: so it stays on with hormonal contraception.
+  // Menopause has its own note for any bleeding at all.
+  const heavy = mode === "normal" || mode === "postpartum" || hormonal ? heavyPeriods(spans, days) : null;
+  if (heavy) {
+    const scope = heavy.consecutive
+      ? ofYourLast(heavy.hits, heavy.observed, noun)
+      : ofTheRecent(heavy.hits, heavy.observed, `${noun} you logged flow in`);
+    notes.push({
+      id: "heavy_periods",
+      title: hormonal ? "Heavy bleeds" : "Heavy periods",
+      body:
+        `You logged a heavy flow on ${HEAVY_DAYS} or more days ${scope} (${list(heavy.heavyDays)} days). ` +
+        (hormonal
+          ? "That's worth mentioning to a doctor, or to whoever prescribes your contraception."
+          : "That's worth mentioning to a doctor. It's common, and very treatable.") +
+        (heavy.tired
+          ? ` Heavy ${noun} and tiredness together are worth asking about. A simple blood test can check your iron.`
+          : ""),
+      signature: `${heavy.starts.join(",")}${heavy.tired ? ":tired" : ""}`,
+    });
+  }
+
+  // Bleeding between periods. Off on hormonal contraception, where bleeding
+  // between bleeds is common, and in the logging-only life stages.
+  const between =
+    mode === "normal" || mode === "postpartum"
+      ? betweenPeriods(cycles, spans, days, lutealFor(cycles, days).days)
+      : null;
+  if (between) {
+    notes.push({
+      id: "between_periods",
+      title: "Bleeding between periods",
+      body: `Bleeding between periods ${ofYourLast(between.hits, between.observed, "cycles")} (${between.firsts
+        .map((d) => formatDay(d))
+        .join(", ")}). That's worth mentioning to a doctor, even when it's light. Spotting right around ovulation isn't counted, because that's common.`,
+      signature: between.days.join(","),
     });
   }
 

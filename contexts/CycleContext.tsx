@@ -58,6 +58,7 @@ import {
   type CycleMood,
   type CycleSettings,
   type CycleView,
+  type Discharge,
   type Energy,
   type GozlinAsk,
   type Flow,
@@ -84,6 +85,7 @@ import React, {
 } from "react";
 import { AppState } from "react-native";
 import { useNutrition, useProfile, useSystem } from "./AppContext";
+import { CycleLockProvider } from "./CycleLockContext";
 
 /** A change to one day's log. `null` clears a field; `undefined` leaves it alone. */
 export interface DayPatch {
@@ -92,6 +94,10 @@ export interface DayPatch {
   mood?: CycleMood | null;
   energy?: Energy | null;
   ovulationTest?: OvulationTest | null;
+  /** "Kept me from school, work or plans" — only kept beside cramps. */
+  stoppedDay?: true | null;
+  /** Only offered with the fertile window on. */
+  discharge?: Discharge | null;
 }
 
 export interface CycleSetup {
@@ -485,12 +491,16 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
         apply("mood");
         apply("energy");
         apply("ovulationTest");
+        apply("stoppedDay");
+        apply("discharge");
         // An answer about a symptom she has just un-ticked goes with it.
         if (next.relief) {
           const kept = next.relief.filter((r) => next.symptoms?.includes(r.symptom));
           if (kept.length) next.relief = kept;
           else delete next.relief;
         }
+        // "Kept me from my day" is about the cramps: un-ticking them takes it too.
+        if (next.stoppedDay && !next.symptoms?.includes("cramps")) delete next.stoppedDay;
         // Nothing logged, nothing to clear: don't create an empty day.
         if (isEmptyDayLog(next) && isEmptyDayLog(prev)) return d;
 
@@ -762,7 +772,13 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
     ],
   );
 
-  return <CycleContext.Provider value={value}>{children}</CycleContext.Provider>;
+  // "Lock my cycle" sits inside, so it remounts with the account like the log
+  // does, and every surface that reads the cycle can also read whether to hide it.
+  return (
+    <CycleContext.Provider value={value}>
+      <CycleLockProvider>{children}</CycleLockProvider>
+    </CycleContext.Provider>
+  );
 }
 
 export function useCycle(): CycleContextValue {

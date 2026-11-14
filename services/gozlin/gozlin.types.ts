@@ -362,6 +362,14 @@ export interface GozlinForecast extends StructuredBase {
 
   /** True when the read is limited by how consistently things are logged. */
   adherenceLimited: boolean;
+
+  /**
+   * The local day (YYYY-MM-DD) it was worked out on. The card uses it to tell
+   * a forecast made today from one re-shown out of an old conversation: only a
+   * fresh one is remembered as "said" (services/body/forecastMemory). Absent on
+   * forecasts saved before 2026-11-14.
+   */
+  asOf?: string;
 }
 
 export type FindingKind =

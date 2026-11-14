@@ -166,13 +166,6 @@ analytics SDK.
 
 Named here rather than discovered later.
 
-**The two legal entity constants are unfilled, and CI is red because of it.**
-`LEGAL_POSTAL_ADDRESS` and `LEGAL_JURISDICTION` in `constants/legal.ts` still
-hold placeholder text, and `constants/__tests__/legal.test.ts` fails on purpose
-until they are real — they are interpolated verbatim into the privacy policy and
-terms that users must accept. **The gate is correct and must not be relaxed.**
-See [`docs/legal/store-submission.md`](docs/legal/store-submission.md).
-
 **Apple Health / Health Connect is written but not installed.**
 The adapters, the sleep-overlap merging, the HRV baselines and the platform
 selector all exist and are tested; neither native package is a dependency yet, so

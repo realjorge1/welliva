@@ -279,7 +279,7 @@ describe("what leaves the phone, and where it is kept", () => {
 
   it("exports the answer with everything else", () => {
     const csv = cycleCsv(data(settings(method("hormonal", "2026-09-01"))));
-    expect(csv.split("\n")[0]).toBe("type,date,end,flow,symptoms,mood,energy,ovulation_test,detail");
+    expect(csv.split("\n")[0]).toBe("type,date,end,flow,symptoms,mood,energy,ovulation_test,detail,kept_from_day,discharge");
     expect(csv).toContain("contraception,2026-09-01,,,,,,,hormonal contraception: yes");
   });
 

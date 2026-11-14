@@ -59,6 +59,7 @@ import {
 } from "@/services/account/AccountDeletion";
 import { useBilling } from "@/contexts/BillingContext";
 import { useCycle } from "@/contexts/CycleContext";
+import { useCycleHidden } from "@/contexts/CycleLockContext";
 import { useCyclePalette } from "@/components/cycle";
 import { cycleHeadline } from "@/services/cycle";
 import { TIER_NAME } from "@/services/billing";
@@ -460,8 +461,12 @@ export default function SettingsScreen() {
   // Home). The row's subtitle is the live state, never a promise.
   const cycle = useCycle();
   const cyclePalette = useCyclePalette();
+  // "Lock my cycle" shut: the row says so, and nothing about where she is.
+  const cycleHidden = useCycleHidden();
   const cycleSubtitle = cycle.settings.enabled
-    ? (() => {
+    ? cycleHidden
+      ? "Locked"
+      : (() => {
         const h = cycleHeadline(cycle.view, cycle.view.showFertile);
         return `${h.eyebrow} · ${h.title}`;
       })()

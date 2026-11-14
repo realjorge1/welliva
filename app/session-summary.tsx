@@ -29,6 +29,7 @@ import {
 import { EXERCISE_DATABASE } from "@/constants/ExerciseDatabase";
 import { Spacing, alpha } from "@/constants/theme";
 import { useProfile, useWorkout } from "@/contexts/AppContext";
+import { PainCheck } from "@/fitness/components/PainCheck";
 import { PrimaryPill } from "@/fitness/components/SessionControls";
 import { BLOCK_LABEL } from "@/fitness/components/sessionBlocks";
 import { formatClock, sessionTotals } from "@/fitness/components/sessionTotals";
@@ -317,6 +318,15 @@ export default function SessionSummaryScreen() {
               </AppText>
             </View>
           </Reveal>
+
+          {/* Anything hurt? — optional; pain rests that spot in the plan
+              (fitness/components/PainCheck). Only after real work: a run
+              opened and abandoned has nothing to have hurt. */}
+          {summary.setsCompleted > 0 || summary.exercisesCompleted > 0 ? (
+            <Reveal index={2} style={styles.block}>
+              <PainCheck runId={summary.sessionRunId} date={summary.date} />
+            </Reveal>
+          ) : null}
 
           {/* Body map — what today's work actually hit */}
           {workedMuscles.length > 0 && (

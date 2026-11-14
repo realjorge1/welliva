@@ -10,9 +10,11 @@
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { withPainAnswer } from "../../services/training/pain";
 import type {
   EffortMemory,
   FitnessProfile,
+  PainMemory,
   RecommendationMemory,
   ReminderPrefs,
 } from "../types";
@@ -167,6 +169,16 @@ export async function rememberSessionEffort(
   const current = await loadFitnessProfile();
   const effortHistory = [...current.effortHistory, memory].slice(-EFFORT_MEMORY_LIMIT);
   return updateFitnessProfile({ effortHistory });
+}
+
+/**
+ * Bank (or change) the answer to "Did anything hurt?" for one session run.
+ * Writing emits on the change feed, which is what rebuilds the plan around a
+ * resting area (contexts/domain/useWorkoutState).
+ */
+export async function rememberPain(answer: PainMemory): Promise<FitnessProfile> {
+  const current = await loadFitnessProfile();
+  return updateFitnessProfile({ painHistory: withPainAnswer(current.painHistory, answer) });
 }
 
 /* ─────────────────────────── data safety ─────────────────────────── */

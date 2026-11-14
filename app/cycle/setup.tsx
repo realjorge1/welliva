@@ -14,6 +14,7 @@
  * terms matter, so it's the moment they're stated, in full and in plain words.
  */
 import { DateStrip, useCyclePalette } from "@/components/cycle";
+import { CycleLockGate } from "@/components/cycle/CycleLockGate";
 import { ScreenErrorFallback } from "@/components/AppErrorBoundary";
 import { AppText, Button, Card, Chip, ChipGrid, Screen, Stepper, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
@@ -34,7 +35,16 @@ import { Pressable, StyleSheet, View } from "react-native";
 const CYCLE_RANGE = { min: 18, max: 60, start: 28 };
 const PERIOD_RANGE = { min: 1, max: 12, start: 5 };
 
+/** Behind "Lock my cycle" when it's on (components/cycle/CycleLockGate). */
 export default function CycleSetupScreen() {
+  return (
+    <CycleLockGate variant="pushed">
+      <CycleSetupBody />
+    </CycleLockGate>
+  );
+}
+
+function CycleSetupBody() {
   const { colors } = useColors();
   const palette = useCyclePalette();
   const cycle = useCycle();

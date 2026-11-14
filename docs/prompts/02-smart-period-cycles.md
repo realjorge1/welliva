@@ -127,7 +127,7 @@ The tracker was built 2026-10-15 and extended 2026-10-21. **Most of it has never
 - **Gozlin:** to tell Gozlin something new, add lines to the cycle brief (`services/cycle/brief.ts` → `cycleStateLines`), which feeds the client-built state block in `services/gozlin/agent/context.ts`. If anything needs the server (sibling repo `..\backend-welliva`, auto-deploys from `main`), both repos change together with a contract-version bump on both sides, and **nothing is pushed without the owner's OK**.
 - **Analytics:** first-party `track()` from `services/telemetry/Analytics.ts` only. Add one event per feature for shown, accepted and dismissed. **Never put cycle details in an event:** no dates, no symptoms, no method. Only that the feature was used.
 - **Tests:** vitest. New logic goes in pure modules with tests in `services/cycle/__tests__`. Inject `today`. Build date fixtures from **local date parts**, never `toISOString()`.
-- **Verification after every phase:** `npm run typecheck`, `npm run lint`, `npm test`. Exactly **2 tests are expected to fail**: the legal postal-address tests, a deliberate hold. Mention them in one clause and never "fix" them.
+- **Verification after every phase:** `npm run typecheck`, `npm run lint`, `npm test`. Every test must pass (the old 2 legal postal-address failures were resolved on 14 November 2026). On Windows, run the tests from an uppercase `C:\` working directory: a lowercase `c:\` makes every file fail on load with zero tests run.
 
 ---
 
@@ -384,7 +384,7 @@ On those days their calorie target shows the extra, with a small note "+250 · h
 ## Done means
 
 - All seven features work end to end and in every mode.
-- Typecheck and lint are clean. All tests pass except the 2 known legal postal-address tests.
+- Typecheck and lint are clean. All tests pass.
 - New pure logic has its own tests, and the library tests still prove the pages match the code.
 - The legal wording was handled exactly per D4, and nothing was published publicly without the owner's OK.
 - No crash reached the owner's phone during the work.

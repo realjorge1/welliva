@@ -16,10 +16,38 @@ import type {
   SuccessBand,
   VelocityTrend,
 } from "@/services/gozlin";
+import { noteForecastSaid } from "@/services/body/forecastMemory";
+import { todayDate } from "@/services/OfflineStorage";
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { CardHeader, Chip, kitStyles, LeverBox } from "./GozlinCardKit";
+
+/**
+ * "We said / you did": a goal date shown today is remembered, and when it has
+ * moved two weeks or more from the last one said, one line says by how much
+ * and why (services/body/forecastMemory). Only a forecast worked out today
+ * counts as said: one re-shown from an old conversation changes nothing, and a
+ * second showing today still compares with what was said before today.
+ */
+function useMovedLine(data: GozlinForecast): string | null {
+  const [moved, setMoved] = useState<string | null>(null);
+  const { goalWeightKg, expectedGoalDate, projectedRatePerWeek, asOf } = data;
+  useEffect(() => {
+    if (!asOf || asOf !== todayDate() || goalWeightKg == null || !expectedGoalDate) return;
+    let alive = true;
+    void noteForecastSaid(
+      { targetKg: goalWeightKg, eta: expectedGoalDate, ratePerWeek: projectedRatePerWeek },
+      asOf,
+    ).then((line) => {
+      if (alive) setMoved(line);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [asOf, goalWeightKg, expectedGoalDate, projectedRatePerWeek]);
+  return moved;
+}
 
 const CONF_LABEL: Record<ForecastConfidence, string> = {
   low: "Low confidence",
@@ -56,6 +84,7 @@ function formatGoalDate(dateStr: string): string {
 
 export function ForecastCard({ data }: { data: GozlinForecast }) {
   const { colors } = useColors();
+  const moved = useMovedLine(data);
 
   const band = BAND_META[data.successBand];
   const bandColor = colors[band.key] as string;
@@ -160,6 +189,16 @@ export function ForecastCard({ data }: { data: GozlinForecast }) {
             colors={colors}
           />
         </View>
+
+        {/* ── The date moved since it was last said, and why ── */}
+        {moved ? (
+          <View style={styles.movedRow}>
+            <ThemedIcon name="time-outline" size={15} role="textSecondary" />
+            <AppText variant="footnote" color="secondary" style={styles.movedText}>
+              {moved}
+            </AppText>
+          </View>
+        ) : null}
 
         {/* ── Current Projection ── */}
         <AppText variant="body" color="secondary">
@@ -287,4 +326,6 @@ const styles = StyleSheet.create({
   },
   adjList: { gap: Spacing.sm, marginTop: 2 },
   adjRow: { flexDirection: "row", alignItems: "flex-start", gap: Spacing.sm },
+  movedRow: { flexDirection: "row", alignItems: "flex-start", gap: Spacing.sm },
+  movedText: { flex: 1 },
 });

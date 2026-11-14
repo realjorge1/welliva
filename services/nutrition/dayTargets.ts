@@ -78,9 +78,12 @@ export function dayCalorieTarget(
   return base + dayCalorieDelta(date, adjustments);
 }
 
-/** The small note beside the target. Null on an ordinary day. Never a penalty, never a debt. */
-export function dayTargetNote(kcal: number): string | null {
-  if (kcal > 0) return `+${kcal} · hungrier week`;
+/**
+ * The small note beside the target. Null on an ordinary day. Never a penalty, never a debt.
+ * `discreet` (the cycle lock is shut): the number stays right, the reason doesn't name the cycle.
+ */
+export function dayTargetNote(kcal: number, opts: { discreet?: boolean } = {}): string | null {
+  if (kcal > 0) return `+${kcal} · ${opts.discreet ? "planned" : "hungrier week"}`;
   if (kcal < 0) return `−${Math.abs(kcal)} · evened out`;
   return null;
 }

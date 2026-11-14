@@ -62,6 +62,7 @@ import {
 } from "./ScheduleService";
 import { SessionService } from "./SessionService";
 import { resolveTrainingPrefs, type TrainingPrefs } from "./training";
+import { withRestingAreas } from "./training/pain";
 import { ensureWorkoutExercisesLoaded, generateWorkoutPlan } from "./WorkoutGenerator";
 
 export interface EnsuredDiet {
@@ -333,11 +334,16 @@ async function libraryLookup(): Promise<(id: string) => WorkoutDefinition | unde
  * Deterministic — calling it twice in a row builds the same plan.
  */
 export async function generateWorkoutWeek(
-  bio: UserBio,
+  ownBio: UserBio,
   weekStart: string,
   previous?: GeneratedWorkoutPlan | null,
 ): Promise<GeneratedWorkoutPlan> {
   await ensureWorkoutExercisesLoaded(); // the engine reads the exercise pool
+  // An area that hurt after a recent session is rested like an injury, on
+  // every path that builds a plan (services/training/pain). Idempotent, so a
+  // caller that already applied it changes nothing.
+  const today = toLocalDateString(new Date());
+  const bio = withRestingAreas(ownBio, (await loadFitnessProfile()).painHistory, today);
   const prefs = await loadTrainingPrefs(bio);
   const [sessions, prior, library] = await Promise.all([
     SessionService.getInstance().loadHistory(),

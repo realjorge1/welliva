@@ -66,6 +66,11 @@ const NOT_SHOWN_FROM: Partial<Record<FigureMotion, FigureCamera>> = {
   // The pattern fallback for core is a standing knee tuck: front-on, its
   // driven knee could only bend both legs into a dip.
   core: "front",
+  // A heel raise happens along the foot, straight at a front-on camera: with a
+  // trainer that cannot tip toward the viewer, the athlete could only float up
+  // off the floor. Side-on the heel lifts and the toes stay down.
+  calfRaise: "front",
+  singleCalfRaise: "front",
   lateralShuffle: "side",
   skater: "side",
   jumpingJack: "side",

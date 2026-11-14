@@ -586,6 +586,13 @@ const DOWNWARD = 0.35;
  */
 const SHIN_LEVEL = 0.15;
 
+/**
+ * A shin within this much of plumb, its ankle lifted no more than RISE_MOST off
+ * the surface, is standing UP ON ITS TOES — a calf raise.
+ */
+const RISE_CONE = (25 * Math.PI) / 180;
+const RISE_MOST = 8;
+
 /** How a foot is set at one keyframe, and which rule set it. */
 export interface FootSet {
   angle: number;
@@ -634,6 +641,12 @@ export function footSet(knee: Pt, ankle: Pt, lift: number, facing: Facing): Foot
     forward + facing * Math.min(sideShoeToeRoom(lift), angleBetween(square, forward));
   if (lift <= ON_SURFACE && angleBetween(shin, Math.PI / 2) <= STAND_CONE) {
     return { angle: forward, how: "flat", toes };
+  }
+  // A standing leg whose ankle the pose lifts a little rises onto the ball of
+  // the foot: the toe stays on the floor and the heel comes up. Left "free", the
+  // foot hung a touch toes-down and the whole athlete rose off the floor with it.
+  if (lift <= RISE_MOST && angleBetween(shin, Math.PI / 2) <= RISE_CONE) {
+    return { angle: forward + facing * sideShoeToeRoom(lift), how: "flat", toes };
   }
   if (lift <= NEAR_SURFACE && Math.sin(square) > DOWNWARD) {
     // Resting on its top: lying back along the surface, toes away from the body.
@@ -964,7 +977,7 @@ export function buildFrontRigFrom(profile: FrontProfile): Rig {
  * lowest joint would otherwise be taken for the floor, and the hanging feet
  * drawn flat, standing on air.)
  */
-const HANGING = new Set<FigureMotion>(["pullUp"]);
+export const HANGING = new Set<FigureMotion>(["pullUp"]);
 
 /**
  * What the registry knows about a movement's side view beyond its two poses:

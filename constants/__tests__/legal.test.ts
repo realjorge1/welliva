@@ -1,11 +1,12 @@
 /**
  * LEGAL — the placeholder guard.
  *
- * WHY THIS FILE EXISTS. constants/legal.ts interpolates four identity constants
+ * WHY THIS FILE EXISTS. constants/legal.ts interpolates its identity constants
  * verbatim into the privacy policy, terms and medical disclaimer — the three
  * documents a user must accept before the app will ask them about pregnancy,
- * medication or kidney disease. Two of them shipped as literal bracket text;
- * one (the jurisdiction) has since been filled, and one still reads:
+ * medication or kidney disease. Two of them once shipped as literal bracket
+ * text (the jurisdiction, since filled, and a postal address, since removed by
+ * the owner's choice on 14 November 2026 — the documents give an email only):
  *
  *     LEGAL_POSTAL_ADDRESS = "[registered business address — to be completed]"
  *
@@ -24,8 +25,9 @@
  * It also pins the two invariants that make LEGAL_VERSION meaningful, because a
  * consent record is only as good as the version stamped on it.
  *
- * ⚠️ THIS FILE IS CURRENTLY RED ON PURPOSE. See `KNOWN_HOLD` below before
- * "fixing" anything here.
+ * Never turn a failure here green by loosening PLACEHOLDER or skipping a test:
+ * fill the real value, or (as with the postal address) take the field out of
+ * the documents by the owner's decision.
  */
 import { describe, expect, it } from "vitest";
 
@@ -36,7 +38,6 @@ import {
   LEGAL_ENTITY,
   LEGAL_JURISDICTION,
   LEGAL_LAST_UPDATED,
-  LEGAL_POSTAL_ADDRESS,
   LEGAL_VERSION,
   PRIVACY_POLICY_URL,
   TERMS_URL,
@@ -49,25 +50,15 @@ import {
  */
 const PLACEHOLDER = /\[[^\]]*\]|TODO|TBD|FIXME|XXX|to be completed|lorem ipsum/i;
 
-/**
- * Printed on every failure this file can produce, because the failures are
- * currently EXPECTED and each fresh reader otherwise rediscovers that the hard
- * way. Keep this in the message, not only in a comment — the message is what a
- * CI log and a code-reading agent actually see.
- */
-const KNOWN_HOLD =
-  "KNOWN DELIBERATE HOLD (as of 10 September 2026): LEGAL_POSTAL_ADDRESS is the " +
-  "only field still unfilled, and the owner has chosen to leave it red until the " +
-  "registered business address is decided. Two assertions here fail on purpose. " +
-  "Do NOT invent an address, do NOT loosen PLACEHOLDER, do NOT skip these tests — " +
-  "a fabricated address in a live privacy policy is worse than a red build. " +
-  "Fill the real address in constants/legal.ts and both go green. " +
-  "See docs/legal/store-submission.md.";
+/** Printed on every placeholder failure, so the fix travels with the CI log. */
+const HOW_TO_FIX =
+  "Fill the REAL value in constants/legal.ts. Do NOT invent one, do NOT loosen " +
+  "PLACEHOLDER, do NOT skip this test — invented details in a privacy policy " +
+  "users must accept are worse than a red build.";
 
 const IDENTITY: Record<string, string> = {
   LEGAL_ENTITY,
   LEGAL_CONTACT_EMAIL,
-  LEGAL_POSTAL_ADDRESS,
   LEGAL_JURISDICTION,
   PRIVACY_POLICY_URL,
   TERMS_URL,
@@ -90,7 +81,7 @@ describe("legal identity constants", () => {
           `Replace it in constants/legal.ts with the real value — it is ` +
           `rendered verbatim in the privacy policy, terms and disclaimer.\n` +
           `\n` +
-          `${KNOWN_HOLD}`,
+          `${HOW_TO_FIX}`,
       ).toBe(false);
     },
   );
@@ -132,7 +123,7 @@ describe("legal documents", () => {
 
       expect(
         offending,
-        `${id} contains unfilled text:\n  ${offending.join("\n  ")}\n\n${KNOWN_HOLD}`,
+        `${id} contains unfilled text:\n  ${offending.join("\n  ")}\n\n${HOW_TO_FIX}`,
       ).toEqual([]);
     }
   });

@@ -123,6 +123,10 @@ export const DEVICE_LOCAL_KEYS: readonly string[] = [
   "@welliva_analytics_activated",
   // the cycle reminders pending in THIS phone's OS queue (services/cycle/reminders)
   "@welliva_cycle_reminder_ids",
+  // "Lock my cycle" (contexts/CycleLockContext). It asks for THIS phone's own
+  // screen lock, so on another phone it would mean nothing — and syncing it
+  // could lock a phone whose owner never chose to.
+  "@welliva_cycle_lock",
   // which smart moment took which screen's slot today (services/smart/ledger).
   // A day's budget is a decision about this phone; the ANSWERS sync.
   "@welliva_smart_shown",
