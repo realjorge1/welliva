@@ -50,14 +50,14 @@ footer nav a { margin-right: 16px; white-space: nowrap; }
 <main>
 <h1>Privacy Policy</h1>
 <p class="summary">What welliva collects, where it lives, and how to erase it.</p>
-<p class="updated">Last updated 15 October 2026</p>
+<p class="updated">Last updated 15 November 2026</p>
 <h2>The short version</h2>
 <p>welliva is a personal health and fitness app. To build your plan it needs health information about you — including sensitive information such as pregnancy status, medical conditions, medications and injuries.</p>
 <p>welliva is built device-first: your detailed history (meals, workouts, check-ins, the coach's memory) is stored on your phone. What leaves the device is limited to what is needed to sign you in, to keep your account in sync across your devices, and — only if you switch it on — a short, minimised summary sent to the AI coach.</p>
 <p>We do not sell your data, we do not run advertising, and we never share your health information with employers, insurers or data brokers.</p>
 
 <h2>Who we are</h2>
-<p>This app is operated by welliva (&quot;we&quot;, &quot;us&quot;). For privacy questions, or to exercise any right described below, contact <a href="mailto:mrjorgeobika@gmail.com">mrjorgeobika@gmail.com</a>. Postal: [registered business address — to be completed].</p>
+<p>This app is operated by welliva (&quot;we&quot;, &quot;us&quot;). For privacy questions, or to exercise any right described below, contact <a href="mailto:mrjorgeobika@gmail.com">mrjorgeobika@gmail.com</a>.</p>
 <p>Where data-protection law applies to you (for example the UK/EU GDPR, or comparable national law), we act as the controller of the personal data described here.</p>
 
 <h2>What we collect</h2>
@@ -67,8 +67,8 @@ footer nav a { margin-right: 16px; white-space: nowrap; }
 <li>Body and lifestyle: age, biological sex, height, weight, daily activity level, training experience, available equipment, goals and region</li>
 <li>Food: dietary style, cuisine preference, meals per day, allergies and foods you dislike</li>
 <li>Health context: medical conditions (including pregnancy and trimester, diabetes, kidney, liver, thyroid, digestive and hormonal conditions), injuries or pain areas, and medications or medication categories</li>
-<li>Your logs: meals and foods eaten, water, workouts and sessions completed, body measurements and weigh-ins, habits, streaks, and mood/energy/sleep check-ins</li>
-<li>Your cycle log, only if you switch cycle tracking on: the dates your periods start and end, flow, symptoms you note (such as cramps or headache), mood and energy, how long your cycle usually is, and ovulation-test results if you turn on the fertile-window estimate. Cycle tracking is off until you enable it</li>
+<li>Your logs: meals and foods eaten, water, workouts and sessions completed (and, if you answer, whether anything hurt afterwards and where), body measurements and weigh-ins, habits, streaks, and mood/energy/sleep check-ins</li>
+<li>Your cycle log, only if you switch cycle tracking on: the dates your periods start and end, flow, symptoms you note (such as cramps or headache), whether cramps kept you from school, work or plans, mood and energy, how long your cycle usually is, ovulation-test results and discharge if you turn on the fertile-window estimate, whether you use hormonal contraception (if you choose to say), what you said helped a symptom, and whether you asked welliva to plan for a hungrier week. Cycle tracking is off until you enable it</li>
 <li>Photos, if you add them: a profile picture, progress photos, and meal photos you ask the coach to analyse</li>
 <li>Messages you send to the AI coach</li>
 </ul>
@@ -77,7 +77,7 @@ footer nav a { margin-right: 16px; white-space: nowrap; }
 <ul>
 <li>Calendar: read-only, to spot travel and big days so the plan can bend around them</li>
 <li>Location: coarse location only (rounded to roughly 1 km) and used solely to fetch the local forecast</li>
-<li>Wearable and health metrics: sleep, heart-rate variability and steps, to make recovery real rather than estimated</li>
+<li>Health Connect (Android), read-only: sleep, heart-rate variability and resting heart rate, to make recovery real rather than estimated. welliva never writes to Health Connect</li>
 <li>Health records: medications and conditions from your phone's health store</li>
 <li>Meal photos and voice: analysed to draft a log you confirm — nothing is saved without your okay</li>
 <li>Notifications: reminders and briefings, within your quiet hours and daily limit</li>
@@ -87,8 +87,9 @@ footer nav a { margin-right: 16px; white-space: nowrap; }
 <p>Your cycle log is health data too. You give your explicit consent for it by switching cycle tracking on, and you withdraw that consent by switching it off or by deleting the log, both in Cycle settings.</p>
 <ul>
 <li>To create your nutrition targets, meal plan and training plan — this is the service you asked for (performance of a contract)</li>
-<li>To keep you safe: allergies, conditions, injuries and medications are used to filter foods and exercises out of your plan</li>
-<li>To track your cycle, estimate when your next period is likely and, on days you log cramps or heavy flow, ease your workout — only if you switch cycle tracking on</li>
+<li>To keep you safe: allergies, conditions, injuries and medications are used to filter foods and exercises out of your plan, and an area you say hurt after a workout is rested in your plan for two weeks</li>
+<li>To point out, on your phone, things in your own logs that may be worth raising with a doctor, such as weight falling without trying, eating less than the least welliva would plan for you, low moods on most days for two weeks, or the same spot hurting after workouts. These are never a diagnosis</li>
+<li>To track your cycle, estimate when your next period is likely and, on days you log cramps or heavy flow, ease your workout; and to line your cycle up, on your phone, against your own weight, food, sleep, training, mood and trips, so welliva can explain what it sees and, if you ask it to, plan your calories around it — only if you switch cycle tracking on</li>
 <li>To sync your account across your devices and restore it if you change phone</li>
 <li>To send reminders you have enabled</li>
 <li>To keep the service secure and to diagnose faults</li>
@@ -96,8 +97,9 @@ footer nav a { margin-right: 16px; white-space: nowrap; }
 <h2>Where your data lives</h2>
 <p>On your device. Your timeline, logs, summaries and the coach's memory are stored locally on your phone.</p>
 <p>In your private cloud account. So your account survives a lost phone, your profile and logs are synced to our hosted database (Supabase). Rows are protected by per-user row-level security: your account can only read and write its own data. Photos and voice notes go to private storage buckets scoped to your user id, and are served through short-lived signed links — never public URLs.</p>
-<p>Your cycle log. It is stored on your phone and, by default, included in your account backup — the same sync that carries your other logs. Switch the backup off in Cycle settings and the log stays on your phone only; the copy in your cloud account is erased. It reaches the AI coach only if you switch on &quot;Let Gozlin see your cycle&quot; in Cycle settings, which is off by default; the coach then sees your cycle day, when your next period is likely and what you logged today, and nothing else. &quot;Delete all cycle data&quot; erases the log from your phone and from your backup, and you can export it first.</p>
+<p>Your cycle log. It is stored on your phone and, by default, included in your account backup — the same sync that carries your other logs. Switch the backup off in Cycle settings and the log stays on your phone only; the copy in your cloud account is erased. It reaches the AI coach only if you switch on &quot;Let Gozlin see your cycle&quot; in Cycle settings, which is off by default; the coach then sees your cycle day, when your next period is likely, what you logged today, whether you use hormonal contraception, what you said helped a symptom, and what your logs show around your cycle (what changed when a period is late, your weight before a period, a hungrier-week plan, and a period that falls during a trip), and nothing else. &quot;Delete all cycle data&quot; erases the log from your phone and from your backup, and you can export it first.</p>
 <p>With the AI coach, only if enabled. When you use Gozlin's cloud features, a minimised summary of the relevant context — not your full history — is sent over an encrypted connection to our backend, which uses Anthropic's Claude models to generate the reply. It is used to answer you, and not to train third-party models.</p>
+<p>From Health Connect, only if you set it up. welliva reads your sleep, heart-rate variability and resting heart rate, on your phone. The readings stay on your phone: they are not synced to your account or sent to us. When you use the AI coach, the short summary it receives can include what welliva worked out from them, such as your recovery score and last night's hours of sleep. They are never used for advertising, never sold, and never shared with anyone else. welliva's use of information received from Health Connect adheres to the Health Connect Permissions policy, including the Limited Use requirements. You can stop it at any time in Health Connect or under More → Trust.</p>
 <p>Weather. If you enable weather, coarse coordinates are sent to Open-Meteo to fetch a forecast. No account identifier is attached.</p>
 
 <h2>Who we share it with</h2>
@@ -121,7 +123,7 @@ footer nav a { margin-right: 16px; white-space: nowrap; }
 <p>Write to <a href="mailto:mrjorgeobika@gmail.com">mrjorgeobika@gmail.com</a> and we will respond within 30 days. We never charge for a request, and never require a reason.</p>
 <p>Step-by-step deletion instructions, including for accounts created with Google or Facebook, are at <a href="https://realjorge1.github.io/welliva/data-deletion/">https://realjorge1.github.io/welliva/data-deletion/</a>.</p>
 <ul>
-<li>Access a copy of what we hold about you</li>
+<li>Access a copy of what we hold about you. Trust → Download my data saves it as a Word document, wherever you choose on your phone</li>
 <li>Correct anything wrong — most of it is editable in Settings</li>
 <li>Delete your data, or your whole account</li>
 <li>Withdraw a consent you gave, at any time, under More → Privacy</li>
@@ -135,7 +137,16 @@ footer nav a { margin-right: 16px; white-space: nowrap; }
 <p>welliva is not for children under 13, and accounts cannot be created below that age. Where local law sets a higher age for consenting to data processing (16 in parts of Europe), a parent or guardian must consent on the user's behalf. If you believe a child has given us data, contact <a href="mailto:mrjorgeobika@gmail.com">mrjorgeobika@gmail.com</a> and we will delete it.</p>
 
 <h2>Analytics and tracking</h2>
-<p>welliva contains no advertising SDKs, no third-party analytics and no cross-app tracking. We do not use your data to build advertising profiles, and we do not ask for the advertising identifier.</p>
+<p>welliva contains no advertising SDKs, no third-party analytics and no cross-app tracking. We do not use your data to build advertising profiles, and we do not ask for the advertising identifier. Nothing about you is sold, and nothing is shared with a tracking company.</p>
+<p>We do measure two things ourselves, on our own servers, to find out which parts of the app work and which quietly break:</p>
+<ul>
+<li>Usage events — that a meal was logged, that a screen was opened, that setup was finished, that the upgrade screen was seen, how a reply from the coach ended (answered, offline and so on). Each event carries its name and at most a short label the app chooses, such as which screen, which plan or which outcome, and simple counts such as how many seconds a coach reply took. Never what you typed and never any health value</li>
+<li>Crash reports — when a screen fails, the error and the part of the code it happened in</li>
+</ul>
+<h2>What the measurement never sees</h2>
+<p>Not any number or note you entered. No weight, no calories, no meal or food name, no mood, no cycle dates or symptoms, no messages to the coach, no search terms, no photos. The list of events the app is able to send is fixed in its own code, and a value that is not on that list cannot be sent even by mistake.</p>
+<p>Events are tied to a random identifier created on your device at first launch — not your name, not your email, and not your phone's or advertiser's ID. Reinstalling the app, or resetting your data, replaces it, and earlier events can no longer be connected to you.</p>
+<p>Our legal basis is our legitimate interest in keeping welliva working and fixing what breaks. Both are on when you install, and both have their own switch under More → Trust. Turning one off stops it at once and discards anything still waiting to be sent on your device.</p>
 
 <h2>Changes to this policy</h2>
 <p>If we change this policy materially we will ask you to review and accept the new version inside the app before you continue. The version and date at the top of this document tell you which one you accepted.</p>
