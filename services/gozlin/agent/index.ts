@@ -17,6 +17,7 @@ export type {
 } from "./deepDive";
 export type {
   AgentTurnOptions,
+  AgentTurnOutcome,
   AgentTurnResult,
   CoachTransport,
   CoachTurnRequest,

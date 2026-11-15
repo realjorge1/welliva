@@ -88,8 +88,8 @@ Answers implied by the current code. "Collected" = leaves the device;
 | Health info (conditions, pregnancy, medications, injuries, allergies — and, if cycle tracking is on, period dates, flow, symptoms, mood) | Yes (synced to the user's private row) | No — see "Sharing" below | App functionality | Optional |
 | Fitness info (workouts, sessions, body metrics) | Yes | No | App functionality | Optional |
 | Photos (progress photos, meal photos) | Yes (private bucket) | No | App functionality | Optional |
-| Voice / audio | Yes, only if voice is enabled | No | App functionality | Optional |
-| Calendar | No — read on-device only | No | App functionality | Optional |
+| Voice / audio | No — voice logging was removed (2026-11-15) and the microphone permission with it | No | — | — |
+| Calendar | No — read on-device only; if switched on, workouts / likely cycle days are written to a local, unsynced "welliva" calendar on the phone (policy v6) | No | App functionality | Optional |
 | Approximate location | Not stored; sent to the weather API only | No | App functionality | Optional |
 | Messages to the AI coach | Yes | Yes — processed by our AI provider | App functionality | Optional |
 | Crash logs / diagnostics | No | No | — | — |

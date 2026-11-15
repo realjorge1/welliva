@@ -32,6 +32,8 @@ import {
 } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useCycle } from "@/contexts/CycleContext";
+import { useCalendarScope } from "@/components/calendar/useCalendarScope";
+import { syncCycleCalendar } from "@/services/calendar/sync";
 import { useCycleLockOptional } from "@/contexts/CycleLockContext";
 import { LOCK_TITLE, lockOfferReason } from "@/services/cycle/lockRules";
 import {
@@ -67,6 +69,8 @@ function CycleSettingsBody() {
   const permission = useReminderPermission();
   const [confirm, setConfirm] = useState<"off" | "delete" | null>(null);
   const [busy, setBusy] = useState(false);
+  // "Cycle in my calendar" (services/calendar): off until she turns it on.
+  const inCalendar = useCalendarScope("cycle", syncCycleCalendar);
   // "Lock my cycle": shown when this build can ask (or it's already on), on
   // this phone only. Turning it on asks for one unlock first.
   const lock = useCycleLockOptional();
@@ -251,6 +255,29 @@ function CycleSettingsBody() {
                 onValueChange={(v) => void cycle.updateSettings({ discreet: v })}
                 trackColor={switchTrack}
                 accessibilityLabel="Discreet wording"
+              />
+            }
+          />
+          <ListRow
+            icon="calendar"
+            tone={colors.water}
+            title="In my calendar"
+            subtitle={
+              inCalendar.on
+                ? `Your likely days are in the "welliva" calendar on this phone${
+                    settings.discreet ? ', named "Plan-ahead days"' : ""
+                  }. Apps allowed to read your calendar can see them.`
+                : `Likely period days${
+                    settings.showFertileWindow ? " and your fertile window" : ""
+                  } in a "welliva" calendar kept on this phone only. Apps allowed to read your calendar could see them.`
+            }
+            right={
+              <Switch
+                value={inCalendar.on}
+                disabled={inCalendar.busy}
+                onValueChange={(v) => void inCalendar.toggle(v)}
+                trackColor={switchTrack}
+                accessibilityLabel="Cycle in my calendar"
               />
             }
           />

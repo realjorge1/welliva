@@ -58,6 +58,13 @@ export const DEVICE_LOCAL_KEYS: readonly string[] = [
   "@welliva_signals_weather",
   "@welliva_signals_wearable",
   "@gozlin_forecast_cache",
+  // the home-screen widget's picture of today on THIS phone (services/widget),
+  // rebuilt from the synced logs whenever they change
+  "@welliva_widget_today",
+  // the dates THIS phone laid the evening streak reminder for (its back-off)
+  "@welliva_streak_reminder_log",
+  // the last frozen day THIS phone has shown the freeze moment for
+  "@welliva_freeze_moment_seen",
   // the last store price quote (services/billing/priceMemory) — in THIS
   // device's Play-account currency, and regenerated on the next price load
   "@welliva_store_prices",
@@ -145,6 +152,10 @@ export const DEVICE_LOCAL_PREFIXES: readonly string[] = [
   // here from `@welliva_cycle_*`, and the removal of those keys is what makes
   // the sweep tombstone the cloud copy (services/cycle/store).
   "@welliva_cycle_local_",
+  // welliva's own calendar on this phone (services/calendar): its id and the two
+  // switches. The calendar is a LOCAL one that exists on this phone only, so
+  // neither its id nor "write into it" can mean anything on another device.
+  "@welliva_calendar_",
 ];
 
 /** True when a key belongs to the app (either namespace). */

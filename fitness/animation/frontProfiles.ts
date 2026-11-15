@@ -711,25 +711,33 @@ export const FRONT_PROFILES: FrontProfileMap = {
   },
 
   // Seated tall, soles together, knees dropped out to the sides; the knees
-  // ease toward the floor.
+  // ease toward the floor while the hands hold the feet.
+  //
+  // Redrawn 2026-11-14: the seat is ON the floor (the whole pose hovered) and
+  // the feet stay where they are (they slid four units down as the knees fell).
   butterfly: {
     frames: [
-      P([50, 43], [50, 59], [50, 84], [60, 60], [57.1, 72.9], [53.9, 84.4], [56, 84], [71.5, 85.1], [56.5, 85.9]),
-      P([50, 43.4], [50, 59.4], [50, 84.4], [60, 60.4], [57.4, 73.3], [54.4, 85], [56, 84.4], [71, 88.4], [56.1, 90.5]),
+      P([50, 52.2], [50, 68.2], [50, 93.2], [60, 69.2], [63.2, 81.8], [59.9, 93.2], [56, 93.2], [70.85, 87.68], [57.1, 93.6]),
+      P([50, 52.2], [50, 68.2], [50, 93.2], [60, 69.2], [63.2, 81.8], [59.9, 93.2], [56, 93.2], [71.78, 90.57], [57.1, 93.6]),
     ],
     loopMs: 4200,
   },
 
   // Seated 90/90: front knee bent in front, back knee bent out to the side;
-  // sit tall, then lean over the front shin.
+  // sit tall with the hands on the thighs, then lean over the front shin.
+  //
+  // Redrawn 2026-11-14 (owner: "not good enough", "floating"): the seat is ON
+  // the floor (it hovered seven units up, the shins hanging from it like a wide
+  // squat's), both legs lie along the floor — the front shin across in front of
+  // the hips, the back shin away to the side — and the hands rest on the legs.
   ninetyNinety: {
     frames: [
-      P([50, 43], [50, 59], [50, 84], [60, 60], [58.9, 73.2], [57.3, 85], [56, 84], [71.5, 87.9], [56.6, 88.9]),
-      P([59, 43.9], [55.7, 59.5], [50.5, 84], [65.3, 62.6], [63.5, 75.7], [61.2, 87.5], [56.5, 84], [72, 87.9], [57.1, 88.9]),
+      P([50, 52.2], [50, 68.2], [50, 93.2], [60, 69.2], [61.2, 82.4], [64.4, 94], [56, 93.2], [71.92, 94.85], [57, 94.6]),
+      P([59, 53.2], [55.2, 68.75], [50, 93.2], [65, 70.8], [67.3, 83.6], [69, 95.2], [56, 93.2], [71.92, 94.85], [57, 94.6]),
     ],
     framesL: [
-      L([40, 60], [39.5, 73.2], [39.6, 85.2], [44, 84], [28.5, 87.9], [19.2, 99.7]),
-      L([45.7, 58.4], [46.1, 71.6], [47.1, 83.6], [44.5, 84], [29, 87.9], [19.7, 99.7]),
+      L([40, 69.2], [38.8, 82.4], [35.6, 94], [44, 93.2], [28.08, 94.85], [13.5, 91.5]),
+      L([45.4, 66.7], [43.7, 79.6], [40.5, 90.6], [44, 93.2], [28.08, 94.85], [13.5, 91.5]),
     ],
     loopMs: 4200,
   },

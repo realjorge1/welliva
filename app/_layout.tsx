@@ -26,6 +26,8 @@ import { AppDrawer } from "@/components/navigation";
 import { NotificationActionRunner } from "@/components/notifications/NotificationActionRunner";
 import { ProactiveDeliveryRunner } from "@/components/notifications/ProactiveDeliveryRunner";
 import { ReminderSyncRunner } from "@/components/notifications/ReminderSyncRunner";
+import { CalendarWriteRunner } from "@/components/calendar/CalendarWriteRunner";
+import { WeatherRunner } from "@/components/weather/WeatherRunner";
 import { SupabaseAuthProvider, useAuth } from "@/components/SupabaseAuthProvider";
 import { CustomThemeProvider, useTheme } from "@/components/ThemeContext";
 import { Colors } from "@/constants/theme";
@@ -43,6 +45,7 @@ import { AppProvider } from "@/contexts/AppContext";
 import { BillingProvider } from "@/contexts/BillingContext";
 import { CycleProvider } from "@/contexts/CycleContext";
 import { HabitsProvider } from "@/contexts/HabitsContext";
+import { TodayWidgetSync } from "@/components/widget/TodayWidgetSync";
 import { MealPlanProvider } from "@/contexts/MealPlanContext";
 
 /*
@@ -174,6 +177,8 @@ function RootLayoutContent() {
             custom menus, food logging and tracking mode. */}
         <MealPlanProvider>
         <HabitsProvider>
+        {/* Keeps the home-screen widget's day current; off without the native widget. */}
+        <TodayWidgetSync />
         {/* The cycle tracker's state. Inside the account-keyed subtree like every
             data provider, so a switch of account or "Reset data" re-reads it. */}
         <CycleProvider>
@@ -266,6 +271,12 @@ function RootLayoutContent() {
               fitness, habits), and folds lock-screen writes back into the live
               screens. Headless. */}
           <ReminderSyncRunner />
+          {/* Workouts (and, for women who switch it on, the cycle) in welliva's
+              own calendar on this phone. Off until switched on. Headless. */}
+          <CalendarWriteRunner />
+          {/* Today's forecast, fresh on open and foreground, for the training-
+              hour note, the heat top-up and Home's line. Off with weather off. */}
+          <WeatherRunner />
           <StatusBar style={currentTheme === "dark" ? "light" : "dark"} />
           </IntroRevealProvider>
         </AuthWrapper>

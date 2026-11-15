@@ -115,9 +115,18 @@ function toHours(s: string): number | undefined {
   return Number.isFinite(n) && n >= 0 && n <= 24 ? Math.round(n * 10) / 10 : undefined;
 }
 
+/** The sheet's header + the button row, in dp (measured, 2026-11-15). */
+const SHEET_CHROME_DP = 160;
+/** Step one without the orb: toggle, answer, slider, labels and gaps, in dp. */
+const STEP_ONE_ROWS_DP = 200;
+/** The orb's wrap (padding included) as a multiple of the orb. */
+const ORB_WRAP = 1.5;
+/** Smallest orb worth drawing; below it, step one scrolls instead. */
+const ORB_MIN = 72;
+
 export function MindSheet({ visible, existing, onClose, onSave }: Props) {
   const { containerStyle } = useKeyboardInset();
-  const { width, height } = useWindowDimensions();
+  const { width, height, fontScale } = useWindowDimensions();
 
   const [kind, setKind] = useState<MindKind>("daily");
   const [step, setStep] = useState<Step>(0);
@@ -134,11 +143,24 @@ export function MindSheet({ visible, existing, onClose, onSave }: Props) {
    * The orb, as big as the panel allows. Its canvas is (1 + 2 × ORB_BLEED) of
    * it, and that whole canvas has to fit the panel's width — the scroll region
    * clips at its sides, and a clipped glow is exactly the boxed look this
-   * replaced. On a short phone the height decides instead, so step one still
-   * fits without scrolling.
+   * replaced. On a short phone the height decides instead, so step one — the
+   * toggle, the orb, the answer AND the slider — fits without scrolling.
+   *
+   * 27% of the height alone did not: on a 569 dp phone (2026-11-15) it pushed
+   * the slider, the one control of step one, below the fold of a scroll with no
+   * indicator. So the orb also gets only what is left: the sheet is 92% of the
+   * screen, its header and buttons take ~160 dp, step one's other rows and gaps
+   * ~200 dp (both measured on that phone, and grown with the text size), and
+   * the orb's wrap is ~1.5× the orb. Below ORB_MIN it stops shrinking and the
+   * body scrolls instead — an orb smaller than that says nothing.
    */
+  const leftForOrb =
+    (height * 0.92 - (SHEET_CHROME_DP + STEP_ONE_ROWS_DP) * Math.max(1, fontScale)) / ORB_WRAP;
   const orb = Math.floor(
-    Math.min(220, (width - Spacing.sm * 2 - 2) / (1 + ORB_BLEED * 2), height * 0.27),
+    Math.max(
+      ORB_MIN,
+      Math.min(220, (width - Spacing.sm * 2 - 2) / (1 + ORB_BLEED * 2), height * 0.27, leftForOrb),
+    ),
   );
 
   // Prefill from the day's existing entry each time the sheet opens. Only a

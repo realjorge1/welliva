@@ -133,7 +133,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useKeepAwake } from "expo-keep-awake";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
+import { BackHandler, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
 import Reanimated, {
   FadeIn,
   useAnimatedStyle,
@@ -764,6 +764,21 @@ export default function GuidedSessionScreen() {
    * a rest longer than it began — so this is the most that was ever left, per rest.
    */
   const restSpan = useRef({ key: "", max: 1 });
+
+  // Android's back button leaves a running session the way the End pill does —
+  // through the one sheet that names both ways out — instead of silently
+  // popping the player mid-set (found on device 2026-11-15). An open sheet is a
+  // Modal and takes the press itself first; before and after the run, back is back.
+  const runLive =
+    phase === "COUNTDOWN" || phase === "ACTIVE_SET" || phase === "REST" || phase === "TRANSITION";
+  useEffect(() => {
+    if (!runLive) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      handleLeave();
+      return true;
+    });
+    return () => sub.remove();
+  }, [runLive, handleLeave]);
 
   // While a resumed session is being restored, hold a quiet placeholder.
   if (!state) {

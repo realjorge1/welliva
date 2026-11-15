@@ -61,14 +61,20 @@ function loadHealthConnect(): HealthConnectModule | null {
   }
 }
 
-/** Everything welliva asks for. Read-only, always. */
-const READ_TYPES = [
+/**
+ * Everything welliva asks for. Read-only, always — and only what a feature the
+ * person can see uses: these three feed the recovery score. Steps and active
+ * calories were dropped before the first build that asks (owner, 2026-11-15):
+ * nothing used them, and Google approves only data a visible feature uses.
+ * plugins/withHealthConnect.js declares the matching manifest permissions; a
+ * test keeps the two lists equal.
+ */
+export const HEALTH_CONNECT_READ_TYPES = [
   "SleepSession",
   "HeartRateVariabilityRmssd",
   "RestingHeartRate",
-  "Steps",
-  "ActiveCaloriesBurned",
 ] as const;
+const READ_TYPES = HEALTH_CONNECT_READ_TYPES;
 
 const PERMISSIONS = READ_TYPES.map((recordType) => ({
   accessType: "read" as const,
@@ -272,13 +278,13 @@ export class HealthConnectProvider implements WearableProvider {
   }
 
   /**
-   * How many of our five record types were granted.
+   * How many of our record types were granted.
    *
    * PARTIAL GRANTS ARE NORMAL on Android — the permission sheet is per record
-   * type and people routinely allow steps while declining heart data. So this
+   * type and people routinely allow sleep while declining heart data. So this
    * is a count rather than a boolean, and any grant at all makes the source
-   * ready: reading three of five metrics is much better than reading none, and
-   * the snapshot is sparse by design.
+   * ready: reading one metric is much better than reading none, and the
+   * snapshot is sparse by design.
    */
   private async grantedCount(): Promise<number> {
     const mod = this.module();
@@ -361,25 +367,17 @@ export class HealthConnectProvider implements WearableProvider {
 
     const window = lastNightWindow(now);
     const baselineStart = now.getTime() - BASELINE_DAYS * 86_400_000;
-    const dayStart = new Date(now);
-    dayStart.setHours(0, 0, 0, 0);
-
-    const [sleepSessions, hrv, restingHr, steps, activeEnergyKcal] = await Promise.all([
+    // Only the three types welliva asks for. Steps and active calories are not
+    // read (see HEALTH_CONNECT_READ_TYPES); the mapping still accepts them for
+    // the day a feature uses them.
+    const [sleepSessions, hrv, restingHr] = await Promise.all([
       this.read("SleepSession", window.start, window.end),
       this.read("HeartRateVariabilityRmssd", baselineStart, now.getTime()),
       this.read("RestingHeartRate", baselineStart, now.getTime()),
-      this.aggregate("Steps", dayStart.getTime(), now.getTime(), [
-        "COUNT_TOTAL",
-        "count",
-      ]),
-      this.aggregate("ActiveCaloriesBurned", dayStart.getTime(), now.getTime(), [
-        "ACTIVE_CALORIES_TOTAL",
-        "energy",
-      ]),
     ]);
 
     return snapshotFromHealthConnect(
-      { sleepSessions, hrv, restingHr, steps, activeEnergyKcal },
+      { sleepSessions, hrv, restingHr, steps: undefined, activeEnergyKcal: undefined },
       now,
     );
   }

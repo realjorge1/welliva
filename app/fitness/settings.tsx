@@ -23,6 +23,8 @@ import {
   resetRecommendationMemory,
 } from "@/fitness/services/FitnessProfileStore";
 import type { ReminderPrefs } from "@/fitness/types";
+import { useCalendarScope } from "@/components/calendar/useCalendarScope";
+import { syncWorkoutCalendar } from "@/services/calendar/sync";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "@/utils/haptics";
 import { router } from "expo-router";
@@ -44,7 +46,12 @@ function offSwitches(patch: Partial<ReminderPrefs>): Partial<ReminderPrefs> {
 export default function FitnessSettingsScreen() {
   const { colors } = useColors();
   const { profile, update } = useFitnessProfile();
-  const { workoutLog, sessionHistory } = useWorkout();
+  const { workoutLog, sessionHistory, workoutPlan } = useWorkout();
+  // "Workouts in my calendar" (services/calendar): the week's sessions, written
+  // into welliva's own calendar on this phone at the training hour.
+  const planRef = React.useRef(workoutPlan);
+  planRef.current = workoutPlan;
+  const inCalendar = useCalendarScope("workouts", () => syncWorkoutCalendar(planRef.current));
 
   /**
    * Every reminder write goes through here so a switch can never end up "on"
@@ -293,6 +300,29 @@ export default function FitnessSettingsScreen() {
               onValueChange={(v) => void setReminders({ weeklySummary: v })}
               trackColor={{ true: colors.primary, false: colors.border }}
               thumbColor="#FFFFFF"
+            />
+          }
+        />
+        <Row
+          icon="calendar-outline"
+          label="In my calendar"
+          sub={
+            inCalendar.on
+              ? inCalendar.written === 0
+                ? "No sessions left this week — next week's go in when the plan is made"
+                : inCalendar.written != null
+                ? `Added ${inCalendar.written} ${inCalendar.written === 1 ? "session" : "sessions"} to the "welliva" calendar on this phone`
+                : `Your sessions are in the "welliva" calendar on this phone, at ${String(profile.reminders.hour ?? 17).padStart(2, "0")}:00`
+              : `Each session in a "welliva" calendar on this phone — it moves when the plan does`
+          }
+          right={
+            <Switch
+              value={inCalendar.on}
+              disabled={inCalendar.busy}
+              onValueChange={(v) => void inCalendar.toggle(v)}
+              trackColor={{ true: colors.primary, false: colors.border }}
+              thumbColor="#FFFFFF"
+              accessibilityLabel="Workouts in my calendar"
             />
           }
         />

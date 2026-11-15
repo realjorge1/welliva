@@ -123,6 +123,8 @@ export type GozlinFlag =
   | "NO_PLAN"
   | "STREAK_STRONG"
   | "STREAK_BROKEN"
+  /** A streak freeze covered yesterday: the run is intact; yesterday wasn't kept. */
+  | "FREEZE_HELD"
   | "SETBACK";
 
 export interface GozlinMetric {

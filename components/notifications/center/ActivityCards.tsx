@@ -17,7 +17,7 @@ import type { QueueKind, QueuedNotification } from "@/services/notifications/que
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { StyleSheet, View } from "react-native";
-import { agoLabel, plural, whenLabel } from "./format";
+import { agoLabel, whenLabel } from "./format";
 
 const KIND_ICON: Record<QueueKind, keyof typeof Ionicons.glyphMap> = {
   habit: "repeat",
@@ -103,7 +103,7 @@ export function UpNextCard({ queue }: { queue: QueuedNotification[] }) {
       )}
       {queue.length > UP_NEXT_ROWS ? (
         <AppText variant="caption" color="tertiary" style={styles.more}>
-          and {plural(queue.length - UP_NEXT_ROWS, "more")} after that
+          and {queue.length - UP_NEXT_ROWS} more after that
         </AppText>
       ) : null}
     </Card>

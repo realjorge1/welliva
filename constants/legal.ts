@@ -66,12 +66,25 @@ export const DATA_DELETION_URL = `${LEGAL_SITE_URL}/data-deletion/`;
  * still-unpublished v5 the same day: "anything hurt?" after a workout, the
  * "worth mentioning to a doctor" notes, and Download my data, so users
  * re-accept once, not twice. Also folded in, same day: the "Who we are" line
- * no longer carries a postal address (owner's decision; email only).
+ * no longer carries a postal address (owner's decision; email only), and the
+ * usage-events line now says exactly what an event carries (a short label the
+ * app chooses and simple counts, e.g. how a coach reply ended and how long it
+ * took) instead of "the event name and nothing else", which was already loose.
+ * And Health Connect (2026-11-15): exactly which three types are read, read-only,
+ * where the readings go (nowhere but the phone, except the recovery and sleep
+ * hours in the coach's summary when the person uses it), never ads, never sold,
+ * and Google's Limited Use statement.
+ * 6 (15 November 2026, owner: "update the privacy policy"): the calendar is no
+ * longer read-only — if the person switches it on, welliva writes their training
+ * sessions and, separately, their likely cycle days into its own calendar kept
+ * on the phone (synced to no account; other apps allowed to read the calendar
+ * can see them). The forecast now also shapes a training-hour note and a hot
+ * day's water goal, on the phone. Voice logging is gone (it was never built).
  */
-export const LEGAL_VERSION = 5;
+export const LEGAL_VERSION = 6;
 
 /** Shown in each document header. Update alongside LEGAL_VERSION. */
-export const LEGAL_LAST_UPDATED = "14 November 2026";
+export const LEGAL_LAST_UPDATED = "15 November 2026";
 
 /** Minimum age to hold an account (the onboarding age field enforces it too). */
 export const MINIMUM_AGE = 13;
@@ -163,11 +176,11 @@ const PRIVACY: LegalDoc = {
         "welliva can read a small number of device signals to make coaching fit your real life. Every one of them is OFF by default and each has its own switch under More → Privacy. Turning one off stops the reads immediately.",
       ],
       bullets: [
-        "Calendar: read-only, to spot travel and big days so the plan can bend around them",
-        "Location: coarse location only (rounded to roughly 1 km) and used solely to fetch the local forecast",
-        "Wearable and health metrics: sleep, heart-rate variability and steps, to make recovery real rather than estimated",
+        "Calendar: read to spot travel and big days so the plan can bend around them. Only if you switch it on, welliva also adds your training sessions — and, separately, your likely cycle days — to a \"welliva\" calendar kept on this phone and synced to no account. Other apps you allow to read your calendar can see those entries",
+        "Location: coarse location only (rounded to roughly 1 km) and used solely to fetch the local forecast. The forecast stays on this phone, where it shapes a note about the weather at your training time and a little extra water on a hot day",
+        "Health Connect (Android), read-only: sleep, heart-rate variability and resting heart rate, to make recovery real rather than estimated. welliva never writes to Health Connect",
         "Health records: medications and conditions from your phone's health store",
-        "Meal photos and voice: analysed to draft a log you confirm — nothing is saved without your okay",
+        "Meal photos: analysed to draft a log you confirm — nothing is saved without your okay",
         "Notifications: reminders and briefings, within your quiet hours and daily limit",
       ],
     },
@@ -194,6 +207,7 @@ const PRIVACY: LegalDoc = {
         "In your private cloud account. So your account survives a lost phone, your profile and logs are synced to our hosted database (Supabase). Rows are protected by per-user row-level security: your account can only read and write its own data. Photos and voice notes go to private storage buckets scoped to your user id, and are served through short-lived signed links — never public URLs.",
         "Your cycle log. It is stored on your phone and, by default, included in your account backup — the same sync that carries your other logs. Switch the backup off in Cycle settings and the log stays on your phone only; the copy in your cloud account is erased. It reaches the AI coach only if you switch on \"Let Gozlin see your cycle\" in Cycle settings, which is off by default; the coach then sees your cycle day, when your next period is likely, what you logged today, whether you use hormonal contraception, what you said helped a symptom, and what your logs show around your cycle (what changed when a period is late, your weight before a period, a hungrier-week plan, and a period that falls during a trip), and nothing else. \"Delete all cycle data\" erases the log from your phone and from your backup, and you can export it first.",
         "With the AI coach, only if enabled. When you use Gozlin's cloud features, a minimised summary of the relevant context — not your full history — is sent over an encrypted connection to our backend, which uses Anthropic's Claude models to generate the reply. It is used to answer you, and not to train third-party models.",
+        "From Health Connect, only if you set it up. welliva reads your sleep, heart-rate variability and resting heart rate, on your phone. The readings stay on your phone: they are not synced to your account or sent to us. When you use the AI coach, the short summary it receives can include what welliva worked out from them, such as your recovery score and last night's hours of sleep. They are never used for advertising, never sold, and never shared with anyone else. welliva's use of information received from Health Connect adheres to the Health Connect Permissions policy, including the Limited Use requirements. You can stop it at any time in Health Connect or under More → Trust.",
         "Weather. If you enable weather, coarse coordinates are sent to Open-Meteo to fetch a forecast. No account identifier is attached.",
       ],
     },
@@ -258,7 +272,7 @@ const PRIVACY: LegalDoc = {
         "We do measure two things ourselves, on our own servers, to find out which parts of the app work and which quietly break:",
       ],
       bullets: [
-        "Usage events — that a meal was logged, that a screen was opened, that setup was finished, that the upgrade screen was seen. The event name and nothing else",
+        "Usage events — that a meal was logged, that a screen was opened, that setup was finished, that the upgrade screen was seen, how a reply from the coach ended (answered, offline and so on). Each event carries its name and at most a short label the app chooses, such as which screen, which plan or which outcome, and simple counts such as how many seconds a coach reply took. Never what you typed and never any health value",
         "Crash reports — when a screen fails, the error and the part of the code it happened in",
       ],
     },
@@ -588,7 +602,7 @@ export const CONSENT_SUMMARY: ConsentSummaryCard[] = [
     lines: [
       "No selling your data. No advertising. No tracking you across other apps.",
       "Nothing shared with employers, insurers or data brokers.",
-      "Calendar, location, wearable, photos and voice stay off until you turn them on.",
+      "Calendar, location, wearable and photos stay off until you turn them on.",
     ],
   },
   {

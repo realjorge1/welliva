@@ -40,6 +40,25 @@ export interface StreakLike {
    * are their own synced record.
    */
   paused?: readonly string[];
+  /**
+   * FROZEN days — missed days a streak freeze covered (see pendingFreezes).
+   * Like a paused day a frozen day neither adds to the run nor breaks it, and
+   * it is NEVER a kept day: "N days kept" does not grow. Stored on the record
+   * and synced as a union, so two phones can't erase one.
+   */
+  frozen?: readonly string[];
+}
+
+/** One freeze is earned for every this-many days kept. */
+export const FREEZE_EARN_EVERY_DAYS = 7;
+/** The most freezes anyone holds at once; one earned beyond this is not banked. */
+export const FREEZE_MAX = 2;
+/** How many frozen dates the record keeps. */
+export const FROZEN_DAYS_CAP = 100;
+
+/** Days that carry a run without being kept: rough days and frozen days. */
+function bridgingDays(data: Pick<StreakLike, "paused" | "frozen">): string[] {
+  return [...(data.paused ?? []), ...(data.frozen ?? [])];
 }
 
 export interface CommitmentDay {
@@ -49,6 +68,8 @@ export interface CommitmentDay {
   kept: boolean;
   /** A rough day that paused the streak (and wasn't kept anyway). */
   paused: boolean;
+  /** A missed day a streak freeze covered. Never kept. */
+  frozen: boolean;
   isToday: boolean;
   /** Later this week — can't have been kept or missed yet. */
   isFuture: boolean;
@@ -67,6 +88,8 @@ export interface CommitmentState {
   best: number;
   /** Every day ever kept. */
   totalDays: number;
+  /** Freezes held right now (0 … FREEZE_MAX). */
+  freezes: number;
   /** Monday → Sunday of the current week. */
   week: CommitmentDay[];
 }
@@ -100,12 +123,12 @@ export function weekdayIndex(date: string): number {
  * stored number says.
  */
 export function liveStreak(
-  data: Pick<StreakLike, "currentStreak" | "lastActiveDate" | "paused">,
+  data: Pick<StreakLike, "currentStreak" | "lastActiveDate" | "paused" | "frozen">,
   today: string,
 ): number {
   if (!data.lastActiveDate || data.currentStreak <= 0) return 0;
   if (data.lastActiveDate === today) return data.currentStreak;
-  return runReaches(data.lastActiveDate, today, data.paused) ? data.currentStreak : 0;
+  return runReaches(data.lastActiveDate, today, bridgingDays(data)) ? data.currentStreak : 0;
 }
 
 /** A month and a bit: further back than any run of paused days can reach. */
@@ -133,6 +156,91 @@ export function runReaches(
 }
 
 /**
+ * Freezes held, replayed from the ledgers in date order: every
+ * FREEZE_EARN_EVERY_DAYS-th kept day earns one (none is banked past
+ * FREEZE_MAX), every frozen day spends one. Derived, never stored, so the
+ * number can't drift from the days behind it, and a synced union of kept and
+ * frozen days gives every phone the same answer.
+ *
+ * The kept ledger is capped (KEPT_DAYS_CAP); past that, the oldest days drop
+ * out of the replay. At a year of kept days the difference is at most one
+ * freeze, and only ever for someone who already holds the maximum.
+ */
+export function freezeBalance(days?: readonly string[], frozen?: readonly string[]): number {
+  const kept = new Set(days ?? []);
+  const events = [
+    ...[...kept].map((d) => ({ d, kept: true })),
+    ...[...new Set(frozen ?? [])].filter((d) => !kept.has(d)).map((d) => ({ d, kept: false })),
+  ].sort((a, b) => a.d.localeCompare(b.d) || (a.kept === b.kept ? 0 : a.kept ? -1 : 1));
+  let count = 0;
+  let balance = 0;
+  for (const e of events) {
+    if (e.kept) {
+      count++;
+      if (count % FREEZE_EARN_EVERY_DAYS === 0) balance = Math.min(FREEZE_MAX, balance + 1);
+    } else {
+      balance = Math.max(0, balance - 1);
+    }
+  }
+  return balance;
+}
+
+/**
+ * The missed days a freeze should cover now — or none.
+ *
+ * Walks from yesterday back to the last kept day. Every day in between that
+ * is neither a rough day nor already frozen is MISSED. If there are no more
+ * missed days than freezes held, each is frozen and the run carries on;
+ * otherwise none is (spending freezes that can't save the run would only
+ * waste them). A rough day the person marked is never frozen: it already
+ * protects the run on its own. Today is never frozen — it isn't over.
+ */
+export function pendingFreezes(data: StreakLike, today: string): string[] {
+  if (!data.lastActiveDate || data.currentStreak <= 0 || data.lastActiveDate >= today) return [];
+  const bridge = new Set(bridgingDays(data));
+  const missed: string[] = [];
+  let d = shiftDay(today, -1);
+  for (let i = 0; i < PAUSE_REACH && d > data.lastActiveDate; i++) {
+    if (!bridge.has(d)) missed.push(d);
+    d = shiftDay(d, -1);
+  }
+  if (d !== data.lastActiveDate || missed.length === 0) return [];
+  return missed.length <= freezeBalance(data.days, data.frozen) ? missed.sort() : [];
+}
+
+/**
+ * The freeze moment (components/celebration/FreezeMoment) plays once per phone
+ * for frozen days this recent; an older one, arriving on a new phone through
+ * sync, is history, not news.
+ */
+export const FREEZE_MOMENT_WINDOW_DAYS = 7;
+
+/** Frozen days this phone hasn't shown yet, oldest first. `seen` = the last one shown. */
+export function unseenFrozen(
+  frozen: readonly string[] | undefined,
+  seen: string | null,
+  today: string,
+): string[] {
+  const floor = shiftDay(today, -FREEZE_MOMENT_WINDOW_DAYS);
+  return [...new Set(frozen ?? [])].filter((d) => d < today && d >= floor && (!seen || d > seen)).sort();
+}
+
+const WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] as const;
+
+/** The line under the streak while the moment plays — and after. */
+export function freezeMomentLine(dates: readonly string[], today: string): string {
+  if (dates.length >= 2) return "Two freezes held your streak";
+  const d = dates[0] ?? shiftDay(today, -1);
+  return d === shiftDay(today, -1) ? "A freeze held yesterday" : `A freeze held on ${WEEKDAY_NAMES[weekdayIndex(d)]}`;
+}
+
+/** Add frozen dates: deduped, ascending, capped from the old end. */
+export function withFrozenDays(frozen: readonly string[] | undefined, dates: readonly string[]): string[] {
+  const out = [...new Set([...(frozen ?? []), ...dates])].sort();
+  return out.length > FROZEN_DAYS_CAP ? out.slice(out.length - FROZEN_DAYS_CAP) : out;
+}
+
+/**
  * Add a kept date to the ledger: deduped, ascending, capped from the old end.
  * Returns a new array — the stored one is never mutated in place.
  */
@@ -156,9 +264,9 @@ function keptSet(data: StreakLike, horizon: string): Set<string> {
   const kept = new Set(ledger);
   if (data.lastActiveDate && data.currentStreak > 0) {
     // Only as far back as anyone will look (the start of this week). A paused
-    // day inside the run was not kept — step over it (unless the ledger says
-    // it was: a kept day beats a rough day).
-    const paused = new Set(data.paused ?? []);
+    // or frozen day inside the run was not kept — step over it (unless the
+    // ledger says it was: a kept day beats a rough day).
+    const paused = new Set(bridgingDays(data));
     let d = data.lastActiveDate;
     let counted = 0;
     for (let guard = 0; counted < data.currentStreak && guard < data.currentStreak + PAUSE_REACH; guard++) {
@@ -184,6 +292,14 @@ export function pausedOn(data: StreakLike, dates: readonly string[]): boolean[] 
   return dates.map((d, i) => paused.has(d) && !kept[i]);
 }
 
+/** Which of `dates` a streak freeze covered. A day that was kept is kept, not frozen. */
+export function frozenOn(data: StreakLike, dates: readonly string[]): boolean[] {
+  if (dates.length === 0) return [];
+  const frozen = new Set(data.frozen ?? []);
+  const kept = keptOn(data, dates);
+  return dates.map((d, i) => frozen.has(d) && !kept[i]);
+}
+
 /**
  * Which of `dates` were kept — any dates, in any order, answered from the same
  * ledger (and the same reconstructed run) as the Monday-to-Sunday week. For a
@@ -204,6 +320,7 @@ export function readCommitment(data: StreakLike, today: string): CommitmentState
   const monday = shiftDay(today, -weekdayIndex(today));
   const kept = keptSet(data, monday);
   const paused = new Set(data.paused ?? []);
+  const frozen = new Set(data.frozen ?? []);
   const pausedToday = paused.has(today) && !keptToday;
 
   const week: CommitmentDay[] = WEEK_LABELS.map((label, i) => {
@@ -213,6 +330,7 @@ export function readCommitment(data: StreakLike, today: string): CommitmentState
       label,
       kept: kept.has(date),
       paused: paused.has(date) && !kept.has(date),
+      frozen: frozen.has(date) && !kept.has(date) && !paused.has(date),
       isToday: date === today,
       isFuture: date > today,
     };
@@ -226,6 +344,7 @@ export function readCommitment(data: StreakLike, today: string): CommitmentState
     pausedToday,
     best: Math.max(data.longestStreak, streak),
     totalDays: data.totalActiveDays,
+    freezes: freezeBalance(data.days, data.frozen),
     week,
   };
 }

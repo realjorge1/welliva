@@ -30,6 +30,7 @@ export type {
   AnalyticsEventName,
   AnalyticsEvents,
   AuthMethod,
+  CoachTurnOutcome,
   FoodLogSource,
   OnboardingStep,
   PaywallSource,
@@ -38,6 +39,8 @@ export type {
 } from "./events";
 export {
   ALLOWED_PROP_KEYS,
+  COACH_TURN_OUTCOMES,
+  coachTurnSeconds,
   KNOWN_EVENTS,
   ONBOARDING_STEPS,
   PAYWALL_SOURCES,

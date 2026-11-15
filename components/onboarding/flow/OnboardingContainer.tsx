@@ -17,6 +17,14 @@
  * bar's resting style when there is one, and by each scroll region's own tail
  * when there is not — so nothing ever sits under a home indicator, and nothing
  * is ever padded for it twice.
+ *
+ * A FADED BAR STILL HOLDS ITS SEAT. Fading the bar out leaves its full height —
+ * button, padding, safe area, ~130pt — reserved under the stage, so on a long
+ * step with no action the scroll stops at a hard edge over an empty band (the
+ * plan reveal looked like it had a blank card glued to the bottom). A step like
+ * that FOLDS the seat (`footerFolded`): the bar stays mounted and invisible, but
+ * leaves the layout, and the step's scroll pays the safe area itself
+ * (`StepScroll ownsSafeArea`).
  */
 import { OrbField, useOrbTouch } from "@/components/OrbField";
 import { AmbientCanvas, Button, useKeyboardInset } from "@/components/ui";
@@ -41,15 +49,44 @@ export interface OnboardingContainerProps {
   header?: React.ReactNode;
   /** The action bar. Rides the keyboard with the stage. */
   footer?: React.ReactNode;
+  /**
+   * Give the action bar's seat back to the stage — for a step that has no
+   * action and runs to the bottom edge. The bar stays mounted (and invisible);
+   * only its reserved height goes. That step's scroll must then pay the safe
+   * area itself: `<StepScroll ownsSafeArea>`.
+   */
+  footerFolded?: boolean;
   children: React.ReactNode;
 }
 
-export function OnboardingContainer({ header, footer, children }: OnboardingContainerProps) {
+export function OnboardingContainer({
+  header,
+  footer,
+  footerFolded = false,
+  children,
+}: OnboardingContainerProps) {
   const insets = useSafeAreaInsets();
   const kb = useKeyboardInset({ bottomInset: insets.bottom, gap: Spacing.lg });
+  const motion = useMotion();
   // Bubble-phase observers: any press or swipe that lands on a background orb
   // bounces it away elastically, without ever intercepting the flow's own taps.
   const { touch, touchHandlers } = useOrbTouch();
+
+  // WHEN the seat folds. Growing the stage moves nothing on a top-anchored
+  // scroll — its bottom edge just drops — but the step LEAVING is still painted
+  // for the first part of the hand-over, and a centred one (the build) would
+  // slide down half the seat. So the fold waits out the outgoing half, then
+  // happens in one frame nobody can see. Unfolding is immediate: the bar must
+  // have its seat before it fades back in.
+  const [folded, setFolded] = React.useState(footerFolded);
+  React.useEffect(() => {
+    if (!footerFolded) {
+      setFolded(false);
+      return;
+    }
+    const t = setTimeout(() => setFolded(true), motion.dur(Dur.stepOut));
+    return () => clearTimeout(t);
+  }, [footerFolded, motion]);
 
   return (
     <View style={styles.flex} {...touchHandlers}>
@@ -60,7 +97,16 @@ export function OnboardingContainer({ header, footer, children }: OnboardingCont
         <Animated.View style={[styles.flex, kb.containerStyle]}>
           <View style={styles.flex}>{children}</View>
           {footer ? (
-            <Animated.View style={[styles.actions, kb.restingStyle]}>{footer}</Animated.View>
+            <Animated.View
+              // Folded, the seat floats over the stage's bottom edge. box-none is
+              // what keeps that invisible box from swallowing taps meant for
+              // the scroll under it (a plain View is a hit-test target even
+              // with no handlers).
+              pointerEvents="box-none"
+              style={[styles.actions, kb.restingStyle, folded && styles.actionsFolded]}
+            >
+              {footer}
+            </Animated.View>
           ) : null}
         </Animated.View>
       </SafeAreaView>
@@ -76,6 +122,11 @@ export interface StepScrollProps extends ScrollViewProps {
   tail?: number;
   /** For a step whose beats replace each other in place and must each start at the top. */
   scrollRef?: React.Ref<ScrollView>;
+  /**
+   * The scroll runs to the screen's bottom edge (the container's
+   * `footerFolded`), so its tail also clears the home indicator / nav bar.
+   */
+  ownsSafeArea?: boolean;
 }
 
 /**
@@ -83,12 +134,21 @@ export interface StepScrollProps extends ScrollViewProps {
  * onboarding's rhythm rather than the app's denser screen spacing, and taps
  * pass through to controls while the keyboard is up.
  */
-export function StepScroll({ children, tail = 0, style, scrollRef, ...rest }: StepScrollProps) {
+export function StepScroll({
+  children,
+  tail = 0,
+  style,
+  scrollRef,
+  ownsSafeArea = false,
+  ...rest
+}: StepScrollProps) {
+  const insets = useSafeAreaInsets();
+  const floor = ownsSafeArea ? insets.bottom : 0;
   return (
     <ScrollView
       ref={scrollRef}
       style={[styles.flex, style]}
-      contentContainerStyle={[styles.scrollBody, { paddingBottom: Rhythm.tail + tail }]}
+      contentContainerStyle={[styles.scrollBody, { paddingBottom: Rhythm.tail + tail + floor }]}
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
@@ -228,6 +288,7 @@ export function OnboardingActions({
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   actions: { paddingHorizontal: Gutter, paddingTop: Spacing.md },
+  actionsFolded: { position: "absolute", left: 0, right: 0, bottom: 0 },
   actionRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
 
   scrollBody: {

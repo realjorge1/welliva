@@ -21,6 +21,7 @@ import {
   solveLife,
   solvePose,
   SHOULDER_SPREAD,
+  type MotionKit,
 } from "@/fitness/animation/motion";
 import { motionCameras } from "@/fitness/animation/cameras";
 import type { FigureMotion } from "@/fitness/animation/movementProfiles";
@@ -39,6 +40,19 @@ const ALL: [FigureMotion, "front" | "side"][] = (["front", "side"] as const).fla
 );
 
 const DEG = 180 / Math.PI;
+
+/**
+ * The leg bones the solver places rather than swings on the beat: a foot held
+ * to its spot or stepped to the next (`legPins`, 14 numbers each), and a loose
+ * leg kept out of the floor (`free`, 4 each). The planted foot the body moves
+ * from (`anchor`) is not among them — its angles are exactly the rig's.
+ */
+function placedLegs(kit: MotionKit): Set<number> {
+  const out = new Set<number>();
+  for (let j = 0; j < kit.legPins.length; j += 14) [0, 1].forEach((o) => out.add(kit.legPins[j + o]));
+  for (let j = 0; j < kit.free.length; j += 4) [0, 1].forEach((o) => out.add(kit.free[j + o]));
+  return out;
+}
 const angleDiff = (a: number, b: number): number => {
   let d = a - b;
   while (d > Math.PI) d -= 2 * Math.PI;
@@ -94,12 +108,14 @@ describe("the solved pose", () => {
       const kit = buildMotionKit(m, view);
       const a = solvePose(kit, 0);
       const b = solvePose(kit, 0.5);
+      const legs = placedLegs(kit);
       rig.bones.forEach((bone, i) => {
         // The kit's own angles: a planted arm is re-solved to reach what it holds,
-        // and everything else is exactly what the rig built.
+        // a placed leg to stand on its foot, a loose one to stay out of the floor;
+        // everything else is exactly what the rig built.
         if (angleDiff(a[i * 3 + 2], kit.anglesA[i]) > 1e-6) bad.push(`${view} ${m}/${bone.name}@0`);
         if (angleDiff(b[i * 3 + 2], kit.anglesB[i]) > 1e-6) bad.push(`${view} ${m}/${bone.name}@0.5`);
-        if (/arm|hand/i.test(bone.name)) return;
+        if (/arm|hand/i.test(bone.name) || legs.has(i)) return;
         if (angleDiff(kit.anglesA[i], rig.anglesA[i]) > 1e-6) bad.push(`${view} ${m}/${bone.name} A moved`);
         if (angleDiff(kit.anglesB[i], rig.anglesB[i]) > 1e-6) bad.push(`${view} ${m}/${bone.name} B moved`);
       });
@@ -114,7 +130,7 @@ describe("the solved pose", () => {
     const bad: string[] = [];
     for (const [m, view] of ALL) {
       const kit = buildMotionKit(m, view);
-      const planted = new Set<number>();
+      const planted = placedLegs(kit);
       for (let j = 0; j < kit.pins.length; j += 11) [0, 1].forEach((o) => planted.add(kit.pins[j + o]));
       for (let s = 1; s < 24; s++) {
         const q = s / 24;
@@ -241,8 +257,16 @@ describe("the speed budget, measured on the solved pose", () => {
       // Nothing overshoots, so the budget holds as solved (a hair over for
       // sampling a curve at 480 points). A loose forearm catches up late in the
       // move, and an arm goes the way round its joints allow, so an arm gets a
-      // quarter more than the body it hangs from: the tempo is the body's.
-      const allowed = speedBudget(t.feel) * (/arm/i.test(who) ? 1.25 : 1.02);
+      // quarter more than the body it hangs from: the tempo is the body's. An
+      // arm planted on the floor rides the body's true arc over its hands (a
+      // Hindu push-up's dive), and gets a little more. A foot that STEPS is its
+      // own quick movement inside the body's rhythm — two feet take turns within
+      // one rep — and gets the most.
+      const placed = placedLegs(kit);
+      const whoAt = rig.bones.findIndex((b) => b.name === who);
+      const planted = kit.pins.some((v, j) => j % 11 < 2 && v === whoAt);
+      const allowed =
+        speedBudget(t.feel) * (placed.has(whoAt) ? 2.25 : planted ? 1.4 : /arm/i.test(who) ? 1.25 : 1.02);
       if (peak > allowed) tooFast.push(`${view} ${m} ${who} ${Math.round(peak)}°/s`);
     }
     expect(tooFast).toEqual([]);
@@ -283,11 +307,14 @@ describe("the planted foot", () => {
   });
 
   it("lets go when the feet are meant to leave it", () => {
-    expect(buildMotionKit("pullUp", "front").lock).toBe(0);
-    expect(buildMotionKit("jumpSquat", "side").lock).toBe(0);
-    expect(buildMotionKit("calfRaise", "side").lock).toBe(0);
+    // Hanging from a bar, nothing is under the body; a jump has a pose in the
+    // air; everything else rests on its floor the whole rep.
+    expect(buildMotionKit("pullUp", "front").ground).toBe(0);
+    expect(buildMotionKit("jumpSquat", "side").ground).toBe(2);
+    expect(buildMotionKit("squat", "side").ground).toBe(1);
+    // A calf raise rises onto its toes: the ankle climbs, the toes stay down.
+    expect(buildMotionKit("calfRaise", "side").ground).toBe(1);
     expect(ankleRange("calfRaise", "side")).toBeGreaterThan(4);
-    expect(buildMotionKit("squat", "side").lock).toBe(1);
   });
 
   it("a jumping jack leaves the floor in the middle of a hop and lands at each end", () => {

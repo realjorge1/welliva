@@ -566,7 +566,9 @@ function buildEntries(input: {
       kind: "workout",
       icon: "barbell",
       title: w.sessionLabel || "Workout",
-      detail: `${w.exercisesCompleted} of ${w.totalExercises} exercises`,
+      // A workout told to Gozlin (log_workout) has no exercise list to count.
+      detail:
+        w.totalExercises > 0 ? `${w.exercisesCompleted} of ${w.totalExercises} exercises` : "Logged with Gozlin",
       value: w.durationMinutes ? `${w.durationMinutes} min` : undefined,
       href: "/fitness/progress",
     });

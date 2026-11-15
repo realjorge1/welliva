@@ -59,6 +59,7 @@ import {
   recordActivity,
   StreakData,
 } from "../../services/StreakService";
+import { withHeat } from "@/services/weather/today";
 
 interface Params {
   userBio: UserBio | null;
@@ -396,7 +397,7 @@ export function useNutritionState({
   const creditIfGoalCrossed = useCallback(
     (prev: number, next: number) => {
       const goal =
-        userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500;
+        withHeat(userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500);
       if (prev < goal && next >= goal) {
         const today = todayDate();
         setAchievementRecord((rec) => {
@@ -421,9 +422,11 @@ export function useNutritionState({
    * have quietly erased it.
    */
   const addWater = useCallback(
-    (ml: number) => {
+    (ml: number): Promise<void> => {
       setWaterMl((prev) => prev + ml);
-      void addWaterToday(ml).then(({ prev, next }) => {
+      // Returned, not awaited here: a caller that needs the write to have
+      // landed (Gozlin's log_water reads the pour back for its Undo) awaits it.
+      return addWaterToday(ml).then(({ prev, next }) => {
         setWaterMl(next);
         creditIfGoalCrossed(prev, next);
       });
@@ -439,7 +442,7 @@ export function useNutritionState({
    * foreground, and once the launch rollover has landed.
    */
   const syncLiveCounters = useCallback(async () => {
-    const goal = userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500;
+    const goal = withHeat(userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500);
     try {
       await drainWaterInbox(goal);
       const counter = await readWaterCounter();

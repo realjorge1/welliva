@@ -231,6 +231,19 @@ export function setAnalyticsUser(id: string | null): void {
 }
 
 /**
+ * A row queued before boot installed the sink says platform "unknown" — which
+ * the table's check constraint (ios | android | web) refuses, and one refused
+ * row fails its whole batch, every flush, so nothing queued after it ever left.
+ * A phone checked on 2026-11-15 held 88 events back to 31 October behind three
+ * such rows. The row was written on this device, and by flush time the sink
+ * knows which device that is, so it says so.
+ */
+function stampHost(row: EventRow): EventRow {
+  if (row.platform !== NULL_SINK.platform) return row;
+  return { ...row, platform: sink.platform, app_version: row.app_version ?? sink.appVersion };
+}
+
+/**
  * Send what is queued. Safe to call often — deduped, and a failure is a no-op
  * that leaves the queue intact for the next attempt.
  *
@@ -251,7 +264,7 @@ export async function flush(): Promise<void> {
     }
 
     while (queue.length > 0) {
-      const batch = queue.slice(0, BATCH_SIZE);
+      const batch = queue.slice(0, BATCH_SIZE).map(stampHost);
       const result = await sink.sendEvents(batch);
       if (!result.ok) {
         reportFailure("flush failed", result.error);

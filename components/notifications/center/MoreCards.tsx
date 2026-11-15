@@ -14,6 +14,13 @@ import { useNotificationSettings } from "@/components/notifications/useNotificat
 import { AppText, Card, IconBadge, Stepper, useColors } from "@/components/ui";
 import { Spacing } from "@/constants/theme";
 import { formatTime } from "@/services/notifications/mealReminders";
+import {
+  STREAK_REMINDER_HOUR,
+  STREAK_REMINDER_MIN_DAYS,
+  STREAK_REMINDER_MINUTE,
+  loadStreakReminderOn,
+  saveStreakReminderOn,
+} from "@/services/notifications/streakReminder";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React from "react";
@@ -96,6 +103,55 @@ export function CoachingCard({
           </AppText>
         </View>
       ) : null}
+    </Card>
+  );
+}
+
+/**
+ * THE EVENING STREAK REMINDER — one switch. On by default; it only ever sends
+ * on an evening the streak is worth keeping and today is still open.
+ */
+export function StreakReminderCard({ paused = false }: { paused?: boolean }) {
+  const { colors } = useColors();
+  const [on, setOn] = React.useState<boolean | null>(null);
+  React.useEffect(() => {
+    let live = true;
+    void loadStreakReminderOn().then((v) => {
+      if (live) setOn(v);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  const time = formatTime(STREAK_REMINDER_HOUR, STREAK_REMINDER_MINUTE);
+
+  return (
+    <Card padding="lg">
+      <View style={styles.head}>
+        <IconBadge name="flame" tone={on ? colors.gold : colors.textTertiary} size={42} />
+        <View style={styles.flex}>
+          <AppText variant="bodyLg" weight="700">
+            Streak reminder
+          </AppText>
+          <AppText variant="footnote" color="tertiary" style={styles.status}>
+            {on === false
+              ? "Off"
+              : paused
+                ? "On — paused with everything else"
+                : `At ${time}, only if today isn't kept yet and your streak is ${STREAK_REMINDER_MIN_DAYS} days or more`}
+          </AppText>
+        </View>
+        <Switch
+          value={!!on}
+          onValueChange={(v) => {
+            setOn(v);
+            void saveStreakReminderOn(v);
+          }}
+          disabled={on === null}
+          trackColor={{ true: colors.primary, false: colors.border }}
+          accessibilityLabel="Evening streak reminder"
+        />
+      </View>
     </Card>
   );
 }

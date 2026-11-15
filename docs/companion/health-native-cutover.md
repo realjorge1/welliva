@@ -1,6 +1,8 @@
 # Apple Health / Health Connect — the native cutover
 
-**Status:** adapter written, tested and registered. Native packages **not installed**.
+**Status (15 Nov 2026):** Android is PREPARED for the next build: `react-native-health-connect@4.1.3` installed, `plugins/withHealthConnect.js` (used instead of the package's own plugin: it declares the permissions and sends Health Connect's privacy link to the in-app privacy policy, `welliva://legal/privacy`), `expo-build-properties` minSdk 26 (owner approved). **Three** read types only — sleep, HRV, resting heart rate — steps and active calories were dropped (owner, 2026-11-15: nothing used them). Play steps for the owner: `health-connect-play-declaration.md`. iOS: not planned yet; the iOS section below still applies when it is.
+
+**Earlier status:** adapter written, tested and registered. Native packages **not installed**.
 **Audit reference:** F-04 (30 Aug 2026), "Apple Health / Health Connect is a seam with a
 null provider."
 

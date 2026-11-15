@@ -134,29 +134,37 @@ export const ConsistencyCard = React.memo(function ConsistencyCard({
   // Nothing at all until the pen starts: an empty chart, then the line.
   const chartStyle = useAnimatedStyle(() => ({ opacity: reveal.value > 0 ? 1 : 0 }));
 
-  const { score, label, trend, daysTracked } = consistency;
+  const { score, label, trend, last7 } = consistency;
   const t = TREND[trend];
+  // "Tracked" counts days something was actually eaten. The engine's own
+  // `daysTracked` also counts a planned day with nothing ticked (it has to, to
+  // score it as zero), so today read "Tracked 1 of the last 7 days" on a phone
+  // with nothing logged all week (2026-11-15).
+  const logged = last7.filter((d) => d.status === "completed" || d.status === "partial").length;
   const sub =
-    daysTracked > 0
-      ? `Tracked ${daysTracked} of the last 7 days`
+    logged > 0
+      ? `Tracked ${logged} of the last 7 days`
       : "Log meals to start building your score";
   const first = view[0];
 
-  const chip = (
-    <View style={styles.chip}>
-      {t.icon ? <Ionicons name={t.icon} size={11} color={colors.textSecondary} /> : null}
-      <Mono size={11} tracking={0.6} color={colors.textSecondary}>
-        {t.text}
-      </Mono>
-    </View>
-  );
+  // A trend needs something to trend: with nothing eaten, "STEADY" is a claim
+  // about no data, so the chip waits.
+  const chip =
+    logged > 0 ? (
+      <View style={styles.chip}>
+        {t.icon ? <Ionicons name={t.icon} size={11} color={colors.textSecondary} /> : null}
+        <Mono size={11} tracking={0.6} color={colors.textSecondary}>
+          {t.text}
+        </Mono>
+      </View>
+    ) : undefined;
 
   return (
     <View style={[INSTRUMENT_CARD, styles.card, style]}>
       <View
         style={styles.top}
         accessible
-        accessibilityLabel={`Consistency ${score} out of 100, ${label}. ${sub}. Trend: ${t.text.toLowerCase()}.`}
+        accessibilityLabel={`Consistency ${score} out of 100, ${label}. ${sub}.${logged > 0 ? ` Trend: ${t.text.toLowerCase()}.` : ""}`}
       >
         <TileHeader label="Consistency" right={chip} />
         <View style={styles.figureRow}>

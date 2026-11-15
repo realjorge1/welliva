@@ -257,6 +257,25 @@ export function ExerciseFigure({
             },
           ]}
         >
+          {/* The floor the athlete stands on. A card with nothing under the
+              figure read as floating (owner, 2026-11-14). It sits on the panel's
+              baseline — 94% down, where every pose is stood (motion.ts
+              framePanel) — behind the figure, so the feet meet the line. One
+              solid line and a faint ground: no shadow, no dashes. A bare panel's
+              host draws its own floor; a ring-fitted one has none. */}
+          {!bare && !fit ? (
+            <View
+              pointerEvents="none"
+              style={[
+                styles.floor,
+                {
+                  top: size * FLOOR_LINE,
+                  backgroundColor: alpha(colors.text, 0.05),
+                  borderTopColor: alpha(colors.text, 0.2),
+                },
+              ]}
+            />
+          ) : null}
           <View style={opacity < 1 ? { opacity } : undefined}>
             {SkiaPanel ? (
               <SkiaPanel
@@ -295,6 +314,8 @@ const PROP_COLOR = "#8E949E";
 const FAR_SHIFT = 3.2;
 /** A still this small (px tall) is a list thumbnail and is drawn without its fine detail. */
 const THUMB_MAX_SIZE = 96;
+/** Where a panel's floor line is, down its height: framePanel stands every pose here. */
+const FLOOR_LINE = 0.94;
 
 export interface FigureStillProps {
   motion: FigureMotion;
@@ -605,6 +626,13 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "flex-end",
+  },
+  floor: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopWidth: 1,
   },
   tag: {
     position: "absolute",

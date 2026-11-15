@@ -10,7 +10,10 @@ import {
   buildForecastUrl,
   coarsen,
   describeWeatherCode,
+  heatTopUpMl,
   parseForecast,
+  trainingHourHint,
+  weatherAt,
   weatherWorkoutHint,
   type WeatherSnapshot,
 } from "../signals/weather/openmeteo";
@@ -90,6 +93,34 @@ describe("calendar classify (pure)", () => {
     expect(out).toHaveLength(1);
     expect(out[0].id).toBe("cal:a");
   });
+
+  it("keeps ONE copy of the same event carried by several calendars (different ids)", () => {
+    // Found on a phone: one public holiday, three calendars, three entries.
+    const holiday = { title: "Eid El-Fitr Holiday", startDate: "2026-07-10", endDate: "2026-07-10", allDay: true };
+    const out = proposeFromCalendar(
+      [
+        cal({ id: "h1", ...holiday }),
+        cal({ id: "h2", ...holiday, title: "eid el-fitr  holiday" }),
+        cal({ id: "h3", ...holiday }),
+      ],
+      TODAY,
+    );
+    expect(out.map((p) => p.id)).toEqual(["cal:h1"]);
+  });
+
+  it("files an event from a public-holiday calendar as a holiday, never a vacation", () => {
+    const p = proposeFromCalendarEvent(
+      cal({ title: "Eid El-Fitr Holiday", allDay: true, holidayCalendar: true }),
+      TODAY,
+    );
+    expect(p!.kind).toBe("holiday");
+    // Without the calendar's word for it, the title's "holiday" still reads as time off.
+    expect(proposeFromCalendarEvent(cal({ title: "Holiday in Spain" }), TODAY)!.kind).toBe("vacation");
+    // Every other day of a holiday calendar stays out — no flood of "a holiday's near".
+    expect(
+      proposeFromCalendarEvent(cal({ title: "Christmas Eve", allDay: true, holidayCalendar: true }), TODAY),
+    ).toBeNull();
+  });
 });
 
 describe("weather (pure)", () => {
@@ -129,6 +160,46 @@ describe("weather (pure)", () => {
 
   it("throws on a malformed body", () => {
     expect(() => parseForecast({}, new Date())).toThrow();
+  });
+
+  it("asks for the hourly forecast and parses it by the place's own date and hour", () => {
+    expect(buildForecastUrl(6.52, 3.38)).toContain("hourly=temperature_2m,precipitation_probability,weather_code");
+    const w = parseForecast(
+      {
+        current: { temperature_2m: 30, weather_code: 51 },
+        daily: { weather_code: [51], temperature_2m_max: [31], temperature_2m_min: [26], precipitation_probability_max: [98] },
+        hourly: {
+          time: ["2026-11-15T16:00", "2026-11-15T17:00", "2026-11-15T18:00", "bad"],
+          temperature_2m: [30.6, 29.8, 28.2, 1],
+          precipitation_probability: [40, 85, 20, 0],
+          weather_code: [3, 61, 2, 0],
+        },
+      },
+      new Date(),
+    );
+    expect(w.hours).toHaveLength(3);
+    expect(weatherAt(w, "2026-11-15", 17)).toEqual({ date: "2026-11-15", hour: 17, tempC: 30, precipChance: 85, code: 61 });
+    expect(weatherAt(w, "2026-11-16", 17)).toBeNull();
+  });
+
+  it("speaks about the training hour only when it changes something", () => {
+    const hours = (o: { tempC?: number; precipChance?: number; code?: number }) =>
+      snap({ hours: [{ date: "2026-11-15", hour: 17, tempC: 26, precipChance: 10, code: 1, ...o }] });
+    expect(trainingHourHint(hours({}), "2026-11-15", 17)).toBeNull(); // a fine hour: silence
+    expect(trainingHourHint(hours({ precipChance: 85 }), "2026-11-15", 17)?.line).toBe(
+      "Rain likely around 5 PM (85%) — this one works indoors.",
+    );
+    expect(trainingHourHint(hours({ code: 95 }), "2026-11-15", 17)?.indoor).toBe(true);
+    expect(trainingHourHint(hours({ tempC: 34 }), "2026-11-15", 17)?.line).toMatch(/^34° around 5 PM/);
+    // Not in the forecast (an old snapshot without hours, another day): nothing.
+    expect(trainingHourHint(snap({}), "2026-11-15", 17)).toBeNull();
+    expect(trainingHourHint(hours({ precipChance: 90 }), "2026-11-16", 17)).toBeNull();
+  });
+
+  it("tops water up in small steps for heat, never below 30°", () => {
+    expect([29, 30, 32, 33, 35, 36, 40].map(heatTopUpMl)).toEqual([0, 250, 250, 500, 500, 750, 750]);
+    expect(heatTopUpMl(undefined)).toBe(0);
+    expect(heatTopUpMl(Number.NaN)).toBe(0);
   });
 
   function snap(o: Partial<WeatherSnapshot>): WeatherSnapshot {

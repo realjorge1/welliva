@@ -1,5 +1,6 @@
 /**
- * health-os/multimodal — photo + voice logging (Proactive Companion P5).
+ * health-os/multimodal — photo logging (Proactive Companion P5). Voice capture was
+ * deleted on 2026-11-15 (owner): it was never built past a consent switch.
  *
  * The capture → analyze → LogDraft → confirm pipeline, as PURE cores plus consent-gated,
  * provider-seam adapters that degrade to a no-op until the native providers (image picker,
@@ -17,7 +18,6 @@ export {
   isAutoChecked,
   mealDraftTotals,
 } from "./photo";
-export { cleanTranscript, looksLikeLog, toVoiceCapture } from "./voice";
 export {
   MealPhotoSource,
   mealPhotoSource,
@@ -28,9 +28,3 @@ export {
   type MealPhotoAnalyzer,
   type PickedImage,
 } from "./MealPhotoSource";
-export {
-  SpeechSource,
-  speechSource,
-  nullSpeechProvider,
-  type SpeechProvider,
-} from "./SpeechSource";

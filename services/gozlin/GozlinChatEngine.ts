@@ -22,6 +22,7 @@ import type { HabitTrackerBrief } from "./GozlinTrackerHabits";
 import type { ExperienceBrief } from "./novelty/types";
 import type { CycleBrief } from "../cycle/brief";
 import type { LearnedBrief } from "./agent/learned";
+import type { PastChat } from "./pastChats";
 import { closer } from "./GozlinPersona";
 import {
   buildWeeklyReview,
@@ -80,6 +81,12 @@ export interface GozlinChatContext {
    * until the models know them; the offline path ignores it.
    */
   learned?: LearnedBrief;
+  /**
+   * Earlier conversations it may remember (./pastChats.ts): each past chat's
+   * day, topic, and what they said they'd try, derived from the chat history
+   * on the phone. Never evidence for a figure. Absent means none.
+   */
+  pastChats?: PastChat[];
   /**
    * Today is a rough day the user marked (services/smart/roughDay): the coach
    * goes gentle for the day. Absent on any other day.

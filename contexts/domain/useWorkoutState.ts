@@ -226,7 +226,7 @@ export function useWorkoutState({
   }, [rebuild]);
 
   const logWorkout = useCallback(
-    async (entry: WorkoutLogEntry) => {
+    async (entry: WorkoutLogEntry, opts?: { source?: "session" | "manual" }) => {
       // Dedupe by id: the session-summary screen logs on mount and can re-fire
       // (e.g. remount/navigation), which previously appended duplicate entries.
       if (workoutLogRef.current.some((l) => l.id === entry.id)) return;
@@ -245,11 +245,10 @@ export function useWorkoutState({
       setStreakData(streakUpdated);
 
       // Past the dedupe, so a remount of the summary screen cannot double-count.
-      // Always "session": every WorkoutLogEntry carries a sessionId, a duration
-      // and a completion percent, so this choke point only ever sees finished
-      // guided sessions. A hand-entered workout would need its own path, and
-      // would pass "manual" when it gets one.
-      track("workout_logged", { source: "session" });
+      // "session" unless the caller says otherwise: a finished guided session
+      // is the default. A workout someone TOLD Gozlin about (the log_workout
+      // tool, after their confirmation) passes "manual".
+      track("workout_logged", { source: opts?.source ?? "session" });
       void markActivated();
     },
     [currentDate, setWorkoutLog, setStreakData],

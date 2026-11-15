@@ -190,6 +190,48 @@ describe("consent gating", () => {
   });
 });
 
+describe("an event queued before boot", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("is sent with the real platform, which the table's check constraint accepts", async () => {
+    vi.doMock("@/health-os/privacy/ConsentRepository", () => ({
+      consent: { isGranted: async () => true },
+    }));
+    const analytics = await import("../Analytics");
+    analytics.__resetAnalyticsForTests();
+
+    // Before boot: no sink, so the row is queued as "unknown".
+    analytics.track("app_open", { cold: true });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(analytics.__queueForTests()[0].platform).toBe("unknown");
+
+    // The table refuses anything but these — exactly what Postgres does.
+    const sent: { platform: string; app_version: string | null }[] = [];
+    analytics.setAnalyticsSink({
+      platform: "android",
+      appVersion: "1.0.0",
+      sendEvents: async (rows) => {
+        if (rows.some((r) => !["ios", "android", "web"].includes(r.platform))) {
+          return { ok: false, error: "violates check constraint analytics_events_platform_check" };
+        }
+        sent.push(...rows);
+        return { ok: true };
+      },
+      sendCrash: async () => ({ ok: true }),
+    });
+    analytics.track("app_open", { cold: false });
+    await new Promise((r) => setTimeout(r, 0));
+    await analytics.flush();
+
+    // Both left — the pre-boot row no longer holds the queue hostage.
+    expect(sent.map((r) => r.platform)).toEqual(["android", "android"]);
+    expect(sent[0].app_version).toBe("1.0.0");
+    expect(analytics.__queueForTests()).toEqual([]);
+  });
+});
+
 describe("a failing upload", () => {
   beforeEach(() => {
     vi.resetModules();

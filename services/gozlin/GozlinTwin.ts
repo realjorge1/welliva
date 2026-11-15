@@ -180,9 +180,14 @@ export function buildTwin(input: GozlinSnapshotInput): GozlinTwin {
     flags.push("REST_DAY");
   }
 
+  // A frozen day carries the run (services/commitment), so the live streak a
+  // freeze saved is never 0 and never reads as broken.
   if (input.streak.currentStreak >= 3) flags.push("STREAK_STRONG");
   else if (input.streak.currentStreak === 0 && input.streak.totalActiveDays > 0)
     flags.push("STREAK_BROKEN");
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if ((input.streak.frozen ?? []).includes(toLocalDateString(yesterday))) flags.push("FREEZE_HELD");
 
   if (consistency.score < 35 && input.streak.currentStreak === 0 && hasProfile)
     flags.push("SETBACK");

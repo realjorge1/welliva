@@ -15,11 +15,13 @@ const N = vi.hoisted(() => ({
   getPermissionsAsync: vi.fn(),
   scheduleNotificationAsync: vi.fn(),
   cancelScheduledNotificationAsync: vi.fn(),
+  getAllScheduledNotificationsAsync: vi.fn(),
   setNotificationChannelAsync: vi.fn(),
   setNotificationCategoryAsync: vi.fn(),
 }));
 
 vi.mock("expo-notifications", () => ({
+  getAllScheduledNotificationsAsync: N.getAllScheduledNotificationsAsync,
   SchedulableTriggerInputTypes: { DAILY: "daily", WEEKLY: "weekly" },
   AndroidImportance: { DEFAULT: 3 },
   IosAuthorizationStatus: { PROVISIONAL: 3 },
@@ -70,6 +72,7 @@ beforeEach(async () => {
   let n = 0;
   N.scheduleNotificationAsync.mockImplementation(async () => `id_${++n}`);
   N.cancelScheduledNotificationAsync.mockResolvedValue(undefined);
+  N.getAllScheduledNotificationsAsync.mockResolvedValue([]);
   N.setNotificationChannelAsync.mockResolvedValue(undefined);
 });
 
@@ -213,6 +216,84 @@ describe("syncFitnessReminders", () => {
 
     expect(result).toEqual({ status: "ok", scheduled: 1 });
     expect(N.scheduleNotificationAsync.mock.calls[0][0].trigger.weekday).toBe(2);
+  });
+});
+
+describe("never a duplicate: fixed ids + one sync at a time", () => {
+  /** A stand-in for the OS queue: keyed by identifier, like expo's store. */
+  function fakeQueue() {
+    const q = new Map<string, { identifier: string; content: any; trigger?: any }>();
+    let n = 0;
+    N.scheduleNotificationAsync.mockImplementation(async (req: any) => {
+      const id = req.identifier ?? `random_${++n}`;
+      q.set(id, { identifier: id, content: req.content, trigger: req.trigger });
+      return id;
+    });
+    N.cancelScheduledNotificationAsync.mockImplementation(async (id: string) => {
+      q.delete(id);
+    });
+    N.getAllScheduledNotificationsAsync.mockImplementation(async () => [...q.values()]);
+    return q;
+  }
+
+  it("gives every reminder a fixed id, so laying it again replaces it", async () => {
+    const q = fakeQueue();
+    const p = makeProfile(
+      { workouts: true, hydration: true, stretch: true, weeklySummary: true },
+      { daysAvailable: [0, 2] },
+    );
+    await syncFitnessReminders(p);
+    await syncFitnessReminders(p);
+    expect([...q.keys()].sort()).toEqual([
+      "welliva.fitness.hydration",
+      "welliva.fitness.stretch",
+      "welliva.fitness.weekly-summary",
+      "welliva.fitness.workout.0",
+      "welliva.fitness.workout.2",
+    ]);
+  });
+
+  it("overlapping syncs (boot repair + a save + another) leave exactly one set", async () => {
+    // The phone this was found on held 3 "Training day" per training day.
+    const q = fakeQueue();
+    const p = makeProfile({ workouts: true }, { daysAvailable: [0, 2, 3, 4] });
+    await saveFitnessProfile(p);
+    await Promise.all([syncFitnessReminders(p), refreshFitnessReminders(), syncFitnessReminders(p)]);
+    expect(q.size).toBe(4);
+  });
+
+  it("when calls overlap, the newest call's settings are the ones left standing", async () => {
+    const q = fakeQueue();
+    await Promise.all([
+      syncFitnessReminders(makeProfile({ workouts: true }, { daysAvailable: [0, 2] })),
+      syncFitnessReminders(makeProfile({ workouts: false })),
+    ]);
+    expect(q.size).toBe(0);
+  });
+
+  it("sweeps strays of ours from earlier builds, and leaves other modules' reminders alone", async () => {
+    const q = fakeQueue();
+    const stray = { data: { type: "fitness-reminder", kind: "workout" } };
+    q.set("old-random-1", { identifier: "old-random-1", content: stray });
+    q.set("old-random-2", { identifier: "old-random-2", content: stray });
+    q.set("welliva.habit.h1.0", {
+      identifier: "welliva.habit.h1.0",
+      content: { data: { type: "habit-reminder" } },
+    });
+
+    await syncFitnessReminders(makeProfile({ workouts: true }, { daysAvailable: [0] }));
+
+    expect([...q.keys()].sort()).toEqual(["welliva.fitness.workout.0", "welliva.habit.h1.0"]);
+  });
+
+  it("still cancels the remembered ids when the OS queue can't be listed", async () => {
+    await syncFitnessReminders(makeProfile({ workouts: true }, { daysAvailable: [0, 2] }));
+    N.getAllScheduledNotificationsAsync.mockRejectedValue(new Error("no native module"));
+    N.cancelScheduledNotificationAsync.mockClear();
+
+    await cancelFitnessReminders();
+
+    expect(N.cancelScheduledNotificationAsync).toHaveBeenCalledTimes(2);
   });
 });
 

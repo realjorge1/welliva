@@ -21,7 +21,14 @@
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { liveStreak, readCommitment, runReaches, withKeptDay } from "./commitment";
+import {
+  liveStreak,
+  pendingFreezes,
+  readCommitment,
+  runReaches,
+  withFrozenDays,
+  withKeptDay,
+} from "./commitment";
 import { emitExternalWrite } from "./notifications/externalWrites";
 import { todayDate } from "./OfflineStorage";
 import { loadRoughDays, pausedDates } from "./smart/roughDay";
@@ -56,6 +63,12 @@ export interface StreakData {
    * moment engine) sees the same live run; stripped before saving.
    */
   paused?: string[];
+  /**
+   * Missed days a streak freeze covered (services/commitment pendingFreezes).
+   * STORED and synced as a union. Never kept: they carry the run, they don't
+   * count as days kept.
+   */
+  frozen?: string[];
 }
 
 export interface Badge {
@@ -222,7 +235,19 @@ export async function loadStreakData(): Promise<StreakData> {
   const paused = await loadPaused();
   try {
     const raw = await AsyncStorage.getItem(STREAK_KEY);
-    if (raw) return asOf(JSON.parse(raw) as StreakData, todayDate(), paused);
+    if (raw) {
+      const stored = JSON.parse(raw) as StreakData;
+      const today = todayDate();
+      // A missed day a freeze can cover is covered on the first load after it
+      // ends: the run carries on, and the frozen day is recorded so every
+      // reader — and the other phone, through the sync union — agrees.
+      const freeze = pendingFreezes({ ...stored, paused }, today);
+      if (freeze.length > 0) {
+        stored.frozen = withFrozenDays(stored.frozen, freeze);
+        await AsyncStorage.setItem(STREAK_KEY, JSON.stringify(stored));
+      }
+      return asOf(stored, today, paused);
+    }
   } catch (e) {
     console.error("Error loading streak data:", e);
   }
@@ -249,7 +274,10 @@ export async function recordActivity(
   // The run continues when the last kept day reaches today — yesterday, or
   // across days that were paused (protected rough days). A paused day adds
   // nothing to the count; it only stops the gap from ending the run.
-  if (data.lastActiveDate && runReaches(data.lastActiveDate, today, data.paused)) {
+  if (
+    data.lastActiveDate &&
+    runReaches(data.lastActiveDate, today, [...(data.paused ?? []), ...(data.frozen ?? [])])
+  ) {
     data.currentStreak += 1;
   } else {
     data.currentStreak = 1;

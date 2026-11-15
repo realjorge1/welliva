@@ -36,6 +36,7 @@ import { experienceEvidence } from "./experiences";
 import { replyLanguageLines } from "./replyLanguage";
 import { cycleStateLines } from "../../cycle/brief";
 import { learnedStateLines } from "./learned";
+import { pastChatLines } from "../pastChats";
 
 // ════════════════════════════════════════════════════════════════
 // TIER 1 — frozen. Cache breakpoint goes here.
@@ -198,7 +199,16 @@ export function twinStateMessage(
   twin: GozlinTwin,
   ctx?: Pick<
     GozlinChatContext,
-    "snapshot" | "identity" | "habits" | "experiences" | "cycle" | "language" | "now" | "roughDay" | "learned"
+    | "snapshot"
+    | "identity"
+    | "habits"
+    | "experiences"
+    | "cycle"
+    | "language"
+    | "now"
+    | "roughDay"
+    | "learned"
+    | "pastChats"
   >,
   /** The message being answered — enables the habit cross-reference and recall. */
   userText?: string,
@@ -215,6 +225,13 @@ export function twinStateMessage(
     `goal: ${twin.identitySummary}`,
     `flags: ${twin.flags.join(", ") || "none"}`,
   ];
+
+  // What FREEZE_HELD means, in words: the flag alone invites a guess.
+  if (twin.flags.includes("FREEZE_HELD")) {
+    lines.push(
+      "A streak freeze covered yesterday, which they missed: their streak is intact, and yesterday does not count as a day kept. Mention it only if it comes up, and never as a reproach.",
+    );
+  }
 
   const who = identityEvidence(ctx?.identity);
   if (who.motivation) lines.push(`their stated why: ${who.motivation} (their exact words: quote them or leave them, never reword them)`);
@@ -260,6 +277,11 @@ export function twinStateMessage(
   // What the learning models know about them, past each model's own gate
   // (./learned.ts). The agent loop grounds against the same brief.
   lines.push(...learnedStateLines(ctx?.learned));
+
+  // Earlier conversations, the few that bear on what they just asked
+  // (../pastChats.ts). Memories, not evidence: nothing here joins the
+  // grounding set or the receipts, and the lines carry no figures.
+  lines.push(...pastChatLines(ctx?.pastChats, userText ?? ""));
 
   // A rough day they marked themselves (services/smart/roughDay). It changes
   // how to talk today, not what is true: the logged numbers above still stand.

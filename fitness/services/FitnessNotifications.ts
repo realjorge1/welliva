@@ -1,8 +1,9 @@
 /**
  * FITNESS NOTIFICATIONS — reminder scheduling for the fitness module.
  *
- * Owns ONLY its own notifications: every id it schedules is remembered under
- * one AsyncStorage key and only those ids are ever cancelled — it never calls
+ * Owns ONLY its own notifications: each has a fixed `welliva.fitness.*` id, the
+ * ids are remembered under one AsyncStorage key, and a cancel touches only
+ * those plus any stray `fitness-reminder` the list lost — it never calls
  * cancelAll, so the app's proactive-delivery scheduler (health-os) and the
  * habit reminders are untouched.
  *
@@ -115,10 +116,41 @@ async function saveOwnedIds(ids: string[]): Promise<void> {
   }
 }
 
-/** Cancel exactly the notifications this module scheduled — nothing else. */
+/**
+ * Every reminder this module lays has a FIXED identifier under this prefix, so
+ * laying it again replaces it instead of adding a copy. With random ids (before
+ * 2026-11-15) two overlapping syncs — the boot repair, a settings save, the
+ * plan adopting its training days — each laid a full set while only the last
+ * set was remembered; the rest could never be cancelled and returned as
+ * duplicate "Training day" notifications (a test phone held 3 of each).
+ */
+const ID_PREFIX = "welliva.fitness.";
+
+/** The fixed identifier of one reminder: its kind, plus the day for a per-day one. */
+export function fitnessReminderId(kind: string, day?: number): string {
+  return day === undefined ? `${ID_PREFIX}${kind}` : `${ID_PREFIX}${kind}.${day}`;
+}
+
+/**
+ * Cancel this module's notifications — nothing else. The remembered ids go,
+ * and a sweep of the OS queue catches any of ours the list lost: an orphan of
+ * an overlapping sync, a crash between schedule and save, or the random ids of
+ * earlier builds. "Ours" = our id prefix or our `fitness-reminder` data type,
+ * which no other module uses.
+ */
 export async function cancelFitnessReminders(): Promise<void> {
-  const ids = await loadOwnedIds();
-  for (const id of ids) {
+  const doomed = new Set(await loadOwnedIds());
+  try {
+    for (const p of await Notifications.getAllScheduledNotificationsAsync()) {
+      const type = (p.content?.data as { type?: unknown } | null | undefined)?.type;
+      if (p.identifier?.startsWith(ID_PREFIX) || type === "fitness-reminder") {
+        doomed.add(p.identifier);
+      }
+    }
+  } catch {
+    // listing failed — the remembered ids still go
+  }
+  for (const id of doomed) {
     try {
       await Notifications.cancelScheduledNotificationAsync(id);
     } catch {
@@ -160,8 +192,24 @@ export async function requestNotificationPermission(): Promise<boolean> {
  * so this is equally the way reminders are turned OFF.
  *
  * Returns why nothing was scheduled when nothing was; see {@link FitnessReminderSync}.
+ *
+ * Calls run ONE AT A TIME, in the order they were made: each cancel-and-re-lay
+ * finishes before the next begins, so the newest call's settings stand.
  */
-export async function syncFitnessReminders(profile: FitnessProfile): Promise<FitnessReminderSync> {
+export function syncFitnessReminders(profile: FitnessProfile): Promise<FitnessReminderSync> {
+  return oneAtATime(() => syncNow(profile));
+}
+
+let tail: Promise<unknown> = Promise.resolve();
+
+/** Queue a job behind every earlier sync; a failed job never blocks the next. */
+function oneAtATime<T>(job: () => Promise<T>): Promise<T> {
+  const run = tail.then(job, job);
+  tail = run.catch(() => undefined);
+  return run;
+}
+
+async function syncNow(profile: FitnessProfile): Promise<FitnessReminderSync> {
   await cancelFitnessReminders();
 
   const reminders = profile.reminders;
@@ -194,12 +242,14 @@ export async function syncFitnessReminders(profile: FitnessProfile): Promise<Fit
   const stamp = await ownerStamp();
   const ids: string[] = [];
   const schedule = async (
+    identifier: string,
     content: Notifications.NotificationContentInput,
     trigger: Notifications.NotificationTriggerInput,
   ) => {
     try {
       ids.push(
         await Notifications.scheduleNotificationAsync({
+          identifier,
           content: { ...content, data: { ...(content.data ?? {}), ...stamp } },
           trigger,
         }),
@@ -212,6 +262,7 @@ export async function syncFitnessReminders(profile: FitnessProfile): Promise<Fit
   if (reminders.workouts) {
     for (const day of days) {
       await schedule(
+        fitnessReminderId("workout", day),
         {
           title: "Training day",
           body: `It's ${DAY_LABELS[day]} — your session is ready when you are.`,
@@ -230,6 +281,7 @@ export async function syncFitnessReminders(profile: FitnessProfile): Promise<Fit
 
   if (hydrationLaid) {
     await schedule(
+      fitnessReminderId("hydration"),
       {
         title: "Hydration check",
         body: "Midday top-up — a glass keeps the engine cool. One tap logs it.",
@@ -255,6 +307,7 @@ export async function syncFitnessReminders(profile: FitnessProfile): Promise<Fit
 
   if (reminders.stretch) {
     await schedule(
+      fitnessReminderId("stretch"),
       {
         title: "Evening unwind",
         body: "Five minutes of stretching tonight buys an easier tomorrow.",
@@ -271,6 +324,7 @@ export async function syncFitnessReminders(profile: FitnessProfile): Promise<Fit
 
   if (reminders.weeklySummary) {
     await schedule(
+      fitnessReminderId("weekly-summary"),
       {
         title: "Your week in review",
         body: "See what you built this week — open your fitness progress.",
@@ -314,7 +368,8 @@ export async function syncFitnessReminders(profile: FitnessProfile): Promise<Fit
  */
 export async function refreshFitnessReminders(): Promise<FitnessReminderSync> {
   try {
-    return await syncFitnessReminders(await loadFitnessProfile());
+    // Read inside the queue, so the profile is the newest one saved.
+    return await oneAtATime(async () => syncNow(await loadFitnessProfile()));
   } catch {
     return { status: "off", scheduled: 0 };
   }

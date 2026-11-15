@@ -97,6 +97,15 @@ const UNLIT = {
   light: { outer: "#D5D8DE", inner: "#E4E6EA" },
 } as const;
 
+/**
+ * A day a streak freeze covered: the same flame, held in frost — neither lit
+ * (it wasn't kept) nor dark (the run didn't end). Fill only, no outline.
+ */
+export const FROST_COLORS = { outer: "#8FB4CC", inner: "#CFE3EF" } as const;
+
+/** The flame's drawing, for a layer that must sit exactly on it (FreezeMoment). */
+export const FLAME_PATHS = { viewBox: VIEWBOX, outer: OUTER, inner: INNER } as const;
+
 /** Where the flame stands, as a transform origin — the middle of its foot. */
 const ORIGIN = "50% 93.6%";
 
@@ -437,20 +446,24 @@ export function Flame({
 export function FlameGlyph({
   size,
   unlit = false,
+  frost = false,
   dark,
 }: {
   /** Width in points; height is `size * FLAME_ASPECT`. */
   size: number;
   unlit?: boolean;
+  /** A day a streak freeze covered: frost tones, no core. Wins over `unlit`. */
+  frost?: boolean;
   /** Which ground the UNLIT grey is chosen for. Lit colours never change. */
   dark: boolean;
 }) {
-  const tone = dark ? UNLIT.dark : UNLIT.light;
+  const tone = frost ? FROST_COLORS : dark ? UNLIT.dark : UNLIT.light;
+  const dim = unlit || frost;
   return (
     <Svg width={size} height={size * FLAME_ASPECT} viewBox={VIEWBOX}>
-      <Path d={OUTER} fill={unlit ? tone.outer : FLAME_COLORS.outer} />
-      <Path d={INNER} fill={unlit ? tone.inner : FLAME_COLORS.inner} />
-      {!unlit ? <Path d={CORE} fill={FLAME_COLORS.core} /> : null}
+      <Path d={OUTER} fill={dim ? tone.outer : FLAME_COLORS.outer} />
+      <Path d={INNER} fill={dim ? tone.inner : FLAME_COLORS.inner} />
+      {!dim ? <Path d={CORE} fill={FLAME_COLORS.core} /> : null}
     </Svg>
   );
 }

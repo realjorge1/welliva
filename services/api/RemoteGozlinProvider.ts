@@ -26,7 +26,7 @@ import { WellivaApi } from "./WellivaApi";
  * two copies of the system prompt surfaces instead of silently changing how the
  * coach behaves. Bump alongside services/gozlin/agent/context.ts.
  */
-export const GOZLIN_PROMPT_VERSION = "2026-09-27.3";
+export const GOZLIN_PROMPT_VERSION = "2026-11-14.1";
 
 /**
  * The agent-loop transport, or null when no backend is configured — the loop

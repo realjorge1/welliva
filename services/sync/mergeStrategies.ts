@@ -40,6 +40,12 @@ export type MergeStrategy =
   /** Current behavior: adopt the remote document wholesale. The default. */
   | { kind: "lww" }
   /**
+   * The streak record (StreakService). Kept days and frozen days UNION — two
+   * phones each keeping a day, or each spending a freeze, must end with both —
+   * and the counts are rebuilt from the merged days (see mergeStreak).
+   */
+  | { kind: "streak" }
+  /**
    * `Record<YYYY-MM-DD, V>`. Days union; a day present on both sides merges by
    * value — arrays union item-wise, objects resolve by `preferField` (highest
    * wins) or, failing that, by richness.
@@ -103,7 +109,15 @@ const SCORERS = {
  * single-valued documents (the active plan, the bio, preferences): those aren't
  * append-only, and merging two versions of one object is meaningless.
  */
+/** The streak record's own key (services/StreakService). Declared before the map reads it. */
+export const STREAK_KEY = "@welliva_streak_data";
+
 export const MERGE_STRATEGIES: Record<string, MergeStrategy> = {
+  // The streak (StreakService STREAK_KEY). It was last-write-wins, so a freeze
+  // spent on one phone, or a day kept on it, could be erased by the other's
+  // older copy. Now the ledgers union.
+  [STREAK_KEY]: { kind: "streak" },
+
   // Record<date, FoodLogEntry[]> — the headline case from the audit.
   [KEYS.FOOD_LOG]: { kind: "mergeByDate", capDays: 180 },
 
@@ -470,6 +484,75 @@ export function mergeByDate(
  * `null` means "no document": a null local means the device doesn't have it,
  * a null remote means a tombstone. Neither is a merge — the caller handles both.
  */
+const isDay = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+const dayList = (v: unknown): string[] => (Array.isArray(v) ? v.filter(isDay) : []);
+const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+const prevDay = (d: string): string => {
+  const [y, m, dd] = d.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, dd) - 86_400_000);
+  return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`;
+};
+
+/**
+ * Two copies of the streak record → one, by VALUE (commutative, idempotent):
+ *   - `days` and `frozen` union (sorted, capped like their writers cap them);
+ *   - the last kept day is the later of the two;
+ *   - the run is the longer of: each side's run that ends on that day, and the
+ *     run the merged days spell out (consecutive kept days, frozen days carry it);
+ *   - best and total never go down; badges union by id (earliest earning kept).
+ * Rough days are not on this record (they sync on their own), so a run that a
+ * rough day carried is taken from the sides, never undercounted by the rebuild.
+ */
+export function mergeStreak(
+  l: Record<string, unknown>,
+  r: Record<string, unknown>,
+): Record<string, unknown> {
+  const days = [...new Set([...dayList(l.days), ...dayList(r.days)])].sort().slice(-400);
+  const keptSet = new Set(days);
+  const frozen = [...new Set([...dayList(l.frozen), ...dayList(r.frozen)])]
+    .filter((d) => !keptSet.has(d))
+    .sort()
+    .slice(-100);
+  const lLast = isDay(l.lastActiveDate) ? l.lastActiveDate : "";
+  const rLast = isDay(r.lastActiveDate) ? r.lastActiveDate : "";
+  const lastActiveDate = [lLast, rLast, days[days.length - 1] ?? ""].sort().pop() ?? "";
+
+  // The run the merged ledger spells out, ending on the last kept day.
+  const frozenSet = new Set(frozen);
+  let rebuilt = 0;
+  if (lastActiveDate && keptSet.has(lastActiveDate)) {
+    let d = lastActiveDate;
+    for (let guard = 0; guard < 1000; guard++) {
+      if (keptSet.has(d)) rebuilt++;
+      else if (!frozenSet.has(d)) break;
+      d = prevDay(d);
+    }
+  }
+  const sideRun = (s: Record<string, unknown>, last: string) => (last === lastActiveDate ? num(s.currentStreak) : 0);
+  const currentStreak = Math.max(rebuilt, sideRun(l, lLast), sideRun(r, rLast));
+
+  const badges = new Map<string, Record<string, unknown>>();
+  for (const b of [...(Array.isArray(l.badges) ? l.badges : []), ...(Array.isArray(r.badges) ? r.badges : [])]) {
+    if (!isPlainObject(b) || typeof b.id !== "string") continue;
+    const seen = badges.get(b.id);
+    if (!seen || String(b.earnedAt ?? "") < String(seen.earnedAt ?? "")) badges.set(b.id, b);
+  }
+
+  // Unknown fields: the side whose last kept day is later (ties: the larger
+  // serialisation, so the choice never depends on which side is local).
+  const base = lLast !== rLast ? (lLast > rLast ? l : r) : JSON.stringify(l) >= JSON.stringify(r) ? l : r;
+  return {
+    ...base,
+    currentStreak,
+    longestStreak: Math.max(num(l.longestStreak), num(r.longestStreak), currentStreak),
+    lastActiveDate,
+    totalActiveDays: Math.max(num(l.totalActiveDays), num(r.totalActiveDays), days.length),
+    badges: [...badges.values()].sort((a, b) => String(a.id).localeCompare(String(b.id))),
+    days,
+    frozen,
+  };
+}
+
 export function merge(
   key: string,
   local: string | null,
@@ -481,6 +564,11 @@ export function merge(
   try {
     const l: unknown = JSON.parse(local);
     const r: unknown = JSON.parse(remote);
+
+    if (strategy.kind === "streak") {
+      if (!isPlainObject(l) || !isPlainObject(r)) return remote; // shape drift
+      return JSON.stringify(mergeStreak(l, r));
+    }
 
     if (strategy.kind === "mergeByDate") {
       if (!isPlainObject(l) || !isPlainObject(r)) return remote; // shape drift

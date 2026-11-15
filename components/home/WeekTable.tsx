@@ -24,12 +24,14 @@
  * one rounded strip because the rows touch.
  */
 import { Flame, FlameGlyph, FLAME_COLORS } from "@/components/celebration/Flame";
+import { FreezeFlame, FreezeLine, useFreezeMoment } from "@/components/celebration/FreezeMoment";
 import { AppText, Mono, useColors } from "@/components/ui";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { useNutrition, useSystem, useWorkout } from "@/contexts/AppContext";
 import { getWaterHistory, type WaterHistoryEntry } from "@/services/OfflineStorage";
 import {
   commitmentStatus,
+  frozenOn,
   keptOn,
   pausedOn,
   readCommitment,
@@ -133,6 +135,11 @@ export const WeekTable = React.memo(function WeekTable({
     () => pausedOn(streak, table.columns.map((c) => c.date)),
     [streak, table.columns],
   );
+  // Missed days a streak freeze covered: the flame held in frost.
+  const frozen = useMemo(
+    () => frozenOn(streak, table.columns.map((c) => c.date)),
+    [streak, table.columns],
+  );
   // A fresh start shows the days since it began — not the empty ones before.
   const freshDay = freshDayOf(freshStart, currentDate);
   const from =
@@ -142,9 +149,14 @@ export const WeekTable = React.memo(function WeekTable({
   const columns = table.columns.slice(from);
   const keptShown = kept.slice(from);
   const pausedShown = paused.slice(from);
+  const frozenShown = frozen.slice(from);
+  // Freezes held: the small change in the strip when one is earned — a word
+  // in the caption, never a moment of its own.
+  const freezeNote =
+    state.freezes > 0 ? ` · ${state.freezes} ${state.freezes === 1 ? "freeze" : "freezes"}` : "";
   const caption =
     state.totalDays > 0
-      ? `Best ${state.best} · ${state.totalDays} ${state.totalDays === 1 ? "day" : "days"} kept`
+      ? `Best ${state.best} · ${state.totalDays} ${state.totalDays === 1 ? "day" : "days"} kept${freezeNote}`
       : "Your first flame is one log away";
 
   /* ── When the flame plays ─────────────────────────────────────────────── */
@@ -160,6 +172,10 @@ export const WeekTable = React.memo(function WeekTable({
     },
     [entrance, onSignal],
   );
+  // A streak freeze carried a missed day: its one quiet moment, the first time
+  // this card is on screen afterwards (components/celebration/FreezeMoment).
+  const freeze = useFreezeMoment(streak.frozen, currentDate, play != null);
+
   // Today turning kept while the card is on screen lights it there and then.
   const wasKept = useRef(state.keptToday);
   useEffect(() => {
@@ -204,16 +220,18 @@ export const WeekTable = React.memo(function WeekTable({
         }`}
       >
         <View style={styles.flameBox}>
-          {state.keptToday && play ? (
-            <Flame
-              key={play.n}
-              size={FLAME}
-              entrance={play.mode}
-              flickerCycles={FLICKER_CYCLES}
-            />
-          ) : (
-            <FlameGlyph size={FLAME} unlit={!state.keptToday} dark />
-          )}
+          <FreezeFlame size={FLAME} play={!!freeze.moment?.play} onDone={freeze.done}>
+            {state.keptToday && play ? (
+              <Flame
+                key={play.n}
+                size={FLAME}
+                entrance={play.mode}
+                flickerCycles={FLICKER_CYCLES}
+              />
+            ) : (
+              <FlameGlyph size={FLAME} unlit={!state.keptToday} dark />
+            )}
+          </FreezeFlame>
         </View>
         <AppText
           variant="display"
@@ -234,6 +252,8 @@ export const WeekTable = React.memo(function WeekTable({
           </AppText>
         </View>
       </View>
+
+      {freeze.moment ? <FreezeLine text={freeze.moment.line} /> : null}
 
       {/* ── The grid ── */}
       <View style={styles.grid}>
@@ -288,15 +308,19 @@ export const WeekTable = React.memo(function WeekTable({
                   ? "kept"
                   : pausedShown[ci]
                     ? "rough day, streak paused"
-                    : c.isToday
-                      ? "not kept yet"
-                      : "missed"
+                    : frozenShown[ci]
+                      ? "missed, a streak freeze kept the streak"
+                      : c.isToday
+                        ? "not kept yet"
+                        : "missed"
               }`}
             >
               {pausedShown[ci] ? (
                 // A rough day that paused the streak: its own quiet mark —
                 // neither a lit flame nor a missed one.
                 <Ionicons name="pause" size={DAY_FLAME - 2} color={colors.textTertiary} />
+              ) : frozenShown[ci] ? (
+                <FlameGlyph size={DAY_FLAME} frost dark />
               ) : (
                 <FlameGlyph size={DAY_FLAME} unlit={!keptShown[ci]} dark />
               )}

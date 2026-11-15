@@ -10,7 +10,7 @@
  */
 
 import { useApp } from "@/contexts/AppContext";
-import { currentWeekStart } from "@/services/OfflineStorage";
+import { currentWeekStart, toLocalDateString } from "@/services/OfflineStorage";
 import {
   addEpisode,
   archiveConversation,
@@ -72,9 +72,26 @@ import { catalogLogLabel } from "@/services/nutrition/FoodLogService";
 import { linkCatalogFood, resolveCatalogFood } from "@/services/nutrition/NutrientResolver";
 import { recordCareFlag } from "@/services/gozlin/ExperienceStore";
 import { phoneLanguage } from "@/utils/phoneLanguage";
+import { coachTurnSeconds, track } from "@/services/telemetry";
+import { formatWeight } from "@/models/units";
+import { HABIT_COLORS, HABIT_ICONS } from "@/components/habits/habitTheme";
+import type { Receipt } from "@/components/smart/receipt";
+import { poursOn } from "@/services/nutrition/waterPours";
+import { readWaterPours, removeWaterPour } from "@/services/nutrition/waterStore";
+import {
+  cancelCoachReminder,
+  coachReminderBlock,
+  scheduleCoachReminder,
+} from "@/services/notifications/coachReminders";
+import {
+  derivePastChats,
+  loadForgottenPastChats,
+  subscribePastChats,
+} from "@/services/gozlin/pastChats";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCuriosity, type UseCuriosity } from "./useCuriosity";
 import { useGozlinSnapshot } from "./useGozlinSnapshot";
+import { withHeat } from "@/services/weather/today";
 
 /**
  * THE PROMPT POOL — twenty-six, of which four are on screen at a time.
@@ -300,7 +317,24 @@ export interface UseGozlin {
   noted: { id: string; label: string } | null;
   undoNote: (id: string) => Promise<void>;
   clearNoted: () => void;
+  /**
+   * What one of the coach's confirmed writes just did ("Logged 250 ml of
+   * water"), with an Undo where the store allows one. The screen shows it in
+   * its toast, then calls `clearReceipt`.
+   */
+  receipt: Receipt | null;
+  clearReceipt: () => void;
 }
+
+/** Welliva weekdays: 0 = Monday … 6 = Sunday (services/HabitService). */
+const HABIT_DAYS = {
+  every_day: [0, 1, 2, 3, 4, 5, 6],
+  weekdays: [0, 1, 2, 3, 4],
+  weekends: [5, 6],
+} as const;
+
+/** The same fallback the water goal uses when it keeps a day (useNutritionState). */
+const WATER_GOAL_FALLBACK_ML = 2500;
 
 export function useGozlin(): UseGozlin {
   const app = useApp();
@@ -308,7 +342,17 @@ export function useGozlin(): UseGozlin {
     views: habitViews,
     retired: retiredHabits,
     refreshRetired,
+    createHabit,
+    deleteHabit,
   } = useHabits();
+  // The tool actions read the latest app and habits through these, so the
+  // actions object (and every turn callback depending on it) stays stable.
+  const appRef = useRef(app);
+  const habitViewsRef = useRef(habitViews);
+  useEffect(() => {
+    appRef.current = app;
+    habitViewsRef.current = habitViews;
+  });
   const { openUpgrade } = useBilling();
   const { logCatalogFood } = useMealPlan();
   const [quota, setQuota] = useState<MeteredState | null>(null);
@@ -359,6 +403,8 @@ export function useGozlin(): UseGozlin {
   const { recordTurn: recordCuriosityTurn, saveNote: saveExperienceNote } = curiosity;
   const [noted, setNoted] = useState<{ id: string; label: string } | null>(null);
   const clearNoted = useCallback(() => setNoted(null), []);
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const clearReceipt = useCallback(() => setReceipt(null), []);
 
   const gentleToday = useRoughToday() !== null;
   const briefing = useMemo(
@@ -463,6 +509,37 @@ export function useGozlin(): UseGozlin {
     };
   }, [mifflinTdee, app.currentDate]);
 
+  // What it remembers from earlier conversations: derived from the chat
+  // history on this phone every time (services/gozlin/pastChats.ts), minus the
+  // ones they told it to forget on the Memory screen. No extra AI call.
+  const [forgottenChats, setForgottenChats] = useState<string[]>([]);
+  useEffect(() => {
+    let live = true;
+    const read = () => {
+      loadForgottenPastChats()
+        .then((ids) => {
+          if (live) setForgottenChats(ids);
+        })
+        .catch((e) => console.log("[gozlin] could not read forgotten chats", e));
+    };
+    read();
+    const off = subscribePastChats(read);
+    return () => {
+      live = false;
+      off();
+    };
+  }, []);
+  const pastChats = useMemo(
+    () =>
+      derivePastChats({
+        archive,
+        experiences: curiosity.brief.records,
+        identity,
+        forgotten: forgottenChats,
+      }),
+    [archive, curiosity.brief.records, identity, forgottenChats],
+  );
+
   const chatContext = useMemo<GozlinChatContext>(
     () => ({
       twin,
@@ -474,6 +551,7 @@ export function useGozlin(): UseGozlin {
       cycle: cycleBrief,
       roughDay: roughBrief,
       learned: learnedBrief,
+      pastChats,
       experiences: curiosity.brief,
       conversation: messages,
       // Read once per launch and never changes while the app runs, so it is
@@ -492,6 +570,7 @@ export function useGozlin(): UseGozlin {
       cycleBrief,
       roughBrief,
       learnedBrief,
+      pastChats,
       curiosity.brief,
       messages,
       app.userGoals,
@@ -595,8 +674,127 @@ export function useGozlin(): UseGozlin {
         if (r.ok) setNoted({ id: r.id, label: note.subject.label });
         return r;
       },
+
+      // ── G2: the coach's confirmed writes, each through the app's own store ──
+
+      waterStatus: async () => {
+        const a = appRef.current;
+        return {
+          todayMl: a.consumedNutrition.waterMl,
+          goalMl: withHeat(a.userGoals?.dailyWaterMl ?? a.nutritionTargets?.waterMl ?? WATER_GOAL_FALLBACK_ML),
+        };
+      },
+      logWater: async (ml) => {
+        const a = appRef.current;
+        const goalMl = withHeat(a.userGoals?.dailyWaterMl ?? a.nutritionTargets?.waterMl ?? WATER_GOAL_FALLBACK_ML);
+        const before = a.consumedNutrition.waterMl;
+        try {
+          // The same path as the water buttons: the counter, the pours log,
+          // and the whole-goal credit that keeps the day.
+          await a.addWater(ml);
+          const pours = poursOn(await readWaterPours(), toLocalDateString(new Date()));
+          const pour = pours[pours.length - 1];
+          setReceipt({
+            message: `Logged ${ml} ml of water`,
+            onUndo: pour
+              ? async () => {
+                  await removeWaterPour(pour.id);
+                  await appRef.current.syncLiveCounters();
+                }
+              : undefined,
+          });
+          return { ok: true as const, todayMl: before + ml, goalMl };
+        } catch (e) {
+          console.log("[gozlin] could not log water", e);
+          return { ok: false as const, reason: "The water couldn't be saved." };
+        }
+      },
+
+      weightStatus: async () => {
+        const a = appRef.current;
+        const unit = a.userBio?.measurementUnits?.weight ?? "kg";
+        const today = toLocalDateString(new Date());
+        const logs = [...a.bodyLogs]
+          .filter((b) => Number.isFinite(b.weightKg))
+          .sort((x, y) => x.date.localeCompare(y.date));
+        const before = logs.filter((b) => b.date < today);
+        const last = before[before.length - 1];
+        const todayEntry = logs.filter((b) => b.date === today).pop();
+        return {
+          show: (kg: number) => formatWeight(kg, unit),
+          last: last ? { kg: last.weightKg, date: last.date } : null,
+          todayKg: todayEntry ? todayEntry.weightKg : null,
+        };
+      },
+      logWeight: async (kg) => {
+        try {
+          await appRef.current.logBodyMeasurement(makeWeighIn(kg));
+          // No Undo: weigh-ins have no delete path; a new reading replaces today's.
+          setReceipt({ message: "Weigh-in logged" });
+          return { ok: true as const };
+        } catch (e) {
+          console.log("[gozlin] could not log a weigh-in", e);
+          return { ok: false as const, reason: "The weigh-in couldn't be saved." };
+        }
+      },
+
+      logWorkout: async ({ activity, minutes }) => {
+        const now = new Date();
+        const id = `manual_${now.getTime()}`;
+        try {
+          await appRef.current.logWorkout(
+            {
+              id,
+              date: toLocalDateString(now),
+              sessionId: `manual:${id}`,
+              sessionLabel: activity,
+              exercisesCompleted: 0,
+              totalExercises: 0,
+              completionPercent: 100,
+              durationMinutes: minutes,
+              completedAt: now.toISOString(),
+            },
+            { source: "manual" },
+          );
+          // No Undo: the workout log has no delete path.
+          setReceipt({ message: `Logged · ${activity}` });
+          return { ok: true as const };
+        } catch (e) {
+          console.log("[gozlin] could not log a workout", e);
+          return { ok: false as const, reason: "The workout couldn't be saved." };
+        }
+      },
+
+      habitNames: () => habitViewsRef.current.map((v) => v.habit.name),
+      addHabit: async ({ name, schedule }) => {
+        try {
+          const habit = await createHabit({
+            name,
+            icon: HABIT_ICONS[0],
+            color: HABIT_COLORS[0],
+            days: [...HABIT_DAYS[schedule]],
+            weeklyGoal: null,
+            source: "manual",
+            reminder: null,
+            anchor: null,
+          });
+          setReceipt({ message: `Added · ${name}`, onUndo: () => deleteHabit(habit.id) });
+          return { ok: true as const };
+        } catch (e) {
+          console.log("[gozlin] could not add a habit", e);
+          return { ok: false as const, reason: "The habit couldn't be added." };
+        }
+      },
+
+      reminderBlock: (at) => coachReminderBlock(at),
+      setReminder: async ({ text, at }) => {
+        const r = await scheduleCoachReminder(text, at);
+        if (!r.ok) return r;
+        setReceipt({ message: "Reminder set", onUndo: () => cancelCoachReminder(r.id) });
+        return { ok: true as const };
+      },
     }),
-    [logCatalogFood, saveExperienceNote],
+    [logCatalogFood, saveExperienceNote, createHabit, deleteHabit],
   );
 
   // ── Load memory + conversation + check-ins once ──
@@ -698,6 +896,9 @@ export function useGozlin(): UseGozlin {
     async (text: string, thread: GozlinMessage[], history: GozlinMessage[]) => {
       const trimmed = text.trim();
       if (!trimmed || isThinking) return;
+      // The wait the person feels: from their send to the reply in the bubble,
+      // allowance check included (coach_turn's `seconds`).
+      const sentAt = Date.now();
 
       // ── The daily allowance ──
       //
@@ -769,6 +970,14 @@ export function useGozlin(): UseGozlin {
             onActivity: (label) => setActivity(label),
           },
         );
+
+        // How the turn ended and how long it took. The outcome word and two
+        // counts only: never the question, the reply or which tools ran.
+        track("coach_turn", {
+          result: result.outcome,
+          tools: result.toolCalls,
+          seconds: coachTurnSeconds(Date.now() - sentAt),
+        });
 
         const locked = result.source === "locked";
         const reply = locked ? lockedReply() : result.message;
@@ -1129,5 +1338,7 @@ export function useGozlin(): UseGozlin {
     noted,
     undoNote: curiosity.undo,
     clearNoted,
+    receipt,
+    clearReceipt,
   };
 }

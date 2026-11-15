@@ -34,6 +34,8 @@ import {
 } from "@/components/lifecontext";
 import { useIntelligence } from "@/components/memory/useIntelligence";
 import { useMemoryCenter } from "@/components/memory/useMemoryCenter";
+import { usePastChats } from "@/components/memory/usePastChats";
+import { pastChatSummary } from "@/services/gozlin/pastChats";
 import { ScreenTopBar } from "@/components/navigation";
 import {
   AppText,
@@ -113,6 +115,7 @@ function humanize(s: string): string {
 export default function KnowsScreen() {
   const { colors } = useColors();
   const m = useMemoryCenter();
+  const pastChats = usePastChats();
   const lc = useLifeContext();
   const ant = useAnticipation();
   const intel = useIntelligence();
@@ -541,6 +544,45 @@ export default function KnowsScreen() {
                   }
                 />
               ) : null}
+            </ListGroup>
+          </View>
+        </Reveal>
+
+        {/* ── From past chats (services/gozlin/pastChats) ──
+             Exactly what Gozlin may bring up from earlier conversations: the
+             day, the topic, what they said they'd try. Forget stops Gozlin
+             bringing it up; the chat stays in the history. */}
+        <Reveal index={7}>
+          <View style={styles.block}>
+            <SectionHeader
+              title="From past chats"
+              subtitle="What Gozlin may bring up from earlier conversations. Forget any of it; the chat itself stays in your history"
+            />
+            <ListGroup>
+              {pastChats.chats.length === 0 ? (
+                <ListRow
+                  icon="chatbubbles-outline"
+                  tone={colors.textTertiary}
+                  title="Nothing yet"
+                  subtitle="When you start a new conversation, the last one moves to your chat history, and Gozlin can remember what you said you'd try."
+                />
+              ) : (
+                pastChats.chats.map((c) => (
+                  <ListRow
+                    key={c.id}
+                    icon="chatbubbles-outline"
+                    tone={colors.primary}
+                    title={c.title ?? "A conversation"}
+                    subtitle={[humanDate(c.day), pastChatSummary(c) || null].filter(Boolean).join(" · ")}
+                    right={
+                      <RemoveButton
+                        label={`Forget the chat about ${c.title ?? "this"}`}
+                        onPress={() => void pastChats.forget(c.id)}
+                      />
+                    }
+                  />
+                ))
+              )}
             </ListGroup>
           </View>
         </Reveal>

@@ -21,6 +21,21 @@ export interface RawCalendarEvent {
   allDay: boolean;
   location?: string;
   notes?: string;
+  /**
+   * The event sits in a public-holiday calendar ("Holidays in Nigeria", Google's
+   * `#holiday@group.v.calendar.google.com`). Such a day is a holiday, never the
+   * person's own vacation — whatever its title says.
+   */
+  holidayCalendar?: boolean;
+}
+
+/**
+ * One key per real-world event. The same public holiday arrives once per calendar
+ * that carries it (each with its own id), and a phone found on 2026-11-15 got
+ * "Eid El-Fitr Holiday" three times. Title (case and spacing folded) + dates.
+ */
+export function sameEventKey(title: string, start: string, end?: string): string {
+  return `${title.trim().replace(/\s+/g, " ").toLowerCase()}|${start}|${end ?? start}`;
 }
 
 /** Confidence stamped on inferred (calendar-sourced) entries — below user-entered 1.0. */
@@ -62,10 +77,15 @@ export function proposeFromCalendarEvent(
   if (raw.startDate < today) return null; // only the future
 
   const multiDay = raw.allDay && raw.endDate > raw.startDate;
-  let kind = classifyKind(`${title} ${raw.location ?? ""}`);
+  // A public-holiday calendar carries every holiday of the year; only the ones the
+  // rules would pick anyway come through (no flood of "a holiday's near"), and they
+  // are filed as a holiday — never the person's own vacation.
+  const keyword = classifyKind(`${title} ${raw.location ?? ""}`);
+  let kind: LifeEventKind | null = raw.holidayCalendar && keyword ? "holiday" : keyword;
   if (!kind) {
     if (!multiDay) return null; // ordinary meeting → skip
-    kind = "travel"; // a multi-day all-day block reads as a trip
+    // a multi-day all-day block reads as a trip — or, from a holiday calendar, a holiday
+    kind = raw.holidayCalendar ? "holiday" : "travel";
   }
 
   const hasRange = raw.endDate > raw.startDate;
@@ -86,9 +106,15 @@ export function proposeFromCalendar(
   today: string,
 ): LifeEventInput[] {
   const out = new Map<string, LifeEventInput>();
+  const seen = new Set<string>();
   for (const ev of events) {
     const p = proposeFromCalendarEvent(ev, today);
-    if (p && p.id && !out.has(p.id)) out.set(p.id, p);
+    if (!p || !p.id || out.has(p.id)) continue;
+    // The same event from a second calendar: the first one stands.
+    const key = sameEventKey(p.title, p.window.start, p.window.end);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.set(p.id, p);
   }
   return [...out.values()];
 }

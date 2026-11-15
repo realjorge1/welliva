@@ -15,11 +15,16 @@
  * See docs/companion/00-proactive-companion-blueprint.md §3.2 + §7.
  */
 import { toLocalDateString } from "../../platform/clock";
-import type { LifeContextRepository } from "../../lifecontext";
+import type { LifeContextRepository, LifeEventInput } from "../../lifecontext";
 import { lifeContext as defaultLifeContext } from "../../lifecontext";
 import { consent as defaultConsent, type ConsentRepository } from "../../privacy";
 import type { SignalPermission, SignalStatus } from "../types";
-import { proposeFromCalendar, type RawCalendarEvent } from "./classify";
+import { proposeFromCalendar, sameEventKey, type RawCalendarEvent } from "./classify";
+
+/** A public-holiday calendar, by its name or Google's holiday-calendar id. */
+function isHolidayCalendar(c: { id?: string; title?: string | null; name?: string | null }): boolean {
+  return /holiday/i.test(`${c.title ?? ""} ${c.name ?? ""}`) || /#holiday@/i.test(c.id ?? "");
+}
 
 type ExpoCalendar = typeof import("expo-calendar");
 
@@ -93,6 +98,7 @@ export class CalendarSource {
       const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
       const ids = calendars.map((c) => c.id);
       if (ids.length === 0) return [];
+      const holidayIds = new Set(calendars.filter(isHolidayCalendar).map((c) => c.id));
 
       const end = new Date(now);
       end.setDate(end.getDate() + days);
@@ -110,6 +116,7 @@ export class CalendarSource {
           allDay,
           location: e.location || undefined,
           notes: e.notes || undefined,
+          ...(holidayIds.has(e.calendarId) ? { holidayCalendar: true } : {}),
         };
       });
     } catch {
@@ -135,7 +142,50 @@ export class CalendarSource {
         // skip a single malformed event; keep importing the rest
       }
     }
+    await this.tidy(proposals, now, events.length > 0);
     return { proposed: proposals.length };
+  }
+
+  /**
+   * Bring what earlier syncs filed in line with this one: a calendar entry that is
+   * the same event as one just proposed (another calendar's copy of it) goes, and
+   * a kept one whose kind changed (a public holiday once filed as "vacation") is
+   * corrected. Only calendar-sourced, still-active entries are touched — never
+   * anything the person typed in. Best-effort: the import above already stands.
+   */
+  private async tidy(
+    proposals: LifeEventInput[],
+    now: Date,
+    /**
+     * The read came back with events, so the calendar can be trusted as the truth:
+     * a future calendar entry it no longer proposes (deleted there, or filtered
+     * out by a rule) goes too. Never on an empty read — a failed read is not
+     * "you deleted everything".
+     */
+    mirror = false,
+  ): Promise<void> {
+    try {
+      const kept = new Map(proposals.map((p) => [p.id, p]));
+      const keyed = new Map(
+        proposals.map((p) => [sameEventKey(p.title, p.window.start, p.window.end), p.id]),
+      );
+      for (const e of await this.lifeContext.list()) {
+        if (e.source !== "calendar" || e.status !== "active") continue;
+        const mine = kept.get(e.id);
+        if (mine) {
+          if (mine.kind !== e.kind) await this.lifeContext.update(e.id, { kind: mine.kind }, now);
+          continue;
+        }
+        const twin = keyed.get(sameEventKey(e.title, e.window.start, e.window.end));
+        if (twin && twin !== e.id) {
+          await this.lifeContext.remove(e.id);
+        } else if (mirror && e.window.start >= toLocalDateString(now)) {
+          await this.lifeContext.remove(e.id);
+        }
+      }
+    } catch {
+      // a store without list/update/remove (or a failed write) leaves things as they were
+    }
   }
 }
 

@@ -29,6 +29,8 @@ type ExpoLocation = typeof import("expo-location");
 type FetchLike = (url: string) => Promise<{ ok: boolean; json: () => Promise<unknown> }>;
 
 const FRESH_MS = 2 * 60 * 60 * 1000; // 2 hours
+/** How old the phone's last-known position may be and still say where they are. */
+const LAST_KNOWN_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 interface WeatherCache {
   snapshot: WeatherSnapshot;
@@ -119,8 +121,10 @@ export class WeatherSource {
       const perm = await Location.getForegroundPermissionsAsync();
       if (mapPermission(perm.status) !== "granted") return cached?.snapshot ?? null;
 
+      // A last-known fix only while it is recent: an old one can be another city
+      // (a trip weeks ago), and its weather would be wrong with full confidence.
       const pos =
-        (await Location.getLastKnownPositionAsync()) ??
+        (await Location.getLastKnownPositionAsync({ maxAge: LAST_KNOWN_MAX_AGE_MS })) ??
         (await Location.getCurrentPositionAsync({}));
       if (!pos) return cached?.snapshot ?? null;
 
@@ -134,6 +138,21 @@ export class WeatherSource {
       return snapshot;
     } catch {
       return cached?.snapshot ?? null;
+    }
+  }
+
+  /**
+   * Is the phone's own location switched off? Then no forecast can come, and the
+   * person should be told that rather than see the row quietly reset. False when
+   * it can't be told (no module, an error) — no claim without knowing.
+   */
+  async locationOff(): Promise<boolean> {
+    const Location = await this.mod();
+    if (!Location) return false;
+    try {
+      return (await Location.hasServicesEnabledAsync()) === false;
+    } catch {
+      return false;
     }
   }
 

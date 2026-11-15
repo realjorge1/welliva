@@ -293,6 +293,11 @@ export function SignalsPanel({ onSynced }: { onSynced: () => Promise<void> | voi
   const calUnavailable = s.calendar.permission === "unavailable";
   const wxUnavailable = s.weatherStatus.permission === "unavailable";
   const wearUnavailable = s.wearable.permission === "unavailable";
+  // Health Connect runs on Android 9 (API 28) and newer only. On an older phone
+  // the build HAS it, but it can never start — "coming soon" was untrue there
+  // (found on an Android 8.1 phone, 2026-11-15). Watches reach welliva through
+  // Health Connect, so this is also the answer to "can my watch connect?".
+  const androidTooOld = Platform.OS === "android" && Number(Platform.Version) < 28;
 
   const action = (label: string) => (
     <AppText variant="footnote" color="brand" style={styles.actionLabel}>
@@ -311,7 +316,7 @@ export function SignalsPanel({ onSynced }: { onSynced: () => Promise<void> | voi
             ? s.weatherHint?.reason
             : wxUnavailable
               ? "Available in the full app build."
-              : "So Gozlin can call indoor vs outdoor days."
+              : (s.weatherProblem ?? "So Gozlin can call indoor vs outdoor days.")
         }
         onPress={!s.weather && !wxUnavailable ? () => void s.enableWeather() : undefined}
         right={
@@ -343,23 +348,36 @@ export function SignalsPanel({ onSynced }: { onSynced: () => Promise<void> | voi
         title={
           wearUnavailable
             ? Platform.OS === "android"
-              ? "Health Connect — coming soon"
+              ? androidTooOld
+                ? "Health Connect needs Android 9+"
+                : "Health Connect isn't ready here"
               : "Apple Health — coming soon"
             : s.wearable.ready
-              ? "Health app connected"
-              : Platform.OS === "android"
-                ? "Connect Health Connect"
-                : "Connect Apple Health"
+              ? Platform.OS === "android"
+                ? "Health Connect is set up"
+                : "Apple Health is set up"
+              : // Google's Health Connect guidance: a verb like "Set up", never
+                // "Connect to Health Connect".
+                Platform.OS === "android"
+                ? "Set up Health Connect"
+                : "Set up Apple Health"
         }
         subtitle={
           wearUnavailable
             ? // Named plainly rather than dressed up: it is off, and the manual
               // path is the working alternative today.
-              "Not in this build yet. Log last night's sleep by hand and recovery still uses it."
+              Platform.OS === "android"
+              ? androidTooOld
+                ? "This phone's Android is too old for it, so a watch can't link here. Log last night's sleep by hand and recovery still uses it."
+                : "Install or update Health Connect from Google Play, then come back. Until then, log last night's sleep by hand."
+              : "Not in this build yet. Log last night's sleep by hand and recovery still uses it."
             : s.wearable.ready
-              ? s.wearableSnapshot?.sleepHours !== undefined
-                ? `Last night: ${s.wearableSnapshot.sleepHours.toFixed(1)}h. Read on device, never uploaded.`
-                : "Sleep and heart data stay on your device — only the recovery score is used."
+              ? // Exact, not "never uploaded": when they chat, Gozlin's short
+                // summary can include the recovery worked out from these and
+                // last night's hours of sleep (constants/legal.ts).
+                s.wearableSnapshot?.sleepHours !== undefined
+                ? `Last night: ${s.wearableSnapshot.sleepHours.toFixed(1)}h. Read on your phone, never synced.`
+                : "The readings stay on your phone. Gozlin sees only your recovery and last night's sleep."
               : "Sleep, HRV and resting heart rate make recovery real instead of a training-load guess."
         }
         onPress={wearUnavailable ? undefined : () => void onConnectWearable()}
@@ -367,7 +385,7 @@ export function SignalsPanel({ onSynced }: { onSynced: () => Promise<void> | voi
         right={
           wearUnavailable
             ? undefined
-            : action(s.connectingWearable ? "…" : s.wearable.ready ? "Refresh" : "Connect")
+            : action(s.connectingWearable ? "…" : s.wearable.ready ? "Refresh" : "Set up")
         }
       />
     </ListGroup>

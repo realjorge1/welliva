@@ -25,9 +25,13 @@ export {
   buildForecastUrl,
   coarsen,
   describeWeatherCode,
+  heatTopUpMl,
   parseForecast,
+  trainingHourHint,
+  weatherAt,
   weatherWorkoutHint,
   type WeatherGroup,
+  type WeatherHour,
   type WeatherSnapshot,
   type WorkoutWeatherHint,
 } from "./weather/openmeteo";

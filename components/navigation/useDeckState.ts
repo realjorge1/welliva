@@ -36,6 +36,7 @@ import {
   type NextMove,
   type NextMoveInput,
 } from "./nextMove";
+import { withHeat } from "@/services/weather/today";
 
 const sessionService = SessionService.getInstance();
 
@@ -148,7 +149,7 @@ export function useDeckState(
       .map(([type, m]) => ({ type, name: m.name, consumed: m.isConsumed }));
   }, [todayDiet]);
 
-  const waterGoalMl = userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500;
+  const waterGoalMl = withHeat(userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500);
 
   /**
    * Whole days since the most recent body log, or null if there has never been

@@ -403,8 +403,8 @@ export function PlanReveal({
   }, []);
 
   return (
-    // The frame keeps the (invisible) action bar mounted on this step, so the
-    // safe area and the tail are already paid for above this component.
+    // The frame folds the (invisible) action bar's seat away on this step, and
+    // the step's scroll pays the safe area and the tail above this component.
     <View style={styles.body}>
       <View style={styles.hero}>
         <AnimatedText variant="kicker" color="brand" uppercase align="center" delay={T.kicker} duration={Dur.ui}>

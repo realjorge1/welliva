@@ -24,6 +24,7 @@
  * ref, so two quick taps on the day sheet can't overwrite each other.
  */
 import { consent } from "@/health-os";
+import { syncCycleCalendar } from "@/services/calendar/sync";
 import {
   answerContraception,
   clearCycleReminders,
@@ -385,6 +386,34 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
     }, 800);
     return () => clearTimeout(t);
   }, [ready, remindersKey]);
+
+  // Her calendar, when she has switched "Cycle in my calendar" on (services/
+  // calendar): re-written when anything it shows moves — the likely days, the
+  // fertile window and its own switch, discreet wording. A no-op while that
+  // switch is off; it reads storage itself, so a short wait lets saves land.
+  const calendarKey = useMemo(() => {
+    const s = data.settings;
+    const p = view.prediction;
+    return [
+      s.enabled,
+      s.discreet,
+      s.showFertileWindow,
+      view.mode,
+      p?.likely,
+      p?.earliest,
+      p?.latest,
+      p?.periodLength,
+      p?.cycleLength,
+      p?.fertileStart,
+      p?.fertileEnd,
+    ].join("|");
+  }, [data.settings, view]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => void syncCycleCalendar(), 1200);
+    return () => clearTimeout(t);
+  }, [ready, calendarKey]);
 
   // Postpartum: predictions restart from the first period after the birth.
   // The profile doesn't record when that was, so the first day this provider

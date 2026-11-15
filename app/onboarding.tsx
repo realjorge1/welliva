@@ -1775,7 +1775,9 @@ export default function OnboardingScreen() {
 
       case "plan":
         return (
-          <StepScroll>
+          // No action bar under the reveal (its own button closes it), so the
+          // frame folds the bar's seat away and this scroll clears the nav bar.
+          <StepScroll ownsSafeArea>
             {planPreview ? (
               <PlanReveal
                 preview={planPreview}
@@ -1803,6 +1805,11 @@ export default function OnboardingScreen() {
   // A held question has the stage to itself; the bar comes back with its answers.
   const showActions =
     currentStep !== "building" && currentStep !== "plan" && held !== currentStep;
+  // A faded bar still holds ~130pt under the stage. The reveal is a long scroll
+  // with its own button, so it takes that room back; nothing comes after it.
+  // (The build keeps the seat: it is centred, and a resizing stage would slide
+  // it during the hand-over. A held question keeps it too: its bar returns.)
+  const foldActions = currentStep === "plan";
 
   return (
     <>
@@ -1829,6 +1836,7 @@ export default function OnboardingScreen() {
             delay={actionDelay}
           />
         }
+        footerFolded={foldActions}
       >
         <OnboardingTransition step={currentStep} direction={direction} render={renderStep} />
       </OnboardingContainer>

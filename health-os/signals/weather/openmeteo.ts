@@ -32,6 +32,24 @@ export interface WeatherSnapshot {
   fetchedAt: string;
   /** Optional place label (reverse-geocoded by the adapter). */
   place?: string;
+  /**
+   * Hour by hour for today and tomorrow, in the place's own time (2026-11-15:
+   * "rain at 5 PM, when you train" needs the hour, not the day's maximum).
+   * Absent on snapshots cached before then.
+   */
+  hours?: WeatherHour[];
+}
+
+/** One hour of the forecast. */
+export interface WeatherHour {
+  /** Local `YYYY-MM-DD` of the place. */
+  date: string;
+  /** 0–23, local to the place. */
+  hour: number;
+  tempC: number;
+  /** 0–100. */
+  precipChance: number;
+  code: number;
 }
 
 export interface WorkoutWeatherHint {
@@ -72,6 +90,7 @@ export function buildForecastUrl(lat: number, lon: number): string {
     `https://api.open-meteo.com/v1/forecast?latitude=${la}&longitude=${lo}` +
     `&current=temperature_2m,weather_code` +
     `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max` +
+    `&hourly=temperature_2m,precipitation_probability,weather_code` +
     `&timezone=auto&forecast_days=2`
   );
 }
@@ -84,6 +103,34 @@ interface OpenMeteoResponse {
     temperature_2m_min?: number[];
     precipitation_probability_max?: number[];
   };
+  hourly?: {
+    /** Local "YYYY-MM-DDTHH:MM" (timezone=auto). */
+    time?: string[];
+    temperature_2m?: number[];
+    precipitation_probability?: number[];
+    weather_code?: number[];
+  };
+}
+
+/** The hourly block, kept only where every field is a number. */
+function parseHours(h: OpenMeteoResponse["hourly"]): WeatherHour[] | undefined {
+  if (!h?.time?.length) return undefined;
+  const out: WeatherHour[] = [];
+  h.time.forEach((t, i) => {
+    const m = /^(\d{4}-\d{2}-\d{2})T(\d{2})/.exec(t);
+    const temp = h.temperature_2m?.[i];
+    const code = h.weather_code?.[i];
+    if (!m || typeof temp !== "number" || typeof code !== "number") return;
+    const p = h.precipitation_probability?.[i];
+    out.push({
+      date: m[1],
+      hour: Number(m[2]),
+      tempC: Math.round(temp),
+      precipChance: typeof p === "number" ? Math.round(p) : 0,
+      code,
+    });
+  });
+  return out.length ? out : undefined;
 }
 
 /** Parse an Open-Meteo response into a snapshot. Throws on a malformed body. */
@@ -105,7 +152,52 @@ export function parseForecast(json: unknown, now: Date = new Date()): WeatherSna
     lowC: Math.round(r.daily?.temperature_2m_min?.[0] ?? temp),
     precipChance: Math.round(r.daily?.precipitation_probability_max?.[0] ?? 0),
     fetchedAt: now.toISOString(),
+    ...(parseHours(r.hourly) ? { hours: parseHours(r.hourly) } : {}),
   };
+}
+
+/** The forecast for one local hour, or null when the snapshot doesn't reach it. */
+export function weatherAt(w: WeatherSnapshot | null, date: string, hour: number): WeatherHour | null {
+  return w?.hours?.find((h) => h.date === date && h.hour === hour) ?? null;
+}
+
+function clock(hour: number): string {
+  const h = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h} ${hour < 12 ? "AM" : "PM"}`;
+}
+
+/**
+ * The weather at the hour she trains, said only when it changes something:
+ * storms, likely rain, heat or frost. A fine hour says nothing — no message for
+ * the sake of a message. Null without the hour in the forecast.
+ */
+export function trainingHourHint(
+  w: WeatherSnapshot | null,
+  date: string,
+  hour: number,
+): { indoor: boolean; line: string } | null {
+  const h = weatherAt(w, date, hour);
+  if (!h) return null;
+  const at = clock(hour);
+  if (h.code >= 95) return { indoor: true, line: `Storms likely around ${at} — train indoors today.` };
+  if (h.precipChance >= 60) {
+    return { indoor: true, line: `Rain likely around ${at} (${h.precipChance}%) — this one works indoors.` };
+  }
+  if (h.tempC >= 33) return { indoor: true, line: `${h.tempC}° around ${at} — go early or stay indoors, and drink more.` };
+  if (h.tempC <= 0) return { indoor: false, line: `${h.tempC}° around ${at} — warm up longer than usual.` };
+  return null;
+}
+
+/**
+ * Extra water for a hot day, from the day's high. Small steps on purpose — it
+ * tops the goal up, it doesn't double it — and nothing below 30°.
+ */
+export function heatTopUpMl(highC: number | null | undefined): number {
+  if (typeof highC !== "number" || !Number.isFinite(highC)) return 0;
+  if (highC >= 36) return 750;
+  if (highC >= 33) return 500;
+  if (highC >= 30) return 250;
+  return 0;
 }
 
 /** The coach-facing read: should today's session move indoors, and why. */

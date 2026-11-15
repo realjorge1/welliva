@@ -18,6 +18,7 @@ import type { WorkoutSession } from "@/models/workout";
 import { buildTwin, type GozlinSnapshotInput, type GozlinTwin } from "@/services/gozlin";
 import { useMemo } from "react";
 import { useReadinessSignals } from "./useReadinessSignals";
+import { withHeat } from "@/services/weather/today";
 
 export interface GozlinSnapshot {
   snapshot: GozlinSnapshotInput;
@@ -68,7 +69,7 @@ export function useGozlinSnapshot(): GozlinSnapshot {
         : {}),
       consumed: app.consumedNutrition,
       waterGoalMl:
-        app.userGoals?.dailyWaterMl ?? app.nutritionTargets?.waterMl ?? 2500,
+        withHeat(app.userGoals?.dailyWaterMl ?? app.nutritionTargets?.waterMl ?? 2500),
       todayDiet: app.todayDiet,
       workoutSession: todaySession,
       workoutDoneToday,

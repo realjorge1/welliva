@@ -56,9 +56,11 @@ import {
 import { subscribeNotificationPause } from "@/services/notifications/pause";
 import { rememberWaterGoal, syncWaterReminders } from "@/services/notifications/waterReminders";
 import { relayCycleReminders } from "@/services/cycle/reminders";
+import { syncStreakReminder } from "@/services/notifications/streakReminder";
 import * as Notifications from "expo-notifications";
 import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
+import { withHeat } from "@/services/weather/today";
 
 /** A foreground within this long of the last full re-lay only re-checks permission. */
 const RELAY_THROTTLE_MS = 5 * 60 * 1000;
@@ -76,7 +78,7 @@ export function ReminderSyncRunner(): null {
   reconcileRef.current = reconcileReminders;
 
   // The same goal every water surface uses (Home, Diet, the streak).
-  const waterGoalMl = userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500;
+  const waterGoalMl = withHeat(userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500);
   const waterGoalRef = useRef(waterGoalMl);
   waterGoalRef.current = waterGoalMl;
   useEffect(() => {
@@ -139,6 +141,9 @@ export function ReminderSyncRunner(): null {
         // Cycle: read straight from storage, so it holds even when the cycle
         // screen hasn't been opened in weeks (services/cycle/reminders).
         await relayCycleReminders();
+        // The evening "still open" reminder: today's while it's open, or
+        // tomorrow's once today is kept (services/notifications/streakReminder).
+        await syncStreakReminder();
         await reconcileRef.current({ force });
         if (force) await writeNotificationFormat(NOTIFICATION_FORMAT);
         await commitExactAlarmStatus(exact);

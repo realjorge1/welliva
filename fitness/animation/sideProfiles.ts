@@ -413,10 +413,12 @@ export const SIDE_PROFILES: SideProfileMap = {
     loopMs: 3000,
   },
 
+  // Seated, leaning back, heels down, hands sweeping side to side. The seat is
+  // on the floor (it was drawn four units above the floor the feet stood on).
   russianTwist: {
     frames: [
-      P([64, 48], [56, 60], [62, 68], [70, 74], [40, 80], [56, 70], [64, 86]),
-      P([64, 48], [56, 60], [54, 72], [64, 76], [40, 80], [56, 70], [64, 86]),
+      P([64, 52.4], [56, 64.4], [62, 72.4], [70, 78.4], [40, 84.4], [52.5, 70.4], [61.5, 86]),
+      P([64, 52.4], [56, 64.4], [54, 76.4], [64, 80.4], [40, 84.4], [52.5, 70.4], [61.5, 86]),
     ],
     loopMs: 1600,
   },
@@ -454,11 +456,16 @@ export const SIDE_PROFILES: SideProfileMap = {
   },
 
   // Kneeling, sit the hips back to the heels and fold forward, forehead down,
-  // arms reaching long.
+  // arms reaching long; the back rises a little on each breath in.
+  //
+  // Redrawn 2026-11-14 (owner: "not good enough", the figure "floating"): the
+  // knees, shins and the tops of the feet lie flat on the floor, the seat rests
+  // ON the heels (it hovered a shin's height above them), the chest folds onto
+  // the thighs and the forehead and forearms are down on the floor.
   childsPose: {
     frames: [
-      P([80.7, 89.2], [64.8, 87.5], [77.3, 90.8], [89, 93.5], [40, 84], [53.6, 97.3], [37, 93.5]),
-      P([80.2, 90.7], [64.3, 88.7], [76.8, 92.3], [88.4, 95.2], [39.6, 84.8], [53.4, 97.8], [37, 93.5]),
+      P([66.8, 94.2], [51.9, 88.5], [64.4, 92.1], [75.9, 95.5], [27, 86.6], [44, 95.1], [27, 95.1]),
+      P([66.9, 92.7], [52, 87], [64.23, 91.41], [75.6, 95.5], [27, 86.6], [44, 95.1], [27, 95.1]),
     ],
     loopMs: 3600,
   },
@@ -1146,16 +1153,21 @@ export const SIDE_PROFILES: SideProfileMap = {
     loopMs: 3200,
   },
 
-  // Front shin folded across the floor, back leg long behind: sit tall, then
-  // fold over the front leg.
+  // Front shin folded across the floor, back leg long behind: sit tall with the
+  // hands on the front thigh, then fold over the front leg, hands to the floor.
+  //
+  // Redrawn 2026-11-14 (owner: "not good enough", "floating"): the back leg
+  // lies ON the floor — thigh, knee, shin and the top of the foot (it was drawn
+  // six units up, in the air) — the hips sit low over the folded front leg, and
+  // the hands land on the floor instead of reaching into the air.
   pigeon: {
     frames: [
-      P([49.7, 45.4], [47.5, 61.2], [46.1, 74.2], [45.7, 86.2], [44, 86], [61.4, 93.7], [44.4, 93.7]),
-      P([83.9, 77.9], [68, 79.6], [80.6, 82.8], [92.5, 84.4], [44, 86.5], [61.4, 94.2], [44.4, 94.2]),
+      P([51.5, 49.7], [50, 65.6], [53.5, 78.1], [59.3, 88.6], [48, 90.5], [66.4, 95.1], [49.4, 95.1]),
+      P([84, 80.2], [68.5, 76.2], [77, 86], [84.5, 95.3], [48, 90.5], [66.4, 95.1], [49.4, 95.1]),
     ],
     framesFar: [
-      F([46.1, 74.2], [45.7, 86.2], [25, 87.3], [8.1, 87.9]),
-      F([80.6, 82.8], [92.5, 84.4], [25, 87.8], [8.1, 88.4]),
+      F([53.5, 78.1], [59.3, 88.6], [29.5, 94.85], [12.5, 95.15]),
+      F([77, 86], [84.5, 95.3], [29.5, 94.85], [12.5, 95.15]),
     ],
     loopMs: 4200,
   },
@@ -1174,16 +1186,21 @@ export const SIDE_PROFILES: SideProfileMap = {
     loopMs: 4200,
   },
 
-  // Back knee down against the wall with that shin up it, front foot planted:
-  // the torso rises tall.
+  // Back knee down against the wall with that shin up it, front foot planted
+  // under a 90° knee: from leaning in over the front knee, the torso rises tall.
+  //
+  // Redrawn 2026-11-14 (owner: "not good enough"): the back knee is on the
+  // floor at the foot of the wall and the shin runs straight up it (they were
+  // nine units out from the wall, the shin up nothing); the knee stays put while
+  // the hips press forward and the chest lifts.
   couchStretch: {
     frames: [
-      P([66, 41.1], [59, 55.5], [54.1, 67.6], [62.6, 76], [48, 78], [67, 77], [66, 94]),
-      P([47.4, 36], [46.9, 52], [49, 64.8], [58.6, 72], [46, 77], [65, 77], [66, 94]),
+      P([57.5, 40.8], [52.55, 56], [52.8, 69], [63.5, 74.6], [44, 79.5], [63, 77.3], [66, 94]),
+      P([45.5, 37.7], [44.5, 53.66], [45.5, 66.6], [56.5, 71.4], [42.8, 78.6], [62, 77.5], [66, 94]),
     ],
     framesFar: [
-      F([54.1, 67.6], [62.6, 76], [39.1, 94.8], [39.1, 77.8]),
-      F([49, 64.8], [58.6, 72], [35.1, 92.6], [35.1, 75.6]),
+      F([52.8, 69], [63.5, 74.6], [32.6, 94.8], [32.6, 77.8]),
+      F([45.5, 66.6], [56.5, 71.4], [32.6, 94.8], [32.6, 77.8]),
     ],
     loopMs: 4200,
   },

@@ -19,6 +19,8 @@ import * as Notifications from "expo-notifications";
 import { defineNotificationTask, registerNotificationTask } from "./backgroundTask";
 import { initNotifications } from "./init";
 import { HANDLED_KEY, processNotificationResponse } from "./pipeline";
+import { onCommitmentKept } from "../StreakService";
+import { syncStreakReminder } from "./streakReminder";
 
 /** The pre-pipeline dedupe key (one response). Folded into the ledger once. */
 const LEGACY_HANDLED_KEY = "@welliva_notif_last_response";
@@ -77,3 +79,9 @@ initNotifications();
 defineNotificationTask();
 void registerNotificationTask();
 installNotificationResponseHandling();
+// The evening "still open" reminder is withdrawn the moment the day is kept —
+// installed here, at module scope, so it also runs in the headless task that
+// applies a lock-screen press (./streakReminder).
+onCommitmentKept(() => {
+  void syncStreakReminder();
+});

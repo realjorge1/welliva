@@ -28,6 +28,7 @@
  *     your baseline" off a comparison; three readings is not a baseline, and
  *     returning one anyway makes the coach confident about nothing.
  */
+import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -42,6 +43,7 @@ import {
 } from "../signals/wearable/normalize";
 import { snapshotFromHealthKit } from "../signals/wearable/providers/appleHealth";
 import {
+  HEALTH_CONNECT_READ_TYPES,
   sleepIntervalsFromSessions,
   snapshotFromHealthConnect,
 } from "../signals/wearable/providers/healthConnect";
@@ -403,5 +405,29 @@ describe("sleepIntervalsFromSessions", () => {
       },
     ]);
     expect(totalHours(intervals)).toBe(4);
+  });
+});
+describe("Health Connect: exactly what is asked for", () => {
+  // The manifest (plugins/withHealthConnect.js) and the provider's read list
+  // must never drift: a permission the code doesn't read is a Play-review
+  // risk, and a read the manifest doesn't declare fails on the phone.
+  const PERMISSION_FOR: Record<string, string> = {
+    SleepSession: "android.permission.health.READ_SLEEP",
+    HeartRateVariabilityRmssd: "android.permission.health.READ_HEART_RATE_VARIABILITY",
+    RestingHeartRate: "android.permission.health.READ_RESTING_HEART_RATE",
+  };
+  const plugin = createRequire(import.meta.url)("../../plugins/withHealthConnect.js") as {
+    READ_PERMISSIONS: string[];
+  };
+
+  it("declares exactly the permissions the provider reads", () => {
+    expect([...plugin.READ_PERMISSIONS].sort()).toEqual(
+      HEALTH_CONNECT_READ_TYPES.map((t) => PERMISSION_FOR[t]).sort(),
+    );
+  });
+
+  it("asks for the three recovery inputs only, read-only", () => {
+    expect([...HEALTH_CONNECT_READ_TYPES]).toEqual(["SleepSession", "HeartRateVariabilityRmssd", "RestingHeartRate"]);
+    expect(plugin.READ_PERMISSIONS.some((p) => /WRITE|STEPS|CALORIES/.test(p))).toBe(false);
   });
 });

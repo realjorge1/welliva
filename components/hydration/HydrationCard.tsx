@@ -31,6 +31,7 @@ import { DrinkLog } from "./DrinkLog";
 import { HydrationGauge } from "./HydrationGauge";
 import { GLASS_ML, QUICK_ML, hydrationStatus } from "./hydrationLogic";
 import { useDrinkRows } from "./useDrinkRows";
+import { useTodayWeather, withHeat } from "@/services/weather/today";
 
 const WATER_GOAL_FALLBACK = 2500;
 /** Ink for text that sits on the water-blue key. */
@@ -43,8 +44,10 @@ export function HydrationCard({ style }: { style?: StyleProp<ViewStyle> }) {
   const { currentDate } = useSystem();
   const { consumedNutrition, addWater, syncLiveCounters } = useNutrition();
   const { userGoals, nutritionTargets } = useProfile();
+  // Re-renders when a fresh forecast lands; the top-up is already inside `goal`.
+  const { weather, topUpMl } = useTodayWeather();
 
-  const goal = userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? WATER_GOAL_FALLBACK;
+  const goal = withHeat(userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? WATER_GOAL_FALLBACK);
   const total = consumedNutrition?.waterMl || 0;
   const level = goal > 0 ? Math.min(total / goal, 1) : 0;
   const status = hydrationStatus(total, goal);
@@ -115,6 +118,12 @@ export function HydrationCard({ style }: { style?: StyleProp<ViewStyle> }) {
           <AppText variant="footnote" color="tertiary" style={styles.of}>
             of {goal.toLocaleString()} ml
           </AppText>
+          {topUpMl > 0 && weather ? (
+            // The reason, said where the bigger number is — never a silent change.
+            <AppText variant="caption" color="tertiary">
+              {`incl. +${topUpMl} ml for today's heat (${weather.highC}°)`}
+            </AppText>
+          ) : null}
 
           <View style={styles.statusRow}>
             <Ionicons

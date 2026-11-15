@@ -84,6 +84,21 @@ describe("breakfast on the phone, lunch on the tablet", () => {
 
 /** A realistic pair of documents for each strategy in the registry. */
 const FIXTURES: Record<string, [string, string]> = {
+  // The streak: kept and frozen days union; counts rebuilt (StreakService).
+  "@welliva_streak_data": [
+    JSON.stringify({
+      currentStreak: 2, longestStreak: 4, lastActiveDate: "2026-11-09", totalActiveDays: 9,
+      badges: [{ id: "first_day", earnedAt: "2026-10-01T00:00:00Z" }],
+      weekActivity: [true, false, false, false, false, false, false],
+      days: ["2026-11-08", "2026-11-09"], frozen: ["2026-11-05"],
+    }),
+    JSON.stringify({
+      currentStreak: 2, longestStreak: 3, lastActiveDate: "2026-11-10", totalActiveDays: 10,
+      badges: [{ id: "streak_3", earnedAt: "2026-11-01T00:00:00Z" }],
+      weekActivity: [false, true, false, false, false, false, false],
+      days: ["2026-11-09", "2026-11-10"], frozen: ["2026-11-06"],
+    }),
+  ],
   [KEYS.FOOD_LOG]: [
     JSON.stringify({
       "2026-07-01": [{ id: "a", loggedAt: "2026-07-01T08:00:00Z" }],

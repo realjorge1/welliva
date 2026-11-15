@@ -35,6 +35,7 @@ export default defineConfig({
       "services/smart/**/*.test.ts",
       "services/__tests__/**/*.test.ts",
       "services/account/**/*.test.ts",
+      "services/widget/**/*.test.ts",
       "models/__tests__/**/*.test.ts",
     ],
   },

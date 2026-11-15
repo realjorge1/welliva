@@ -9,6 +9,7 @@ import {
   FLOOR_AT,
   auxSize,
   figureBox,
+  standLine,
   floorGrid,
   floorSteps,
   litFloor,
@@ -35,11 +36,16 @@ describe("the stage", () => {
     for (const [w, h] of STAGES) expect(stageOf(w, h).floorY).toBe(Math.round(h * FLOOR_AT));
   });
 
-  it("stands the figure's floor on the floor line, inside the stage", () => {
+  it("stands the figure out on the floor, in front of the wall line, inside the stage", () => {
     for (const [w, h] of STAGES) {
       const stage = stageOf(w, h);
       const box = figureBox(stage);
-      expect(Math.abs(box.top + box.size * 0.94 - stage.floorY)).toBeLessThanOrEqual(1);
+      const feet = box.top + box.size * 0.94;
+      // On the floor (not on the seam with the wall, where it read as floating)…
+      expect(Math.abs(feet - standLine(stage))).toBeLessThanOrEqual(1);
+      expect(feet).toBeGreaterThan(stage.floorY);
+      // …with floor still in front of the feet, and the panel inside the stage.
+      expect(feet).toBeLessThan(stage.height);
       expect(box.top).toBeGreaterThanOrEqual(-1);
       expect(box.size * 0.94).toBeLessThanOrEqual(w);
     }

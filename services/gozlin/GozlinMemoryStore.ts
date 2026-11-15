@@ -14,6 +14,7 @@ import { parseLocalDate, readJSON, writeJSON, remove } from "../OfflineStorage";
 import { deriveConversationTitle } from "./conversationTitle";
 import { EXPERIENCE_KEYS, announceExperiences } from "./ExperienceStore";
 import { INSIGHT_LEDGER_KEY, announceLedger } from "./InsightLedger";
+import { PAST_CHAT_FORGOTTEN_KEY, announcePastChats } from "./pastChats";
 import { clearSmartLedger } from "../smart/ledger";
 import { clearForgottenUsuals } from "../smart/usualStore";
 import type {
@@ -41,6 +42,9 @@ const G_KEYS = {
   ...EXPERIENCE_KEYS,
   // Which insights they have opened, and the archive of them (./InsightLedger).
   INSIGHT_LEDGER: INSIGHT_LEDGER_KEY,
+  // Which past chats they told Gozlin to stop bringing up (./pastChats). The
+  // memory itself is derived from ARCHIVE above, so clearing both clears it.
+  PAST_CHATS_FORGOTTEN: PAST_CHAT_FORGOTTEN_KEY,
 } as const;
 
 const EPISODE_CAP = 100;
@@ -357,6 +361,7 @@ export async function clearGozlinMemory(): Promise<void> {
   // A coach screen still mounted holds the questions and memories just wiped.
   announceExperiences();
   announceLedger();
+  announcePastChats();
   // What they told the smart layer ("Not now", "not my usual") is memory too. The
   // running records (rough days, a fresh start, an accepted shorter day) are not:
   // wiping those would change their streak and their plan, not what's remembered.

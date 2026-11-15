@@ -213,12 +213,22 @@ describe("context architecture", () => {
     }
   });
 
-  it("marks exactly the three mutating tools as writes", () => {
-    // note_experience is the third, and the only one without a confirmation
-    // sheet — see its definition and docs/gozlin/11 §7.3. A fourth write tool
-    // appearing here should be a deliberate decision, not an accident.
+  it("marks exactly the mutating tools as writes", () => {
+    // note_experience is the only one without a confirmation sheet — see its
+    // definition and docs/gozlin/11 §7.3. The five G2 writes (2026-11-14) each
+    // confirm first (actionTools.test.ts). A new write tool appearing here
+    // should be a deliberate decision, not an accident.
     const writes = GOZLIN_TOOLS.filter((t) => !t.readOnly).map((t) => t.name).sort();
-    expect(writes).toEqual(["log_food", "note_experience", "remember_fact"]);
+    expect(writes).toEqual([
+      "add_habit",
+      "log_food",
+      "log_water",
+      "log_weight",
+      "log_workout",
+      "note_experience",
+      "remember_fact",
+      "set_reminder",
+    ]);
   });
 
   it("puts volatile state in a system message, not the cached prefix", () => {

@@ -91,6 +91,8 @@ import { useFreshStartDay } from "@/components/smart/useWelcomeBack";
 import { SHORT_MINUTES, activeShortDay, shortSessionReason } from "@/services/smart/hardDay";
 import { FRESH_START_DAYS } from "@/services/smart/welcomeBack";
 import { Ionicons } from "@expo/vector-icons";
+import { trainingHourHint } from "@/health-os/signals/weather/openmeteo";
+import { useTodayWeather } from "@/services/weather/today";
 import * as Haptics from "@/utils/haptics";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -150,6 +152,10 @@ export default function ExerciseScreen() {
   const { isOnboardingComplete, userBio } = useProfile();
   const { currentDate } = useSystem();
   const { profile, ready: profileReady } = useFitnessProfile();
+  // The weather at her training hour, said only when it changes something
+  // (storms, likely rain, heat, frost). Nothing with weather switched off.
+  const { weather: todayWeather } = useTodayWeather();
+  const hourHint = trainingHourHint(todayWeather, currentDate, profile.reminders?.hour ?? 17);
   // Pro: today's planned session eased to the recovery score.
   const adaptiveTraining = useAllows("adaptive-training");
   const { openUpgrade } = useBilling();
@@ -397,21 +403,28 @@ export default function ExerciseScreen() {
   }, [profileReady, recommendation.kind, recommendation.workoutId, currentDate, todayCompleted]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Resume-a-session: surface an in-flight guided session (e.g. app restart).
-  useEffect(() => {
-    let mounted = true;
-    void sessionService.loadSession().then((s) => {
-      if (!mounted || !s) return;
-      const isLive =
-        s.phase !== "COMPLETE" &&
-        s.phase !== "SUMMARY" &&
-        s.exercises.length > 0 &&
-        s.startedAt.slice(0, 10) === currentDate;
-      setSavedSession(isLive ? s : null);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, [currentDate, workoutLog.length]);
+  // Read on every return to Fitness, not only on mount: the tab stays mounted,
+  // so the player's "Leave for now" lands here and must find its session —
+  // and a session finished or discarded elsewhere must stop being offered.
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
+      void sessionService.loadSession().then((s) => {
+        if (!mounted) return;
+        const isLive =
+          !!s &&
+          s.phase !== "COMPLETE" &&
+          s.phase !== "SUMMARY" &&
+          s.exercises.length > 0 &&
+          s.startedAt.slice(0, 10) === currentDate;
+        setSavedSession(isLive ? s : null);
+      });
+      return () => {
+        mounted = false;
+      };
+      // workoutLog.length: a finished session lands in the log — read again then.
+    }, [currentDate, workoutLog.length]), // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   const handleResume = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -574,9 +587,34 @@ export default function ExerciseScreen() {
             </Reveal>
           )}
 
+          {/* The weather at her training hour, when it changes the plan. */}
+          {hourHint && !todayCompleted ? (
+            <Reveal index={revealIndex++}>
+              <Card padding="lg" style={styles.block}>
+                <View style={styles.setupRow}>
+                  <IconBadge
+                    name={hourHint.indoor ? "umbrella-outline" : "thermometer-outline"}
+                    tone={colors.water}
+                    size={40}
+                  />
+                  <AppText variant="callout" style={styles.flex}>
+                    {hourHint.line}
+                  </AppText>
+                </View>
+              </Card>
+            </Reveal>
+          ) : null}
+
           {/* Today — the recommendation hero */}
           <Reveal index={revealIndex++}>
-            {rough && !todayCompleted && trainAnywayOn !== currentDate ? (
+            {/* Until the stored profile is read, the recommendation is built
+                on the defaults (a 20-minute window) and named the wrong
+                session for a second on a slow phone. Hold the place instead. */}
+            {!profileReady ? (
+              <Card padding="xxl" style={[styles.block, styles.heroPending]}>
+                <View />
+              </Card>
+            ) : rough && !todayCompleted && trainAnywayOn !== currentDate ? (
               <RoughDayWorkoutCard
                 choice={rough.workout}
                 hasSession={!!todaySession}
@@ -1032,6 +1070,8 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   hidden: { opacity: 0 },
   block: { marginBottom: Spacing.xl },
+  // Holds the hero's place while the profile loads, so nothing jumps.
+  heroPending: { minHeight: 280 },
   /**
    * A CARD-LESS section. Content sits straight on the ambient canvas, so the
    * only thing separating it from its neighbours is air — hence the wider

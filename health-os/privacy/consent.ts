@@ -25,7 +25,8 @@ export type ConsentCategory =
   | "wearable" // HRV/sleep/steps → real recovery
   | "health_records" // meds/conditions from the platform health store
   | "photo" // meal-photo analysis
-  | "voice" // speech-to-text logging/chat
+  // ("voice" — speak to log or chat — was deleted 2026-11-15 by the owner: it never
+  // went past this switch. An old stored "voice" decision is simply never read.)
   | "proactive_notifications" // out-of-app briefings + anticipation alerts
   // ── coaching behaviours — how Gozlin acts on what it already sees; ON by default ──
   | "experience_followups" // ask how a new exercise went, remember the answer
@@ -110,7 +111,7 @@ export const CONSENT_CATEGORY_META: Record<ConsentCategory, ConsentCategoryMeta>
   },
   calendar: {
     label: "Calendar",
-    blurb: "Read upcoming events to spot trips and big days, so I can plan around them. Read-only, on-device.",
+    blurb: "Read upcoming events to spot trips and big days, so I can plan around them. Read on-device. Adding your workouts or cycle to the calendar is a separate switch.",
     group: "integration",
     icon: "calendar",
     defaultGranted: false,
@@ -126,7 +127,8 @@ export const CONSENT_CATEGORY_META: Record<ConsentCategory, ConsentCategoryMeta>
   },
   wearable: {
     label: "Wearable & health metrics",
-    blurb: "Read sleep, HRV and steps to make recovery real, not estimated. On-device only.",
+    blurb:
+      "Read-only from Health Connect: sleep, HRV and resting heart rate, so recovery is real, not estimated. The readings stay on your phone.",
     group: "integration",
     icon: "watch",
     defaultGranted: false,
@@ -145,14 +147,6 @@ export const CONSENT_CATEGORY_META: Record<ConsentCategory, ConsentCategoryMeta>
     blurb: "Analyse a photo of a meal to draft a log you confirm. Nothing is logged without your okay.",
     group: "integration",
     icon: "camera",
-    defaultGranted: false,
-    requiresNative: true,
-  },
-  voice: {
-    label: "Voice",
-    blurb: "Speak to log or chat — speech is turned to text on the way in.",
-    group: "integration",
-    icon: "mic",
     defaultGranted: false,
     requiresNative: true,
   },

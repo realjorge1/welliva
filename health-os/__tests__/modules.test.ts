@@ -49,10 +49,12 @@ describe("built-in companion modules", () => {
 
   it("exposes the companion's consent categories + a sense per integration", () => {
     const cats = moduleRegistry.consentCategories();
-    for (const c of ["calendar", "location_weather", "wearable", "proactive_notifications", "photo", "voice"]) {
+    for (const c of ["calendar", "location_weather", "wearable", "proactive_notifications", "photo"]) {
       expect(cats).toContain(c);
     }
-    // calendar, weather, wearable, notifications, photo, voice
-    expect(moduleRegistry.signalSources().length).toBe(6);
+    // Voice was deleted (owner, 2026-11-15): no switch, no sense.
+    expect(cats).not.toContain("voice");
+    // calendar, weather, wearable, notifications, photo
+    expect(moduleRegistry.signalSources().length).toBe(5);
   });
 });

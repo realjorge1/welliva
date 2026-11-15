@@ -132,16 +132,29 @@ export function litFloor(steps: readonly string[], lit: number): string {
 }
 
 /**
+ * How far into the floor, from the wall line toward the card's foot, the
+ * athlete stands. On the wall line itself the feet sat on the seam between wall
+ * and floor, the floor's lines all in front of them: the figure read as pasted
+ * on the wall, floating, rather than standing in the room (owner, 2026-11-14:
+ * "not on a base (floor)"). A little way in, the floor runs out from under and
+ * around the feet.
+ */
+export const STANDS_IN = 0.4;
+
+/** Where the figure's feet meet the floor, from the top of the stage. */
+export function standLine(stage: Stage): number {
+  return stage.floorY + (stage.height - stage.floorY) * STANDS_IN;
+}
+
+/**
  * The figure's panel: tall enough that its floor — 94% down the panel, where
- * ExerciseFigure stands a pose — lands on the stage's floor line, and never
- * wider than the stage. Returns the panel size and its top edge.
+ * ExerciseFigure stands a pose — lands on the stand line, out on the floor, and
+ * never wider than the stage. Returns the panel size and its top edge.
  */
 export function figureBox(stage: Stage): { size: number; top: number } {
-  const size = Math.max(
-    40,
-    Math.min((stage.floorY - 4) / 0.94, (stage.width - 16) / 0.94, MAX_FIGURE),
-  );
-  return { size: Math.round(size), top: Math.round(stage.floorY - size * 0.94) };
+  const stand = standLine(stage);
+  const size = Math.max(40, Math.min((stand - 4) / 0.94, (stage.width - 16) / 0.94, MAX_FIGURE));
+  return { size: Math.round(size), top: Math.round(stand - size * 0.94) };
 }
 
 /** The small second panel in a top corner — a demonstration, never a smudge. */

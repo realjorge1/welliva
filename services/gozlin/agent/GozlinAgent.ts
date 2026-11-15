@@ -50,6 +50,13 @@ import {
 } from "./outputSafety";
 import { safeDisplayLength } from "./streamGate";
 import { findTool, type GozlinToolContext } from "./tools";
+import type { CoachTurnOutcome } from "../../telemetry/events";
+
+/**
+ * How a turn ended — the closed list lives in services/telemetry/events.ts,
+ * because that file is the privacy boundary the outcome is sent across.
+ */
+export type AgentTurnOutcome = CoachTurnOutcome;
 
 /**
  * Hard stop. A coach answering a question about this week never legitimately
@@ -121,6 +128,14 @@ export interface AgentTurnResult extends GozlinChatResult {
    * and the server disagreed, and saying so is the only honest reply.
    */
   source: "agent" | "deterministic" | "clinical" | "locked";
+  /**
+   * WHY it was produced that way — finer than `source`, which only says which
+   * path answered. Set at every return, so "how often does the coach really
+   * answer, and when it doesn't, why" can be measured (the coach_turn event).
+   */
+  outcome: AgentTurnOutcome;
+  /** Tool calls the model made this turn, across every round. */
+  toolCalls: number;
   /** What this turn did with "trying something new". Agent replies only. */
   curiosity?: TurnCuriosity;
   /**
@@ -182,6 +197,11 @@ const ACTIVITY: Record<string, string> = {
   note_experience: "noting that…",
   remember_fact: "saving that…",
   log_food: "logging that…",
+  log_water: "logging that…",
+  log_weight: "logging that…",
+  log_workout: "logging that…",
+  add_habit: "adding that…",
+  set_reminder: "setting that up…",
 };
 
 // ── Message helpers ────────────────────────────────────────────────
@@ -237,16 +257,29 @@ export async function runAgentTurn(
       message: coachMsg(risk.reply, risk.kind === "emergency" ? "alert" : "gentle", now),
       source: "clinical",
       clinicalKind: risk.kind,
+      outcome: "clinical_screen",
+      toolCalls: 0,
     };
   }
 
   // 2. Offline / unconfigured → the floor. Unchanged behaviour, no network.
   const transport = opts.transport;
-  if (!transport) return { ...respondDeterministic(text, ctx), source: "deterministic" };
+  if (!transport) {
+    return {
+      ...respondDeterministic(text, ctx),
+      source: "deterministic",
+      outcome: "no_backend",
+      toolCalls: 0,
+    };
+  }
 
-  const fallback = (): AgentTurnResult => ({
+  // Counted across every round; the fallback reads it at the moment it runs.
+  let toolCalls = 0;
+  const fallback = (outcome: AgentTurnOutcome): AgentTurnResult => ({
     ...respondDeterministic(text, ctx),
     source: "deterministic",
+    outcome,
+    toolCalls,
   });
 
   // This turn as the state block AND the tools see it: one clock, so the days
@@ -318,10 +351,13 @@ export async function runAgentTurn(
   const checkable = (text: string) => maskLocalDates(text, ctx.language);
 
   let regenerations = 0;
+  // Which check the one rewrite was spent on, so a reply that made it through
+  // after a correction is told apart from one that was right first time.
+  let fixedFor: "number" | "safety" | null = null;
 
   try {
     for (let i = 0; i < MAX_ITERATIONS; i++) {
-      if (opts.signal?.aborted) return fallback();
+      if (opts.signal?.aborted) return fallback("cancelled");
 
       opts.onTurnStart?.();
 
@@ -353,21 +389,22 @@ export async function runAgentTurn(
 
       // Safety classifiers decline with HTTP 200 and stop_reason "refusal".
       // Check BEFORE reading content — on a pre-output refusal it's empty.
-      if (res.stop_reason === "refusal") return fallback();
+      if (res.stop_reason === "refusal") return fallback("refused");
 
       const content = res.content ?? [];
       messages.push({ role: "assistant", content });
 
       if (res.stop_reason !== "tool_use") {
         const reply = textOf(content);
-        if (!reply) return fallback();
+        if (!reply) return fallback("empty");
 
         // 3. Numeric grounding. One correction, then the floor.
         const check = validateNumbers(checkable(reply), allowed);
         recordGrounding(check);
         if (!check.ok) {
-          if (regenerations >= MAX_REGENERATIONS) return fallback();
+          if (regenerations >= MAX_REGENERATIONS) return fallback("ungrounded");
           regenerations++;
+          fixedFor = "number";
           messages.push({
             role: "system",
             content:
@@ -387,6 +424,7 @@ export async function runAgentTurn(
         if (risk) {
           if (regenerations < MAX_REGENERATIONS) {
             regenerations++;
+            fixedFor = "safety";
             messages.push({ role: "system", content: risk.correction });
             continue;
           }
@@ -395,6 +433,8 @@ export async function runAgentTurn(
           return {
             message: coachMsg(OUTPUT_FALLBACK[risk.kind], "gentle", now),
             source: "clinical",
+            outcome: "unsafe",
+            toolCalls,
           };
         }
 
@@ -426,14 +466,27 @@ export async function runAgentTurn(
                 recalled: used.map((p) => p.record.id),
               }
             : undefined;
-        return { message, source: "agent", ...(curiosity ? { curiosity } : {}) };
+        const outcome: AgentTurnOutcome =
+          fixedFor === "number"
+            ? "answered_after_fix_number"
+            : fixedFor === "safety"
+              ? "answered_after_fix_safety"
+              : "answered";
+        return {
+          message,
+          source: "agent",
+          outcome,
+          toolCalls,
+          ...(curiosity ? { curiosity } : {}),
+        };
       }
 
       // 4. Tool round. Execute every call, return ALL results in ONE user
       //    message — splitting them across messages trains the model out of
       //    parallel calls.
       const calls = content.filter((b) => b.type === "tool_use");
-      if (calls.length === 0) return fallback();
+      if (calls.length === 0) return fallback("malformed");
+      toolCalls += calls.length;
 
       for (const c of calls) {
         const label = ACTIVITY[c.name ?? ""];
@@ -476,7 +529,7 @@ export async function runAgentTurn(
     }
 
     // Iteration cap — it's looping, not working.
-    return fallback();
+    return fallback("loop_cap");
   } catch (e) {
     // The server said this account may not use the coach. Say so, flagged, so
     // the caller can show the full Pro message — never the offline coach's
@@ -485,10 +538,15 @@ export async function runAgentTurn(
       return {
         message: coachMsg("Talking this through is part of welliva Pro.", "gentle", now),
         source: "locked",
+        outcome: "locked",
+        toolCalls,
       };
     }
+    // Stopped by the person: the transport rejects with an abort error, which
+    // is not the network failing.
+    if (opts.signal?.aborted) return fallback("cancelled");
     // Network, timeout, malformed payload — all land on the floor.
-    return fallback();
+    return fallback("offline");
   }
 }
 

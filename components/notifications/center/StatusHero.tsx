@@ -34,6 +34,10 @@ export function StatusHero({
   const { colors } = useColors();
   const { permission, queue, paused } = center;
   const status = permission.status;
+  // Until the phone answers, the status is only a placeholder: on a slow phone
+  // the answer took 6 s, and "Turn on notifications" for 6 s on a phone where
+  // they're on is a false alarm. Say it's checking instead.
+  const checking = permission.loading;
   // Paused only means something once notifications are allowed at all.
   const quiet = paused && status === "granted";
 
@@ -41,7 +45,9 @@ export function StatusHero({
   const cycleHidden = useCycleHidden();
   const found = queue.find((q) => q.next !== null) ?? null;
   const next = found && cycleHidden && found.kind === "cycle" ? { ...found, title: "a private reminder" } : found;
-  const tone = quiet
+  const tone = checking
+    ? colors.textTertiary
+    : quiet
     ? colors.warning
     : status === "granted"
       ? colors.success
@@ -55,10 +61,12 @@ export function StatusHero({
         <BellGlyph tone={tone} on={status === "granted" && !quiet} />
         <View style={styles.flex}>
           <AppText variant="headline">
-            {quiet ? "Notifications are paused" : TITLE[status]}
+            {checking ? "Checking notifications…" : quiet ? "Notifications are paused" : TITLE[status]}
           </AppText>
           <AppText variant="footnote" color="secondary" style={styles.line}>
-            {quiet
+            {checking
+              ? "Reading this phone's notification settings."
+              : quiet
               ? "Nothing is lined up while they're paused. Switch the pause off below and every reminder comes back as you set it."
               : status === "granted"
                 ? summary(queue, next)
@@ -76,7 +84,7 @@ export function StatusHero({
         </View>
       </View>
 
-      {status === "undetermined" ? (
+      {checking ? null : status === "undetermined" ? (
         <>
           <NotificationBannerPreview
             title="Lunch"

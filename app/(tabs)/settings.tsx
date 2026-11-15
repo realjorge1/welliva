@@ -78,6 +78,8 @@ import {
 import { Equipment } from "@/models/workout";
 import { MAX_EQUIPMENT, equipmentFull, toggleEquipment } from "@/models/equipment";
 import { Ionicons } from "@expo/vector-icons";
+import { AddWidgetCard } from "@/components/widget/AddWidgetCard";
+import { todayWidgetAvailable } from "@/widgets";
 import { BlurView } from "expo-blur";
 import Constants from "expo-constants";
 import * as Haptics from "@/utils/haptics";
@@ -1263,6 +1265,16 @@ export default function SettingsScreen() {
             </ListGroup>
           </View>
         </Reveal>
+
+        {/* The home-screen widget, one tap to add (Android, when this build has it). */}
+        {todayWidgetAvailable() ? (
+          <Reveal index={5} stagger={45}>
+            <View style={styles.section}>
+              <GroupLabel label="Home screen" hint="welliva without opening it" />
+              <AddWidgetCard />
+            </View>
+          </Reveal>
+        ) : null}
 
         {/* Cycle tracking — private, free, and here for anyone to switch on. */}
         <Reveal index={5} stagger={45}>

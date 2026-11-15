@@ -7,13 +7,11 @@ import {
   isAutoChecked,
   mealDraftTotals,
 } from "../multimodal/photo";
-import { cleanTranscript, looksLikeLog, toVoiceCapture } from "../multimodal/voice";
 import {
   MealPhotoSource,
   type ImagePickerProvider,
   type MealPhotoAnalyzer,
 } from "../multimodal/MealPhotoSource";
-import { SpeechSource, type SpeechProvider } from "../multimodal/SpeechSource";
 import type { MealPhotoAnalysis } from "../multimodal/types";
 import { MemoryStore } from "./helpers/MemoryStore";
 
@@ -54,20 +52,6 @@ describe("photo drafts (pure)", () => {
   });
 });
 
-describe("voice (pure)", () => {
-  it("cleans transcripts", () => {
-    expect(cleanTranscript("  had   eggs and a run  ")).toBe("Had eggs and a run");
-    expect(cleanTranscript("")).toBe("");
-  });
-
-  it("routes logs vs questions", () => {
-    expect(looksLikeLog("had eggs and a 5k run")).toBe(true);
-    expect(looksLikeLog("what should I eat today?")).toBe(false);
-    expect(looksLikeLog("how many calories in rice")).toBe(false);
-    expect(toVoiceCapture("drank 500ml of water").looksLikeLog).toBe(true);
-  });
-});
-
 describe("MealPhotoSource (consent + provider gated)", () => {
   function picker(ready: boolean): ImagePickerProvider {
     return {
@@ -100,27 +84,5 @@ describe("MealPhotoSource (consent + provider gated)", () => {
     await consent.grant("photo");
     const src = new MealPhotoSource(picker(false), analyzer, consent);
     expect(await src.capture()).toBeNull();
-  });
-});
-
-describe("SpeechSource (consent + provider gated)", () => {
-  const provider: SpeechProvider = {
-    getStatus: async () => ({ permission: "granted", ready: true }),
-    requestAccess: async () => ({ permission: "granted", ready: true }),
-    listen: async () => "had a chicken salad for lunch",
-  };
-
-  it("returns null without consent", async () => {
-    const src = new SpeechSource(provider, new ConsentRepository(new MemoryStore()));
-    expect(await src.capture()).toBeNull();
-  });
-
-  it("captures + routes once consent is granted", async () => {
-    const consent = new ConsentRepository(new MemoryStore());
-    await consent.grant("voice");
-    const src = new SpeechSource(provider, consent);
-    const cap = await src.capture();
-    expect(cap?.looksLikeLog).toBe(true);
-    expect(cap?.text).toMatch(/chicken salad/i);
   });
 });

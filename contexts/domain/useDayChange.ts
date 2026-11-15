@@ -42,6 +42,7 @@ import {
 import { ensureDietBuffer, ensureDietForDate } from "../../services/PlanSync";
 import { firstDrinkOn } from "../../services/nutrition/waterStore";
 import { sweepClosedDays } from "../../services/ScheduleService";
+import { withHeat } from "../../services/weather/today";
 
 interface Params {
   currentDate: string;
@@ -131,8 +132,11 @@ export function useDayChange({
         // Read from storage rather than the captured `waterMl` — this effect's
         // closure can hold a stale value (waterMl isn't in its deps).
         const endingMl = await readJSON<number>(KEYS.WATER_TODAY, 0);
-        const waterGoal =
-          userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500;
+        // The ENDING day's goal, its heat top-up included — what she was shown.
+        const waterGoal = withHeat(
+          userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500,
+          currentDate,
+        );
         await archiveWaterDay(currentDate, endingMl, waterGoal, await firstDrinkOn(currentDate));
         setCurrentDate(today);
         setWaterMl(0);

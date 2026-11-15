@@ -23,6 +23,7 @@ import {
   type WeatherSnapshot,
   type WorkoutWeatherHint,
 } from "@/health-os";
+import { refreshTodayWeather } from "@/services/weather/today";
 import { useCallback, useEffect, useState } from "react";
 
 const UNKNOWN: SignalStatus = { permission: "undetermined", ready: false };
@@ -36,6 +37,8 @@ export interface UseSignals {
   weatherHint: WorkoutWeatherHint | null;
   weatherStatus: SignalStatus;
   loadingWeather: boolean;
+  /** Why the last Enable brought no forecast (location off, blocked, offline), or null. */
+  weatherProblem: string | null;
   enableWeather: () => Promise<void>;
   /** Apple Health / Health Connect. `unavailable` until the native cutover. */
   wearable: SignalStatus;
@@ -52,6 +55,7 @@ export function useSignals(): UseSignals {
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
   const [weatherStatus, setWeatherStatus] = useState<SignalStatus>(UNKNOWN);
   const [loadingWeather, setLoadingWeather] = useState(false);
+  const [weatherProblem, setWeatherProblem] = useState<string | null>(null);
   const [wearable, setWearable] = useState<SignalStatus>(UNKNOWN);
   const [wearableSnapshot, setWearableSnapshot] = useState<WearableSnapshot | null>(null);
   const [connectingWearable, setConnectingWearable] = useState(false);
@@ -98,13 +102,31 @@ export function useSignals(): UseSignals {
 
   const enableWeather = useCallback(async () => {
     setLoadingWeather(true);
+    setWeatherProblem(null);
     try {
       await consent.grant("location_weather");
       const status = await weatherSource.requestAccess();
       setWeatherStatus(status);
-      if (!status.ready) return;
+      if (!status.ready) {
+        if (status.permission === "denied") {
+          setWeatherProblem("Location is blocked for welliva. Allow it in your phone's settings.");
+        }
+        return;
+      }
       const snap = await weatherSource.getToday({ refresh: true });
-      if (snap) setWeather(snap);
+      if (snap) {
+        setWeather(snap);
+        // Home, Fitness and the water goal read it from here (services/weather/today).
+        void refreshTodayWeather();
+        return;
+      }
+      // Permission is there and still nothing came: say why instead of quietly
+      // showing "Enable" again (found on a phone with location off, 2026-11-15).
+      setWeatherProblem(
+        (await weatherSource.locationOff())
+          ? "Your phone's location is off. Turn it on, then tap Enable."
+          : "Couldn't reach the forecast just now. Tap Enable to try again.",
+      );
     } finally {
       setLoadingWeather(false);
     }
@@ -144,6 +166,7 @@ export function useSignals(): UseSignals {
     weatherHint: weather ? weatherWorkoutHint(weather) : null,
     weatherStatus,
     loadingWeather,
+    weatherProblem,
     enableWeather,
   };
 }

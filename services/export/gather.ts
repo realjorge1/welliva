@@ -16,6 +16,8 @@ import {
   loadEpisodes,
   loadIdentity,
 } from "../gozlin/GozlinMemoryStore";
+import { loadExperiences } from "../gozlin/ExperienceStore";
+import { derivePastChats, loadForgottenPastChats, pastChatSummary } from "../gozlin/pastChats";
 import type { IntakeRecord } from "../nutrition/IntakeLedger";
 import { readStore } from "../nutrition/foodLogStore";
 import { KEYS, getWaterHistory, readJSON } from "../OfflineStorage";
@@ -61,7 +63,7 @@ async function readMeals(): Promise<ExportMeal[]> {
 }
 
 export async function gatherStoredData(): Promise<StoredExportData> {
-  const [meals, water, checkins, profile, identity, episodes, current, archive] = await Promise.all([
+  const [meals, water, checkins, profile, identity, episodes, current, archive, notes, forgotten] = await Promise.all([
     readMeals(),
     soft(() => getWaterHistory(), [], "water history"),
     soft(() => loadCheckins(), [], "check-ins"),
@@ -70,7 +72,16 @@ export async function gatherStoredData(): Promise<StoredExportData> {
     soft(() => loadEpisodes(), [], "Gozlin's moments"),
     soft(() => loadConversation(), [], "the current conversation"),
     soft(() => loadArchive(), [], "past conversations"),
+    soft(() => loadExperiences(), [], "things you tried"),
+    soft(() => loadForgottenPastChats(), [], "forgotten chats"),
   ]);
+  // The same derivation the coach reads, so the file shows exactly what
+  // Gozlin may bring up — nothing it can't.
+  const pastChats = derivePastChats({ archive, experiences: notes, identity, forgotten }).map((c) => ({
+    day: c.day,
+    title: c.title,
+    summary: pastChatSummary(c),
+  }));
 
   const conversations = archive.map((a) => ({ startedAt: a.startedAt, messages: a.messages }));
   if (current.length) {
@@ -89,6 +100,7 @@ export async function gatherStoredData(): Promise<StoredExportData> {
       constraints: identity?.constraints ?? [],
       episodes: episodes.map((e) => ({ date: e.date, summary: e.summary })),
       conversations,
+      pastChats,
     },
   };
 }

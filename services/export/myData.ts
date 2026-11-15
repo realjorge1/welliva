@@ -93,6 +93,8 @@ export interface MyDataInput {
     constraints: readonly string[];
     episodes: readonly { date: string; summary: string }[];
     conversations: readonly { startedAt: number; messages: readonly ExportMessage[] }[];
+    /** What Gozlin may bring up from earlier chats (services/gozlin/pastChats). */
+    pastChats?: readonly { day: string; title: string | null; summary: string }[];
   };
 }
 
@@ -422,6 +424,15 @@ export function buildMyDataBlocks(input: MyDataInput): DocBlock[] {
   if (episodes.length) {
     coach.push({ kind: "heading", level: 2, text: "Moments Gozlin remembers" });
     coach.push({ kind: "table", header: ["Date", "What"], rows: episodes.map((e) => [day(e.date), e.summary]) });
+  }
+  const remembered = [...(input.coach.pastChats ?? [])].sort((a, b) => a.day.localeCompare(b.day));
+  if (remembered.length) {
+    coach.push({ kind: "heading", level: 2, text: "What Gozlin may bring up from past chats" });
+    coach.push({
+      kind: "table",
+      header: ["Date", "Chat", "What it remembers"],
+      rows: remembered.map((c) => [day(c.day), c.title ?? "A conversation", c.summary || "The topic and the day"]),
+    });
   }
   const talks = [...input.coach.conversations]
     .filter((c) => c.messages.some((m) => m.content.trim()))

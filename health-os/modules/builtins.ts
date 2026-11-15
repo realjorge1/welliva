@@ -9,7 +9,7 @@
  * literally true: a future module (sleep coaching, glucose, mental-health) adds one
  * `register(...)` call with its own event types, consent, and senses — no rewrite.
  */
-import { mealPhotoSource, speechSource } from "../multimodal";
+import { mealPhotoSource } from "../multimodal";
 import { notificationScheduler } from "../notifications";
 import { calendarSource, weatherSource, wearableSource } from "../signals";
 import { moduleRegistry } from "./registry";
@@ -63,11 +63,10 @@ export function registerBuiltInModules(): void {
     .register({
       id: "multimodal",
       title: "Multimodal logging",
-      description: "Photo meal analysis + voice capture (confirm before commit).",
-      consent: ["photo", "voice"],
+      description: "Photo meal analysis (confirm before commit).",
+      consent: ["photo"],
       signalSources: [
         { id: "photo", label: "Meal photos", consent: "photo", getStatus: () => mealPhotoSource.getStatus() },
-        { id: "voice", label: "Voice", consent: "voice", getStatus: () => speechSource.getStatus() },
       ],
     });
 }

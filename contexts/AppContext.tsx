@@ -103,6 +103,7 @@ import {
 import { ensureDietBuffer, ensureDietForDate } from "../services/PlanSync";
 import type { PrimaryGoal } from "../models/user";
 import { type WorkoutAdaptation } from "../services/gozlin";
+import { withHeat } from "@/services/weather/today";
 
 // ============================================================================
 // TYPES
@@ -173,7 +174,7 @@ interface AppContextType {
   // Nutrition (derived from consumed meals — single source of truth)
   nutritionTargets: NutritionTargets | null;
   consumedNutrition: ConsumedNutrition;
-  addWater: (ml: number) => void;
+  addWater: (ml: number) => Promise<void>;
   /**
    * Re-read the counters a lock-screen button can move behind React's back —
    * today's water and the activity streak. See useNutritionState.
@@ -217,7 +218,7 @@ interface AppContextType {
   // Workout
   workoutPlan: GeneratedWorkoutPlan | null;
   regenerateWorkoutPlan: () => Promise<void>;
-  logWorkout: (entry: WorkoutLogEntry) => Promise<void>;
+  logWorkout: (entry: WorkoutLogEntry, opts?: { source?: "session" | "manual" }) => Promise<void>;
   workoutLog: WorkoutLogEntry[];
   /** Per-exercise session results (reps/skips) — feeds Adaptive Workout Intelligence. */
   sessionHistory: SessionSummaryData[];
@@ -537,7 +538,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         easyOnCalories: todayCalorieDelta > 0,
         consumed: consumedNutrition,
         waterGoalMl:
-          userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500,
+          withHeat(userGoals?.dailyWaterMl ?? nutritionTargets?.waterMl ?? 2500),
         todayDiet,
         workoutSession: todayWorkoutSession,
         workoutDoneToday,

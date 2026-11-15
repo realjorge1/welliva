@@ -88,6 +88,45 @@ const MAX_LOGGED_PORTIONS = 10;
 
 const MEAL_SLOTS: readonly MealSlot[] = ["breakfast", "lunch", "dinner", "snack"];
 
+// ── The newer writes (G2, 2026-11-14) ──
+// Bounds are about what one message can plausibly mean, not about health: a
+// model's "20000 ml" is a misreading, not a drink.
+const WATER_MIN_ML = 50;
+const WATER_MAX_ML = 2000;
+const WEIGHT_MIN_KG = 25;
+const WEIGHT_MAX_KG = 350;
+const WORKOUT_MIN_MINUTES = 5;
+const WORKOUT_MAX_MINUTES = 300;
+const ACTIVITY_MAX = 40;
+const HABIT_NAME_MAX = 40;
+const REMINDER_TEXT_MAX = 80;
+
+export type HabitSchedule = "every_day" | "weekdays" | "weekends";
+const HABIT_SCHEDULES: readonly HabitSchedule[] = ["every_day", "weekdays", "weekends"];
+const SCHEDULE_WORDS: Record<HabitSchedule, string> = {
+  every_day: "every day",
+  weekdays: "on weekdays",
+  weekends: "at weekends",
+};
+
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "2026-11-10" → "10 Nov". */
+function shortDay(date: string): string {
+  const [, m, d] = date.split("-").map(Number);
+  return `${d} ${SHORT_MONTHS[(m || 1) - 1]}`;
+}
+
+/** One line, trimmed, inner whitespace collapsed. */
+function oneLine(s: unknown): string {
+  return String(s ?? "").replace(/\s+/g, " ").trim();
+}
+
+const DECLINED = {
+  status: "declined",
+  reason: "The user declined. Do not do it, and do not ask again this turn.",
+} as const;
+const UNAVAILABLE = { status: "unavailable", reason: "That is not available right now." } as const;
+
 /** investigate_progress's enum. An unknown value reads as no focus, not a guess. */
 const DETECTIVE_FOCI: readonly DetectiveFocus[] = ["weight", "strength", "energy", "adherence"];
 
@@ -122,6 +161,33 @@ export interface GozlinToolActions {
    * the tool for why. Absent means the feature is off: the tool fails closed.
    */
   noteExperience?: (note: ExperienceNote) => Promise<{ ok: true; id: string } | { ok: false; reason: string }>;
+  /** Today's water so far and the goal that keeps the day. Nothing is written. */
+  waterStatus?: () => Promise<{ todayMl: number; goalMl: number }>;
+  /** Add one drink to today's water (the pours log). */
+  logWater?: (
+    ml: number,
+  ) => Promise<{ ok: true; todayMl: number; goalMl: number } | { ok: false; reason: string }>;
+  /**
+   * The weigh-in before today, today's if there is one, and how to write a
+   * weight in their own unit. Nothing is written.
+   */
+  weightStatus?: () => Promise<{
+    show: (kg: number) => string;
+    last: { kg: number; date: string } | null;
+    todayKg: number | null;
+  }>;
+  /** Record today's weigh-in (one a day: it replaces today's). */
+  logWeight?: (kg: number) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** Record a workout they did today outside the app's player. */
+  logWorkout?: (w: { activity: string; minutes: number }) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** The names of the habits they already track, to refuse a duplicate. */
+  habitNames?: () => readonly string[];
+  /** Add a habit to the tracker, with the default glyph and colour. */
+  addHabit?: (h: { name: string; schedule: HabitSchedule }) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** Why a reminder at `at` can't be set now (Pause all, a quiet day, no permission), or null. */
+  reminderBlock?: (at: Date) => Promise<string | null>;
+  /** Set one reminder notification. */
+  setReminder?: (r: { text: string; at: Date }) => Promise<{ ok: true } | { ok: false; reason: string }>;
   /**
    * Confirmation gate for write tools. When absent, every write is DECLINED —
    * fail closed. The model must never mutate user data unprompted.
@@ -905,6 +971,225 @@ export const GOZLIN_TOOLS: GozlinTool[] = [
       if (!result.ok) return { status: "failed", reason: result.reason };
       if (turn) turn.notes += 1;
       return { status: "noted", exercise: resolved.subject.label, triedOn: resolved.triedOn };
+    },
+  },
+
+  // ── Writes that act for them (G2). Every one: settle exactly what will be
+  // written, show it, wait for the tap, write through the app's own store.
+  // There is deliberately NO tool that changes calorie or protein targets,
+  // deletes anything, or writes to the period tracker.
+
+  {
+    name: "log_water",
+    description:
+      "Add a drink of water to today's water log. Call it ONLY when they ask you to log water or clearly tell you " +
+      "they drank some and want it recorded — never to answer a question about water. A glass is about 250 ml and a " +
+      "bottle about 500 when they don't say. Requires their confirmation. Only meeting the WHOLE daily water goal " +
+      "keeps their day; never say a single glass does.",
+    input_schema: obj(
+      {
+        ml: { type: "number", description: "Millilitres to add, e.g. 250 for a glass." },
+      },
+      ["ml"],
+    ),
+    readOnly: false,
+    run: async (input: { ml: number }, ctx) => {
+      const actions = ctx.actions;
+      if (!actions?.waterStatus || !actions.logWater || !actions.confirm) return UNAVAILABLE;
+      const ml = Math.round(Number(input.ml) / 10) * 10;
+      if (!Number.isFinite(ml) || ml < WATER_MIN_ML || ml > WATER_MAX_ML) {
+        return { status: "rejected", reason: `One drink is between ${WATER_MIN_ML} and ${WATER_MAX_ML} ml.` };
+      }
+      const before = await actions.waterStatus();
+      const after = before.todayMl + ml;
+      const meetsGoal = before.goalMl > 0 && before.todayMl < before.goalMl && after >= before.goalMl;
+      const approved = await actions.confirm({
+        tool: "log_water",
+        summary: `Log ${ml} ml of water?`,
+        detail: [
+          `Today: ${Math.round(before.todayMl)} → ${Math.round(after)} ml of ${Math.round(before.goalMl)} ml`,
+          meetsGoal ? "That meets your whole water goal, which keeps today." : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        input: { ml },
+      });
+      if (!approved) return DECLINED;
+      const r = await actions.logWater(ml);
+      return r.ok
+        ? { status: "logged", ml, todayMl: Math.round(r.todayMl), goalMl: Math.round(r.goalMl), goalMet: r.todayMl >= r.goalMl }
+        : { status: "failed", reason: r.reason };
+    },
+  },
+
+  {
+    name: "log_weight",
+    description:
+      "Record today's weigh-in from a scale reading they give you. Call it ONLY when they ask you to log their " +
+      "weight or clearly give today's reading to be recorded. Convert to kilograms first if they use pounds or " +
+      "stone. Requires their confirmation. One reading a day: a second one replaces today's. A change of a kilo " +
+      "or two over a few days is mostly water, food and timing, not fat — never treat one reading as fat gained or lost.",
+    input_schema: obj(
+      {
+        kg: { type: "number", description: "The reading in kilograms, e.g. 82.4." },
+      },
+      ["kg"],
+    ),
+    readOnly: false,
+    run: async (input: { kg: number }, ctx) => {
+      const actions = ctx.actions;
+      if (!actions?.weightStatus || !actions.logWeight || !actions.confirm) return UNAVAILABLE;
+      const kg = Math.round(Number(input.kg) * 10) / 10;
+      if (!Number.isFinite(kg) || kg < WEIGHT_MIN_KG || kg > WEIGHT_MAX_KG) {
+        return { status: "rejected", reason: "That doesn't read as a body weight in kilograms." };
+      }
+      const s = await actions.weightStatus();
+      const approved = await actions.confirm({
+        tool: "log_weight",
+        summary: `Log ${s.show(kg)} as today's weight?`,
+        detail: [
+          s.last ? `Your last weigh-in: ${s.show(s.last.kg)} on ${shortDay(s.last.date)}` : "Your first weigh-in.",
+          s.todayKg != null ? `This replaces today's ${s.show(s.todayKg)}.` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        input: { kg },
+      });
+      if (!approved) return DECLINED;
+      const r = await actions.logWeight(kg);
+      return r.ok
+        ? {
+            status: "logged",
+            kg,
+            ...(s.last ? { previousKg: s.last.kg, previousDate: s.last.date } : {}),
+          }
+        : { status: "failed", reason: r.reason };
+    },
+  },
+
+  {
+    name: "log_workout",
+    description:
+      "Record a workout they did TODAY outside the app's workout player — a run, a walk, a class, a swim, a game. " +
+      "Call it ONLY when they ask you to log it or clearly want it recorded. Never for a session done in the app's " +
+      "player (those log themselves), never for something planned, never for another day. Requires their confirmation.",
+    input_schema: obj(
+      {
+        activity: { type: "string", description: "What they did, in a few words, e.g. 'run', 'yoga class'." },
+        minutes: { type: "number", description: "How long it lasted, in minutes." },
+      },
+      ["activity", "minutes"],
+    ),
+    readOnly: false,
+    run: async (input: { activity: string; minutes: number }, ctx) => {
+      const actions = ctx.actions;
+      if (!actions?.logWorkout || !actions.confirm) return UNAVAILABLE;
+      const activity = oneLine(input.activity).slice(0, ACTIVITY_MAX);
+      const minutes = Math.round(Number(input.minutes));
+      if (activity.length < 2) return { status: "rejected", reason: "No activity named." };
+      if (!Number.isFinite(minutes) || minutes < WORKOUT_MIN_MINUTES || minutes > WORKOUT_MAX_MINUTES) {
+        return {
+          status: "rejected",
+          reason: `A workout here is between ${WORKOUT_MIN_MINUTES} and ${WORKOUT_MAX_MINUTES} minutes. Ask how long it was.`,
+        };
+      }
+      const approved = await actions.confirm({
+        tool: "log_workout",
+        summary: `Log ${activity}, ${minutes} min, as today's workout?`,
+        detail: "It counts as a workout today, which keeps your day.",
+        input: { activity, minutes },
+      });
+      if (!approved) return DECLINED;
+      const r = await actions.logWorkout({ activity, minutes });
+      return r.ok ? { status: "logged", activity, minutes } : { status: "failed", reason: r.reason };
+    },
+  },
+
+  {
+    name: "add_habit",
+    description:
+      "Add a new habit to their habit tracker. Call it ONLY when they ask you to add or start tracking a habit — " +
+      "never as your own suggestion acted on. The name is a short phrase in their words. Requires their confirmation. " +
+      "They can change its icon, colour and reminder on the Habits screen afterwards.",
+    input_schema: obj(
+      {
+        name: { type: "string", description: "The habit, in a few of their words, e.g. 'Stretch after waking'." },
+        schedule: {
+          type: "string",
+          enum: ["every_day", "weekdays", "weekends"],
+          description: "Which days it's for. 'every_day' when they don't say.",
+        },
+      },
+      ["name", "schedule"],
+    ),
+    readOnly: false,
+    run: async (input: { name: string; schedule: HabitSchedule }, ctx) => {
+      const actions = ctx.actions;
+      if (!actions?.addHabit || !actions.confirm) return UNAVAILABLE;
+      const name = oneLine(input.name).slice(0, HABIT_NAME_MAX);
+      if (name.length < 2) return { status: "rejected", reason: "No habit named." };
+      const schedule: HabitSchedule = HABIT_SCHEDULES.includes(input.schedule) ? input.schedule : "every_day";
+      const existing = actions.habitNames?.() ?? [];
+      if (existing.some((h) => h.trim().toLowerCase() === name.toLowerCase())) {
+        return { status: "exists", reason: `They already track "${name}". Nothing was added.` };
+      }
+      const approved = await actions.confirm({
+        tool: "add_habit",
+        summary: `Add the habit "${name}", ${SCHEDULE_WORDS[schedule]}?`,
+        detail: "You can change its icon, colour and reminder on the Habits screen.",
+        input: { name, schedule },
+      });
+      if (!approved) return DECLINED;
+      const r = await actions.addHabit({ name, schedule });
+      return r.ok ? { status: "added", name, schedule } : { status: "failed", reason: r.reason };
+    },
+  },
+
+  {
+    name: "set_reminder",
+    description:
+      "Set ONE reminder notification for them, today or tomorrow, at a time they choose. Call it ONLY when they " +
+      "ask, e.g. 'remind me to prep lunch at 7'. Never on your own initiative, never repeating, never about their period or " +
+      "cycle. The text is their words, short. Requires their confirmation. If it can't be set (reminders paused, " +
+      "a quiet day, notifications off), say so plainly and don't retry.",
+    input_schema: obj(
+      {
+        text: { type: "string", description: "What to remind them of, in a few of their words." },
+        time: { type: "string", description: "Local 24-hour time, 'HH:MM', e.g. '19:00'." },
+        day: { type: "string", enum: ["today", "tomorrow"], description: "Which day." },
+      },
+      ["text", "time", "day"],
+    ),
+    readOnly: false,
+    run: async (input: { text: string; time: string; day: "today" | "tomorrow" }, ctx) => {
+      const actions = ctx.actions;
+      if (!actions?.setReminder || !actions.reminderBlock || !actions.confirm) return UNAVAILABLE;
+      const text = oneLine(input.text).slice(0, REMINDER_TEXT_MAX);
+      if (text.length < 2) return { status: "rejected", reason: "No reminder text." };
+      const m = /^(\d{1,2}):(\d{2})$/.exec(oneLine(input.time));
+      const h = m ? Number(m[1]) : NaN;
+      const min = m ? Number(m[2]) : NaN;
+      if (!m || h > 23 || min > 59) return { status: "rejected", reason: "The time must be HH:MM, 24-hour." };
+      const day = input.day === "tomorrow" ? "tomorrow" : "today";
+      const now = nowOf(ctx);
+      const at = new Date(now);
+      if (day === "tomorrow") at.setDate(at.getDate() + 1);
+      at.setHours(h, min, 0, 0);
+      if (at.getTime() - now.getTime() < 60_000) {
+        return { status: "rejected", reason: "That time has already passed today. Ask whether they meant tomorrow." };
+      }
+      const block = await actions.reminderBlock(at);
+      if (block) return { status: "unavailable", reason: block };
+      const clock = `${h}:${String(min).padStart(2, "0")}`;
+      const approved = await actions.confirm({
+        tool: "set_reminder",
+        summary: `Remind you ${day} at ${clock}: "${text}"?`,
+        detail: "One notification. Pause all, in Settings, still silences it.",
+        input: { text, time: clock, day },
+      });
+      if (!approved) return DECLINED;
+      const r = await actions.setReminder({ text, at });
+      return r.ok ? { status: "set", day, time: clock, text } : { status: "failed", reason: r.reason };
     },
   },
 ];

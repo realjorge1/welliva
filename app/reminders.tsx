@@ -26,7 +26,11 @@ import {
   LockScreenJournalCard,
   UpNextCard,
 } from "@/components/notifications/center/ActivityCards";
-import { CoachingCard, WorkoutsCard } from "@/components/notifications/center/MoreCards";
+import {
+  CoachingCard,
+  StreakReminderCard,
+  WorkoutsCard,
+} from "@/components/notifications/center/MoreCards";
 import {
   OnTimeCard,
   useExactAlarmStatus,
@@ -201,6 +205,8 @@ export default function NotificationsScreen() {
         <Section label="Also from welliva" />
         <View style={styles.gap} />
         <CoachingCard blocked={blocked} paused={center.paused} />
+        <View style={styles.gap} />
+        <StreakReminderCard paused={center.paused} />
         <View style={styles.gap} />
         <WorkoutsCard
           fitness={center.fitness}

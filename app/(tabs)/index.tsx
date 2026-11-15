@@ -86,6 +86,7 @@ import { sumMacros } from "@/services/nutrition/DayTotals";
 import { router } from "expo-router";
 import { insightTitle } from "@/constants/RetroFont";
 import { Ionicons } from "@expo/vector-icons";
+import { useTodayWeather } from "@/services/weather/today";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -423,6 +424,11 @@ export default function HomeScreen() {
       }),
     [],
   );
+  // Today's weather beside the date, when weather is on (services/weather/today).
+  const { weather: todayWeather } = useTodayWeather();
+  const todayLine = todayWeather
+    ? `${todayLabel} · ${todayWeather.condition} ${todayWeather.tempC}°`
+    : todayLabel;
 
   const calorieTarget = (nutritionTargets?.calories || 2000) + todayDelta;
   const caloriePct = nutritionTargets
@@ -607,7 +613,7 @@ export default function HomeScreen() {
       <Reveal index={3}>
         <View style={styles.section}>
           <View style={styles.gutter}>
-            <SectionHeader title="Today" subtitle={todayLabel} weight="700" />
+            <SectionHeader title="Today" subtitle={todayLine} weight="700" />
           </View>
           <Card style={styles.planCard} padding="lg">
             <View style={styles.planRow}>

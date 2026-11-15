@@ -75,6 +75,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import type { RecallReceipt, Receipt } from "@/services/gozlin/agent";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { showReceipt } from "@/components/smart/receipt";
 import {
   Animated as RNAnimated,
   FlatList,
@@ -135,6 +136,8 @@ export default function GozlinScreen() {
     noted,
     undoNote,
     clearNoted,
+    receipt,
+    clearReceipt,
   } = useGozlin();
 
   const { prompt } = useLocalSearchParams<{ prompt?: string }>();
@@ -215,6 +218,14 @@ export default function GozlinScreen() {
     });
     clearNoted();
   }, [noted, toast, undoNote, clearNoted]);
+
+  // One of the coach's confirmed writes (log water, add a habit, …) just
+  // landed: say what it did, with an Undo where the store allows one.
+  useEffect(() => {
+    if (!receipt) return;
+    showReceipt(toast, receipt);
+    clearReceipt();
+  }, [receipt, toast, clearReceipt]);
 
   // Keep the latest turn in view.
   useEffect(() => {

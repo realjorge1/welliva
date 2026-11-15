@@ -286,11 +286,11 @@ export function buildMotionKit(
 /* ─────────────────────────────── The solver ──────────────────────────────── */
 
 /** How many numbers one loose limb takes in `MotionKit.free`. */
-const FREE_N = 3;
+const FREE_N = 4;
 /** How many numbers one planted arm takes in `MotionKit.pins`. */
 const PIN_N = 11;
 /** …and one planted leg in `MotionKit.legPins`. */
-const LEG_PIN_N = 13;
+const LEG_PIN_N = 14;
 /** A part over a bench or a box rests on its top unless it is this far down inside it. */
 const SURFACE_SINK = 2;
 /** A jump's feet stay on the floor until the legs are this far through the push-off. */
@@ -432,7 +432,7 @@ function kneeFor(
  * from one spot to the next, lifted clear of the floor — from wherever the hip
  * is now.
  */
-function placeLeg(k: MotionKit, out: number[], j: number, t: number): void {
+function placeLeg(k: MotionKit, out: number[], j: number, t: number, back: boolean): void {
   "worklet";
   const p = k.legPins;
   const u = p[j];
@@ -443,8 +443,11 @@ function placeLeg(k: MotionKit, out: number[], j: number, t: number): void {
   let w = (t - p[j + 11]) / (p[j + 12] - p[j + 11]);
   w = w < 0 ? 0 : w > 1 ? 1 : w;
   const e = w * w * (3 - 2 * w);
+  // It lifts only on its swing: side-on, a foot travelling back is the one the
+  // body stands on, and it stays down.
+  const lift = back ? p[j + 13] : p[j + 10];
   const tx = p[j + 3] + (p[j + 5] - p[j + 3]) * e;
-  const ty = p[j + 4] + (p[j + 6] - p[j + 4]) * e - p[j + 10] * Math.sin(Math.PI * e);
+  const ty = p[j + 4] + (p[j + 6] - p[j + 4]) * e - lift * Math.sin(Math.PI * e);
   const L1 = p[j + 7];
   const L2 = p[j + 8];
   const sx = out[u * 3];
@@ -517,12 +520,14 @@ function placeArm(k: MotionKit, out: number[], j: number, t: number): void {
 }
 
 /**
- * THE FLOOR GUARD. A limb that holds nothing swings on its joint angles alone,
- * and between two poses a foot on its way up (a hamstring curl's kick) or a hand
- * sweeping low (a thread-the-needle) can pass under the floor line. Where its
- * end would, the whole limb lifts at the hip or shoulder, by just the angle
- * that lets it skim the floor. It keeps its own shape — no joint is re-chosen,
- * so nothing can flip — and the lift is nothing at all until it touches.
+ * THE FLOOR GUARD. A leg that carries nothing swings on its joint angles alone,
+ * and between two poses a foot on its way up (a hamstring curl's kick) can pass
+ * under the floor line. Where it would, the knee bends just enough — the way
+ * that knee is drawn bending, fixed for the rep — for the foot to skim the floor
+ * instead. (Arms are left be: a nearly straight arm brushing the floor would
+ * have to fold its elbow in a frame to clear it, and a snapping elbow reads
+ * worse than a hand grazing the floor.) Solved exactly:
+ * barely touching, the limb is exactly the limb it was.
  */
 function clampLimb(k: MotionKit, out: number[], j: number): void {
   "worklet";
@@ -531,36 +536,31 @@ function clampLimb(k: MotionKit, out: number[], j: number): void {
   const f = g[j + 1];
   const end = g[j + 2];
   const c = end >= 0 ? end : f;
+  const sink = partLow(k, out, c) - k.floor;
+  if (sink <= 1e-4) return;
+  const L1 = k.lengths[u];
+  const L2 = k.lengths[f];
   const sx = out[u * 3];
   const sy = out[u * 3 + 1];
-  // Twice: once turned, the lowest point of the hand or shoe is a new one.
-  for (let pass = 0; pass < 2; pass++) {
-    const sink = partLow(k, out, c) - k.floor;
-    if (sink <= 1e-4) return;
-    const a = out[c * 3 + 2];
-    const rx = out[c * 3] + supportX(k, c, a) - sx;
-    const ry = out[c * 3 + 1] + supportAt(k, c, a) - sy;
-    const r = Math.sqrt(rx * rx + ry * ry);
-    if (r < 1e-3) return;
-    const phi = Math.atan2(ry, rx);
-    let v = (ry - sink) / r;
-    v = v > 1 ? 1 : v < -1 ? -1 : v;
-    const lifted = Math.cos(phi) >= 0 ? Math.asin(v) : Math.PI - Math.asin(v);
-    let d = lifted - phi;
-    while (d > Math.PI) d -= Math.PI * 2;
-    while (d < -Math.PI) d += Math.PI * 2;
-    const cs = Math.cos(d);
-    const sn = Math.sin(d);
-    for (let b = 0; b < 3; b++) {
-      const i = b === 0 ? u : b === 1 ? f : end;
-      if (i < 0) continue;
-      out[i * 3 + 2] += d;
-      if (i === u) continue;
-      const x = out[i * 3] - sx;
-      const y = out[i * 3 + 1] - sy;
-      out[i * 3] = sx + x * cs - y * sn;
-      out[i * 3 + 1] = sy + x * sn + y * cs;
-    }
+  const wx = out[f * 3] + L2 * Math.cos(out[f * 3 + 2]);
+  const wy = out[f * 3 + 1] + L2 * Math.sin(out[f * 3 + 2]) - sink;
+  const dx = wx - sx;
+  const dy = wy - sy;
+  const d0 = Math.sqrt(dx * dx + dy * dy);
+  const least = Math.abs(L1 - L2) + 1e-3;
+  const r = d0 > L1 + L2 ? L1 + L2 : d0 < least ? least : d0;
+  const cos = (L1 * L1 + r * r - L2 * L2) / (2 * L1 * r);
+  const ua = Math.atan2(dy, dx) + g[j + 3] * Math.acos(cos > 1 ? 1 : cos < -1 ? -1 : cos);
+  const ex = sx + L1 * Math.cos(ua);
+  const ey = sy + L1 * Math.sin(ua);
+  const fa = Math.atan2(wy - ey, wx - ex);
+  out[u * 3 + 2] = ua;
+  out[f * 3] = ex;
+  out[f * 3 + 1] = ey;
+  out[f * 3 + 2] = fa;
+  if (end >= 0) {
+    out[end * 3] = ex + L2 * Math.cos(fa);
+    out[end * 3 + 1] = ey + L2 * Math.sin(fa);
   }
 }
 
@@ -569,7 +569,7 @@ function clampLimb(k: MotionKit, out: number[], j: number): void {
  * length between two steps — how far the body must come down so that it can:
  * the little dip a body makes between two steps.
  */
-function stepDip(k: MotionKit, out: number[], t: number): number {
+function stepDip(k: MotionKit, out: number[], t: number, back: boolean): number {
   "worklet";
   const p = k.legPins;
   let down = 0;
@@ -577,8 +577,9 @@ function stepDip(k: MotionKit, out: number[], t: number): number {
     let w = (t - p[j + 11]) / (p[j + 12] - p[j + 11]);
     w = w < 0 ? 0 : w > 1 ? 1 : w;
     const e = w * w * (3 - 2 * w);
+    const lift = back ? p[j + 13] : p[j + 10];
     const tx = p[j + 3] + (p[j + 5] - p[j + 3]) * e;
-    const ty = p[j + 4] + (p[j + 6] - p[j + 4]) * e - p[j + 10] * Math.sin(Math.PI * e);
+    const ty = p[j + 4] + (p[j + 6] - p[j + 4]) * e - lift * Math.sin(Math.PI * e);
     const u = p[j];
     const reach = (p[j + 7] + p[j + 8]) * LEG_REACH;
     const dx = tx - out[u * 3];
@@ -671,13 +672,13 @@ export function solvePose(k: MotionKit, q: number): number[] {
   if (dy !== 0) for (let i = 0; i < n; i++) out[i * 3 + 1] += dy;
   // Between two steps the body dips as far as it must for the feet to reach.
   if (k.anchor.length === 0 && k.legPins.length > 0) {
-    const dip = stepDip(k, out, t);
+    const dip = stepDip(k, out, t, q >= 0.5);
     if (dip > 0) for (let i = 0; i < n; i++) out[i * 3 + 1] += dip;
   }
   // A planted foot answers to the floor, not to the hip, and a planted hand to
   // what it holds, not to the shoulder: those limbs are placed last, from
   // wherever the body has ended up.
-  for (let j = 0; j < k.legPins.length; j += LEG_PIN_N) placeLeg(k, out, j, t);
+  for (let j = 0; j < k.legPins.length; j += LEG_PIN_N) placeLeg(k, out, j, t, q >= 0.5);
   for (let j = 0; j < k.pins.length; j += PIN_N) placeArm(k, out, j, t);
   // A loose foot or hand never goes through the floor: it skims it.
   for (let j = 0; j < k.free.length; j += FREE_N) clampLimb(k, out, j);
@@ -909,6 +910,10 @@ function clearFold(
 function settleHands(k: MotionKit, rig: Rig, motion: FigureMotion, view: FigureView): void {
   const A = solvePose(k, 0);
   const B = solvePose(k, 0.5);
+  // Where the body sits at each end, for if its hands turn out to be both what
+  // it rests on and what gets planted (a handstand): see the end of this.
+  const shiftA = A[1] - k.rootA[1];
+  const shiftB = B[1] - k.rootB[1];
   const props = propsFor(motion, view);
   const c = rig.facing;
   // The body through one way of the rep, for what a planted arm has to reach.
@@ -1014,6 +1019,22 @@ function settleHands(k: MotionKit, rig: Rig, motion: FigureMotion, view: FigureV
     // A hand that lands on the floor at one end of the rep lands flat.
     if (holdA && view === "side") k.anglesA[h] = nearest(handSet(holdA.kind, k.anglesA[f], view, c), k.anglesA[f]);
     if (holdB && view === "side") k.anglesB[h] = nearest(handSet(holdB.kind, k.anglesB[f], view, c), k.anglesB[f]);
+  }
+  // A planted arm answers to what it holds. If it was also what the body rested
+  // on, it leaves that set, and the body keeps the placements it had at the two
+  // ends — otherwise each would chase the other.
+  let carried = false;
+  for (let j = 0; j < k.pins.length; j += PIN_N) {
+    for (const i of [k.pins[j], k.pins[j + 1], k.pins[j + 2]]) {
+      if (k.gset[i]) {
+        k.gset[i] = 0;
+        carried = true;
+      }
+    }
+  }
+  if (carried && !k.gset.some(Boolean)) {
+    k.cA = shiftA;
+    k.cB = shiftB;
   }
 }
 
@@ -1289,16 +1310,22 @@ function settleLegs(k: MotionKit, rig: Rig, view: FigureView, planted: Set<numbe
     // Which foot is free to go first: the one bearing less at the start — the
     // higher of the two, a tapped toe rather than a planted heel.
     const startLow = A[ft >= 0 ? ft * 3 + 1 : f * 3 + 1];
-    found.push([u, f, ft, from[0], from[1], to[0], to[1], k.lengths[u], k.lengths[f], fold, lift, 0, 1, step, startLow]);
+    // Side-on a foot lifts on its swing forward, the way the body faces, and
+    // stays down while it travels back under the body; front-on every step is a
+    // step to the side, and lifts both ways.
+    const ahead = view === "side" ? (to[0] - from[0]) * rig.facing : 0;
+    const liftGo = view === "front" || ahead > 0 ? lift : 0;
+    const liftBack = view === "front" || ahead < 0 ? lift : 0;
+    found.push([u, f, ft, from[0], from[1], to[0], to[1], k.lengths[u], k.lengths[f], fold, liftGo, 0, 1, liftBack, step, startLow]);
   }
   if (found.length === 0) return;
   // Two feet that both travel the same way take turns — a step-touch, a walk.
   // Two going opposite ways switch together, as a climber's do.
-  const steppers = found.filter((p) => p[13] > FOOT_HOLDS);
+  const steppers = found.filter((p) => p[14] > FOOT_HOLDS);
   const sameWay = (a: number[], b: number[]) => (a[5] - a[3]) * (b[5] - b[3]) + (a[6] - a[4]) * (b[6] - b[4]) > 0;
   if (steppers.length === 2 && sameWay(steppers[0], steppers[1])) {
     const [a, b] = steppers;
-    const first = Math.abs(a[14] - b[14]) > 0.5 ? (a[14] < b[14] ? a : b) : a[13] >= b[13] ? a : b;
+    const first = Math.abs(a[15] - b[15]) > 0.5 ? (a[15] < b[15] ? a : b) : a[14] >= b[14] ? a : b;
     const second = first === a ? b : a;
     first[12] = STEP_FIRST;
     second[11] = 1 - STEP_FIRST;
@@ -1352,14 +1379,47 @@ function settleFree(k: MotionKit, rig: Rig, view: FigureView): void {
           [index("thighR"), index("shinR"), -1],
           [index("thighL"), index("shinL"), -1],
         ];
-  for (const arm of rig.arms) limbs.push([arm.upper, arm.fore, arm.hand]);
+  // A leg that is the planted leg's twin (the far leg echoing the near one)
+  // moves with it, exactly: it is not loose.
+  const twin = (u: number, f: number) =>
+    k.anchor.length >= 2 &&
+    [k.anglesA, k.anglesB].every(
+      (at) => Math.abs(at[u] - at[k.anchor[k.anchor.length - 1]]) < 1e-6 && Math.abs(at[f] - at[k.anchor[k.anchor.length - 2]]) < 1e-6,
+    );
+  const wrap = (a: number) => a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
+  const A = solvePose(k, 0);
+  const B = solvePose(k, 0.5);
   for (const [u, f, end] of limbs) {
-    if (u < 0 || f < 0 || placed.has(u) || k.depthSlot[f] >= 0) continue;
+    if (u < 0 || f < 0 || placed.has(u) || k.depthSlot[f] >= 0 || twin(u, f)) continue;
     // A foot or hand the body rests on is what the floor was found from: it
     // cannot sink. (A thigh can carry the body through the seat of the shorts
     // while its foot is free — a V-up's, a superman's — so only the end counts.)
     if (k.gset[end >= 0 ? end : f]) continue;
-    k.free.push(u, f, end);
+    // Which way the joint bends: as drawn, at the end where it bends most.
+    const bend = (pose: number[]) => {
+      const [wx, wy] = boneTip(k, pose, f);
+      return wrap(pose[u * 3 + 2] - Math.atan2(wy - pose[u * 3 + 1], wx - pose[u * 3]));
+    };
+    const ba = bend(A);
+    const bb = bend(B);
+    const big = Math.abs(ba) >= Math.abs(bb) ? ba : bb;
+    const natural = view === "side" ? -rig.facing : rig.bones[u].name.endsWith("L") ? 1 : -1;
+    k.free.push(u, f, end, Math.abs(big) > RAD ? Math.sign(big) : natural);
+  }
+  // The two ends with their feet kept out of the floor, so a frozen frame is
+  // the pose the animation passes through. (Settled a few times over: the
+  // shoe's lowest point shifts a hair as the shin turns.)
+  for (let pass = 0; pass < 4; pass++) {
+    for (const [q, at] of [
+      [0, k.anglesA],
+      [0.5, k.anglesB],
+    ] as const) {
+      const pose = solvePose(k, q);
+      for (let j = 0; j < k.free.length; j += FREE_N) {
+        at[k.free[j]] = nearest(pose[k.free[j] * 3 + 2], at[k.free[j]]);
+        at[k.free[j + 1]] = nearest(pose[k.free[j + 1] * 3 + 2], at[k.free[j + 1]]);
+      }
+    }
   }
 }
 

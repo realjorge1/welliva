@@ -14,7 +14,7 @@
 import type { MealSlot } from "../timeline/catalog";
 
 export type LogDraftKind = "meal" | "water" | "workout";
-export type LogDraftSource = "photo" | "voice" | "text";
+export type LogDraftSource = "photo" | "text";
 
 export interface LogDraft {
   /** Deterministic per capture → idempotent commit (a re-confirm never double-logs). */
@@ -50,12 +50,4 @@ export interface MealPhotoAnalysis {
   foods: AnalyzedFood[];
   slot?: MealSlot;
   note?: string;
-}
-
-/** A normalized voice capture (post speech-to-text). */
-export interface VoiceCapture {
-  /** Cleaned transcript text. */
-  text: string;
-  /** Whether it reads like a log ("had eggs and a 5k run") vs a chat question. */
-  looksLikeLog: boolean;
 }

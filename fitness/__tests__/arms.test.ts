@@ -48,6 +48,10 @@ describe("an elbow folds one way", () => {
     const wrong: string[] = [];
     eachArm((m, v, rig, k, arm) => {
       if (v !== "side" || OUT_OF_PLANE.has(m)) return;
+      // An arm lying along the floor (beside a body on its back, under a cobra's
+      // chest) folds up off the floor instead of through it — motion.ts
+      // `clearFold`. Held by "keeps a planted elbow out of the floor" below.
+      if (k.pins.some((u, j) => j % 11 === 0 && u === arm.upper && k.pins[j + 9] !== arm.fold)) return;
       for (const q of REP) {
         const p = solvePose(k, q);
         // What the bend is, measured the way round the elbow actually folds.
@@ -175,6 +179,8 @@ describe("a hand that holds something stays held", () => {
 
   it("has no snap as an arm leaves straight: the elbow moves on from it, frame by frame", () => {
     // An elbow solved to dead straight jumped 13° in one frame in a bear crawl.
+    // (A Hindu push-up's dive now pivots on the toes, the arc a real one makes,
+    // and sweeps the shoulders through the arm's reach a little faster.)
     for (const m of ["bearCrawl", "hinduPushup", "pushup", "mountainClimber"] as FigureMotion[]) {
       const rig = buildSideRig(m);
       const k = buildMotionKit(m, "side");
@@ -186,7 +192,7 @@ describe("a hand that holds something stays held", () => {
       let prev = bend(0);
       for (let s = 1; s <= 240; s++) {
         const now = bend(s / 240);
-        expect(Math.abs(now - prev), `${m} @${s}`).toBeLessThan(6);
+        expect(Math.abs(now - prev), `${m} @${s}`).toBeLessThan(8);
         prev = now;
       }
     }

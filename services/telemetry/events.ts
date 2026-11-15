@@ -116,6 +116,72 @@ export type OnboardingStep =
   | "plan";
 
 /**
+ * How one coach turn ended (services/gozlin/agent/GozlinAgent.ts sets it at every
+ * return). A closed union of words the code chooses, so it is safe to send: it
+ * says HOW the coach answered, never WHAT anyone said.
+ *
+ *  - answered                   the model's reply reached the person as written
+ *  - answered_after_fix_number  …after one rewrite for a figure it couldn't back
+ *  - answered_after_fix_safety  …after one rewrite for unsafe advice
+ *  - ungrounded                 the number check failed twice → offline reply
+ *  - unsafe                     output safety replaced the reply
+ *  - refused                    the model declined
+ *  - empty                      the model returned no text
+ *  - malformed                  asked to use tools but named none
+ *  - loop_cap                   too many tool rounds
+ *  - offline                    network or server error
+ *  - no_backend                 no connection to the coach is configured
+ *  - cancelled                  the person stopped it
+ *  - clinical_screen            the safety screen answered before the model ran
+ *  - locked                     the server said the coach is Pro only
+ */
+export type CoachTurnOutcome =
+  | "answered"
+  | "answered_after_fix_number"
+  | "answered_after_fix_safety"
+  | "ungrounded"
+  | "unsafe"
+  | "refused"
+  | "empty"
+  | "malformed"
+  | "loop_cap"
+  | "offline"
+  | "no_backend"
+  | "cancelled"
+  | "clinical_screen"
+  | "locked";
+
+/**
+ * Runtime mirror of CoachTurnOutcome. The analytics_coach_quality view has a
+ * column for each; a test keeps the two lists in step.
+ */
+export const COACH_TURN_OUTCOMES: readonly CoachTurnOutcome[] = [
+  "answered",
+  "answered_after_fix_number",
+  "answered_after_fix_safety",
+  "ungrounded",
+  "unsafe",
+  "refused",
+  "empty",
+  "malformed",
+  "loop_cap",
+  "offline",
+  "no_backend",
+  "cancelled",
+  "clinical_screen",
+  "locked",
+] as const;
+
+/**
+ * A turn's wait as sent: seconds, one decimal. Rounded here, at the boundary,
+ * so no caller can send a raw millisecond figure by mistake.
+ */
+export function coachTurnSeconds(ms: number): number {
+  if (!Number.isFinite(ms) || ms < 0) return 0;
+  return Math.round(ms / 100) / 10;
+}
+
+/**
  * event name → its props. `Record<string, never>` means "no props".
  *
  * Keep this list short. Every addition is a thing we promise never to misuse.
@@ -161,6 +227,14 @@ export interface AnalyticsEvents {
   coach_message: { tier: "free" | "pro" };
   deep_dive: Record<string, never>;
 
+  /* ── how smart the coach really is ─────────────────────────────────────── */
+  /**
+   * One coach turn finished: how it ended, how many tool calls it made, and how
+   * long the person waited from send to reply (seconds, one decimal). Never the
+   * question, the reply, or which tools ran. A count only.
+   */
+  coach_turn: { result: CoachTurnOutcome; tools: number; seconds: number };
+
   /* ── stability (the crash BODY goes to crash_reports, not here) ────────── */
   crash: { surface: string };
 
@@ -199,6 +273,7 @@ export const KNOWN_EVENTS: readonly AnalyticsEventName[] = [
   "subscription_cancelled",
   "coach_message",
   "deep_dive",
+  "coach_turn",
   "crash",
   "smart_moment",
 ] as const;
@@ -218,6 +293,8 @@ export const ALLOWED_PROP_KEYS: readonly string[] = [
   "tier",
   "surface",
   "feature",
+  "tools",
+  "seconds",
 ] as const;
 
 /** Longest a prop string may be. Every legitimate value here is a short literal. */

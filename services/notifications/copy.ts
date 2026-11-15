@@ -270,3 +270,21 @@ export const MEAL_LOGGED_LINES: readonly string[] = [
   "Got it. Written down.",
   "Done. Your day's up to date.",
 ];
+
+// ── The evening "still open" reminder (./streakReminder) ─────────────────────
+//
+// Calm and true. Each line names only things that really keep a day — a meal,
+// a mood check-in, a habit — never a glass of water (only the WHOLE water goal
+// does). No guilt, no countdown, no "don't lose it".
+
+const STREAK_EVENING_LINES: readonly ((n: number) => string)[] = [
+  (n) => `Your ${n}-day streak is still open tonight. A quick check-in keeps it.`,
+  (n) => `Today isn't kept yet. One log — a meal, a mood or a habit — keeps your ${n}-day streak.`,
+  (n) => `${n} days in a row so far. Logging a meal or how you feel tonight keeps it going.`,
+];
+
+/** The reminder for `date`, with the run as it stands that evening. Stable per date. */
+export function streakEveningCopy(days: number, date: string): { title: string; body: string } {
+  const line = STREAK_EVENING_LINES[hash(`streak:${date}`) % STREAK_EVENING_LINES.length];
+  return { title: "Today is still open", body: line(days) };
+}
