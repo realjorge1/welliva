@@ -16,13 +16,14 @@
 
 import { confidenceWord } from "./copy";
 import { addDays, daysBetween, formatDay, formatRange, maxDate } from "./dates";
-import { liveEpisodes } from "./episodes";
+import { splitEpisodes } from "./episodes";
 import {
   buildCycles,
   countFrom,
   cycleModeOf,
-  lastPositiveTest,
+  givenWindow,
   predict,
+  surgeStart,
   type CycleProfile,
   type Prediction,
 } from "./predict";
@@ -65,7 +66,8 @@ export function startReceipt(input: {
   const { settings, today, profile } = input;
   const mode = cycleModeOf(profile.conditions, settings.contraception?.answer);
   if (mode !== "normal" && mode !== "postpartum") return null;
-  const live = liveEpisodes(input.episodes);
+  // Her latest PERIOD: a stray (bleeding between periods) gets no receipt.
+  const live = splitEpisodes(input.episodes).periods;
   const latest = live[live.length - 1];
   if (!latest) return null;
   const start = latest.start;
@@ -78,8 +80,12 @@ export function startReceipt(input: {
   const before = input.episodes.filter((e) => e.start < start);
   const days: CycleDays = {};
   for (const [d, log] of Object.entries(input.days)) if (d < start) days[d] = log;
-  const said = predict({ episodes: before, days, settings, today: eve, profile });
-  if (!said) return null;
+  const forecast = predict({ episodes: before, days, settings, today: eve, profile });
+  if (!forecast) return null;
+  // What we SAID: the window she was given, not the rolling "any day now" a
+  // late eve would show (./predict givenWindow) — or every late period would
+  // come "right on the day we said".
+  const said = givenWindow(forecast);
 
   const off = daysBetween(said.likely, start);
   const range = formatRange(said.earliest, said.latest);
@@ -111,7 +117,8 @@ export function startReceipt(input: {
  * window. Null when there is no window to share.
  */
 export function shareDatesLine(p: Prediction | null): string | null {
-  if (!p) return null;
+  // Late: there are no dates to share, only "any day now".
+  if (!p || p.overdue) return null;
   const sure = confidenceWord(p) === "Fairly sure";
   return `My next period is likely ${formatRange(p.earliest, p.latest)}${
     sure ? `, most likely ${formatDay(p.likely, { weekday: true })}` : ""
@@ -147,7 +154,9 @@ export function testingStartLine(input: {
   const { prediction: p, days, showFertile, today } = input;
   if (!showFertile || !p) return null;
   if (!Object.values(days).some((log) => !!log.ovulationTest)) return null;
-  if (lastPositiveTest(days, p.lastStart, today)) return null;
+  // A surge this cycle (the same rule the forecast uses), or a temperature rise
+  // that already confirmed ovulation: nothing left to test for.
+  if (surgeStart(days, p.lastStart, today) || p.testBasis === "temperature") return null;
   if (today > addDays(p.ovulation, 1)) return null;
   const from = maxDate(
     addDays(p.earliest, -(p.lutealDays + TESTING_LEAD_DAYS)),

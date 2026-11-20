@@ -222,7 +222,31 @@ export interface UserBio {
   // Training preferences (captured in onboarding; optional for back-compat)
   equipment?: Equipment[]; // Default ["none"] (bodyweight only)
   workoutDaysPerWeek?: number; // 2–6; falls back to goal-derived default
+
+  // ── How the calorie target is shaped (services/nutrition/pace.ts) ──
+  /**
+   * How fast to lose (or gain, for build_muscle). Chosen by the user; written
+   * as "steady" by onboarding for every new account. ABSENT means the account
+   * predates pace and keeps the fixed modifier it was always given (the owner's
+   * 2026-11-20 decision: nobody's number moves until they pick a pace).
+   */
+  pace?: TargetPace;
+  /**
+   * Set by the weight-trend layer while her trend weight is within TAPER_KG of
+   * her goal weight: the deficit halves for the last stretch. Absent = no taper.
+   */
+  nearGoalTaper?: boolean;
+  /**
+   * A correction to the formula's maintenance, in kcal/day, that the user
+   * ACCEPTED from the learning model (services/nutrition/adaptiveTargets.ts).
+   * Never written without her tap. Ignored under 18, underweight, pregnant or
+   * postpartum. Absent = the formula alone.
+   */
+  maintenanceAdjustKcal?: number;
 }
+
+/** Weight-change pace. The same three words serve losing and gaining. */
+export type TargetPace = "gentle" | "steady" | "faster";
 
 /**
  * UserProfile - Extended user data for display

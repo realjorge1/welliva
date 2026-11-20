@@ -59,6 +59,14 @@ import {
 } from "@/services/nutrition/dayProvenance";
 import { mealsForSlot } from "@/services/nutrition/MealCatalog";
 import { TargetsRecalcCard } from "@/components/nutrition/TargetsRecalcCard";
+import { TargetUpdateCard } from "@/components/nutrition/TargetUpdateCard";
+import { PortionSheet } from "@/components/diet/PortionSheet";
+import { DayCompleteRow } from "@/components/diet/DayCompleteRow";
+import { countsAsDay } from "@/services/nutrition/dayStatus";
+import { canLogForDate, shiftDate } from "@/services/nutrition/logWindow";
+import { hasRecordedIntake } from "@/services/nutrition/recordedIntake";
+import { planShortfall, withServings } from "@/services/nutrition/portionSolver";
+import { servingsLabel } from "@/components/diet/types";
 import { Radius, Spacing, alpha } from "@/constants/theme";
 import { retroText } from "@/constants/RetroFont";
 import { HungryOfferCard } from "@/components/cycle/HungryCard";
@@ -104,6 +112,10 @@ import {
   hasSmartSwap,
   learnMealTimes,
   rankMealSwaps,
+  slotBudget,
+  swapServings,
+  alternativeDifference,
+  dietFitLabel,
   type ConsistencyScore,
   type LiveDay,
   type ProteinStatus,
@@ -266,6 +278,8 @@ export default function DietScreen() {
     scheduleWeeklyDietPlan,
     adoptDiet,
     consumedNutrition,
+    setMealPortion,
+    markDayComplete,
   } = useNutrition();
   const { currentDate } = useSystem();
   const {
@@ -327,7 +341,10 @@ export default function DietScreen() {
   // toast; null when nothing is offered. Confirming swaps it in for today.
   const [altSuggestion, setAltSuggestion] = useState<{
     option: DietMealOption;
-    match: number;
+    /** The real difference from the meal it replaces, as shown. */
+    difference: string;
+    /** Sized to the meal it replaces (portionSolver). */
+    servings: number;
     mealType: MealSlot;
     snackIndex?: number;
   } | null>(null);
@@ -338,6 +355,14 @@ export default function DietScreen() {
     useState<DietMatchScore | null>(null);
   // Duration of the plan being started. "custom" carries an explicit end date,
   // which is what lets a plan run for months rather than the old day/week only.
+  // "How much did you have?" for a ticked meal (null = closed).
+  const [portionFor, setPortionFor] = useState<{
+    mealType: "breakfast" | "lunch" | "dinner" | "snack";
+    snackIndex?: number;
+    name: string;
+    plannedKcal: number;
+    current: number;
+  } | null>(null);
   const [scheduleDuration, setScheduleDuration] = useState<PlanDuration>("day");
   const [customEndDate, setCustomEndDate] = useState<string | null>(null);
   const [isScheduling, setIsScheduling] = useState(false);
@@ -688,9 +713,11 @@ export default function DietScreen() {
   }, [currentDietData, swapMealType]);
 
   const handleSwapMealOption = useCallback(
-    async (option: DietMealOption | DietSnackOption) => {
+    // `servings`: the size the sheet offered it at (sized to the slot's budget
+    // by the same solver as a day — see swapServings). The name is unchanged.
+    async (option: DietMealOption | DietSnackOption, servings: number = 1) => {
       const isSnackOption = !("protein" in option);
-      const newMeal: ScheduledMeal = {
+      const authored: ScheduledMeal = {
         id: `meal_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         mealType: swapMealType,
         name: option.name,
@@ -708,6 +735,7 @@ export default function DietScreen() {
         cuisine: "cuisine" in option ? option.cuisine : undefined,
         isConsumed: false,
       };
+      const newMeal = withServings(authored, servings);
       await swapMeal(swapMealType, newMeal, swapSnackIndex);
       await keepMenuInStep(swapMealType, newMeal, swapSnackIndex);
       Haptics.selectionAsync().catch(() => {});
@@ -1045,22 +1073,29 @@ export default function DietScreen() {
   const mealItems = useMemo<MealListItem[]>(() => {
     const items = mealRows
       .filter((r) => r.meal)
-      .map((r, i) => ({
-        key: r.key,
-        id: r.meal!.id,
-        mealType: r.mealType,
-        snackIndex: r.snackIndex,
-        label: r.label,
-        name: r.meal!.name,
-        calories: avg(r.meal!.calories),
-        proteinG: avg(r.meal!.proteinG),
-        carbsG: avg(r.meal!.carbsG),
-        fatG: avg(r.meal!.fatG),
-        completed: !!r.meal!.isConsumed,
-        smartSwap: r.smartSwap,
-        order: i,
-        consumedAt: r.meal!.consumedAt,
-      }));
+      .map((r, i) => {
+        // A ticked meal shows what she ATE: the plan's numbers × her portion,
+        // the same arithmetic the intake ledger recorded.
+        const portion = r.meal!.isConsumed ? (r.meal!.portionEaten ?? 1) : 1;
+        return {
+          key: r.key,
+          id: r.meal!.id,
+          mealType: r.mealType,
+          snackIndex: r.snackIndex,
+          label: r.label,
+          name: r.meal!.name,
+          calories: Math.round(avg(r.meal!.calories) * portion),
+          proteinG: Math.round(avg(r.meal!.proteinG) * portion),
+          carbsG: Math.round(avg(r.meal!.carbsG) * portion),
+          fatG: Math.round(avg(r.meal!.fatG) * portion),
+          completed: !!r.meal!.isConsumed,
+          smartSwap: r.smartSwap,
+          order: i,
+          consumedAt: r.meal!.consumedAt,
+          servings: r.meal!.servings,
+          portion,
+        };
+      });
     return items.sort((a, b) => {
       if (a.completed !== b.completed) return a.completed ? 1 : -1;
       if (!a.completed) return a.order - b.order;
@@ -1071,6 +1106,55 @@ export default function DietScreen() {
       );
     });
   }, [mealRows]);
+
+  // Opens the portion sheet for a ticked meal. Declared after `mealItems`
+  // because its deps array reads it during render.
+  const handleOpenPortion = useCallback(
+    (mealType: MealListItem["mealType"], snackIndex?: number) => {
+      const item = mealItems.find((m) => m.mealType === mealType && m.snackIndex === snackIndex);
+      if (!item || !item.completed) return;
+      const portion = item.portion ?? 1;
+      setPortionFor({
+        mealType,
+        snackIndex,
+        name: item.name,
+        plannedKcal: portion > 0 ? item.calories / portion : item.calories,
+        current: portion,
+      });
+    },
+    [mealItems],
+  );
+
+  const handlePickPortion = useCallback(
+    (portion: number) => {
+      const target = portionFor;
+      setPortionFor(null);
+      if (!target || Math.abs(portion - target.current) < 0.01) return;
+      Haptics.selectionAsync().catch(() => {});
+      void setMealPortion(target.mealType, target.snackIndex, portion);
+    },
+    [portionFor, setMealPortion],
+  );
+
+  // The honest line: a plan that can't reach her numbers says by how much
+  // (nutrition/portionSolver.planShortfall), instead of looking complete.
+  const todayShortfall = useMemo(
+    () =>
+      todayDiet?.schedule && nutritionTargets
+        ? planShortfall(todayDiet.schedule, nutritionTargets)
+        : null,
+    [todayDiet?.schedule, nutritionTargets],
+  );
+
+  // Yesterday, if it can still be logged and reads as only partly logged:
+  // the row offers "Yes, that was all" for it too.
+  const partialYesterday = useMemo(() => {
+    const y = shiftDate(currentDate, -1);
+    if (!canLogForDate(y)) return null;
+    const entry = dietHistory.find((d) => d.date === y);
+    if (!entry || !hasRecordedIntake(entry)) return null;
+    return countsAsDay(entry, nutritionTargets?.calories) ? null : y;
+  }, [currentDate, dietHistory, nutritionTargets?.calories]);
 
   // Current meal in the slot being swapped (for smart-pick deltas).
   const currentSlotMeal = useMemo<ScheduledMeal | null>(() => {
@@ -1092,10 +1176,18 @@ export default function DietScreen() {
       targets: todayTargets,
       consumed,
       slotsRemaining: mealsRemaining,
+      slot: swapMealType,
     })
       .filter((s) => s.option.name !== currentSlotMeal?.name)
       .slice(0, 3);
-  }, [swapOptions, currentSlotMeal, todayTargets, consumed, mealsRemaining]);
+  }, [swapOptions, currentSlotMeal, todayTargets, consumed, mealsRemaining, swapMealType]);
+
+  // What the slot being swapped has left: every option in the sheet is offered
+  // at the serving that fits it (the same solver that sizes a day).
+  const swapBudget = useMemo(
+    () => slotBudget(todayTargets, consumed, mealsRemaining),
+    [todayTargets, consumed, mealsRemaining],
+  );
 
   // Options for a given slot in the active diet — the pool an alternative is
   // drawn from.
@@ -1138,7 +1230,8 @@ export default function DietScreen() {
     }
     setAltSuggestion({
       option: alt.option,
-      match: alt.match,
+      difference: alternativeDifference(alt.delta),
+      servings: alt.servings,
       mealType: nextMeal.type,
       snackIndex: nextMeal.snackIndex,
     });
@@ -1148,19 +1241,22 @@ export default function DietScreen() {
   // confirm with a toast. The next-meal card animates to the new meal.
   const handleConfirmAlternative = useCallback(async () => {
     if (!altSuggestion) return;
-    const { option, mealType, snackIndex } = altSuggestion;
-    const newMeal: ScheduledMeal = {
-      id: `alt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      mealType,
-      name: option.name,
-      calories: option.calories,
-      proteinG: option.protein,
-      carbsG: option.carbs,
-      fatG: option.fat,
-      isNigerian: option.isNigerian,
-      cuisine: option.cuisine,
-      isConsumed: false,
-    };
+    const { option, mealType, snackIndex, servings } = altSuggestion;
+    const newMeal: ScheduledMeal = withServings(
+      {
+        id: `alt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        mealType,
+        name: option.name,
+        calories: option.calories,
+        proteinG: option.protein,
+        carbsG: option.carbs,
+        fatG: option.fat,
+        isNigerian: option.isNigerian,
+        cuisine: option.cuisine,
+        isConsumed: false,
+      },
+      servings,
+    );
     setAltSuggestion(null);
     await swapMeal(mealType, newMeal, snackIndex);
     await keepMenuInStep(mealType, newMeal, snackIndex);
@@ -1596,6 +1692,11 @@ export default function DietScreen() {
                     and silent for everyone else. */}
                 <TargetsRecalcCard style={styles.disclaimer} />
 
+                {/* Once per move: her numbers followed her weight, or an offer
+                    (ease the pace, a learned burn, an activity level) is
+                    waiting for her one-tap answer. Silent otherwise. */}
+                <TargetUpdateCard style={styles.disclaimer} />
+
                 {/* When a condition CONSTRAINED these numbers (a renal protein
                     cap, a diabetic carb cap), the reason and the referral ride
                     with them — a capped number shown bare reads as a
@@ -1695,10 +1796,30 @@ export default function DietScreen() {
                     subtitle={`${mealItems.filter((m) => m.completed).length} of ${mealItems.length} eaten`}
                     weight="700"
                   />
+                  {todayShortfall ? (
+                    <AppText variant="footnote" color="secondary" style={styles.shortfall}>
+                      {todayShortfall}
+                    </AppText>
+                  ) : null}
                   <MealsList
                     meals={mealItems}
                     onToggle={handleToggleMeal}
                     onSwap={handleOpenSwapModal}
+                    onPortion={handleOpenPortion}
+                  />
+                  <DayCompleteRow
+                    today={currentDate}
+                    hasIntake={consumedNutrition.calories > 0}
+                    yesterday={partialYesterday}
+                    onMark={markDayComplete}
+                  />
+                  <PortionSheet
+                    visible={portionFor !== null}
+                    name={portionFor?.name ?? ""}
+                    plannedKcal={portionFor?.plannedKcal ?? 0}
+                    current={portionFor?.current ?? 1}
+                    onPick={handlePickPortion}
+                    onClose={() => setPortionFor(null)}
                   />
                   {chain.moment && (
                     <AnchorChainChip
@@ -1969,7 +2090,7 @@ export default function DietScreen() {
                       {selectedMatchScore && (
                         <View style={styles.scheduleMatch}>
                           <Pill
-                            label={`${Math.round(selectedMatchScore.score)}% match`}
+                            label={dietFitLabel(selectedMatchScore)}
                             tone={getScoreColor(selectedMatchScore.score)}
                             size="sm"
                           />
@@ -2051,7 +2172,7 @@ export default function DietScreen() {
                   Recommended for you
                 </AppText>
                 <AppText variant="subhead" color="tertiary" style={styles.modalSectionSub}>
-                  87–96% match based on your profile
+                  Strong fits for your goal, choices and health
                 </AppText>
                 {recommended.map((match) => {
                   const diet = DIET_DATABASE.find((d) => d.id === match.dietId);
@@ -2080,7 +2201,7 @@ export default function DietScreen() {
                   Other safe options
                 </AppText>
                 <AppText variant="subhead" color="tertiary" style={styles.modalSectionSub}>
-                  75–86% match — compatible with your profile
+                  Good fits that are safe for your profile
                 </AppText>
                 {safeOptions.slice(0, 6).map((match) => {
                   const diet = DIET_DATABASE.find((d) => d.id === match.dietId);
@@ -2242,7 +2363,7 @@ export default function DietScreen() {
                         key={idx}
                         pick={pick}
                         colors={colors}
-                        onPress={() => handleSwapMealOption(pick.option)}
+                        onPress={() => handleSwapMealOption(pick.option, pick.servings)}
                       />
                     ))}
                   </View>
@@ -2259,10 +2380,12 @@ export default function DietScreen() {
 
                 {swapOptions.map((option, idx) => {
                   const isMealOption = "protein" in option;
+                  // Offered at the serving that fits what this slot has left.
+                  const s = swapServings(option, swapMealType, swapBudget);
                   return (
                     <Card
                       key={idx}
-                      onPress={() => handleSwapMealOption(option)}
+                      onPress={() => handleSwapMealOption(option, s)}
                       style={styles.swapCard}
                       padding="lg"
                       elevation="xs"
@@ -2273,9 +2396,10 @@ export default function DietScreen() {
                             {option.name}
                           </AppText>
                           <AppText variant="footnote" color="tertiary" style={styles.swapMacros}>
-                            {avg(option.calories)} kcal
+                            {s !== 1 ? `${servingsLabel(s)}  ·  ` : ""}
+                            {Math.round(avg(option.calories) * s)} kcal
                             {isMealOption &&
-                              `  ·  P ${avg((option as DietMealOption).protein)}g  ·  C ${avg((option as DietMealOption).carbs)}g`}
+                              `  ·  P ${Math.round(avg((option as DietMealOption).protein) * s)}g  ·  C ${Math.round(avg((option as DietMealOption).carbs) * s)}g`}
                           </AppText>
                         </View>
                         {option.isNigerian && (
@@ -2366,7 +2490,7 @@ function AlternativeToast({
   onConfirm,
   onDismiss,
 }: {
-  suggestion: { option: DietMealOption; match: number } | null;
+  suggestion: { option: DietMealOption; difference: string; servings: number } | null;
   colors: Colors;
   isDark: boolean;
   bottomOffset: number;
@@ -2423,7 +2547,7 @@ function AlternativeToast({
             uppercase
             style={[styles.bold, styles.flex]}
           >
-            Alternative · {Math.round(suggestion.match * 100)}% nutrition match
+            Alternative · {suggestion.difference}
           </AppText>
           <Pressable
             onPress={onDismiss}
@@ -2541,9 +2665,10 @@ function SmartPickCard({
             )}
           </View>
           <AppText variant="footnote" color="tertiary" style={styles.swapMacros}>
-            {avg(pick.option.calories)} kcal
+            {pick.servings !== 1 ? `${servingsLabel(pick.servings)}  ·  ` : ""}
+            {pick.kcal} kcal
             {isMeal &&
-              `  ·  P ${avg((pick.option as DietMealOption).protein)}g  ·  C ${avg((pick.option as DietMealOption).carbs)}g`}
+              `  ·  P ${pick.proteinG}g  ·  C ${Math.round(avg((pick.option as DietMealOption).carbs) * pick.servings)}g`}
           </AppText>
           <AppText variant="footnote" color="secondary" style={styles.smartReason}>
             {pick.reason}
@@ -2599,7 +2724,7 @@ function DietCard({
         <View style={styles.flex}>
           <AppText variant="callout">{diet.name}</AppText>
           <View style={styles.dietBadges}>
-            <Pill label={`${Math.round(match.score)}% match`} tone={scoreColor} size="sm" />
+            <Pill label={dietFitLabel(match)} tone={scoreColor} size="sm" />
             {/* Names what the plan IS: a protocol authored around a diagnosis
                 rather than a goal. Not a tier marker — the whole catalog is
                 free — but the label is what tells someone managing a condition
@@ -2742,7 +2867,7 @@ function CategoryBrowser({
                       </AppText>
                     </View>
                     <Pill
-                      label={`${Math.round(match.score)}%`}
+                      label={dietFitLabel(match)}
                       tone={getScoreColor(match.score)}
                       size="sm"
                     />
@@ -2973,6 +3098,7 @@ const styles = StyleSheet.create({
   },
   receiptRowText: { flex: 1 },
   disclaimer: { marginBottom: Spacing.xxl },
+  shortfall: { marginBottom: Spacing.sm },
   macroRingItem: { alignItems: "center", gap: Spacing.sm },
   macroRingLabel: { marginTop: 2 },
 

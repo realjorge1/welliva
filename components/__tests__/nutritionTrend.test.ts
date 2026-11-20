@@ -16,13 +16,16 @@ import {
 const TODAY = "2026-10-31";
 const TARGETS = { calories: 2000, proteinG: 100, carbsG: 250, fatG: 70 };
 
-const day = (date: string, kcal: number, p = 0, c = 0, f = 0): DietHistoryEntry => ({
+// A WHOLE day by default (three meals ticked): since 2026-11-20 the trend
+// draws only whole days, and these fixtures are about arithmetic and geometry.
+// The partial-day rule has its own test below.
+const day = (date: string, kcal: number, p = 0, c = 0, f = 0, meals = 3): DietHistoryEntry => ({
   date,
   dietId: "d",
   dietName: "Diet",
-  mealsConsumed: 1,
+  mealsConsumed: meals,
   totalMeals: 3,
-  status: "partial",
+  status: meals === 3 ? "completed" : "partial",
   consumedCalories: kcal,
   consumedProteinG: p,
   consumedCarbsG: c,
@@ -40,6 +43,16 @@ describe("buildNutritionTrend", () => {
   it("leaves out a closed day with nothing logged — not a zero", () => {
     const t = buildNutritionTrend(
       [day("2026-10-28", 0), day("2026-10-29", 1800, 90, 200, 60)],
+      TODAY,
+      7,
+      TARGETS,
+    );
+    expect(t.days.map((d) => d.date)).toEqual(["2026-10-29"]);
+  });
+
+  it("leaves out a one-snack day — part of a day is not a day (2026-11-20)", () => {
+    const t = buildNutritionTrend(
+      [day("2026-10-28", 180, 2, 30, 6, 1), day("2026-10-29", 1800, 90, 200, 60)],
       TODAY,
       7,
       TARGETS,

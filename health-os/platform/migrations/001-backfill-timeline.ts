@@ -21,12 +21,10 @@ import { localMidnightISO, localMidnightMs } from "../clock";
 import { ulidFromSeed } from "../id";
 import { LEGACY } from "../storage/keys";
 import type {
-  BodyMeasurementPayload,
   CheckinPayload,
   CoachEpisodePayload,
   MealLoggedPayload,
   MealSkippedPayload,
-  NutritionDayClosedPayload,
   WaterDayClosedPayload,
   WorkoutCompletedPayload,
   WorkoutSummaryPayload,
@@ -34,6 +32,7 @@ import type {
 import { buildEvent } from "../../timeline/events";
 import type { HealthEvent } from "../../timeline/events";
 import { TimelineRepository } from "../../timeline/TimelineRepository";
+import { backfillBodySeed, bodyEvent, dayClosedEvent } from "../../timeline/writers";
 import type { Migration, MigrationReport } from "./runner";
 
 function countByType(events: HealthEvent[]): Record<string, number> {
@@ -91,26 +90,10 @@ export const migration001: Migration = {
           }),
         );
       }
-      events.push(
-        buildEvent<NutritionDayClosedPayload>({
-          type: "nutrition.day.closed",
-          id: ulidFromSeed(`diet:${d.date}:dayclosed`, ms),
-          localDate: d.date,
-          ts,
-          source: "import",
-          payload: {
-            dietId: d.dietId,
-            dietName: d.dietName,
-            mealsConsumed: d.mealsConsumed,
-            totalMeals: d.totalMeals,
-            status: d.status,
-            consumedCalories: d.consumedCalories,
-            consumedProteinG: d.consumedProteinG,
-            consumedCarbsG: d.consumedCarbsG,
-            consumedFatG: d.consumedFatG,
-          },
-        }),
-      );
+      // Built by the shared writer (health-os/timeline/writers), with the
+      // same seed the LIVE day-close writer uses — so a day backfilled here
+      // and re-emitted at its next close is one event, never two.
+      events.push(dayClosedEvent(d, "import"));
     }
 
     // ── water history → hydration.day.closed ──
@@ -181,16 +164,9 @@ export const migration001: Migration = {
     // ── body logs → body.measurement.logged ──
     body.forEach((b, i) => {
       if (!b?.date) return;
-      events.push(
-        buildEvent<BodyMeasurementPayload>({
-          type: "body.measurement.logged",
-          id: ulidFromSeed(`body:${i}:${b.date}`, localMidnightMs(b.date)),
-          localDate: b.date,
-          ts: localMidnightISO(b.date),
-          source: "import",
-          payload: { weightKg: b.weightKg, waistCm: b.waistCm, notes: b.notes },
-        }),
-      );
+      // Seeded by POSITION, as it always was (changing it would re-key every
+      // event already backfilled). The live writer matches weigh-ins by date.
+      events.push(bodyEvent(b, backfillBodySeed(i, b.date), "import"));
     });
 
     // ── gozlin check-ins → checkin.logged ──

@@ -180,7 +180,7 @@ Owner's answers at kickoff: they had tried the tracker on their phone and nothin
 
 `predict.ts` (`fromTest`, `lastPositiveTest`, `LIVE_TEST_MIN_DAY` 6, `TEST_HALF_WIDTH` 2 personal / 3 default).
 
-- **The anchor:** the last positive test from cycle day 7 (start + 6) to today. `personalLuteal` now uses the same `lastPositiveTest` rule. Ovulation = test + 1, likely start = ovulation + `lutealDays`, window ± `TEST_HALF_WIDTH`. It replaces the calendar estimate for this cycle, even a narrower one.
+- **The anchor:** ~~the last positive test~~ — since 2026-11-20 the FIRST positive of the latest run (`surgeStart`, see "Fix 5" below), from cycle day 7 (start + 6) to today. `personalLuteal` uses the same rule. Ovulation = test + 1, likely start = ovulation + `lutealDays`, window ± `TEST_HALF_WIDTH`. It replaces the calendar estimate for this cycle, even a narrower one.
 - **Calendar spacing:** `cycleLength` stays her usual length, which spaces the later calendar cycles. The dial's ring (`ringDays`) and the centre's "of about N" use this cycle's expected length (`lastStart → likely`).
 - **Words:** `confidenceLine` → "Updated from your ovulation test on Tue 12 Nov.", `confidenceWord`/`glanceConfidence` → "From your test". The coach hears "fairly sure", never that a test was taken (no new coach words).
 - **PCOS:** dates don't move, and the day sheet's test row says why. `personalLuteal` (the learning from 2+ completed cycles) does not treat PCOS specially; that was left as it was, because a period arriving 9–17 days after a positive is evidence ovulation happened.
@@ -236,9 +236,107 @@ Nothing new takes the one suggestion slot (`suggest.ts`). The receipt sits under
 
 **Legal:** `LEGAL_VERSION` 5, "14 November 2026". The Privacy Policy's cycle-log sentence now lists "whether cramps kept you from school, work or plans" and "discharge if you turn on the fertile-window estimate". `npm run legal:publish` waits for the owner's OK.
 
+## 2026-11-20: the engine fixes
+
+Built from `docs/prompts/05-cycle-engine-fixes.md` after the 2026-11-16 audit. The proof is `services/cycle/__tests__/audit.test.ts` (one test per acceptance line, written first and watched failing) and the seeded simulator (`__tests__/simulate.ts`, `engineAccuracy.test.ts`; before/after in `docs/cycle/engine-accuracy.md`). Owner's answers: temperature yes (privacy wording needs a final OK, so the log row is off: `bbt.TEMPERATURE_LOGGING`), FIGO 2018 everywhere, clear-and-stretchy marks the day fertile, pill mode for the combined pill only.
+
+### Fix 11 + the repair half of Fix 1: clean history
+
+`episodes.ts` (`splitEpisodes`, `MIN_COUNTED_CYCLE` 15), `store.ts` (`tidyPeriods`).
+
+- **Derived, never rewritten.** Every read splits the live episodes into **periods** and **strays**: an episode starting fewer than 15 days after the previous *period* began is bleeding between periods, whatever opened it (an old build's mid-cycle flow, or a "Period started" tap). Starts within `CONTINUATION_GAP_DAYS + 1` of each other are one period (earlier start, later end).
+- **Readers of "a period" use `periods`:** `buildCycles`, `predict`, `todayStatus`, `typicalPeriodLength` (via `periodsFrom`), `completedPeriods`, `dialModel`, `paintDays`, `startReceipt`, `doctorSummary` + CSV, `DayLogSheet`'s cycle day. **Deliberately all bleeding:** `ironMoment` (blood lost), the menopause note (any bleed), `long_bleeding` (how long, stray or not — worded "Bleeding from…"), lock-screen buttons (explicit), `episodeOn`/continuation.
+- Strays' days feed `betweenPeriods` (`strayBleedDays`: the first day always, the span only when she ended it). The calendar draws them as `between`: rose ink and a rose bar, never the period disc. CSV row `bleeding_between`.
+- **Duplicates from two phones:** every load runs `normalizeEpisodes` and writes back only if the canonical list changed. Deterministic (earlier start, then lower id survives), so phones converge.
+- **Spotting-only near ovulation:** the between-periods check now leaves out only SPOTTING within a day of the estimated ovulation (what its note says); a light or heavier flow there counts.
+
+### Fix 1: a flow outside a period
+
+`bleeding.ts` (`classifyFlowDay`, `bleedPrompt`, `START_SLACK_DAYS` 4, `ASK_RUN_DAYS` 2), `dayWrite.ts` (`applyDayPatch`, `answerBleed`).
+
+| Flow on a day outside any period | Normal / postpartum with a forecast |
+|---|---|
+| Within 3 days of a period | continues it (unchanged) |
+| Spotting | between, always |
+| Under 15 days after her last period began | between, said in one line |
+| On/after the window's earliest day − 4, or late | starts a period |
+| Clearly early | asks "Is this the start of your period?" |
+| Filling in history before a logged period | starts, unless within 15 days of either neighbour |
+| No forecast (hormonal, first log, first after a birth) | starts if 15+ days after the last start |
+
+Pregnancy and menopause keep the old rule. Only a change of FLOW is classified. Unanswered = no episode, no forecast change; a second consecutive day re-asks; past 2 days of a run it stays quiet. "No" is stored as **`CycleDayLog.bleedAnswer: "between"`** on the run's first day (not in settings: settings sync last-write-wins as a whole object, days merge per date, so the answer survives two phones — tested). "It was my period" undoes it. The lock-screen "Started today" is explicit and never reads flow, so it doesn't go through this.
+
+### Fix 4: the setup answer fades
+
+`PRIOR_CYCLES` { told 2, unsure 0.5 } × `PRIOR_FADE` 0.6 ^ n; `meanLength = (w0·told + n·median) / (w0 + n)`. The weight never depends on her spread; PCOS/age shape only the spread. Uncertainty of the middle: `σ²·(w0 + n·π/2)/(w0+n)²` (her cycles enter as a median, which wobbles π/2 as much as a mean).
+
+### Fix 6: the textbook second half is 13 days
+
+`DEFAULT_LUTEAL_DAYS` 13 (Bull 2019: 12.4). Library and hormone text quote the 11–16 range, unchanged.
+
+### Fix 9: long gaps
+
+`GAP_MIN_DAYS` 60 (was 45), `GAP_FACTOR` 1.75. An unanswered gap stays out of the forecast but counts toward the long-cycle note "as if that was one real cycle" (said in the note). Two or more unanswered gaps in her last `GAP_PATTERN_WINDOW` 4 cycles are counted (`assumedLong`) and still asked about once each ("Yes, one long cycle" / "Yes, add it" / "A pause").
+
+### Fix 5: ovulation tests
+
+`surgeStart` (first positive of the latest run; runs split by `LH_RUN_GAP_DAYS` 3), `negativesNotBefore` (negatives on 2 of 3 days ending D, D ≥ estimate − 1, no positive → ovulation ≥ D + 1, capped `NEGATIVE_SHIFT_MAX_DAYS` 14). `Prediction.testBasis`: "positive" | "negatives" | "temperature" | null — each has its own words (`testBasisLine`, `confidenceWord`: "From your test" / "From your tests" / "From your temperature"; the coach hears "fairly sure"). PCOS: LH tests move nothing and no longer teach her luteal length either (a temperature rise still does). Existing users' learned second half may shift a day once.
+
+### Fix 7: temperature and discharge
+
+`bbt.ts`: `temperatureC` (34–42 °C, 0.05 steps), `temperatureUnit` (°C/°F, display only). Rise = 3 consecutive days (`HIGH_DAYS`) above the highest of the previous 6 readings (`COVER_READINGS`, within `COVER_LOOKBACK_DAYS` 10), the third ≥ `RISE_MIN_C` 0.2 above; ovulation = the day before the first high day; readings outside 35–38 °C ignored. A rise dates this cycle (`testBasis` "temperature", PCOS allowed) and is a luteal sample (LH preferred). Library page "Tracking your temperature" quotes the same numbers. **`TEMPERATURE_LOGGING` is on** (owner's "yes", 2026-11-20): the day-sheet row (fertile window on), the °C/°F chips in Cycle settings and the library page. The Privacy Policy's cycle-log line names "your resting temperature on waking" and the Medical Disclaimer says it confirms and never predicts — `LEGAL_VERSION` 7, published.
+
+Discharge: a clear-and-stretchy day is `fertile` (and `fertileCore`) on the calendar, a fertile stroke on the dial today, and `view.fertileNow` adds "…today counts as fertile, whatever the estimate says." No date moves.
+
+### Fix 2: an honest fertile window
+
+`fertileSpan`: ovulation ~ N(estimate, sd), `sd² = max(1, σ² − lutealSd² + meanVariance)` (`LUTEAL_SD` 1.5, or her own samples' spread from 3), `TEST_OVULATION_SD` 1 when her signs dated it. The window is every day a plausible ovulation (the middle 60%, `FERTILE_Z` 0.84 each side) makes fertile — monotone by construction. (The brief's "days with ≥ 20% chance" rule narrows and finally vanishes as the spread grows; it is kept only as the CORE: `fertileCore`, days ≥ 50%.) Regular: 7 days; variable 24–40: 17; told only: 11. `fertileWindowNote`: "Wide because your cycles vary. Ovulation tests narrow it." / "A rough window from what you told me…". Never "safe days". Each cycle ahead widens (`projectAhead`, `sd_k² = sd² + k·σ²`); `afterNext` is the trip check's and the phone calendar's rough mark. `todayStatus.phase` follows the point estimate (so the hormone card stays right); `inFertileWindow` drives the "Fertile window (estimate)" label and the coach's phase word.
+
+### Fix 3: late is information
+
+`Prediction.overdue { days, original }`, `fertileKnown`, `givenWindow()`, `LATE_WINDOW_AHEAD` 5. Past the window she was given: `earliest/likely/latest` roll ("any day now": today … today + 5), `afterNext` is null (no second cycle), `fertileKnown` false unless a positive test or temperature dated it. **Everything that judges or times against the forecast uses `givenWindow`:** `lateBy`, `ringDays`, the dial's passed window, reminders (the check-in isn't re-laid daily), the receipt, `classifyFlowDay`, water, the doctor summary. Phone calendar: one "Period any day now" block (discreet: "Plan-ahead days"), no rough mark, no window. The pregnancy-test advice is unchanged (tested at 3, 10, 40 days).
+
+### Fix 8: it checks itself
+
+`backtest.ts`: her last `BACKTEST_CYCLES` 6 completed counted cycles (never the first 2), each re-forecast the day after it began from what was logged by then (calibration off). From `MIN_BACKTEST` 4: `calibrationScale` = 1 + n/(n+4) × (z(0.8)/z(p) − 1), p = (hits+½)/(n+1), within 0.85–1.6. (The brief's linear formula moved an irregular cycler from 68% to 70%; the z-ratio is what a coverage change actually needs.) `MAX_HALF_WIDTH` 10 → 14. `BIAS_CORRECTION` is OFF: the simulator showed it hurt three archetypes. The Next period card says "5 of your last 6 forecasts landed inside the window." (`calibrationLine`, from 4, not when late).
+
+### Fix 10: one medical standard
+
+`standards.ts`: FIGO 2018 — cycles under 24 / over 38 days (21 / 45 under 20), bleeding over 8 days, regularity 7 days at 26–41, 9 otherwise. `flags.ts` and the library import them; the library tests hold the words to the numbers and the source line. `visibleNotes` keeps a dismissed note dismissed when its evidence is a subset of what she dismissed (so the change of standard never resurrects one).
+
+### Fix 12: the combined pill
+
+`pill.ts`: "Which one?" (Combined pill / Another method) after a "yes", in setup and settings; `Contraception.method`, `packDays` (28 or 91). `pillForecast` = last bleed + pack ± 2, "from your pack schedule", never "period"; missed → the late page's own pregnancy-test line; gone a whole pack later. The mode stays "hormonal": no window, ovulation, phases, late, hormone card or hungry plan. One check-in the morning after the window ("Has your bleed started?"; discreet by default). Another method stays log-only.
+
+### Every mode (2026-11-20 fixes)
+
+Held by the third table in `modes.test.ts`.
+
+| | Asks "is this your period?" | Fertile window | "Any day now" when late | Self-check | Temperature dates it | Stretchy = fertile | Pack forecast |
+|---|---|---|---|---|---|---|---|
+| Normal | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – |
+| Hormonal contraception | – | – | – | – | – | – | ✓ (combined pill) |
+| Pregnancy | – | – | – | – | – | – | – |
+| Postpartum | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – |
+| Menopause | – | – | – | – | – | – | – |
+
+### What's stored (2026-11-20)
+
+| Field | Where | Export | Erased by "Delete all cycle data" |
+|---|---|---|---|
+| `bleedAnswer` | day logs (only beside a flow) | CSV `bleeding_answer` | Yes |
+| `temperatureC` | day logs (row shown with the fertile window on) | CSV `temperature_c` (not in the doctor summary) | Yes |
+| `temperatureUnit` | settings | No (display only) | Yes |
+| `contraception.method`, `.packDays` | settings | CSV contraception row; doctor summary | Yes |
+
+All inside the existing cycle documents, so they ride the sync merge, the backup namespace (`@welliva_cycle_*` ↔ `@welliva_cycle_local_*`) and the erase. **Nothing new reaches Gozlin** (the brief's words for a dated window are "fairly sure"; no temperature, no answer, no pill line) **or the lock screen** (the pill check-in is discreet by default). No analytics.
+
+**Legal:** `LEGAL_VERSION` 7, "20 November 2026" (re-gates everyone once, because v6 had reached users). Privacy Policy: the cycle-log line adds "your resting temperature on waking" (fertile-window users) and "whether it is the combined pill and how long its pack is"; the "Why" line says "your next period (or, on the combined pill, your next bleed)". Medical Disclaimer: temperature confirms, never predicts, and is thrown off by illness, alcohol, sleep, travel and shift work; on the combined pill the next bleed is shown "from your pack schedule: a schedule, not a forecast of your body". Published with the owner's "yes". The coach-sees list is unchanged in all three places: nothing new reaches the coach.
+
 ## Not done
 
-- **No device testing.** Nothing here has run on a phone, including the original tracker.
+- **No device testing.** Nothing here has run on a phone, including the original tracker. The 2026-11-20 engine fixes weren't seen on a phone either (Metro was off).
+- **Temperature logging** was switched on 2026-11-20 with `LEGAL_VERSION` 7 (owner's "yes"); like everything above, it hasn't been seen on a phone.
 - **`npm run legal:publish`** has to run before release, with the owner's OK, so the public pages match `constants/legal.ts` (now version 5).
 - **The PIN fallback for the lock needs the owner's next build** (expo-local-authentication). Until then, the lock uses the fingerprint only.
 - **Android app-switcher preview:** the cover may land after the snapshot. Blocking it for certain needs a native screen-capture module, which is the owner's call.

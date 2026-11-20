@@ -71,10 +71,13 @@ const SURE_FOR_COACH: Record<ConfidenceWord, string> = {
   "Fairly sure": "fairly sure",
   "Still learning": "still learning her rhythm",
   "Varies for you": "her cycles vary, so the window is wide",
-  // Dated by a positive ovulation test this cycle. The coach-sees list covers
-  // "when your next period is likely", not her test results, so it hears only
-  // how sure the window is: a test-dated window is narrow.
+  // Dated by her own signs this cycle (a positive test, a run of negatives, a
+  // temperature rise). The coach-sees list covers "when your next period is
+  // likely", not her test results or her temperature, so it hears only how
+  // sure the window is: a window dated that way is narrow.
   "From your test": "fairly sure",
+  "From your tests": "fairly sure",
+  "From your temperature": "fairly sure",
 };
 
 function phaseWords(phase: Phase | null, showFertile: boolean): string | null {
@@ -123,7 +126,12 @@ export function buildCycleBrief(input: {
     lifeStage: status.mode,
     cycleDay: status.cycleDay,
     periodDay: status.periodDay,
-    phase: phaseWords(status.phase, input.showFertileWindow),
+    // The same words the cycle screen uses: a day inside a widened fertile
+    // window is "fertile window" there, so it is here too (./copy phaseLabel).
+    phase:
+      input.showFertileWindow && status.inFertileWindow
+        ? "fertile window (estimate)"
+        : phaseWords(status.phase, input.showFertileWindow),
     nextPeriodFrom: predicting && !status.inPeriod ? Math.max(0, status.toEarliest ?? 0) : null,
     nextPeriodTo: predicting && !status.inPeriod ? Math.max(0, status.toLatest ?? 0) : null,
     lateByDays: status.lateBy > 0 ? status.lateBy : null,

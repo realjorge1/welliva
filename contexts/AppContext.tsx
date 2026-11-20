@@ -32,6 +32,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -73,6 +74,9 @@ import {
 import { calculateNutritionTargets, maintenanceTdee } from "../services/NutritionService";
 import { ZERO_MACROS, type MacroTotals } from "../services/nutrition/DayTotals";
 import { reconcileTargetsVersion } from "../services/nutrition/TargetsVersion";
+import type { TargetOffer } from "../services/nutrition/targetOffers";
+import { stageLearnedOffer } from "../services/nutrition/adaptiveTargets";
+import { stageActivityOffer } from "../services/nutrition/activityCalibration";
 import { firstDrinkOn } from "../services/nutrition/waterStore";
 import {
   archiveWaterDay,
@@ -201,6 +205,14 @@ interface AppContextType {
     mealType: "breakfast" | "lunch" | "dinner" | "snack",
     snackIndex?: number,
   ) => Promise<void>;
+  /** How much of a ticked meal she ate today (0.5 = half, 2 = double). */
+  setMealPortion: (
+    mealType: "breakfast" | "lunch" | "dinner" | "snack",
+    snackIndex: number | undefined,
+    portion: number,
+  ) => Promise<void>;
+  /** "That's everything" for a date (false = "not everything"). */
+  markDayComplete: (date: string, complete?: boolean) => Promise<void>;
   swapMeal: (
     mealType: "breakfast" | "lunch" | "dinner" | "snack",
     newMeal: import("../models/diet").ScheduledMeal,
@@ -239,6 +251,10 @@ interface AppContextType {
   bodyLogs: BodyLogEntry[];
   logBodyMeasurement: (entry: BodyLogEntry) => Promise<void>;
   setTargetWeight: (kg: number) => Promise<void>;
+  /** Let her numbers follow her weight trend (also run once a day). */
+  followWeight: (logs: BodyLogEntry[]) => Promise<void>;
+  /** Her answer to a one-tap target offer (pace guard, learned burn, activity). */
+  answerTargetOffer: (offer: TargetOffer, accept: boolean) => Promise<void>;
 
   // Plan state
   planState: PlanState;
@@ -328,6 +344,8 @@ type ProfileSlice = Pick<
   | "bodyLogs"
   | "logBodyMeasurement"
   | "setTargetWeight"
+  | "followWeight"
+  | "answerTargetOffer"
 >;
 
 /** Today's diet, consumed totals, hydration & coaching — the hot path. */
@@ -348,6 +366,8 @@ type NutritionSlice = Pick<
   | "toggleMealConsumed"
   | "swapMeal"
   | "addFoodAsSnack"
+  | "setMealPortion"
+  | "markDayComplete"
 >;
 
 /** Workout plan, logs & session history. */
@@ -458,6 +478,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     addFoodAsSnack,
     addWater,
     syncLiveCounters,
+    handleSetMealPortion,
+    handleMarkDayComplete,
   } = useNutritionState({
     userBio,
     nutritionTargets,
@@ -494,6 +516,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     updateGoals,
     logBodyMeasurement,
     setTargetWeight,
+    followWeight,
+    answerTargetOffer,
   } = useProfileState({
     userBio,
     nutritionTargets,
@@ -730,11 +754,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           // open simply resolves the same day twice to the same numbers.
           if (bio) {
             try {
-              await runDailyLearning({
+              const learned = await runDailyLearning({
                 mifflinTdee: maintenanceTdee(bio),
                 weightKg: bio.weightKg,
                 noisyWeightDates: await loadNoisyWeightDates(today),
+                targetKcal: calculateNutritionTargets(bio).calories,
               });
+              // A confident model's number becomes a one-tap offer, never a
+              // silent change (services/nutrition/adaptiveTargets).
+              await stageLearnedOffer(bio, learned, today);
+              // Logged training vs stated activity level: one step, one tap,
+              // silent once the learning model is confident.
+              await stageActivityOffer(bio, today);
             } catch {
               // Never let learning block boot — the app has to come up regardless.
             }
@@ -854,6 +885,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Goals + body-measurement handlers (updateGoals / logBodyMeasurement /
   // setTargetWeight) now live in contexts/domain/useProfileState (M4), wired above.
 
+  // Once a day her numbers are checked against her weight trend — a weigh-in
+  // can arrive from another phone through sync, not only through this one's
+  // quick-log. Same idempotent pass as after a weigh-in; a move is applied only
+  // when it is big enough to be worth its sentence.
+  const followedOn = useRef<string | null>(null);
+  useEffect(() => {
+    if (!userBio || bodyLogs.length === 0) return;
+    if (followedOn.current === currentDate) return;
+    followedOn.current = currentDate;
+    void followWeight(bodyLogs);
+  }, [userBio, bodyLogs, currentDate, followWeight]);
+
   // ============================================================================
   // RENDER
   // ============================================================================
@@ -895,6 +938,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       bodyLogs,
       logBodyMeasurement,
       setTargetWeight,
+      followWeight,
+      answerTargetOffer,
     }),
     [
       userBio,
@@ -909,6 +954,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       bodyLogs,
       logBodyMeasurement,
       setTargetWeight,
+      followWeight,
+      answerTargetOffer,
     ],
   );
 
@@ -929,6 +976,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toggleMealConsumed: handleToggleMealConsumed,
       swapMeal: handleSwapMeal,
       addFoodAsSnack,
+      setMealPortion: handleSetMealPortion,
+      markDayComplete: handleMarkDayComplete,
     }),
     [
       consumedNutrition,
@@ -946,6 +995,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       handleToggleMealConsumed,
       handleSwapMeal,
       addFoodAsSnack,
+      handleSetMealPortion,
+      handleMarkDayComplete,
     ],
   );
 

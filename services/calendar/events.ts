@@ -143,7 +143,20 @@ export interface CyclePredictionLike {
   cycleLength: number;
   fertileStart: string;
   fertileEnd: string;
+  /**
+   * The period after the next one, a cycle of spread wider — the "rough" mark.
+   * Null when there is none to show (she is late: nothing is projected from a
+   * date that has already been missed).
+   */
+  afterNext: { earliest: string; likely: string; latest: string } | null;
+  /** She is past the window she was given: the next block is "any day now", not a forecast. */
+  overdue: { days: number } | null;
+  /** This cycle's fertile window can be shown (false once late, unless a test or temperature dated it). */
+  fertileKnown: boolean;
 }
+
+/** A window this long says why it is wide (services/cycle/predict WIDE_WINDOW_DAYS). */
+const WIDE_FERTILE_DAYS = 12;
 
 /** How many coming periods go in: the next, and the one after as a rough mark. */
 const PERIODS_AHEAD = 2;
@@ -169,25 +182,37 @@ export function cycleEventSpecs(input: {
   if (!p) return [];
   const out: CalendarEventSpec[] = [];
   const length = Math.max(1, Math.round(p.periodLength || 5));
-  const every = Math.max(15, Math.round(p.cycleLength || 28));
+  // The next period, and the one after it as the prediction projects it.
+  const windows = [{ earliest: p.earliest, likely: p.likely, latest: p.latest }, p.afterNext];
 
   for (let i = 0; i < PERIODS_AHEAD; i++) {
-    const first = addDays(p.likely, i * every);
+    const w = windows[i];
+    if (!w) continue;
+    const first = w.likely;
     const last = addDays(first, length - 1);
     if (last < input.today) continue;
     const key = `${SCOPE_CODE.cycle}:p${i + 1}`;
     const { start, end } = allDayBlock(first, last);
+    const late = i === 0 && !!p.overdue;
     out.push({
       key,
       scope: "cycle",
-      title: input.discreet ? "Plan-ahead days" : i === 0 ? "Period likely" : "Period likely (rough)",
+      title: input.discreet
+        ? "Plan-ahead days"
+        : late
+          ? "Period any day now"
+          : i === 0
+            ? "Period likely"
+            : "Period likely (rough)",
       notes: withTag(
         key,
         input.discreet
           ? "From welliva. Open the app for what they mean."
-          : i === 0
-            ? `Most likely from ${first}; anywhere from ${p.earliest} to ${p.latest} is usual for you. It re-tunes as you log.`
-            : "A rough mark one cycle further on — it sharpens after the next period.",
+          : late
+            ? "Later than the window welliva gave, so it could start any day. This moves along as the days pass."
+            : i === 0
+              ? `Most likely from ${first}; anywhere from ${p.earliest} to ${p.latest} is usual for you. It re-tunes as you log.`
+              : `A rough mark one cycle further on: anywhere from ${w.earliest} to ${w.latest}. It sharpens after the next period.`,
       ),
       allDay: true,
       start,
@@ -195,9 +220,10 @@ export function cycleEventSpecs(input: {
     });
   }
 
-  if (input.fertileWindow && p.fertileEnd >= input.today) {
+  if (input.fertileWindow && p.fertileKnown && p.fertileEnd >= input.today) {
     const key = `${SCOPE_CODE.cycle}:w1`;
     const { start, end } = allDayBlock(p.fertileStart, p.fertileEnd);
+    const days = Math.round((dayStart(p.fertileEnd).getTime() - dayStart(p.fertileStart).getTime()) / 86_400_000) + 1;
     out.push({
       key,
       scope: "cycle",
@@ -206,7 +232,9 @@ export function cycleEventSpecs(input: {
         key,
         input.discreet
           ? "From welliva. Open the app for what they mean."
-          : "An estimate from your logs — never a form of contraception.",
+          : days > WIDE_FERTILE_DAYS
+            ? "An estimate from your logs, wide because your cycles vary — never a form of contraception."
+            : "An estimate from your logs — never a form of contraception.",
       ),
       allDay: true,
       start,

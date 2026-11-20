@@ -36,6 +36,14 @@ export interface NutritionDayClosedPayload {
   consumedProteinG?: number;
   consumedCarbsG?: number;
   consumedFatG?: number;
+  /**
+   * How much of the day was logged, judged at close (services/nutrition/
+   * dayStatus). Absent on days closed before 2026-11-20 — the learning
+   * series infers those. Only "complete"/"inferred" days are read as intake.
+   */
+  loggedness?: "none" | "partial" | "complete" | "inferred";
+  /** The calorie target the day was judged against. */
+  targetCalories?: number;
 }
 export interface WaterAddedPayload {
   ml: number;

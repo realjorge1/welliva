@@ -28,6 +28,8 @@
 import AILogoBadge from "@/components/gozlin/AILogoBadge";
 import { DisclaimerNote } from "@/components/legal";
 import { TargetGuidanceNote } from "@/components/nutrition/TargetGuidanceNote";
+import { PaceRow, type PaceRowProps } from "@/components/nutrition/PaceRow";
+import { dietFitLabel } from "@/services/intelligence/dietFitLabel";
 import {
   AnimatedNumber,
   AppText,
@@ -145,6 +147,8 @@ export interface PlanRevealProps {
   trainingEnabled: boolean;
   loading: boolean;
   onStart: () => void;
+  /** The Pace row under the target (losing or building only). */
+  pace?: Omit<PaceRowProps, "style">;
 }
 
 /* ───────────────────────────── Card chrome ─────────────────────────────── */
@@ -390,6 +394,7 @@ export function PlanReveal({
   trainingEnabled,
   loading,
   onStart,
+  pace,
 }: PlanRevealProps) {
   const { colors } = useColors();
   const { targets, topDiet, meals, splitType, trainingDays, equipmentSummary } = preview;
@@ -445,6 +450,7 @@ export function PlanReveal({
               </AppText>
             </View>
           </Appear>
+          {pace ? <PaceRow {...pace} style={styles.pace} /> : null}
         </Panel>
       </Appear>
 
@@ -483,13 +489,13 @@ export function PlanReveal({
                     </AppText>
                     <AppText variant="callout">{topDiet.diet.name}</AppText>
                   </View>
+                  {/* A plain label, never a percent: the score is a sort key
+                      made of hand-picked points, not a measurement. The
+                      reasons below say what was actually checked. */}
                   <View style={[styles.score, { backgroundColor: alpha(colors.primary, 0.12) }]}>
-                    <RevealNumber
-                      value={topDiet.score}
-                      delay={T.style + 120}
-                      variant="title"
-                      format={(n) => `${Math.round(n)}%`}
-                    />
+                    <AppText variant="footnote" color="brand" style={styles.fitLabel}>
+                      {dietFitLabel(topDiet.score)}
+                    </AppText>
                   </View>
                 </View>
                 <View style={styles.reasons}>
@@ -619,6 +625,7 @@ const styles = StyleSheet.create({
   legendItem: { gap: 2 },
   legendHead: { flexDirection: "row", alignItems: "center", gap: 6 },
   legendDot: { width: 7, height: 7, borderRadius: 4 },
+  pace: { marginTop: Spacing.sm },
   legendValue: { flexDirection: "row", alignItems: "baseline", gap: 6 },
   water: {
     flexDirection: "row",
@@ -657,6 +664,7 @@ const styles = StyleSheet.create({
   style: { gap: Spacing.md, borderTopWidth: HAIRLINE, paddingTop: Spacing.lg },
   styleRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
   score: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs, borderRadius: Radius.pill },
+  fitLabel: { fontWeight: "700" },
   reasons: { gap: Spacing.sm },
   reason: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
   bullet: { width: 5, height: 5, borderRadius: 3 },

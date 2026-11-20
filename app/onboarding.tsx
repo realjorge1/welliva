@@ -118,7 +118,7 @@ import type { DaySchedule, ScheduledMeal } from "../models/diet";
 import { addDays, dateRange } from "../models/mealPlan";
 import { generateDietPlan } from "../services/DietPlanGenerator";
 import { recommendDiets } from "../services/intelligence";
-import { calculateNutritionTargets } from "../services/NutritionService";
+import { calculateNutritionTargets, paceOptions } from "../services/NutritionService";
 import { midpoint } from "../services/nutrition/MealCatalog";
 import { cuisineWord, dishTitle } from "../services/nutrition/mealRules";
 import {
@@ -158,6 +158,7 @@ import {
   MedicalCondition,
   PrimaryGoal,
   Sex,
+  TargetPace,
   UserBio,
 } from "../models/user";
 import { Equipment } from "../models/workout";
@@ -537,6 +538,10 @@ export default function OnboardingScreen() {
   /** The workout library, loaded only once someone asks to choose. */
   const [catalog, setCatalog] = useState<typeof import("../fitness/services/WorkoutCatalog") | null>(null);
   const [mealsPerDay, setMealsPerDay] = useState<3 | 4>(3);
+  // Every new account is written with an explicit pace — "steady" unless she
+  // picks another on the reveal. An ABSENT pace is reserved for accounts from
+  // before pace existed (they keep their old fixed modifier).
+  const [pace, setPace] = useState<TargetPace>("steady");
   const [allergies, setAllergies] = useState<string[]>([]);
   const [customAllergy, setCustomAllergy] = useState("");
   const [medicalConditions, setMedicalConditions] = useState<MedicalCondition[]>([]);
@@ -875,8 +880,10 @@ export default function OnboardingScreen() {
       region: region.trim() || undefined,
       mealsPerDay,
       measurementUnits: { height: heightUnit, weight: weightUnit },
+      pace,
     }),
     [
+      pace,
       age,
       sex,
       heightCm,
@@ -1789,6 +1796,17 @@ export default function OnboardingScreen() {
                 trainingEnabled={trainingEnabled}
                 loading={loading}
                 onStart={handleComplete}
+                pace={
+                  planPreview.bio.primaryGoal === "lose_weight" ||
+                  planPreview.bio.primaryGoal === "build_muscle"
+                    ? {
+                        options: paceOptions(planPreview.bio),
+                        value: pace,
+                        onChange: setPace,
+                        direction: planPreview.bio.primaryGoal === "lose_weight" ? "lose" : "gain",
+                      }
+                    : undefined
+                }
               />
             ) : (
               <AnimatedText variant="support" color="secondary" align="center">

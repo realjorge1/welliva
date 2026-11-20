@@ -25,6 +25,8 @@ import {
 import { DietHistoryEntry, MealType, ScheduledMeal } from "../../models/diet";
 import { NutritionTargets } from "../../models/nutrition";
 import { parseLocalDate, toLocalDateString } from "../OfflineStorage";
+import { countsAsDay } from "../nutrition/dayStatus";
+import { servingsForBudget } from "../nutrition/portionSolver";
 
 // ────────────────────────────────────────────────────────────
 // Shared types
@@ -82,6 +84,42 @@ export interface SmartSwap {
   isBest: boolean;
   tags: SwapTag[];
   reason: string;
+  /**
+   * Servings the option is offered at, sized to the slot's budget by the same
+   * solver that sizes a day (nutrition/portionSolver). 1 = as authored.
+   */
+  servings: number;
+  /** The option's kcal and protein AT those servings — what the row shows. */
+  kcal: number;
+  proteinG: number;
+}
+
+/** What one slot has left: the day's remaining budget shared across the meals still ahead. */
+export function slotBudget(
+  targets: Pick<NutritionTargets, "calories" | "proteinG"> | null,
+  consumed: Pick<ConsumedTotals, "calories" | "proteinG">,
+  slotsRemaining: number,
+): { calories: number; proteinG: number } | null {
+  if (!targets) return null;
+  const slots = Math.max(1, slotsRemaining);
+  return {
+    calories: Math.max(0, targets.calories - consumed.calories) / slots,
+    proteinG: Math.max(0, targets.proteinG - consumed.proteinG) / slots,
+  };
+}
+
+/** The servings an option is offered at for a slot's budget. */
+export function swapServings(
+  option: DietMealOption | DietSnackOption,
+  slot: MealType,
+  budget: { calories: number; proteinG: number } | null,
+): number {
+  return servingsForBudget(
+    { calories: avg(option.calories), proteinG: optionProtein(option), carbsG: 0, fatG: 0 },
+    slot,
+    budget,
+    option.name,
+  );
 }
 
 export interface RankSwapsInput {
@@ -95,10 +133,12 @@ export interface RankSwapsInput {
    * per-meal budget so a single swap isn't asked to close the whole day's gap.
    */
   slotsRemaining: number;
+  /** The slot being swapped — decides the serving caps (a snack stops at 1½×). */
+  slot?: MealType;
 }
 
 function optionProtein(o: DietMealOption | DietSnackOption): number {
-  return "protein" in o ? avg(o.protein) : 0;
+  return "protein" in o && o.protein ? avg(o.protein) : 0;
 }
 
 /**
@@ -123,9 +163,15 @@ export function rankMealSwaps(input: RankSwapsInput): SmartSwap[] {
   const curCal = avg(current?.calories);
   const curProt = avg(current?.proteinG);
 
+  // Each alternative is SIZED to the slot's budget first (the same solver that
+  // sizes a day), then ranked as it would actually be served — a 400 kcal dish
+  // offered at 1½× to a 600 kcal slot is judged at 600, not 400.
+  const budget = targets ? { calories: calBudget, proteinG: protBudget } : null;
+
   const ranked: SmartSwap[] = options.map((option, index) => {
-    const optCal = avg(option.calories);
-    const optProt = optionProtein(option);
+    const servings = swapServings(option, input.slot ?? "lunch", budget);
+    const optCal = avg(option.calories) * servings;
+    const optProt = optionProtein(option) * servings;
 
     // Calorie fit: how close to the per-meal budget (when we know it).
     let calScore = 60;
@@ -161,7 +207,17 @@ export function rankMealSwaps(input: RankSwapsInput): SmartSwap[] {
 
     const reason = buildSwapReason(option, optCal, optProt, calBudget, protBudget);
 
-    return { option, index, score, isBest: false, tags, reason };
+    return {
+      option,
+      index,
+      score,
+      isBest: false,
+      tags,
+      reason,
+      servings,
+      kcal: Math.round(optCal),
+      proteinG: Math.round(optProt),
+    };
   });
 
   ranked.sort((a, b) => b.score - a.score);
@@ -222,8 +278,29 @@ export interface MealAlternative {
   option: DietMealOption;
   /** Index into the source options array. */
   index: number;
-  /** 0–1 nutrition similarity to the meal being replaced. */
+  /**
+   * 0–1 weighted closeness to the meal being replaced. A SORT KEY and a gate
+   * only (its weights are chosen, not measured) — never shown as a percent.
+   * What the user sees is {@link alternativeDifference}.
+   */
   match: number;
+  /** Servings it is offered at: sized to the meal it replaces (portionSolver). */
+  servings: number;
+  /** The real difference from the meal it replaces, at those servings. */
+  delta: { kcal: number; proteinG: number };
+}
+
+/**
+ * The swap suggestion's line, in real numbers: "+12 g protein · 40 kcal less".
+ * Small differences are called what they are rather than given false precision.
+ */
+export function alternativeDifference(delta: { kcal: number; proteinG: number }): string {
+  const parts: string[] = [];
+  const p = Math.round(delta.proteinG);
+  const k = Math.round(delta.kcal);
+  if (Math.abs(p) >= 3) parts.push(`${p > 0 ? "+" : "−"}${Math.abs(p)} g protein`);
+  if (Math.abs(k) >= 20) parts.push(`${Math.abs(k)} kcal ${k > 0 ? "more" : "less"}`);
+  return parts.length > 0 ? parts.join(" · ") : "About the same calories and protein";
 }
 
 export interface MealAlternativeInput {
@@ -268,17 +345,35 @@ export function findMealAlternative(
     const meal = option as DietMealOption;
     if (meal.name === current.name) return; // must be a different meal
 
+    // Sized to the meal it replaces (that meal may itself be 1½×), so the
+    // comparison — and the swap — is like for like.
+    const servings = servingsForBudget(
+      { calories: avg(meal.calories), proteinG: avg(meal.protein), carbsG: 0, fatG: 0 },
+      current.mealType,
+      { calories: tCal, proteinG: tProt },
+      meal.name,
+    );
+    const cal = avg(meal.calories) * servings;
+    const prot = avg(meal.protein) * servings;
+
     const match =
-      0.4 * nutrientCloseness(avg(meal.calories), tCal) +
-      0.25 * nutrientCloseness(avg(meal.protein), tProt) +
-      0.2 * nutrientCloseness(avg(meal.carbs), tCarb) +
-      0.15 * nutrientCloseness(avg(meal.fat), tFat);
+      0.4 * nutrientCloseness(cal, tCal) +
+      0.25 * nutrientCloseness(prot, tProt) +
+      0.2 * nutrientCloseness(avg(meal.carbs) * servings, tCarb) +
+      0.15 * nutrientCloseness(avg(meal.fat) * servings, tFat);
 
     if (match < minMatch) return;
 
     const sameCuisine =
       current.cuisine != null && meal.cuisine === current.cuisine;
-    eligible.push({ option: meal, index, match, sameCuisine });
+    eligible.push({
+      option: meal,
+      index,
+      match,
+      servings,
+      delta: { kcal: cal - tCal, proteinG: prot - tProt },
+      sameCuisine,
+    });
   });
 
   if (eligible.length === 0) return null;
@@ -289,8 +384,8 @@ export function findMealAlternative(
     return b.match - a.match;
   });
 
-  const { option, index, match } = eligible[0];
-  return { option, index, match };
+  const { option, index, match, servings, delta } = eligible[0];
+  return { option, index, match, servings, delta };
 }
 
 // ════════════════════════════════════════════════════════════
@@ -512,6 +607,8 @@ export function computeWeeklySummary(
   weekStart: string,
   today: string,
   live?: LiveDay,
+  /** Her calorie target, to judge days closed before day status was recorded. */
+  targetKcal?: number | null,
 ): WeeklyNutritionSummary {
   const monday = parseLocalDate(weekStart);
   const perDay: DayAdherence[] = [];
@@ -527,10 +624,16 @@ export function computeWeeklySummary(
   const avgAdherence =
     daysLogged > 0 ? logged.reduce((s, d) => s + d.pct, 0) / daysLogged : 0;
 
-  // Macro averages from recorded history within the week.
+  // Macro averages over WHOLE days only (said so, or inferred — see
+  // services/nutrition/dayStatus). An unlogged day used to be averaged in as
+  // 0 kcal and a one-snack day as a day's eating; both dragged the average to
+  // a number she never ate. Adherence above stays plan-based.
   const weekDates = new Set(perDay.map((d) => d.date));
   const withMacros = history.filter(
-    (h) => weekDates.has(h.date) && typeof h.consumedCalories === "number",
+    (h) =>
+      weekDates.has(h.date) &&
+      typeof h.consumedCalories === "number" &&
+      countsAsDay(h, targetKcal),
   );
   const avgCalories =
     withMacros.length > 0

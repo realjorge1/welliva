@@ -156,9 +156,9 @@ describe("the fertile window is opt-in", () => {
   it("on: four curves stretched to her cycle, ovulation marked, the peak timed", () => {
     const c = card("2026-09-29", { fertile: true })!;
     expect(c.picture!.curves.map((x) => x.id)).toEqual(["oestrogen", "progesterone", "lh", "fsh"]);
-    expect(c.picture!.ovulationDay).toBe(15); // 7 Oct is day 15 from 23 Sep
+    expect(c.picture!.ovulationDay).toBe(16); // 8 Oct is day 16 from 23 Sep (13 days before 21 Oct)
     expect(c.picture!.length).toBe(28);
-    expect(c.howLong).toMatch(/oestrogen usually peaks in about 7 days/);
+    expect(c.howLong).toMatch(/oestrogen usually peaks in about 8 days/);
   });
 
   it("a positive test makes it exact, with the window on", () => {

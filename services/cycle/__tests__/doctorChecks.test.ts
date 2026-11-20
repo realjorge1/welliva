@@ -360,9 +360,10 @@ describe("spotting around ovulation is explained, not counted", () => {
     spottingNote({ date, log: day(date, { flow: "spotting" }), inPeriod, mode, prediction, cycles });
 
   it("says so for spotting a day either side of a past cycle's estimated ovulation", () => {
-    expect(at("2026-05-19")).toBe(OVULATION_SPOTTING_LINE);
+    // 2026-11-20: ovulation is 13 days before the next start now (was 14): 21 May.
     expect(at("2026-05-20")).toBe(OVULATION_SPOTTING_LINE);
-    expect(at("2026-05-22")).toBeNull();
+    expect(at("2026-05-22")).toBe(OVULATION_SPOTTING_LINE);
+    expect(at("2026-05-23")).toBeNull();
   });
 
   it("and in this cycle, from the prediction's own estimate", () => {

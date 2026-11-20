@@ -16,6 +16,7 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { bleedPrompt } from "../bleeding";
 import { addDays } from "../dates";
 import { spottingNote } from "../doctorChecks";
 import { lateContext } from "../late";
@@ -294,5 +295,94 @@ describe("what each mode does with the 2026-11-13 features", () => {
 
   it("menopause: only the cramps note; bleeding already has its own", () => {
     expect(newFeatures("menopause")).toEqual({ ...NOTHING, crampsNote: true });
+  });
+});
+
+/**
+ * THE 2026-11-20 ENGINE FIXES, mode by mode (docs/cycle/smart-cycle.md prints
+ * the same table): the "is this your period?" question, the honest fertile
+ * window, "any day now" when late, the self-check, a temperature rise, a
+ * clear-and-stretchy day, and the combined pill's pack forecast.
+ */
+describe("what each mode does with the 2026-11-20 engine fixes", () => {
+  function engineFixes(mode: Mode) {
+    const { set, conditions } = setup(mode);
+    const profile = { age: 30, conditions };
+    const at = (today: string, days = {}, s: CycleSettings = set) =>
+      computeView({ settings: s, periods: PERIODS, days }, { today, profile });
+    // A clearly early flow: cycle day 17 of the 23 Sep cycle.
+    const early = addDays("2026-09-23", 16);
+    const asked = at(early, { [early]: day(early, { flow: "light" }) });
+    const prompt = bleedPrompt({
+      date: early,
+      days: { [early]: day(early, { flow: "light" }) },
+      episodes: PERIODS,
+      prediction: asked.prediction,
+      mode: asked.mode,
+      today: early,
+      typicalBleed: asked.typicalBleed,
+      covered: false,
+    });
+    const mid = at("2026-10-06");
+    const late = at("2026-10-28");
+    // A textbook temperature chart this cycle: low to day 17, high from day 18.
+    const temps: Record<string, ReturnType<typeof day>> = {};
+    for (let n = 3; n <= 21; n += 1) {
+      const d = addDays("2026-09-23", n - 1);
+      temps[d] = day(d, { temperatureC: n < 18 ? 36.4 : 36.8 });
+    }
+    const stretchy = at("2026-10-01", { "2026-10-01": day("2026-10-01", { discharge: "clear_stretchy" }) });
+    const pillSettings: CycleSettings =
+      mode === "hormonal" && set.contraception
+        ? { ...set, contraception: { ...set.contraception, method: "combined_pill" } }
+        : set;
+    return {
+      asksIfPeriod: prompt?.kind === "ask",
+      fertileWindow: mid.showFertile && !!mid.prediction,
+      anyDayNow: !!late.prediction?.overdue,
+      selfCheck: !!mid.prediction?.calibration,
+      temperatureMoves: at(addDays("2026-09-23", 20), temps).prediction?.testBasis === "temperature",
+      stretchyFertile: stretchy.fertileNow,
+      pillForecast: at("2026-10-06", {}, pillSettings).pill !== null,
+    };
+  }
+
+  const ALL_OF_IT = {
+    asksIfPeriod: true,
+    fertileWindow: true,
+    anyDayNow: true,
+    selfCheck: true,
+    temperatureMoves: true,
+    stretchyFertile: true,
+    pillForecast: false,
+  };
+  const NONE_OF_IT = {
+    asksIfPeriod: false,
+    fertileWindow: false,
+    anyDayNow: false,
+    selfCheck: false,
+    temperatureMoves: false,
+    stretchyFertile: false,
+    pillForecast: false,
+  };
+
+  it("normal: all of it (the pill forecast is for the pill)", () => {
+    expect(engineFixes("normal")).toEqual(ALL_OF_IT);
+  });
+
+  it("hormonal contraception: logging only — and the pack forecast, on the combined pill", () => {
+    expect(engineFixes("hormonal")).toEqual({ ...NONE_OF_IT, pillForecast: true });
+  });
+
+  it("pregnancy: nothing", () => {
+    expect(engineFixes("pregnancy")).toEqual(NONE_OF_IT);
+  });
+
+  it("postpartum (after the first period): all of it", () => {
+    expect(engineFixes("postpartum")).toEqual(ALL_OF_IT);
+  });
+
+  it("menopause: logging only — a bleed is a bleed, never asked about", () => {
+    expect(engineFixes("menopause")).toEqual(NONE_OF_IT);
   });
 });

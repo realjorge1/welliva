@@ -38,7 +38,9 @@ function describe(date: string, paint: DayPaint, today: string, bleed: string): 
   else if (paint.period === "assumed") parts.push(`${bleed} day, end not logged`);
   else if (paint.period === "predicted") parts.push("predicted period");
   if (paint.ovulation) parts.push("estimated ovulation");
+  else if (paint.fertileCore) parts.push("fertile window, likeliest days, an estimate");
   else if (paint.fertile) parts.push("fertile window, an estimate");
+  if (paint.between) parts.push("bleeding between periods");
   if (paint.stretchy) parts.push("clear, stretchy discharge");
   if (paint.hasLog) parts.push("has notes");
   return parts.join(", ");
@@ -62,6 +64,8 @@ export function CycleCalendar({
   const cell = width / 7;
   const disc = Math.max(28, Math.min(40, Math.floor(cell - 6)));
   const weeks = monthGrid(cursor.year, cursor.month);
+  /** The key for bleeding between periods appears only in a month that has some. */
+  const hasBetween = weeks.some((w) => w.some((d) => d.inMonth && paint(d.date).between));
 
   return (
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
@@ -120,9 +124,16 @@ export function CycleCalendar({
               ink = palette.predictedInk;
               weight = "700";
             } else if (showFertile && p.fertile) {
-              fill = palette.fertileSoft;
+              // The likeliest days strongest; the rest of a wide window lighter.
+              fill = p.fertileCore ? palette.fertileSoft : alpha(palette.fertile, 0.08);
               ink = palette.fertile;
-              weight = "700";
+              weight = p.fertileCore ? "700" : "500";
+            }
+            // Bleeding between periods is a record, not a period: rose ink and
+            // a rose bar under the day, never the period's filled disc.
+            if (p.between) {
+              ink = palette.period;
+              weight = "800";
             }
             const day = Number(date.slice(8, 10));
             return (
@@ -162,16 +173,19 @@ export function CycleCalendar({
                     <View style={[styles.ovulation, { backgroundColor: palette.ovulation }]} />
                   ) : null}
                 </View>
-                {/* A clear, stretchy day: a short solid lilac bar where the notes dot goes. */}
+                {/* A clear, stretchy day: a short solid lilac bar where the notes dot
+                    goes; bleeding between periods: the same bar in rose. */}
                 <View
                   style={[
-                    p.stretchy ? styles.stretchy : styles.logDot,
+                    p.between || p.stretchy ? styles.stretchy : styles.logDot,
                     {
-                      backgroundColor: p.stretchy
-                        ? palette.fertile
-                        : p.hasLog
-                          ? alpha(colors.text, 0.55)
-                          : "transparent",
+                      backgroundColor: p.between
+                        ? palette.period
+                        : p.stretchy
+                          ? palette.fertile
+                          : p.hasLog
+                            ? alpha(colors.text, 0.55)
+                            : "transparent",
                     },
                   ]}
                 />
@@ -190,6 +204,14 @@ export function CycleCalendar({
             <View style={[styles.legendStretchy, { backgroundColor: palette.fertile }]} />
             <AppText variant="caption" color="tertiary">
               Clear, stretchy
+            </AppText>
+          </View>
+        ) : null}
+        {hasBetween ? (
+          <View style={styles.legendItem}>
+            <View style={[styles.legendStretchy, { backgroundColor: palette.period }]} />
+            <AppText variant="caption" color="tertiary">
+              Bleeding between
             </AppText>
           </View>
         ) : null}

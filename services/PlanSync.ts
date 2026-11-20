@@ -52,7 +52,7 @@ import {
 } from "../fitness/services/FitnessProfileStore";
 import { WellivaApi } from "./api/WellivaApi";
 import { allows } from "./billing/gating";
-import { generateDietPlan } from "./DietPlanGenerator";
+import { fitScheduleToTargets, generateDietPlan } from "./DietPlanGenerator";
 import { KEYS, parseLocalDate, readJSON, toLocalDateString } from "./OfflineStorage";
 import {
   clearScheduledDietsAfter,
@@ -121,7 +121,10 @@ async function aiDay(
     dietId: preferredDietId,
     recentMeals: await recentMealNames(date),
   });
-  return ai.schedule;
+  // The backend writes the dishes; the phone sizes them, exactly as it sizes
+  // its own plans (nutrition/portionSolver), so a Pro day reaches the same
+  // targets a free day does. The backend is not changed by this.
+  return fitScheduleToTargets(ai.schedule, bio, targets);
 }
 
 /** Plan one day, NOT saved: Gozlin when the user has it and it answers, else the on-device rotation. */

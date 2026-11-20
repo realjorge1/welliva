@@ -11,6 +11,7 @@
 
 import type { DietHistoryEntry } from "@/models/diet";
 import type { SessionSummaryData } from "@/models/session";
+import { countsAsDay } from "@/services/nutrition/dayStatus";
 import { hasRecordedIntake } from "@/services/nutrition/recordedIntake";
 import type { BodyLogEntry, WorkoutLogEntry } from "@/models/workout";
 import type { ChartPoint } from "./types";
@@ -101,9 +102,11 @@ export function buildCaloriesTrend(
   history: DietHistoryEntry[],
   today: string,
   days: number,
+  /** Her calorie target, to judge days closed before day status was recorded. */
+  targetKcal?: number | null,
 ): ChartPoint[] {
   return withinWindow(history, today, days)
-    .filter((e) => hasRecordedIntake(e) && typeof e.consumedCalories === "number")
+    .filter((e) => countsAsDay(e, targetKcal) && typeof e.consumedCalories === "number")
     .map((e) => ({
       value: Math.round(e.consumedCalories as number),
       label: shortDate(e.date),
@@ -116,9 +119,10 @@ export function buildProteinTrend(
   history: DietHistoryEntry[],
   today: string,
   days: number,
+  targetKcal?: number | null,
 ): ChartPoint[] {
   return withinWindow(history, today, days)
-    .filter((e) => hasRecordedIntake(e) && typeof e.consumedProteinG === "number")
+    .filter((e) => countsAsDay(e, targetKcal) && typeof e.consumedProteinG === "number")
     .map((e) => ({
       value: Math.round(e.consumedProteinG as number),
       label: shortDate(e.date),
@@ -131,9 +135,10 @@ export function buildCarbsTrend(
   history: DietHistoryEntry[],
   today: string,
   days: number,
+  targetKcal?: number | null,
 ): ChartPoint[] {
   return withinWindow(history, today, days)
-    .filter((e) => hasRecordedIntake(e) && typeof e.consumedCarbsG === "number")
+    .filter((e) => countsAsDay(e, targetKcal) && typeof e.consumedCarbsG === "number")
     .map((e) => ({
       value: Math.round(e.consumedCarbsG as number),
       label: shortDate(e.date),
@@ -146,9 +151,10 @@ export function buildFatTrend(
   history: DietHistoryEntry[],
   today: string,
   days: number,
+  targetKcal?: number | null,
 ): ChartPoint[] {
   return withinWindow(history, today, days)
-    .filter((e) => hasRecordedIntake(e) && typeof e.consumedFatG === "number")
+    .filter((e) => countsAsDay(e, targetKcal) && typeof e.consumedFatG === "number")
     .map((e) => ({
       value: Math.round(e.consumedFatG as number),
       label: shortDate(e.date),
@@ -172,6 +178,12 @@ export interface MacroMatrixPoint {
   proteinG: number | null;
   carbsG: number | null;
   fatG: number | null;
+  /**
+   * A whole day of eating — said so, or inferred (services/nutrition/
+   * dayStatus). Trends and averages read only these; a table of what was
+   * logged may still show a partial day, as what it is.
+   */
+  counted: boolean;
 }
 
 function numOrNull(v: number | undefined): number | null {
@@ -194,6 +206,8 @@ export function buildMacroMatrix(
   history: DietHistoryEntry[],
   today: string,
   days: number,
+  /** Her calorie target, to judge days closed before day status was recorded. */
+  targetKcal?: number | null,
 ): MacroMatrixPoint[] {
   return withinWindow(history, today, days)
     .filter(hasRecordedIntake)
@@ -205,6 +219,7 @@ export function buildMacroMatrix(
       proteinG: numOrNull(e.consumedProteinG),
       carbsG: numOrNull(e.consumedCarbsG),
       fatG: numOrNull(e.consumedFatG),
+      counted: countsAsDay(e, targetKcal),
     }));
 }
 

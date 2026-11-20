@@ -209,6 +209,39 @@ const FIXTURES: Record<string, [string, string]> = {
       { id: "why:ask", feature: "why", answer: "dismissed", at: "2026-11-02T08:00:00.000Z", until: "2026-12-01" },
     ]),
   ],
+  // Record<date, flag> — 11-18 undone on the phone (newer) beats the tablet's
+  // "complete"; 11-19 marked only on the tablet.
+  "@welliva_day_complete": [
+    JSON.stringify({
+      "2026-11-18": { complete: false, at: "2026-11-19T07:00:00.000Z" },
+    }),
+    JSON.stringify({
+      "2026-11-18": { complete: true, at: "2026-11-18T21:00:00.000Z" },
+      "2026-11-19": { complete: true, at: "2026-11-19T21:30:00.000Z" },
+    }),
+  ],
+  // TargetMove[] — the same weight move made on both phones (one record; the
+  // phone saw it later), plus a move only the tablet made.
+  "@welliva_target_moves": [
+    JSON.stringify([
+      { id: "weight:2026-11-10:1720", kind: "weight", date: "2026-11-10", at: "2026-11-10T08:00:00.000Z", updatedAt: "2026-11-10T09:00:00.000Z", from: { calories: 1760, proteinG: 110 }, to: { calories: 1720, proteinG: 106 }, message: "You've lost 2.4 kg…", seen: true },
+    ]),
+    JSON.stringify([
+      { id: "weight:2026-11-10:1720", kind: "weight", date: "2026-11-10", at: "2026-11-10T08:00:00.000Z", updatedAt: "2026-11-10T08:00:00.000Z", from: { calories: 1760, proteinG: 110 }, to: { calories: 1720, proteinG: 106 }, message: "You've lost 2.4 kg…", seen: false },
+      { id: "weight:2026-10-20:1760", kind: "weight", date: "2026-10-20", at: "2026-10-20T08:00:00.000Z", updatedAt: "2026-10-20T08:00:00.000Z", from: { calories: 1800, proteinG: 114 }, to: { calories: 1760, proteinG: 110 }, message: "You've lost 2.5 kg…", seen: true },
+    ]),
+  ],
+  // TargetOffer[] — the learned offer declined on the phone (newer) beats the
+  // pending copy on the tablet; the activity offer exists only on the tablet.
+  "@welliva_target_offers": [
+    JSON.stringify([
+      { id: "learned", status: "declined", date: "2026-11-12", createdAt: "2026-11-12T08:00:00.000Z", updatedAt: "2026-11-12T09:30:00.000Z", from: { calories: 1820, proteinG: 110 }, to: { calories: 1740, proteinG: 110 }, message: "…", change: { maintenanceAdjustKcal: -80 } },
+    ]),
+    JSON.stringify([
+      { id: "learned", status: "pending", date: "2026-11-12", createdAt: "2026-11-12T08:00:00.000Z", updatedAt: "2026-11-12T08:00:00.000Z", from: { calories: 1820, proteinG: 110 }, to: { calories: 1740, proteinG: 110 }, message: "…", change: { maintenanceAdjustKcal: -80 } },
+      { id: "activity", status: "pending", date: "2026-11-11", createdAt: "2026-11-11T08:00:00.000Z", updatedAt: "2026-11-11T08:00:00.000Z", from: { calories: 1820, proteinG: 110 }, to: { calories: 1950, proteinG: 110 }, message: "…", change: { activityLevel: "moderate" } },
+    ]),
+  ],
   // Record<date, PlannedDay> — 11-05 re-planned on the phone (newer), 11-06 only on the tablet.
   "@welliva_planned_days": [
     JSON.stringify({

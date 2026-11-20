@@ -7,15 +7,42 @@
 
 import {
     BASELINE_NUTRITION,
-    GOAL_CALORIE_MODIFIERS,
     NutritionTargets,
 } from "../models/nutrition";
-import { ACTIVITY_MULTIPLIERS, Sex, UserBio } from "../models/user";
+import { ACTIVITY_MULTIPLIERS, Sex, TargetPace, UserBio } from "../models/user";
 import {
     applyConstraints,
     resolveConstraintsForBio,
 } from "./nutrition/ConditionConstraints";
 import { proteinBasisKg } from "./nutrition/bodyWeight";
+import { goalModifierFor, kgPerWeek, noCutLine, noCutReason } from "./nutrition/pace";
+
+/**
+ * A plausibility bound, not a ceiling on need: no real person's target is near
+ * it. It exists so a mistyped bio (a 900 kg weight) can't produce an absurd
+ * day. The old 3,200/2,800 ceiling was a NEED cap and is gone (see Step 3).
+ */
+export const MAX_PLAUSIBLE_KCAL: Record<Sex, number> = { male: 5500, female: 4800 };
+
+/**
+ * An accepted learned correction may move maintenance at most this share of
+ * the formula's figure, either way. The learning model is a blend of her body
+ * and her logging habits; past ±25% the likelier story is a logging problem,
+ * not a metabolism.
+ */
+export const MAX_MAINTENANCE_ADJUST_SHARE = 0.25;
+
+/** Fibre: 14 g per 1,000 kcal (IOM adequate intake), within a sane 20–45 g. */
+export const FIBER_G_PER_1000_KCAL = 14;
+export const FIBER_MIN_G = 20;
+export const FIBER_MAX_G = 45;
+/** Free sugars: under 10% of energy (WHO), never above the sex's AHA limit. */
+export const SUGAR_ENERGY_SHARE = 0.1;
+
+/** g of protein per kg of the protein basis: muscle, performance, or a cut. */
+export const PROTEIN_G_PER_KG_HIGH = 1.6;
+/** g/kg for everyone else — above the WHO 0.8 minimum. */
+export const PROTEIN_G_PER_KG_BASE = 1.2;
 
 /**
  * Calculate personalized nutrition targets
@@ -44,7 +71,23 @@ export function calculateNutritionTargets(bio: UserBio): NutritionTargets {
   // downstream NaN — a target that renders as "NaN kcal" with no error anywhere.
   const activityMultiplier =
     ACTIVITY_MULTIPLIERS[bio.activityLevel] ?? ACTIVITY_MULTIPLIERS.moderate;
-  const tdee = bmr * activityMultiplier;
+  const formulaTdee = bmr * activityMultiplier;
+
+  // Who must never be given a cut (under 18, BMI < 18.5, pregnancy,
+  // postpartum). Also: no learned correction is ever applied to them — an
+  // adaptive cut for exactly these four is the failure this rule exists for.
+  const noCut = noCutReason(bio);
+
+  // A maintenance correction she ACCEPTED from the learning model. Clamped
+  // here too, not only where it is proposed: this function is the last line.
+  const adjust =
+    noCut === null && Number.isFinite(bio.maintenanceAdjustKcal)
+      ? Math.max(
+          -formulaTdee * MAX_MAINTENANCE_ADJUST_SHARE,
+          Math.min(formulaTdee * MAX_MAINTENANCE_ADJUST_SHARE, bio.maintenanceAdjustKcal ?? 0),
+        )
+      : 0;
+  const tdee = formulaTdee + adjust;
 
   // Step 3: NO separate age adjustment.
   //
@@ -80,11 +123,14 @@ export function calculateNutritionTargets(bio: UserBio): NutritionTargets {
   // surplus is added (IOM/WHO: ~+340 kcal in pregnancy averaged over the 2nd–3rd
   // trimester; ~+400 kcal while recovering/breastfeeding). The minimum floor is
   // also raised so a small frame can't be guided to undereat while expecting.
-  const goalModifier = GOAL_CALORIE_MODIFIERS[bio.primaryGoal];
-  let effectiveGoalModifier = goalModifier;
+  //
+  // The goal's modifier comes from services/nutrition/pace.ts: a share of
+  // maintenance on a chosen pace, the old fixed number for an account that has
+  // never chosen one, halved near her goal weight, and floored at 0 for the
+  // four no-cut groups (pregnancy and postpartum among them, as before).
+  const effectiveGoalModifier = goalModifierFor(bio, tdee);
   let conditionSurplus = 0;
   if (isPregnant) {
-    effectiveGoalModifier = Math.max(0, goalModifier);
     // Surplus scales with trimester (IOM): ~+70 (T1), +340 (T2), +450 (T3).
     conditionSurplus =
       bio.pregnancyTrimester === 1
@@ -93,13 +139,16 @@ export function calculateNutritionTargets(bio: UserBio): NutritionTargets {
           ? 450
           : 340;
   } else if (isPostpartum) {
-    effectiveGoalModifier = Math.max(0, goalModifier);
     conditionSurplus = 400;
   }
 
   const minCalories = calorieFloor(bio);
-  // Allow the pregnancy/postpartum surplus to land without being clamped away.
-  const maxCalories = (bio.sex === "male" ? 3200 : 2800) + conditionSurplus;
+  // NO CEILING. There used to be one (3,200 men / 2,800 women), and it turned
+  // a muscle-builder's surplus into a deficit and cut a 95 kg athlete 662 kcal
+  // under maintenance. What stays is a plain plausibility bound, far above any
+  // real need, so a typo in the bio can't produce a 9,000 kcal day. The
+  // pregnancy/postpartum surplus still lands on top of it.
+  const maxCalories = MAX_PLAUSIBLE_KCAL[bio.sex] + conditionSurplus;
   const targetCalories = Math.round(
     Math.max(
       minCalories,
@@ -112,7 +161,11 @@ export function calculateNutritionTargets(bio: UserBio): NutritionTargets {
   // sodium ceilings) is applied by the constraints pass at the end, so this
   // stays readable and there is exactly one place to look for clinical rules.
   //
-  // Protein: 1.6g/kg for muscle gain, 1.2g/kg for others (above the WHO minimum).
+  // Protein: 1.6 g/kg for muscle gain and performance, and for anyone actually
+  // in a calorie cut — in a deficit the evidence points to ~1.6 g/kg or more to
+  // keep muscle while losing fat (Helms 2014; Morton 2018). 1.2 g/kg otherwise
+  // (above the WHO minimum). "Actually in a cut": a lose_weight goal that was
+  // floored to no cut (under 18, underweight, pregnancy) keeps its own rule.
   //
   // Scaled on the PROTEIN BASIS weight, not raw bodyweight: above BMI 30 that's
   // adjusted body weight (IBW + 40% of the excess), because adipose tissue isn't
@@ -120,11 +173,16 @@ export function calculateNutritionTargets(bio: UserBio): NutritionTargets {
   // high BMI. Below BMI 30 the basis IS actual weight, so nothing changes for
   // most users. See services/nutrition/bodyWeight.ts.
   const basisKg = proteinBasisKg(bio);
+  // The modifier itself, not "target < maintenance": comparing a ROUNDED
+  // target to the unrounded maintenance read a no-cut day (target = burn) as a
+  // cut by a fraction of a kcal, and gave the underweight user 1.6 g/kg.
+  const inACut = bio.primaryGoal === "lose_weight" && effectiveGoalModifier < 0;
   const proteinMultiplier =
     bio.primaryGoal === "build_muscle" ||
-    bio.primaryGoal === "athletic_performance"
-      ? 1.6
-      : 1.2;
+    bio.primaryGoal === "athletic_performance" ||
+    inACut
+      ? PROTEIN_G_PER_KG_HIGH
+      : PROTEIN_G_PER_KG_BASE;
   const proteinG = Math.round(basisKg * proteinMultiplier);
 
   // Fat: 25-30% of calories (using 27.5% average)
@@ -146,13 +204,28 @@ export function calculateNutritionTargets(bio: UserBio): NutritionTargets {
   if (isPregnant) waterMl += bio.pregnancyTrimester === 1 ? 150 : 300;
   else if (isPostpartum) waterMl += 700;
 
+  // Fibre and sugar follow how much she eats. Fibre guidance is per 1,000 kcal
+  // (IOM: 14 g), so a 1,300 kcal day and a 3,000 kcal day can't share one
+  // number; the 20–45 g band keeps both ends sane. Sugar is the WHO's "under
+  // 10% of energy", never above the AHA limit by sex that was the old flat
+  // number. Sodium stays flat on purpose: its guideline is an absolute daily
+  // ceiling (2,300 mg), not a share of energy.
+  const fiberG = Math.min(
+    FIBER_MAX_G,
+    Math.max(FIBER_MIN_G, Math.round((FIBER_G_PER_1000_KCAL * targetCalories) / 1000)),
+  );
+  const sugarG = Math.min(
+    baseline.sugarG,
+    Math.round((SUGAR_ENERGY_SHARE * targetCalories) / 4),
+  );
+
   const base: NutritionTargets = {
     calories: targetCalories,
     proteinG,
     fatG,
     carbsG,
-    sugarG: baseline.sugarG,
-    fiberG: baseline.fiberG,
+    sugarG,
+    fiberG,
     sodiumMg: baseline.sodiumMg,
     waterMl,
   };
@@ -163,7 +236,47 @@ export function calculateNutritionTargets(bio: UserBio): NutritionTargets {
   // referrals, and what we honestly don't model) for the UI to render.
   // The SAME basis is handed to the constraints pass, so a `0.8 g/kg` renal cap
   // is measured against the same denominator the target was built from.
-  return applyConstraints(base, resolveConstraintsForBio(bio), basisKg);
+  const constraints = resolveConstraintsForBio(bio);
+  // A cut that was asked for and not given is said out loud, calmly, in the
+  // same guidance block the target screen already renders.
+  const askedForACut =
+    bio.primaryGoal === "lose_weight" || (bio.goals ?? []).includes("lose_weight");
+  const noCutNote = noCut && askedForACut ? noCutLine(noCut) : null;
+  return applyConstraints(
+    base,
+    noCutNote
+      ? { ...constraints, referrals: [noCutNote, ...constraints.referrals] }
+      : constraints,
+    basisKg,
+  );
+}
+
+/** One choice in the pace picker, in her own numbers. */
+export interface PaceOption {
+  pace: TargetPace;
+  /** Her daily calorie target on this pace. */
+  calories: number;
+  /** kcal/day below (negative) or above maintenance. */
+  changeKcal: number;
+  /** "about 0.4 kg a week" — expected weekly change, kg (always positive). */
+  kgPerWeek: number;
+}
+
+/**
+ * Each pace, priced for this person, for the picker ("Steady: 1,452 kcal,
+ * about 0.4 kg a week"). Empty when no pace applies: a goal that isn't losing
+ * or building, or a person who must not be given a cut (the picker hides).
+ */
+export function paceOptions(bio: UserBio): PaceOption[] {
+  if (bio.primaryGoal !== "lose_weight" && bio.primaryGoal !== "build_muscle") return [];
+  if (bio.primaryGoal === "lose_weight" && noCutReason(bio) !== null) return [];
+  const paces: TargetPace[] = ["gentle", "steady", "faster"];
+  const maintenance = targetMaintenance(bio);
+  return paces.map((pace) => {
+    const t = calculateNutritionTargets({ ...bio, pace });
+    const changeKcal = t.calories - maintenance;
+    return { pace, calories: t.calories, changeKcal, kgPerWeek: kgPerWeek(changeKcal) };
+  });
 }
 
 /**
@@ -183,6 +296,20 @@ export function maintenanceTdee(bio: UserBio): number {
   const multiplier =
     ACTIVITY_MULTIPLIERS[bio.activityLevel] ?? ACTIVITY_MULTIPLIERS.moderate;
   return Math.round(bmr * multiplier);
+}
+
+/**
+ * The maintenance her TARGET is built from: the formula, plus a learned
+ * correction she accepted (clamped, and never for the no-cut groups). Use this
+ * to say "below what you burn"; use {@link maintenanceTdee} wherever the
+ * formula's own figure is meant (the learning model's prior and its "the
+ * formula said X" comparison).
+ */
+export function targetMaintenance(bio: UserBio): number {
+  const formula = maintenanceTdee(bio);
+  if (noCutReason(bio) !== null || !Number.isFinite(bio.maintenanceAdjustKcal)) return formula;
+  const cap = formula * MAX_MAINTENANCE_ADJUST_SHARE;
+  return Math.round(formula + Math.max(-cap, Math.min(cap, bio.maintenanceAdjustKcal ?? 0)));
 }
 
 /**

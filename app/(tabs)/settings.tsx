@@ -74,8 +74,11 @@ import {
   MedicalCondition,
   MedicationCategory,
   PregnancyTrimester,
+  TargetPace,
 } from "@/models/user";
 import { Equipment } from "@/models/workout";
+import { PaceRow } from "@/components/nutrition/PaceRow";
+import { paceOptions } from "@/services/NutritionService";
 import { MAX_EQUIPMENT, equipmentFull, toggleEquipment } from "@/models/equipment";
 import { Ionicons } from "@expo/vector-icons";
 import { AddWidgetCard } from "@/components/widget/AddWidgetCard";
@@ -477,6 +480,26 @@ export default function SettingsScreen() {
   // meals before it resolves. Hold the tapped value locally so the control moves
   // under the finger instead of sitting on the old number until the plan lands.
   const [pendingMeals, setPendingMeals] = useState<3 | 4 | null>(null);
+  // Same idea for pace: the row moves under the finger while the plan refits.
+  const [pendingPace, setPendingPace] = useState<TargetPace | null>(null);
+
+  /**
+   * A chosen pace is her own action: it goes through the same re-fit path as
+   * any bio change, and the "here's what changed" recap states the new number.
+   */
+  const handlePace = async (next: TargetPace) => {
+    if (!userBio || next === userBio.pace || pendingPace !== null) return;
+    setPendingPace(next);
+    try {
+      const summary = await updateUserBio({ pace: next });
+      setChangeSummary(summary);
+    } catch (error) {
+      console.log("Error changing pace:", error);
+      Alert.alert("Couldn't update", "Your pace didn't change. Please try again.");
+    } finally {
+      setPendingPace(null);
+    }
+  };
 
   useEffect(() => {
     setEditingBio(userBio);
@@ -1145,6 +1168,15 @@ export default function SettingsScreen() {
                     carbsG={nutritionTargets.carbsG}
                     fatG={nutritionTargets.fatG}
                   />
+                  {userBio.primaryGoal === "lose_weight" || userBio.primaryGoal === "build_muscle" ? (
+                    <PaceRow
+                      options={paceOptions(userBio)}
+                      value={pendingPace ?? userBio.pace}
+                      onChange={(p) => void handlePace(p)}
+                      direction={userBio.primaryGoal === "lose_weight" ? "lose" : "gain"}
+                      style={styles.stacked}
+                    />
+                  ) : null}
                 </Card>
               ) : null}
 

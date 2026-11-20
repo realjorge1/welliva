@@ -62,6 +62,7 @@ import { useCycle } from "@/contexts/CycleContext";
 import {
   addDays,
   bleedWords,
+  calibrationLine,
   confidenceLine,
   cycleHeadline,
   CYCLE_LIBRARY,
@@ -69,14 +70,19 @@ import {
   dialModel,
   doctorSummary,
   ENERGY_LABEL,
+  FERTILE_NOW_LINE,
+  fertileWindowNote,
   FLOW_LABEL,
   formatDay,
   formatRange,
+  givenWindow,
   minDate,
   MOOD_LABEL,
   openEpisode,
   paintDays,
   PCOS_TESTING_LINE,
+  pillLine,
+  PREGNANCY_TEST_LINE,
   READING_FOR_NOTE,
   shareDatesLine,
   shiftMonthCursor,
@@ -433,8 +439,9 @@ function CycleScreenBody() {
                 A long gap: {formatRange(gap.start, addDays(gap.nextStart, -1))}
               </AppText>
               <AppText variant="footnote" color="secondary" style={styles.cardBody}>
-                {gap.length} days between two periods. Did you have one in between that you
-                didn&apos;t log? I&apos;ve left this gap out of your predictions until you say.
+                {gap.assumedLong
+                  ? `${gap.length} days between two periods. Long gaps like this have happened more than once lately, so I've counted it as one long cycle. Did you have a period in between that you didn't log?`
+                  : `${gap.length} days between two periods. Did you have one in between that you didn't log? I've left this gap out of your predictions until you say.`}
               </AppText>
               <View style={styles.gapActions}>
                 <Button
@@ -443,7 +450,7 @@ function CycleScreenBody() {
                   onPress={() => setQuestion({ kind: "missed", gap })}
                 />
                 <Button
-                  label="One long cycle"
+                  label={gap.assumedLong ? "Yes, one long cycle" : "One long cycle"}
                   size="sm"
                   variant="tonal"
                   onPress={() => void cycle.answerGap(gap.start, "long")}
@@ -563,6 +570,23 @@ function CycleScreenBody() {
             days rather than becoming furniture. */}
         <CycleGozlinAsk style={styles.askCard} />
 
+        {/* ── 5a. The combined pill: the next bleed from the pack, never "period" (services/cycle/pill) ── */}
+        {view.pill && !s.inPeriod ? (
+          <Reveal index={4}>
+            <View style={styles.section}>
+              <SectionHeader title="Next bleed" weight="700" />
+              <Card padding="lg">
+                <AppText variant="callout">{pillLine(view.pill)}</AppText>
+                <AppText variant="footnote" color="secondary" style={styles.cardBody}>
+                  {view.pill.missed
+                    ? PREGNANCY_TEST_LINE
+                    : `Counted ${view.pill.packDays} days from your last bleed. Nothing else is predicted on the pill.`}
+                </AppText>
+              </Card>
+            </View>
+          </Reveal>
+        ) : null}
+
         {/* ── 5. The next period ──────────────────────────────────────── */}
         {p && s.predicting && !s.inPeriod ? (
           <Reveal index={4}>
@@ -571,7 +595,7 @@ function CycleScreenBody() {
               <Card padding="lg">
                 <AppText variant="callout">
                   {s.lateBy > 0
-                    ? `Expected ${formatRange(p.earliest, p.latest)}, now ${s.lateBy} ${
+                    ? `Expected ${formatRange(givenWindow(p).earliest, givenWindow(p).latest)}, now ${s.lateBy} ${
                         s.lateBy === 1 ? "day" : "days"
                       } past that`
                     : windowLine(p)}
@@ -579,25 +603,47 @@ function CycleScreenBody() {
                 <AppText variant="footnote" color="secondary" style={styles.cardBody}>
                   {confidenceLine(p)}
                 </AppText>
+                {/* What the self-check counted (services/cycle/backtest), from 4 forecasts up. */}
+                {s.lateBy === 0 && calibrationLine(p) ? (
+                  <AppText variant="footnote" color="tertiary" style={styles.cardBody}>
+                    {calibrationLine(p)}
+                  </AppText>
+                ) : null}
                 <View style={[styles.rule, { backgroundColor: colors.divider }]} />
                 <AppText variant="footnote" color="secondary">
                   Periods usually last {p.periodLength} days
                   {p.periodBasis > 0 ? " (from the ones you've ended)" : " (what you told me)"}.
                 </AppText>
-                {view.showFertile ? (
+                {/* Late with nothing to date it: this cycle's ovulation is unconfirmed, so no window. */}
+                {view.showFertile && p.fertileKnown ? (
                   <View style={[styles.fertile, { backgroundColor: palette.fertileSoft }]}>
                     <AppText variant="footnote" weight="700" style={{ color: palette.fertile }}>
                       Fertile window {formatRange(p.fertileStart, p.fertileEnd)}
                     </AppText>
                     <AppText variant="caption" color="secondary">
-                      Ovulation around {formatDay(p.ovulation)}
+                      {p.testBasis === "negatives" ? "Ovulation not before " : "Ovulation around "}
+                      {formatDay(p.ovulation)}
                       {p.fromTest
-                        ? ", the day after your positive test"
-                        : p.lutealPersonal
-                          ? ", from your own ovulation tests"
-                          : ""}
+                        ? ", the day after your first positive test"
+                        : p.testBasis === "temperature"
+                          ? ", confirmed by your temperature"
+                          : p.testBasis === "negatives"
+                            ? ": your tests haven't shown a surge yet"
+                            : p.lutealPersonal
+                              ? ", using your own timing from past cycles"
+                              : ""}
                       . An estimate, not birth control.
                     </AppText>
+                    {fertileWindowNote(p) ? (
+                      <AppText variant="caption" color="secondary" style={styles.testing}>
+                        {fertileWindowNote(p)}
+                      </AppText>
+                    ) : null}
+                    {view.fertileNow ? (
+                      <AppText variant="caption" color="secondary" style={styles.testing}>
+                        {FERTILE_NOW_LINE}
+                      </AppText>
+                    ) : null}
                     {/* For someone who uses ovulation tests: when to start. In the app only. */}
                     {view.testingLine ? (
                       <AppText variant="caption" color="secondary" style={styles.testing}>

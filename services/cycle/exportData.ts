@@ -13,7 +13,7 @@
 
 import { contraceptionForDoctor } from "./contraception";
 import { daysBetween, formatDay } from "./dates";
-import { liveEpisodes } from "./episodes";
+import { splitEpisodes } from "./episodes";
 import type { DoctorNote } from "./flags";
 import { median, type CycleRecord, type Prediction } from "./predict";
 import { RELIEF_NOUN, RELIEF_OPTIONS, reliefRecalls } from "./relief";
@@ -37,7 +37,8 @@ export function doctorSummary(input: {
   today: string;
 }): string {
   const { data, cycles, prediction, notes, today } = input;
-  const live = liveEpisodes(data.periods);
+  // Periods only; a stray is bleeding between periods and is listed as that (./episodes).
+  const { periods: live, strays } = splitEpisodes(data.periods);
   const lines: string[] = [];
   // On hormonal contraception the bleeds follow the method, and a doctor reads
   // "period" and "cycle length" as claims about her own cycle — so say "bleed".
@@ -57,6 +58,11 @@ export function doctorSummary(input: {
     `Logged since ${formatDay(live[0].start, { year: true })}: ${live.length} ${noun}${live.length === 1 ? "" : "s"}.`,
   );
   lines.push(`Last ${noun} started: ${formatDay(live[live.length - 1].start, { year: true })}.`);
+  if (strays.length) {
+    lines.push(
+      `Bleeding logged between ${noun}s, starting: ${strays.map((s) => formatDay(s.start, { year: true })).join(", ")}.`,
+    );
+  }
 
   const counted = cycles.filter((c) => c.status === "counted").slice(-6);
   if (counted.length) {
@@ -94,8 +100,13 @@ export function doctorSummary(input: {
         : data.settings.usualCycleDays
           ? "from the usual length entered at setup"
           : "from a typical cycle length, before any logged cycles";
+    // Late: the window that was given, and how far past it — never a rolling date.
     lines.push(
-      `Next period estimated: ${formatDay(prediction.earliest)} to ${formatDay(prediction.latest)}, ${basis}.`,
+      prediction.overdue
+        ? `Next period was estimated for ${formatDay(prediction.overdue.original.earliest)} to ${formatDay(
+            prediction.overdue.original.latest,
+          )}, ${basis}; ${prediction.overdue.days} day${prediction.overdue.days === 1 ? "" : "s"} past that, not started yet.`
+        : `Next period estimated: ${formatDay(prediction.earliest)} to ${formatDay(prediction.latest)}, ${basis}.`,
     );
   }
 
@@ -158,7 +169,9 @@ const CONTRACEPTION_CSV = {
  * The columns. New ones go on the END, so a sheet she made from an older
  * export still lines up: `kept_from_day` ("Kept me from school, work or
  * plans", ticked under Cramps) and `discharge` (fertile-window users only)
- * joined on 2026-11-13.
+ * joined on 2026-11-13; `bleeding_answer` (her "No, bleeding between periods",
+ * on the first day of the bleeding it answers) and `temperature_c` (resting
+ * temperature on waking, always in °C) on 2026-11-20.
  */
 export const CSV_COLUMNS = [
   "type",
@@ -172,6 +185,8 @@ export const CSV_COLUMNS = [
   "detail",
   "kept_from_day",
   "discharge",
+  "bleeding_answer",
+  "temperature_c",
 ] as const;
 
 /** One row, padded to every column, so a row that has nothing to say in the new ones still lines up. */
@@ -185,9 +200,15 @@ export function cycleCsv(data: CycleData): string {
   const rows: string[] = [CSV_COLUMNS.join(",")];
   const c = data.settings.contraception;
   if (c) {
+    const method =
+      c.method === "combined_pill"
+        ? `; combined pill, ${c.packDays ?? 28}-day pack`
+        : c.method === "other"
+          ? "; another method"
+          : "";
     const detail = c.restartFrom
-      ? `${CONTRACEPTION_CSV[c.answer]}; cycles count from ${c.restartFrom}`
-      : CONTRACEPTION_CSV[c.answer];
+      ? `${CONTRACEPTION_CSV[c.answer]}${method}; cycles count from ${c.restartFrom}`
+      : `${CONTRACEPTION_CSV[c.answer]}${method}`;
     rows.push(csvRow(["contraception", c.since, "", "", "", "", "", "", detail]));
   }
   const s = data.settings;
@@ -199,8 +220,13 @@ export function cycleCsv(data: CycleData): string {
     const change = `calorie target ${kcal > 0 ? "+" : ""}${kcal} kcal`;
     rows.push(csvRow(["target_change", date, "", "", "", "", "", "", change]));
   }
-  for (const e of liveEpisodes(data.periods)) {
+  const split = splitEpisodes(data.periods);
+  for (const e of split.periods) {
     rows.push(csvRow(["period", e.start, e.end ?? ""]));
+  }
+  // Episodes that started too soon after a period to be the next one (./episodes).
+  for (const e of split.strays) {
+    rows.push(csvRow(["bleeding_between", e.start, e.end ?? ""]));
   }
   for (const date of Object.keys(data.days).sort()) {
     const log = data.days[date];
@@ -218,6 +244,8 @@ export function cycleCsv(data: CycleData): string {
         reliefDetail(log),
         log.stoppedDay ? "yes" : "",
         log.discharge ? DISCHARGE_LABEL[log.discharge] : "",
+        log.bleedAnswer === "between" ? "not a period" : "",
+        log.temperatureC !== undefined ? log.temperatureC.toFixed(2) : "",
       ]),
     );
   }

@@ -374,6 +374,26 @@ function slotPool(diet: DietData, slot: MealType, rules: HardRules): PoolDish[] 
   return pool;
 }
 
+/**
+ * The extras a day may be topped up with (portionSolver): every authored size
+ * of every snack this diet may serve this user — the same pool the snack
+ * rotation draws from, under the same hard rules (restriction, allergies), with
+ * her dislikes and cuisine narrowing it exactly as they narrow the rotation.
+ * No calorie band: the solver decides what fits.
+ */
+export function topUpOptions(
+  diet: DietData,
+  bio: Pick<UserBio, "dietaryRestriction" | "allergies" | "foodDislikes" | "cuisinePreference">,
+): DietSnackOption[] {
+  const rules: HardRules = { restriction: bio.dietaryRestriction, allergies: bio.allergies };
+  const pool = narrowByCuisine(
+    withoutDislikes(slotPool(diet, "snack", rules), bio.foodDislikes, MIN_KEEP),
+    bio.cuisinePreference,
+    MIN_KEEP,
+  ) as PoolDish<DietSnackOption>[];
+  return pool.flatMap((dish) => dish.portions);
+}
+
 /** {@link slotPool} for a main meal, whose portions always carry full macros. */
 export function mainSlotPool(
   diet: DietData,
@@ -552,6 +572,12 @@ export interface PlannedDay {
   lunch: DietMealOption;
   dinner: DietMealOption;
   snacks: DietSnackOption[];
+  /**
+   * Every authored size of each main's dish, smallest first — so a day the
+   * solver sizes far up can be served at the dish's own larger size rather
+   * than as "2× … (small)" (DietPlanGenerator).
+   */
+  portions?: Record<MainSlot, DietMealOption[]>;
 }
 
 /** A target nudged by what the day has already used, kept within ±30% of the slot's own share. */
@@ -631,5 +657,15 @@ export function planDay(input: DayPlanInput): PlannedDay | null {
   left -= kcalOf(lunch);
   const dinner = closestPortion(dinnerDish, steer(left, split.dinner));
 
-  return { breakfast, lunch, dinner, snacks };
+  return {
+    breakfast,
+    lunch,
+    dinner,
+    snacks,
+    portions: {
+      breakfast: [...breakfastDish.portions],
+      lunch: [...lunchDish.portions],
+      dinner: [...dinnerDish.portions],
+    },
+  };
 }

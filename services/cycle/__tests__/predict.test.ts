@@ -4,6 +4,7 @@ import {
   baselineSpread,
   buildCycles,
   cycleModeOf,
+  givenWindow,
   mad,
   median,
   predict,
@@ -100,7 +101,8 @@ describe("predict", () => {
   });
 
   it("keeps a probable missed log out of the average, and counts it once she confirms", () => {
-    const episodes = history("2026-03-01", [28, 28, 56, 28]);
+    // 70 days: past the missed-log line, max(60, 1.75 × 28). (60 since 2026-11-20; a 56 now counts.)
+    const episodes = history("2026-03-01", [28, 28, 70, 28]);
     const cycles = buildCycles(episodes, settings(), "2026-10-15");
     expect(cycles.map((c) => c.status)).toEqual(["counted", "counted", "gap", "counted"]);
     expect(predict(input({ episodes }))!.recentLengths).toEqual([28, 28, 28]);
@@ -113,10 +115,12 @@ describe("predict", () => {
     expect(paused[2].status).toBe("pause");
   });
 
-  it("ignores a 'cycle' too short to be one", () => {
+  it("reads a bleed too soon after a period to be the next one as bleeding between periods", () => {
+    // 2026-11-20: once a 9-day "cycle" (status "short"); now the 10 Aug bleed is
+    // a stray (./episodes splitEpisodes) and her cycle is the 28 days it was.
     const episodes = [period("2026-08-01"), period("2026-08-10", 2), period("2026-08-29")];
     const cycles = buildCycles(episodes, settings(), "2026-10-15");
-    expect(cycles.map((c) => c.status)).toEqual(["short", "counted"]);
+    expect(cycles.map((c) => [c.length, c.status])).toEqual([[28, "counted"]]);
   });
 
   it("learns her period length from the periods she ended, not from guesses", () => {
@@ -144,8 +148,11 @@ describe("predict", () => {
     // Cycle 1: LH day 16, ovulation day 17, next start day 31 → 14 days. Cycle 2: 12.
     expect(p.lutealDays).toBe(13);
     expect(daysBetween(p.ovulation, p.likely)).toBe(13);
-    expect(daysBetween(p.fertileStart, p.ovulation)).toBe(5);
-    expect(daysBetween(p.ovulation, p.fertileEnd)).toBe(1);
+    // 2026-11-20: the window is ovulation −5…+1 widened EQUALLY by how unsure
+    // the estimate is (Fix 2) — no longer always exactly 7 days.
+    const spread = daysBetween(p.ovulation, p.fertileEnd) - 1;
+    expect(spread).toBeGreaterThanOrEqual(0);
+    expect(daysBetween(p.fertileStart, p.ovulation)).toBe(5 + spread);
   });
 
   it("restarts from the first period after the birth when postpartum", () => {
@@ -174,9 +181,14 @@ describe("todayStatus", () => {
     const i = input({ episodes, settings: s, today: "2026-10-20" });
     const p = predict(i)!;
     const st = todayStatus(i, p);
-    expect(p.latest < "2026-10-20").toBe(true);
+    // 2026-11-20: late, the forecast rolls ("any day now", from today); "late
+    // by" counts against the window she was given (Fix 3).
+    const given = givenWindow(p);
+    expect(given.latest < "2026-10-20").toBe(true);
+    expect(p.earliest).toBe("2026-10-20");
     expect(st.phase).toBe("late");
-    expect(st.lateBy).toBe(daysBetween(p.latest, "2026-10-20"));
+    expect(st.lateBy).toBe(daysBetween(given.latest, "2026-10-20"));
+    expect(p.overdue?.days).toBe(st.lateBy);
     expect(st.ringDays).toBe(st.cycleDay);
   });
 

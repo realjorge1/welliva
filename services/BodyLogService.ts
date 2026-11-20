@@ -137,7 +137,7 @@ export function computeWeightTrend(
 /** Convenience for callers that just want a `YYYY-MM-DD` stamped entry today. */
 export function makeWeighIn(
   weightKg: number,
-  opts: { waistCm?: number; notes?: string; now?: Date } = {},
+  opts: { waistCm?: number; notes?: string; now?: Date; explicit?: boolean } = {},
 ): BodyLogEntry {
   const date = toLocalDateString(opts.now ?? new Date());
   return {
@@ -145,5 +145,6 @@ export function makeWeighIn(
     weightKg,
     ...(opts.waistCm != null ? { waistCm: opts.waistCm } : {}),
     ...(opts.notes ? { notes: opts.notes } : {}),
+    ...(opts.explicit ? { explicit: true } : {}),
   };
 }

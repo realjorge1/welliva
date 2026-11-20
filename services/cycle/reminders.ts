@@ -32,7 +32,8 @@ import { ownerStamp } from "../notifications/owner";
 import { notificationsPaused, quietDate } from "../notifications/pause";
 import { KEYS, readJSON, toLocalDateString, todayDate, writeJSON } from "../OfflineStorage";
 import { loadLifeMoments } from "./lifeMoments";
-import { predict, todayStatus } from "./predict";
+import { pillForecast } from "./pill";
+import { cycleModeOf, predict, todayStatus } from "./predict";
 import { planCycleReminders, type CycleReminderKind, type PlannedReminder } from "./reminderPlan";
 import { loadCycleData } from "./store";
 
@@ -136,6 +137,7 @@ export async function relayCycleReminders(): Promise<number> {
     };
     // predict() itself returns null in the paused and logging-only modes.
     const prediction = predict(input);
+    const mode = cycleModeOf(input.profile.conditions, data.settings.contraception?.answer);
     return await syncCycleReminders(
       planCycleReminders({
         settings: data.settings,
@@ -143,6 +145,8 @@ export async function relayCycleReminders(): Promise<number> {
         prediction,
         now: new Date(),
         moments: await loadLifeMoments(input.today),
+        // The combined pill's one check-in (./pill), exactly as the view plans it.
+        pill: pillForecast({ episodes: data.periods, settings: data.settings, mode, today: input.today }),
       }),
     );
   } catch {

@@ -44,7 +44,9 @@ import {
   getDietHistory,
   getScheduleForDate,
   getTodayDiet,
+  markDayComplete,
   markMealConsumed,
+  setMealPortion,
   swapMealInSchedule,
   toggleMealConsumed,
 } from "../../services/ScheduleService";
@@ -461,6 +463,31 @@ export function useNutritionState({
     }
   }, [userGoals, nutritionTargets, creditIfGoalCrossed, setWaterMl, setStreakData]);
 
+  /**
+   * "I had half" / "I had double" on a ticked meal today. The ledger line is
+   * rescaled, so the day's totals follow at once.
+   */
+  const handleSetMealPortion = useCallback(
+    async (
+      mealType: "breakfast" | "lunch" | "dinner" | "snack",
+      snackIndex: number | undefined,
+      portion: number,
+    ) => {
+      await setMealPortion(todayDate(), mealType, snackIndex, portion);
+      await refreshTodayDiet();
+    },
+    [refreshTodayDiet],
+  );
+
+  /** "That's everything for today" (or for yesterday, inside the log window). */
+  const handleMarkDayComplete = useCallback(
+    async (date: string, complete: boolean = true) => {
+      await markDayComplete(date, complete);
+      await refreshDietHistory();
+    },
+    [refreshDietHistory],
+  );
+
   return {
     consumedNutrition,
     refreshTodayDiet,
@@ -474,5 +501,7 @@ export function useNutritionState({
     addFoodAsSnack,
     addWater,
     syncLiveCounters,
+    handleSetMealPortion,
+    handleMarkDayComplete,
   };
 }

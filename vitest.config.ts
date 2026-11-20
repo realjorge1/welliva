@@ -26,6 +26,7 @@ export default defineConfig({
       "services/sync/**/*.test.ts",
       "services/telemetry/**/*.test.ts",
       "services/nutrition/**/*.test.ts",
+      "services/export/**/*.test.ts",
       "services/gozlin/**/*.test.ts",
       "services/api/**/*.test.ts",
       "services/catalogs/**/*.test.ts",

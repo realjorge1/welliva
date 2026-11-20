@@ -149,6 +149,7 @@ export function useProactiveDelivery(): void {
             dietHistory: app.dietHistory,
             workoutLog: app.workoutLog,
             bodyLogs: app.bodyLogs,
+            targetKcal: app.nutritionTargets?.calories ?? null,
           })
         : null;
 

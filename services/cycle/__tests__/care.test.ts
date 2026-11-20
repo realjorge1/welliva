@@ -236,9 +236,12 @@ describe("export", () => {
       days: days(day("2026-09-02", { symptoms: ["cramps", "back_pain"], flow: "heavy" }), day("2026-09-03", {})),
     });
     const rows = csv.split("\n");
-    expect(rows[0]).toBe("type,date,end,flow,symptoms,mood,energy,ovulation_test,detail,kept_from_day,discharge");
-    expect(rows[1]).toBe("period,2026-09-01,2026-09-05,,,,,,,,");
-    expect(rows[2]).toBe("day,2026-09-02,,Heavy,Cramps; Back pain,,,,,,");
+    // 2026-11-20: `bleeding_answer` and `temperature_c` appended at the end (every row is padded to them).
+    expect(rows[0]).toBe(
+      "type,date,end,flow,symptoms,mood,energy,ovulation_test,detail,kept_from_day,discharge,bleeding_answer,temperature_c",
+    );
+    expect(rows[1]).toBe("period,2026-09-01,2026-09-05,,,,,,,,,,");
+    expect(rows[2]).toBe("day,2026-09-02,,Heavy,Cramps; Back pain,,,,,,,,");
     expect(rows).toHaveLength(3); // the cleared day is not exported
   });
 });

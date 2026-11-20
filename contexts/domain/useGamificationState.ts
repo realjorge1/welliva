@@ -57,6 +57,7 @@ import {
 } from "../../services/MomentEngine";
 import { addEpisode, rememberMotivation } from "../../services/gozlin";
 import { calculateNutritionTargets } from "../../services/NutritionService";
+import { weightTrend } from "../../services/nutrition/weightTrend";
 import {
   KEYS,
   todayDate,
@@ -476,12 +477,23 @@ export function useGamificationState({
       motivation?: string;
     }) => {
       const today = todayDate();
-      const currentWeight =
-        [...bodyLogs].sort((a, b) => a.date.localeCompare(b.date)).slice(-1)[0]
-          ?.weightKg ?? userBio?.weightKg;
+      // Her TREND weight, not the profile's (which only a Profile edit moved
+      // before 2026-11-20) and not one raw reading: a new chapter's target
+      // starts from where her body actually is.
+      const trendKg = weightTrend(
+        bodyLogs.map((l) => ({ date: l.date, kg: l.weightKg, explicit: l.explicit })),
+      ).trendKg;
+      const currentWeight = trendKg ?? userBio?.weightKg;
 
       if (userBio) {
-        const newBio: UserBio = { ...userBio, primaryGoal: input.primaryGoal };
+        // A new goal starts fresh: no taper carried over from the last one.
+        const { nearGoalTaper: _taper, ...rest } = userBio;
+        void _taper;
+        const newBio: UserBio = {
+          ...rest,
+          primaryGoal: input.primaryGoal,
+          ...(currentWeight != null ? { weightKg: Math.round(currentWeight * 10) / 10 } : {}),
+        };
         setUserBio(newBio);
         const targets = calculateNutritionTargets(newBio);
         setNutritionTargets(targets);

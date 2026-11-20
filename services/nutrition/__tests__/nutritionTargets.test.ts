@@ -517,7 +517,10 @@ describe("boundaries", () => {
     expect(t.fatG).toBeGreaterThan(0);
   });
 
-  it("holds the ceiling for a very large, very active frame", () => {
+  it("feeds a very large, very active frame what it needs (no 3,200 ceiling)", () => {
+    // Changed deliberately 2026-11-20. This used to pin 3,200 — the ceiling
+    // that turned this builder's +300 into a 1,800 kcal deficit. Now:
+    // BMR = 1500 + 1250 − 125 + 5 = 2630; × 1.9 = 4997; + 300 = 5297.
     const t = calculateNutritionTargets(
       bio({
         weightKg: 150,
@@ -527,8 +530,15 @@ describe("boundaries", () => {
         primaryGoal: "build_muscle",
       }),
     );
-    expect(t.calories).toBe(3200);
+    expect(t.calories).toBe(5297);
     expect(Math.abs(macroKcal(t) - t.calories) / t.calories).toBeLessThan(0.02);
+  });
+
+  it("still bounds an implausible bio (a typo, not a person)", () => {
+    const t = calculateNutritionTargets(
+      bio({ weightKg: 400, heightCm: 230, age: 20, activityLevel: "very_active", primaryGoal: "build_muscle" }),
+    );
+    expect(t.calories).toBe(5500);
   });
 
   it("leaves an unconstrained user with no guidance block at all", () => {

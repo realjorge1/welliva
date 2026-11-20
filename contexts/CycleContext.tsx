@@ -26,7 +26,10 @@
 import { consent } from "@/health-os";
 import { syncCycleCalendar } from "@/services/calendar/sync";
 import {
+  answerBleed as answerBleedRun,
   answerContraception,
+  answerMethod,
+  applyDayPatch,
   clearCycleReminders,
   computeView,
   DEFAULT_CYCLE_SETTINGS,
@@ -36,11 +39,12 @@ import {
   FULL_SESSION_MEMORY,
   gozlinAsk as computeGozlinAsk,
   GOZLIN_ASK_LIMIT,
-  isEmptyDayLog,
+  givenWindow,
   loadCycleData,
   loadLifeMoments,
   mergeHungryLedger,
   moveCycleData,
+  PERIOD_FLOWS,
   planCycleReminders,
   pruneDays,
   removeEpisode,
@@ -54,26 +58,22 @@ import {
   withCycleLock,
   withRelief,
   type ContraceptionAnswer,
+  type ContraceptionMethod,
   type CycleData,
   type CycleDayLog,
-  type CycleMood,
   type CycleSettings,
   type CycleView,
-  type Discharge,
-  type Energy,
+  type DayPatch as CycleDayPatch,
   type GozlinAsk,
-  type Flow,
   type GapNote,
   type LifeMoment,
-  type OvulationTest,
   type Relief,
   type ReliefSymptom,
-  type Symptom,
 } from "@/services/cycle";
 import { subscribeCycleLogChanged } from "@/services/notifications/cycleActions";
 import { calorieFloor } from "@/services/NutritionService";
 import { publishDayAdjustments } from "@/services/nutrition/dayTargets";
-import { hasRecordedIntake } from "@/services/nutrition/recordedIntake";
+import { wholeDayIntake } from "@/services/nutrition/dayStatus";
 import { forgetSmartFeature } from "@/services/smart/ledger";
 import React, {
   createContext,
@@ -88,18 +88,8 @@ import { AppState } from "react-native";
 import { useNutrition, useProfile, useSystem } from "./AppContext";
 import { CycleLockProvider } from "./CycleLockContext";
 
-/** A change to one day's log. `null` clears a field; `undefined` leaves it alone. */
-export interface DayPatch {
-  flow?: Flow | null;
-  symptoms?: Symptom[];
-  mood?: CycleMood | null;
-  energy?: Energy | null;
-  ovulationTest?: OvulationTest | null;
-  /** "Kept me from school, work or plans" — only kept beside cramps. */
-  stoppedDay?: true | null;
-  /** Only offered with the fertile window on. */
-  discharge?: Discharge | null;
-}
+/** A change to one day's log (services/cycle/dayWrite). */
+export type DayPatch = CycleDayPatch;
 
 export interface CycleSetup {
   /** Null for "I don't remember" — predictions wait for her first log. */
@@ -108,6 +98,10 @@ export interface CycleSetup {
   usualPeriodDays: number | null;
   /** "Do you use hormonal contraception?" — optional, so null when skipped. */
   contraception?: ContraceptionAnswer | null;
+  /** "Which one?", after a yes (services/cycle/pill); null when skipped. */
+  method?: ContraceptionMethod | null;
+  /** The combined pill's pack length: 28 or 91. */
+  packDays?: number;
 }
 
 interface CycleContextValue {
@@ -126,6 +120,8 @@ interface CycleContextValue {
   togglePeriodDay: (date: string, on: boolean) => Promise<void>;
   removePeriod: (id: string) => Promise<void>;
   logDay: (date: string, patch: DayPatch) => Promise<void>;
+  /** "Is this the start of your period?" — her answer, for the run of bleeding `date` belongs to. */
+  answerBleed: (date: string, answer: "period" | "between") => Promise<void>;
   /** "What helped most?" — her answer, onto the symptom day's own log. */
   answerRelief: (date: string, symptom: ReliefSymptom, helped: Relief) => Promise<void>;
   /** "Skip" — kept too: three in a row and that symptom isn't asked about again. */
@@ -134,6 +130,8 @@ interface CycleContextValue {
   setBackup: (on: boolean) => Promise<void>;
   /** Her answer to the contraception question. Switching away from "yes" restarts her history. */
   setContraception: (answer: ContraceptionAnswer) => Promise<void>;
+  /** "Which one?" after a yes: the combined pill (and its pack), or another method. */
+  setContraceptionMethod: (method: ContraceptionMethod, packDays?: number) => Promise<void>;
   setShareWithGozlin: (on: boolean) => Promise<void>;
   answerGap: (cycleStart: string, answer: GapNote) => Promise<void>;
   dismissNote: (id: string, signature: string) => Promise<void>;
@@ -170,8 +168,6 @@ const CycleContext = createContext<CycleContextValue | null>(null);
 
 const nowIso = () => new Date().toISOString();
 
-/** Flows that mean a period day. Spotting doesn't. */
-const PERIOD_FLOWS: readonly Flow[] = ["light", "medium", "heavy"];
 
 export function CycleProvider({ children }: { children: React.ReactNode }) {
   const { userBio, bodyLogs, nutritionTargets } = useProfile();
@@ -195,6 +191,8 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
     () => ({ age, bmi, conditions: conditionsKey ? conditionsKey.split(",") : [] }),
     [age, bmi, conditionsKey],
   );
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
 
   /* ── load ─────────────────────────────────────────────────────────── */
 
@@ -294,11 +292,11 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const weighIns = useMemo(() => bodyLogs.map((b) => ({ date: b.date, kg: b.weightKg })), [bodyLogs]);
-  // Days that recorded food only: a closed day with nothing logged is unknown, not 0 kcal.
-  const intake = useMemo(
-    () => dietHistory.filter(hasRecordedIntake).map((e) => ({ date: e.date, kcal: e.consumedCalories ?? 0 })),
-    [dietHistory],
-  );
+  // WHOLE days only (said so, or inferred — services/nutrition/dayStatus): a
+  // closed day with nothing logged is unknown, not 0 kcal, and a one-snack day
+  // is not a day — read as one, it would look like the hungrier week ending.
+  const intakeTarget = nutritionTargets?.calories ?? null;
+  const intake = useMemo(() => wholeDayIntake(dietHistory, intakeTarget), [dietHistory, intakeTarget]);
   const usualKcal = nutritionTargets?.calories ?? null;
   const floorKcal = userBio ? calorieFloor(userBio) : null;
   const calories = useMemo(
@@ -348,7 +346,9 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
   // run of taps on the day sheet costs one re-lay.
   const remindersKey = useMemo(() => {
     const s = data.settings;
-    const p = view.prediction;
+    // The window she was GIVEN: the reminders are timed off it, and while she
+    // is late the forecast rolls forward daily without changing the plan.
+    const p = view.prediction ? givenWindow(view.prediction) : null;
     return [
       s.enabled,
       s.remindersOn,
@@ -361,6 +361,7 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
       p?.earliest,
       p?.likely,
       p?.latest,
+      view.pill ? `${view.pill.latest}:${view.pill.missed}` : "",
       moments.map((m) => `${m.id}:${m.kind}:${m.start}:${m.end}`).join(","),
     ].join("|");
   }, [data.settings, view, moments]);
@@ -381,6 +382,7 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
           prediction: v.prediction,
           now: new Date(),
           moments: momentsRef.current,
+          pill: v.pill,
         }),
       );
     }, 800);
@@ -406,6 +408,10 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
       p?.cycleLength,
       p?.fertileStart,
       p?.fertileEnd,
+      p?.fertileKnown,
+      p?.afterNext?.earliest,
+      p?.afterNext?.latest,
+      p?.overdue ? "late" : "",
     ].join("|");
   }, [data.settings, view]);
 
@@ -444,10 +450,14 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
             usualCycleDays: setup.usualCycleDays,
             usualPeriodDays: setup.usualPeriodDays,
             // Skipping the question keeps whatever she said before (a log
-            // turned off and on again), never erases it.
-            contraception: setup.contraception
-              ? answerContraception(d.settings.contraception, setup.contraception, todayRef.current)
-              : d.settings.contraception,
+            // turned off and on again), never erases it. "Which one?" only
+            // ever follows a yes.
+            contraception: (() => {
+              const answered = setup.contraception
+                ? answerContraception(d.settings.contraception, setup.contraception, todayRef.current)
+                : d.settings.contraception;
+              return setup.method ? answerMethod(answered, setup.method, setup.packDays) : answered;
+            })(),
             offerDismissed: true,
           },
         };
@@ -501,45 +511,13 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
 
   const logDay = useCallback(
     (date: string, patch: DayPatch) =>
-      commit((d) => {
-        if (date > todayRef.current) return d;
-        const now = nowIso();
-        const prev: CycleDayLog | undefined = d.days[date];
-        const next: CycleDayLog = { ...(prev ?? { date }), date, updatedAt: now };
-        const apply = <K extends keyof DayPatch>(key: K) => {
-          const v = patch[key];
-          if (v === undefined) return;
-          if (v === null || (Array.isArray(v) && v.length === 0)) {
-            delete (next as unknown as Record<string, unknown>)[key];
-          } else {
-            (next as unknown as Record<string, unknown>)[key] = Array.isArray(v) ? [...new Set(v)] : v;
-          }
-        };
-        apply("flow");
-        apply("symptoms");
-        apply("mood");
-        apply("energy");
-        apply("ovulationTest");
-        apply("stoppedDay");
-        apply("discharge");
-        // An answer about a symptom she has just un-ticked goes with it.
-        if (next.relief) {
-          const kept = next.relief.filter((r) => next.symptoms?.includes(r.symptom));
-          if (kept.length) next.relief = kept;
-          else delete next.relief;
-        }
-        // "Kept me from my day" is about the cramps: un-ticking them takes it too.
-        if (next.stoppedDay && !next.symptoms?.includes("cramps")) delete next.stoppedDay;
-        // Nothing logged, nothing to clear: don't create an empty day.
-        if (isEmptyDayLog(next) && isEmptyDayLog(prev)) return d;
+      commit((d) => applyDayPatch(d, date, patch, { today: todayRef.current, now: nowIso(), profile: profileRef.current })),
+    [commit],
+  );
 
-        // A period flow on a day outside any period makes it a period day.
-        let periods = d.periods;
-        if (next.flow && PERIOD_FLOWS.includes(next.flow) && !episodeOn(d.periods, date, todayRef.current, viewRef.current.typicalBleed)) {
-          periods = toggleEpisodeDay(d.periods, date, true, todayRef.current, viewRef.current.typicalBleed, now);
-        }
-        return { ...d, periods, days: { ...d.days, [date]: next } };
-      }),
+  const answerBleed = useCallback(
+    (date: string, answer: "period" | "between") =>
+      commit((d) => answerBleedRun(d, date, answer, { today: todayRef.current, now: nowIso(), profile: profileRef.current })),
     [commit],
   );
 
@@ -586,6 +564,15 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
         // stopping a method, so a restart counts from it (services/cycle/contraception).
         const bleeding = episodeOn(d.periods, day, day, viewRef.current.typicalBleed);
         const next = answerContraception(d.settings.contraception, answer, day, bleeding?.start ?? null);
+        return next === d.settings.contraception ? d : { ...d, settings: { ...d.settings, contraception: next } };
+      }),
+    [commit],
+  );
+
+  const setContraceptionMethod = useCallback(
+    (method: ContraceptionMethod, packDays?: number) =>
+      commit((d) => {
+        const next = answerMethod(d.settings.contraception, method, packDays);
         return next === d.settings.contraception ? d : { ...d, settings: { ...d.settings, contraception: next } };
       }),
     [commit],
@@ -746,11 +733,13 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
       togglePeriodDay,
       removePeriod,
       logDay,
+      answerBleed,
       answerRelief,
       skipRelief,
       updateSettings: patchSettings,
       setBackup,
       setContraception,
+      setContraceptionMethod,
       setShareWithGozlin,
       answerGap,
       dismissNote,
@@ -779,11 +768,13 @@ export function CycleProvider({ children }: { children: React.ReactNode }) {
       togglePeriodDay,
       removePeriod,
       logDay,
+      answerBleed,
       answerRelief,
       skipRelief,
       patchSettings,
       setBackup,
       setContraception,
+      setContraceptionMethod,
       setShareWithGozlin,
       answerGap,
       dismissNote,

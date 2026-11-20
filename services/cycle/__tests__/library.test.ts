@@ -31,6 +31,7 @@ import {
   HEAVY_WINDOW,
   OVULATION_SPOTTING_DAYS,
 } from "../doctorChecks";
+import { ADOLESCENT_CYCLE_DAYS, MAX_NORMAL_BLEED_DAYS, NORMAL_CYCLE_DAYS, STANDARD_SOURCE } from "../standards";
 import {
   CYCLE_ARTICLES,
   CYCLE_LIBRARY,
@@ -131,13 +132,20 @@ describe("the writing", () => {
     ...(a.seeSomeone ?? []),
   ]);
 
-  it("quotes the same thresholds the app acts on", () => {
+  it("quotes the same thresholds the app acts on (one standard, FIGO 2018, since 2026-11-20)", () => {
     const text = all.join(" ");
-    expect(text).toContain("21 to 35");
-    expect(text).toContain("more than seven days");
+    expect(text).toContain(`${NORMAL_CYCLE_DAYS.min} to ${NORMAL_CYCLE_DAYS.max}`);
+    expect(text).toContain("24 to 38");
+    expect(text).toContain(`${ADOLESCENT_CYCLE_DAYS.min} to ${ADOLESCENT_CYCLE_DAYS.max} under the age of 20`);
+    expect(text).toContain(`more than ${MAX_NORMAL_BLEED_DAYS} days`);
+    expect(text).toContain("more than 8 days");
     expect(text).toContain("90 days");
     // The FIGO regularity limits, which ./flags applies by age.
     expect(text).toMatch(/7 days.*\b26 and 41\b|\b26 and 41\b.*7 days/s);
+    // ...and it names the source, in one plain line.
+    expect(text).toContain(STANDARD_SOURCE);
+    // The old rulebook is gone from every page.
+    expect(text).not.toMatch(/21 to 35|more than seven days|longer than 35/);
   });
 
   it("never promises a prediction is contraception — it says the opposite", () => {

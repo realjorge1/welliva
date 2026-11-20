@@ -58,7 +58,23 @@ export interface IntakeRecord {
   fatG: number;
   /** ISO timestamp of the tick. Drives meal-time learning. */
   at: string;
+  /**
+   * How much of the planned meal she ate (0.5 = half, 2 = double). Absent = 1,
+   * as planned. The macros above are ALREADY scaled by it — this is kept so
+   * the plan can show "½×" and a later change can rescale from the base.
+   */
+  portion?: number;
+  /**
+   * Stable identity for the cloud merge (`slot#name#at`). Records written
+   * before 2026-11-20 have none and merge by their whole content, as before.
+   */
+  id?: string;
+  /** ISO time of the last change to this line (a portion edit): newest wins in a merge. */
+  loggedAt?: string;
 }
+
+/** The portions offered after a tick ("Less", "As planned", "Double"…). */
+export const PORTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
 export type IntakeLedger = Record<string, IntakeRecord[]>;
 
@@ -82,8 +98,27 @@ export function recordFor(
   meal: ScheduledMeal,
   slot: MealType,
   at: string,
+  portion: number = meal.portionEaten ?? 1,
 ): IntakeRecord {
-  return { slot, name: meal.name, ...macrosOfMeal(meal), at };
+  const p = Number.isFinite(portion) && portion > 0 ? portion : 1;
+  const m = macrosOfMeal(meal);
+  return {
+    slot,
+    name: meal.name,
+    calories: m.calories * p,
+    proteinG: m.proteinG * p,
+    carbsG: m.carbsG * p,
+    fatG: m.fatG * p,
+    at,
+    ...(p !== 1 ? { portion: p } : {}),
+    id: recordId(slot, meal.name, at),
+    loggedAt: at,
+  };
+}
+
+/** The merge identity of a tick: what was eaten, in which slot, when. */
+export function recordId(slot: MealType, name: string, at: string): string {
+  return `${identity(slot, name)}#${at}`;
 }
 
 // ============================================================================
@@ -172,6 +207,54 @@ export async function unrecordIntake(
   });
 }
 
+/**
+ * Change how much of a ticked meal she ate. Rescales the most recent matching
+ * line from its own base (macros ÷ old portion × new), keeps its tick time,
+ * and stamps `loggedAt` so the edit wins a cloud merge against the old copy.
+ *
+ * The merge limit, stated: a line ticked BEFORE 2026-11-20 on another phone
+ * has no `id`, so an edit here and the old copy there both survive a merge (the
+ * same way an un-tick can come back today). Lines ticked since carry an id and
+ * merge as one, newest edit winning.
+ */
+export async function setIntakePortion(
+  date: string,
+  slot: MealType,
+  name: string,
+  portion: number,
+  now: Date = new Date(),
+): Promise<IntakeRecord | null> {
+  if (!(Number.isFinite(portion) && portion > 0)) return null;
+  return withLock(async () => {
+    const ledger = await readLedger();
+    const day = Array.isArray(ledger[date]) ? [...ledger[date]] : [];
+    const key = identity(slot, name);
+    for (let i = day.length - 1; i >= 0; i--) {
+      const r = day[i]!;
+      if (identity(r.slot, r.name) !== key) continue;
+      const old = r.portion && r.portion > 0 ? r.portion : 1;
+      if (old === portion) return r;
+      const k = portion / old;
+      const next: IntakeRecord = {
+        ...r,
+        calories: r.calories * k,
+        proteinG: r.proteinG * k,
+        carbsG: r.carbsG * k,
+        fatG: r.fatG * k,
+        portion,
+        id: r.id ?? recordId(r.slot, r.name, r.at),
+        loggedAt: now.toISOString(),
+      };
+      if (portion === 1) delete next.portion;
+      day[i] = next;
+      ledger[date] = day;
+      await writeLedger(ledger);
+      return next;
+    }
+    return null;
+  });
+}
+
 // ============================================================================
 // HEALING — the two documents reconciled, in both directions
 // ============================================================================
@@ -223,11 +306,21 @@ export function healSchedule(
     const record = list && list.length > 0 ? list.shift() : undefined;
 
     if (record) {
-      if (meal.isConsumed) return meal;
+      // The plan mirrors how much she ate, so the row can say "½×".
+      const portion = record.portion && record.portion > 0 ? record.portion : 1;
+      if (meal.isConsumed && (meal.portionEaten ?? 1) === portion) return meal;
       // The ledger says this was eaten and the plan has forgotten — the exact
-      // damage every rewrite of the plan used to do. Put the tick back.
+      // damage every rewrite of the plan used to do. Put the tick back (and
+      // the portion with it).
       restored = true;
-      return { ...meal, isConsumed: true, consumedAt: record.at };
+      const healed: ScheduledMeal = {
+        ...meal,
+        isConsumed: true,
+        consumedAt: meal.isConsumed ? meal.consumedAt : record.at,
+      };
+      if (portion !== 1) healed.portionEaten = portion;
+      else delete healed.portionEaten;
+      return healed;
     }
 
     if (meal.isConsumed) {

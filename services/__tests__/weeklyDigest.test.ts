@@ -154,6 +154,9 @@ describe("summariseWeek", () => {
   });
 
   it("averages only the days that actually recorded a number", () => {
+    // Changed deliberately 2026-11-20: the averages read WHOLE days only, so
+    // these two need a target to be judged against (2,000 and 2,400 of 2,200
+    // are both whole days). The blank day still counts as logged.
     const week = summariseWeek(WEEK, {
       dietHistory: [
         { date: WEEK, consumedCalories: 2000 },
@@ -162,9 +165,36 @@ describe("summariseWeek", () => {
       ],
       workoutLog: [],
       bodyLogs: [],
+      targetKcal: 2200,
     });
     expect(week.daysLogged).toBe(3);
     expect(week.avgCalories).toBe(2200); // not dragged toward zero by the blank day
     expect(week.avgProteinG).toBeNull();
+  });
+
+  it("never counts the day-close's all-zero row as a logged day (2026-11-20)", () => {
+    const week = summariseWeek(WEEK, {
+      dietHistory: [
+        { date: WEEK, consumedCalories: 1900, consumedProteinG: 90, mealsConsumed: 3, totalMeals: 3 },
+        { date: "2026-08-18", consumedCalories: 0, consumedProteinG: 0, consumedCarbsG: 0, consumedFatG: 0, mealsConsumed: 0, totalMeals: 3 },
+      ],
+      workoutLog: [],
+      bodyLogs: [],
+    });
+    expect(week.daysLogged).toBe(1);
+  });
+
+  it("leaves a one-snack day out of the average (2026-11-20)", () => {
+    const week = summariseWeek(WEEK, {
+      dietHistory: [
+        { date: WEEK, consumedCalories: 1900, consumedProteinG: 90, mealsConsumed: 3, totalMeals: 3 },
+        { date: "2026-08-18", consumedCalories: 180, consumedProteinG: 3, mealsConsumed: 1, totalMeals: 3 },
+      ],
+      workoutLog: [],
+      bodyLogs: [],
+      targetKcal: 1800,
+    });
+    expect(week.daysLogged).toBe(2); // she did log something
+    expect(week.avgCalories).toBe(1900); // but a snack isn't a day
   });
 });

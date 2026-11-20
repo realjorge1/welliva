@@ -87,6 +87,18 @@ export interface MyDataInput {
   habits: readonly ExportHabit[];
   moods: readonly ExportMood[];
   cycle: ExportCycle;
+  /**
+   * Why her calorie/protein target moved — her weight trend, an answered offer,
+   * or a correction the algorithm made to itself (services/nutrition/
+   * TargetsVersion records one, because its notice is erased on "Got it") — and
+   * the days she marked "That's everything". Optional so an older caller still
+   * builds a file.
+   */
+  targets?: {
+    moves: readonly { date: string; message: string }[];
+    offers: readonly { date: string; kind: string; status: string; message: string }[];
+    completeDays?: readonly string[];
+  };
   coach: {
     motivation?: string;
     preferences: readonly string[];
@@ -188,8 +200,11 @@ function profileRows(input: MyDataInput): string[][] {
     add("Age", num(bio.age));
     add("Sex", words(bio.sex));
     add("Height", bio.heightCm ? `${num(bio.heightCm)} cm` : "");
-    add("Weight when you set up", bio.weightKg ? `${num(bio.weightKg, 1)} kg` : "");
+    // Since 2026-11-20 this follows her weight trend, so it is no longer the
+    // set-up weight: say what it is.
+    add("Weight your targets use", bio.weightKg ? `${num(bio.weightKg, 1)} kg` : "");
     add("Daily activity", words(bio.activityLevel));
+    add("Pace", words(bio.pace));
     add("Training experience", words(bio.exerciseLevel));
     add("Goals", list((bio.goals?.length ? bio.goals : [bio.primaryGoal]).map(words)));
     add("Eating style", words(bio.dietaryRestriction));
@@ -291,6 +306,36 @@ export function buildMyDataBlocks(input: MyDataInput): DocBlock[] {
     });
   }
   section(out, "Food", food, "No food logged.");
+
+  // Why the numbers moved
+  const moves = byDate(input.targets?.moves ?? []);
+  const offers = byDate(input.targets?.offers ?? []);
+  const complete = [...(input.targets?.completeDays ?? [])].sort();
+  const why: DocBlock[] = [];
+  if (moves.length) {
+    why.push({
+      kind: "table",
+      header: ["Date", "What changed"],
+      rows: moves.map((m) => [day(m.date), m.message]),
+    });
+  }
+  if (offers.length) {
+    why.push({ kind: "heading", level: 2, text: "Suggestions and your answers" });
+    why.push({
+      kind: "table",
+      header: ["Date", "Suggestion", "Your answer"],
+      rows: offers.map((o) => [
+        day(o.date),
+        o.message,
+        o.status === "accepted" ? "Used the new numbers" : o.status === "declined" ? "Kept yours" : "Not answered yet",
+      ]),
+    });
+  }
+  if (complete.length) {
+    why.push({ kind: "heading", level: 2, text: "Days you marked complete" });
+    why.push({ kind: "paragraph", text: complete.map((d) => day(d)).join(", ") });
+  }
+  section(out, "Why your numbers changed", why, "Your daily numbers haven't moved by themselves.");
 
   // Water
   const water = byDate(input.water.filter((w) => w.ml > 0));

@@ -42,6 +42,8 @@
  * credibility the feature exists to build.
  */
 
+import { countsAsDay } from "@/services/nutrition/dayStatus";
+
 import { parseLocalDate, toLocalDateString } from "../platform/clock";
 import { store as defaultStore } from "../platform/storage/AsyncStorageAdapter";
 import type { KeyValueStore } from "../platform/storage/KeyValueStore";
@@ -166,7 +168,19 @@ function dateRange(first: string, last: string): string[] {
  * didn't log, or a week of silence collapses into a single day of drift and the
  * filter concludes their metabolism changed overnight.
  */
-export function buildSeries(events: HealthEvent[], today: string): DayRow[] {
+export interface BuildSeriesOptions {
+  /**
+   * Her calorie target. A closed day written before day-completeness was
+   * recorded on the event is judged against it (services/nutrition/dayStatus).
+   */
+  targetKcal?: number;
+}
+
+export function buildSeries(
+  events: HealthEvent[],
+  today: string,
+  opts: BuildSeriesOptions = {},
+): DayRow[] {
   if (events.length === 0) return [];
 
   const byDate = new Map<string, DayRow>();
@@ -183,7 +197,15 @@ export function buildSeries(events: HealthEvent[], today: string): DayRow[] {
     switch (e.type) {
       case "nutrition.day.closed": {
         const p = e.payload as NutritionDayClosedPayload;
-        if (p.consumedCalories != null) row.intakeKcal = p.consumedCalories;
+        // UNKNOWN IS NOT ZERO. Day-close writes 0 kcal for a day nothing was
+        // logged on, and a one-snack day carries the snack's calories. Read
+        // as intake, the first is a starving day and the second nearly one —
+        // both dragged the learned burn hundreds of kcal low. Only a WHOLE
+        // day (said so, or inferred: services/nutrition/dayStatus) is intake;
+        // anything else is null, and the filter widens the weight's
+        // uncertainty for it instead of assuming an amount.
+        row.intakeKcal =
+          p.consumedCalories != null && countsAsDay(p, opts.targetKcal) ? p.consumedCalories : null;
         if (p.totalMeals > 0) {
           row.adherencePct = (p.mealsConsumed / p.totalMeals) * 100;
         }
@@ -397,6 +419,11 @@ export interface DailyLearningInput {
    * scratch, a date added today also corrects the past.
    */
   noisyWeightDates?: readonly string[];
+  /**
+   * Her calorie target. A closed day written before day status was recorded
+   * is judged a whole day (or not) against it — see buildSeries.
+   */
+  targetKcal?: number;
   store?: KeyValueStore;
   now?: Date;
 }
@@ -409,6 +436,19 @@ export interface DailyLearningReport {
   tdeeObservations: number;
   sessionsFitted: number;
   adherenceSamples: number;
+  /** Whole days of known intake in the last 28 days — an adaptive-target gate. */
+  knownIntakeDays28: number;
+  /** Weigh-ins in the last 28 days — the other gate. */
+  weighIns28: number;
+}
+
+/** How many of the last `days` rows (ending today) have known intake / a weigh-in. */
+export function recentEvidence(series: DayRow[], days = 28): { knownIntakeDays: number; weighIns: number } {
+  const recent = series.slice(-days);
+  return {
+    knownIntakeDays: recent.filter((r) => r.intakeKcal !== null).length,
+    weighIns: recent.filter((r) => r.weightKg !== null).length,
+  };
 }
 
 /**
@@ -424,7 +464,7 @@ export async function runDailyLearning(
   const today = toLocalDateString(now);
 
   const events = await timeline.query({});
-  const series = buildSeries(events, today);
+  const series = buildSeries(events, today, { targetKcal: input.targetKcal });
 
   // ── 1. Score every recommendation whose horizon has closed ──
   const reader = makeMetricReader(series);
@@ -458,12 +498,15 @@ export async function runDailyLearning(
   const adherence = fitAdherence(samples);
   await store.set(K.LEARNING_ADHERENCE, adherence);
 
+  const evidence = recentEvidence(series, 28);
   return {
     ...report,
     days: series.length,
     tdeeObservations: kalman?.observations ?? 0,
     sessionsFitted: observations.length,
     adherenceSamples: samples.length,
+    knownIntakeDays28: evidence.knownIntakeDays,
+    weighIns28: evidence.weighIns,
   };
 }
 

@@ -330,6 +330,8 @@ function symptomLine(phase: Phase, log: CycleDayLog | undefined, status: CycleTo
 
 function sureLine(p: Prediction): string {
   if (p.fromTest) return `From your test on ${formatDay(p.fromTest, { weekday: true })}.`;
+  if (p.testBasis === "temperature") return "Confirmed by your temperature.";
+  if (p.testBasis === "negatives") return "Moved later: your tests haven't shown a surge yet.";
   const word = confidenceWord(p);
   if (p.basedOn === 0) return `${word}: based on what you told me so far.`;
   return `${word}: based on ${plural(p.basedOn, "cycle")}.`;

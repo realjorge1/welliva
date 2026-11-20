@@ -19,8 +19,12 @@ import {
     TodayDiet,
     WeekSchedule,
 } from "../models/diet";
-import { KEYS, writeJSON } from "./OfflineStorage";
+import type { UserBio } from "../models/user";
+import { emitDayClosed } from "../health-os/timeline/writers";
+import { calculateNutritionTargets } from "./NutritionService";
+import { KEYS, readJSON, writeJSON } from "./OfflineStorage";
 import { dayMacros } from "./nutrition/DayTotals";
+import { dayLoggedness, explicitFor, setDayComplete } from "./nutrition/dayStatus";
 import { getFoodLogForDate } from "./nutrition/foodLogStore";
 import {
   adoptMissing,
@@ -28,6 +32,7 @@ import {
   healSchedule,
   recordFor,
   recordIntake,
+  setIntakePortion,
   unrecordIntake,
 } from "./nutrition/IntakeLedger";
 import {
@@ -272,10 +277,14 @@ export async function getScheduledDates(): Promise<string[]> {
  * regenerated fresh in the new style. Dates are YYYY-MM-DD, so string
  * comparison is chronological.
  */
-export async function clearScheduledDietsAfter(date: string): Promise<void> {
+export async function clearScheduledDietsAfter(
+  date: string,
+  /** Days after `date` to keep anyway (e.g. her own hand-picked menu days). */
+  keep?: (d: ScheduledDiet) => boolean,
+): Promise<void> {
   return withLock(async () => {
     const existing = await getScheduledDiets();
-    const kept = existing.filter((d) => d.date <= date);
+    const kept = existing.filter((d) => d.date <= date || (keep ? keep(d) : false));
     if (kept.length !== existing.length) {
       await writeJSON(STORAGE_KEYS.SCHEDULED_DIETS, kept);
     }
@@ -450,6 +459,8 @@ export async function markMealConsumed(
   date: string,
   mealType: "breakfast" | "lunch" | "dinner" | "snack",
   snackIndex?: number,
+  /** How much of the planned meal she ate. Default 1: as planned. */
+  portion: number = 1,
 ): Promise<boolean> {
   if (!canLogForDate(date)) return false;
   const eaten = await withLock(async () => {
@@ -469,9 +480,11 @@ export async function markMealConsumed(
 
     target.isConsumed = true;
     target.consumedAt = at;
+    if (portion !== 1) target.portionEaten = portion;
+    else delete target.portionEaten;
     scheduledDiets[index] = diet;
     await writeJSON(STORAGE_KEYS.SCHEDULED_DIETS, scheduledDiets);
-    return recordFor(target, mealType, at);
+    return recordFor(target, mealType, at, portion);
   });
 
   // The tick's own record, with the macros as they are right now. This — not
@@ -504,6 +517,8 @@ export async function markMealConsumedOnce(
   date: string,
   mealType: "breakfast" | "lunch" | "dinner" | "snack",
   snackIndex?: number,
+  /** How much of the planned meal she ate. Default 1: the lock-screen "Ate it". */
+  portion: number = 1,
 ): Promise<MarkOnceResult> {
   if (!canLogForDate(date)) return { status: "closed" };
   // A read first, through the healing reader: it folds any tick the ledger holds
@@ -531,12 +546,14 @@ export async function markMealConsumedOnce(
       const at = new Date().toISOString();
       target.isConsumed = true;
       target.consumedAt = at;
+      if (portion !== 1) target.portionEaten = portion;
+      else delete target.portionEaten;
       scheduledDiets[index] = diet;
       await writeJSON(STORAGE_KEYS.SCHEDULED_DIETS, scheduledDiets);
       return {
         status: "logged",
         mealName: target.name,
-        record: recordFor(target, mealType, at),
+        record: recordFor(target, mealType, at, portion),
       };
     },
   );
@@ -584,6 +601,8 @@ export async function toggleMealConsumed(
     const at = new Date().toISOString();
     target.isConsumed = !wasConsumed;
     target.consumedAt = wasConsumed ? undefined : at;
+    // A fresh tick starts as planned; an un-tick forgets the portion.
+    delete target.portionEaten;
 
     scheduledDiets[index] = diet;
     await writeJSON(STORAGE_KEYS.SCHEDULED_DIETS, scheduledDiets);
@@ -607,6 +626,63 @@ export async function toggleMealConsumed(
     await processDayEnd(date);
   }
   return applied;
+}
+
+/**
+ * "I had half" / "I had double": change how much of a TICKED meal she ate.
+ *
+ * The ledger line is rescaled in place (same tick time, same name, so healing
+ * and identity are untouched) and the plan mirrors it for the "½×" on the
+ * row. A closed-but-open day has its history row recomputed, exactly as a
+ * back-logged tick does. Returns false outside the log window or for a meal
+ * that isn't ticked.
+ */
+export async function setMealPortion(
+  date: string,
+  mealType: MealType,
+  snackIndex: number | undefined,
+  portion: number,
+): Promise<boolean> {
+  const permission = logPermissionFor(date);
+  if (permission !== "open" && permission !== "backlog") return false;
+  if (!(Number.isFinite(portion) && portion > 0)) return false;
+  // Read through the healing reader first: a tick the ledger never heard of
+  // (pre-ledger data) is adopted into it here, so there is a line to rescale.
+  await getScheduleForDate(date).catch(() => null);
+
+  const name = await withLock(async () => {
+    const scheduledDiets = await getScheduledDiets();
+    const index = scheduledDiets.findIndex((d) => d.date === date);
+    if (index < 0) return null;
+    const diet = scheduledDiets[index];
+    const target =
+      mealType === "snack"
+        ? typeof snackIndex === "number"
+          ? diet.schedule.snacks[snackIndex]
+          : null
+        : (diet.schedule[mealType] as ScheduledMeal | null);
+    if (!target || !target.isConsumed) return null;
+    if (portion !== 1) target.portionEaten = portion;
+    else delete target.portionEaten;
+    scheduledDiets[index] = diet;
+    await writeJSON(STORAGE_KEYS.SCHEDULED_DIETS, scheduledDiets);
+    return target.name;
+  });
+  if (!name) return false;
+
+  await setIntakePortion(date, mealType, name, portion);
+  if (permission === "backlog") await processDayEnd(date);
+  return true;
+}
+
+/**
+ * "That's everything for today" (or, `complete: false`, "not everything").
+ * Her word on the day beats inference (services/nutrition/dayStatus). A day
+ * already closed has its history row re-judged straight away.
+ */
+export async function markDayComplete(date: string, complete: boolean = true): Promise<void> {
+  await setDayComplete(date, complete);
+  if (date < todayStr()) await processDayEnd(date);
 }
 
 /**
@@ -682,6 +758,16 @@ export async function addSnackToSchedule(
  * Idempotent: re-running it for the same date recomputes and replaces that
  * date's history entry, which is exactly what a back-log tick needs.
  */
+/** Her calorie target as it stands, or null without a bio (never throws). */
+async function targetCaloriesNow(): Promise<number | null> {
+  try {
+    const bio = await readJSON<UserBio | null>(KEYS.USER_BIO, null);
+    return bio ? calculateNutritionTargets(bio).calories : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function processDayEnd(date: string): Promise<void> {
   return withLock(async () => {
     const scheduledDiets = await getScheduledDiets();
@@ -770,6 +856,13 @@ export async function processDayEnd(date: string): Promise<void> {
     // from before it existed. Counting both makes the close complete either way.
     const consumed = dayMacros([...records, ...missing], foodLog);
 
+    // Was this a whole day of eating, or part of one? Judged once, here, with
+    // her own "That's everything" answer if she gave one and the target the
+    // day was eaten against — so every reader (averages, trends, the cycle
+    // readings, learning) agrees without re-deriving it. See dayStatus.
+    const targetCalories = await targetCaloriesNow();
+    const explicit = await explicitFor(date).catch(() => null);
+
     // Save to history
     const historyEntry: DietHistoryEntry = {
       date,
@@ -786,6 +879,8 @@ export async function processDayEnd(date: string): Promise<void> {
       skippedMeals,
       ...(Object.keys(mealTimes).length > 0 ? { mealTimes } : {}),
     };
+    historyEntry.loggedness = dayLoggedness(historyEntry, { explicit, targetKcal: targetCalories });
+    if (targetCalories != null) historyEntry.targetCalories = targetCalories;
 
     const history = await getDietHistory();
     // Remove existing entry for this date — recomputing on back-log replaces it.
@@ -800,6 +895,11 @@ export async function processDayEnd(date: string): Promise<void> {
       RETENTION_DAYS.DAILY_HISTORY,
     );
     await writeJSON(STORAGE_KEYS.DIET_HISTORY, bounded);
+    // The learning model's input: the same day, on the timeline. Idempotent (a
+    // re-close with the same totals writes nothing; a changed day is corrected
+    // by append) and never throws. Awaited so the day-close compaction and the
+    // nightly learning job that run right after a sweep both see it.
+    await emitDayClosed(historyEntry);
     // NOTE: the schedule for `date` is intentionally left in place so the user
     // can still back-log it. purgeExpiredSchedules removes it once it ages out.
   });

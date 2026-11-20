@@ -27,7 +27,8 @@ import {
     getRecommendedDiets,
     getSafeOptionDiets,
 } from "./DietMatchService";
-import { planDay } from "./nutrition/mealVariety";
+import { dayNumber, planDay, topUpOptions } from "./nutrition/mealVariety";
+import { fitDaySchedule } from "./nutrition/portionSolver";
 
 // ============================================================================
 // DETERMINISTIC IDS
@@ -100,7 +101,7 @@ export function generateDietPlan(
   if (!day) return null;
 
   // 3. Build schedule
-  const schedule: DaySchedule = {
+  const authored: DaySchedule = {
     date,
     dietId: diet.id,
     dietName: diet.name,
@@ -111,10 +112,96 @@ export function generateDietPlan(
     status: "active",
   };
 
-  // 4. Calculate estimated nutrition
+  // 4. Servings: the rotation picked the dishes; the solver sizes them (½–2×)
+  // so the day reaches her calories AND protein without blowing her fat, adding
+  // up to two of the diet's own snacks if it must. Names never change, so the
+  // intake ledger still heals by slot + name. See nutrition/portionSolver.
+  // The extras pool is built only on a day that needs one (most don't).
+  let pool: ScheduledMeal[] | null = null;
+  const fitOpts = {
+    topUps: () => (pool ??= topUpScheduled(diet!, bio, day.snacks.length)),
+    seed: dayNumber(date),
+  };
+  let schedule = fitDaySchedule(authored, targets, fitOpts);
+
+  // "2× … (small)" reads oddly when the dish is authored larger. Where the
+  // solver asked for much more (or less) of a dish than its chosen size, serve
+  // the dish's own authored size nearest that amount and size the day again.
+  // Only here, at generation: a stored day is never renamed under a tick.
+  if (day.portions) {
+    let changed = false;
+    const better = { ...authored };
+    for (const slot of ["breakfast", "lunch", "dinner"] as const) {
+      const sized = schedule[slot];
+      const options = day.portions[slot];
+      if (!sized || !options || (sized.servings ?? 1) === 1) continue;
+      const want = (sized.calories.min + sized.calories.max) / 2;
+      const nearest = options.reduce((a, b) =>
+        Math.abs(midKcal(b) - want) < Math.abs(midKcal(a) - want) ? b : a,
+      );
+      // `nearest` is the closest of ALL the dish's sizes to the amount asked
+      // for, so a different name means a better-fitting authored size exists.
+      if (nearest.name !== sized.name) {
+        better[slot] = mealOptionToScheduled(nearest, slot);
+        changed = true;
+      }
+    }
+    if (changed) schedule = fitDaySchedule(better, targets, fitOpts);
+  }
+
+  // 5. Calculate estimated nutrition
   const dailyNutritionEstimate = calculateDayNutrition(schedule);
 
   return { diet, schedule, dailyNutritionEstimate };
+}
+
+const midKcal = (o: { calories: { min: number; max: number } }) => (o.calories.min + o.calories.max) / 2;
+
+/**
+ * The diet's snack pool as schedule rows, indexed after the planned snacks.
+ * Remembered per diet + the rules that shape it (a 90-day menu asks ninety
+ * times); keyed on the catalog's length, which grows when the library lands.
+ */
+const topUpCache = new Map<string, ScheduledMeal[]>();
+function topUpScheduled(
+  diet: DietData,
+  bio: UserBio,
+  plannedSnacks: number,
+): ScheduledMeal[] {
+  const key = [
+    DIET_DATABASE.length,
+    diet.id,
+    bio.dietaryRestriction,
+    [...(bio.allergies ?? [])].sort().join(","),
+    [...(bio.foodDislikes ?? [])].sort().join(","),
+    bio.cuisinePreference ?? "mixed",
+    plannedSnacks,
+  ].join("|");
+  const hit = topUpCache.get(key);
+  if (hit) return hit;
+  const rows = topUpOptions(diet, bio).map((s, i) => snackOptionToScheduled(s, plannedSnacks + i));
+  if (topUpCache.size > 64) topUpCache.clear();
+  topUpCache.set(key, rows);
+  return rows;
+}
+
+/**
+ * Size an EXISTING day to her targets — a plan written elsewhere (the AI
+ * backend, a hand-picked menu) or one whose targets just moved. Dishes and
+ * names are kept; meals already eaten keep their size; extras come from the
+ * day's diet when it is a catalog diet (none on her own picked menu).
+ */
+export function fitScheduleToTargets(
+  schedule: DaySchedule,
+  bio: UserBio,
+  targets: NutritionTargets,
+  opts: { topUps?: boolean } = {},
+): DaySchedule {
+  const diet = opts.topUps === false ? undefined : DIET_DATABASE.find((d) => d.id === schedule.dietId);
+  return fitDaySchedule(schedule, targets, {
+    topUps: diet ? () => topUpScheduled(diet, bio, schedule.snacks?.length ?? 0) : undefined,
+    seed: dayNumber(schedule.date),
+  });
 }
 
 /**

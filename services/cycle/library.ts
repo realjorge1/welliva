@@ -9,7 +9,7 @@
  * its most frightening in the same sentence, and the only honest answer to
  * "worth mentioning to a doctor" is a page that says what is being mentioned.
  *
- * TWENTY-ONE PAGES, in four groups, each one reachable three ways: from the
+ * TWENTY-TWO PAGES, in four groups, each one reachable three ways: from the
  * library, from the flag that raised it (`READING_FOR_NOTE`), and from whatever
  * she logged today (`suggestedReading`).
  *
@@ -22,8 +22,9 @@
  *    would make it worth going sooner. The word for a condition appears only as
  *    something to ASK about.
  *  · IT NEVER CONTRADICTS THE NUMBERS. Every threshold here is the one the app
- *    already acts on: 21–35 days (./flags), seven days of bleeding, the FIGO
- *    2018 regularity limits of 7 and 9 days by age, 90 days for a missed period.
+ *    already acts on, imported from ./standards (FIGO 2018, the owner's choice
+ *    2026-11-20): 24–38 days (21–45 under 20), eight days of bleeding, the
+ *    regularity limits of 7 and 9 days by age, 90 days for a missed period.
  *    A page that said "most cycles are 28 days" while the app predicted from her
  *    own 31 would teach her to distrust both.
  *  · IT NEVER PROMISES A PREDICTION IS CONTRACEPTION. The fertile-window page is
@@ -39,7 +40,23 @@
  * and the whole library is one import for the reader screen.
  */
 
+import {
+  COVER_LOOKBACK_DAYS,
+  COVER_READINGS,
+  HIGH_DAYS,
+  RISE_MIN_C,
+  TEMPERATURE_LOGGING,
+} from "./bbt";
 import type { DoctorNoteId } from "./flags";
+import {
+  ADOLESCENT_BELOW_AGE,
+  ADOLESCENT_CYCLE_DAYS,
+  MAX_NORMAL_BLEED_DAYS,
+  NORMAL_CYCLE_DAYS,
+  REGULAR_SPREAD_DAYS,
+  REGULAR_SPREAD_DAYS_OTHER_AGES,
+  STANDARD_SOURCE,
+} from "./standards";
 import { fertileWindowAllowed } from "./predict";
 import type { CycleSettings, Symptom } from "./types";
 import type { CycleView } from "./view";
@@ -68,6 +85,7 @@ export type CycleArticleId =
   | "bleeding-between-periods"
   // life and context
   | "ovulation"
+  | "temperature"
   | "contraception"
   | "after-a-birth"
   | "perimenopause"
@@ -175,23 +193,23 @@ const ARTICLES: CycleArticle[] = [
     id: "whats-typical",
     group: "basics",
     title: "What counts as typical",
-    blurb: "The real ranges — 21 to 35 days, 2 to 7 of bleeding — and why 28 is a myth.",
+    blurb: `The real ranges — ${NORMAL_CYCLE_DAYS.min} to ${NORMAL_CYCLE_DAYS.max} days, 2 to ${MAX_NORMAL_BLEED_DAYS} of bleeding — and why 28 is a myth.`,
     icon: "options-outline",
     minutes: 3,
     sections: [
       {
         heading: "28 days is an average, not a target",
         body: [
-          "A typical adult cycle is anywhere from 21 to 35 days. 28 is roughly the middle of that range, which is how it ended up printed on everything — but a 24-day cycle and a 33-day cycle are both ordinary, and neither is a problem to be fixed.",
+          `A typical adult cycle is anywhere from ${NORMAL_CYCLE_DAYS.min} to ${NORMAL_CYCLE_DAYS.max} days. 28 sits inside that range, which is how it ended up printed on everything — but a 25-day cycle and a 34-day cycle are both ordinary, and neither is a problem to be fixed.`,
           "welliva predicts from your cycles, not from 28. Until it has a few of yours it uses what you told it at setup, and it says so on the prediction.",
         ],
       },
       {
         heading: "The ranges welliva actually uses",
         points: [
-          "Cycle length: 21 to 35 days. Outside that in two of your last six cycles is when welliva mentions it.",
-          "Period length: 2 to 7 days of bleeding. More than 7 is worth raising.",
-          "Variation: a cycle that moves by up to 7 days from your shortest to your longest counts as regular between 26 and 41; up to 9 days outside that age range. These are the FIGO 2018 limits, and they are wider for younger and older people on purpose.",
+          `Cycle length: ${NORMAL_CYCLE_DAYS.min} to ${NORMAL_CYCLE_DAYS.max} days, or ${ADOLESCENT_CYCLE_DAYS.min} to ${ADOLESCENT_CYCLE_DAYS.max} under the age of ${ADOLESCENT_BELOW_AGE}. Outside that in two of your last six cycles is when welliva mentions it.`,
+          `Period length: up to ${MAX_NORMAL_BLEED_DAYS} days of bleeding. More than ${MAX_NORMAL_BLEED_DAYS} is worth raising.`,
+          `Variation: a cycle that moves by up to ${REGULAR_SPREAD_DAYS} days from your shortest to your longest counts as regular between 26 and 41; up to ${REGULAR_SPREAD_DAYS_OTHER_AGES} days outside that age range. ${STANDARD_SOURCE} They are wider for younger and older people on purpose.`,
           "No period for 90 days, outside pregnancy and menopause, is worth a conversation.",
         ],
       },
@@ -356,7 +374,7 @@ const ARTICLES: CycleArticle[] = [
     seeSomeone: [
       "Soaking a pad or tampon every hour or two, for several hours.",
       "Clots bigger than a ten-pence piece, or flooding through to clothes and bedding.",
-      "Bleeding for more than seven days.",
+      `Bleeding for more than ${MAX_NORMAL_BLEED_DAYS} days.`,
       "Tiredness, breathlessness or dizziness alongside heavy periods — ask for iron to be checked.",
       "Bleeding between periods, after sex, or any bleeding at all after menopause.",
     ],
@@ -694,13 +712,13 @@ const ARTICLES: CycleArticle[] = [
       {
         heading: "What welliva is counting",
         body: [
-          "A cycle shorter than 21 days or longer than 35, in two of your last six cycles, is when the app mentions it. Two, not one — because one odd month is a month, and a flag that fired on every stressful fortnight would be noise you learned to ignore.",
+          `A cycle shorter than ${NORMAL_CYCLE_DAYS.min} days or longer than ${NORMAL_CYCLE_DAYS.max} (under ${ADOLESCENT_BELOW_AGE}: ${ADOLESCENT_CYCLE_DAYS.min} and ${ADOLESCENT_CYCLE_DAYS.max}), in two of your last six cycles, is when the app mentions it. Two, not one — because one odd month is a month, and a flag that fired on every stressful fortnight would be noise you learned to ignore. ${STANDARD_SOURCE}`,
         ],
       },
       {
         heading: "Short cycles",
         body: [
-          "Repeatedly short cycles usually mean the first half is running short, the second half is, or you're bleeding between periods and it's being counted as a new period. All three are worth sorting out, and the third is worth checking in your own log first: spotting is not a period, and logging it as one would shorten your average for months.",
+          "Repeatedly short cycles usually mean the first half is running short, the second half is, or bleeding between periods is being taken for a new period. All three are worth sorting out. welliva reads a bleed that starts within two weeks of a period as bleeding between periods, never as a new cycle, and asks you when an early one could go either way.",
           "Short cycles mean more periods a year, which means more blood loss and more iron lost. If they come with tiredness, ask for iron to be checked.",
           "Approaching menopause, cycles commonly shorten before they scatter. That's a context worth mentioning if it applies.",
         ],
@@ -774,14 +792,14 @@ const ARTICLES: CycleArticle[] = [
     id: "long-periods",
     group: "changes",
     title: "A period that goes on",
-    blurb: "Seven days is the line. What's usually behind a longer one.",
+    blurb: `${MAX_NORMAL_BLEED_DAYS} days is the line. What's usually behind a longer one.`,
     icon: "hourglass-outline",
     minutes: 3,
     sections: [
       {
         heading: "Where the line is",
         body: [
-          "Two to seven days of bleeding is the typical range. welliva mentions a period longer than seven days — and only counts periods you ended yourself, because a period it had to guess the end of is not evidence of anything.",
+          `Up to ${MAX_NORMAL_BLEED_DAYS} days of bleeding is the typical range. welliva mentions a period longer than ${MAX_NORMAL_BLEED_DAYS} days — and only counts periods you ended yourself, because a period it had to guess the end of is not evidence of anything. ${STANDARD_SOURCE}`,
           "Length and heaviness are separate questions. A long light period and a short heavy one are different situations, and both are worth describing accurately.",
         ],
       },
@@ -809,7 +827,7 @@ const ARTICLES: CycleArticle[] = [
       },
     ],
     seeSomeone: [
-      "Bleeding for more than seven days, more than once.",
+      `Bleeding for more than ${MAX_NORMAL_BLEED_DAYS} days, more than once.`,
       "Bleeding that is both long and heavy — ask for iron to be checked.",
       "Bleeding between periods, after sex, or any bleeding after menopause.",
       "A long period with easy bruising or heavy bleeding after dental work or childbirth — mention that history.",
@@ -890,8 +908,8 @@ const ARTICLES: CycleArticle[] = [
       {
         heading: "Signs that are more reliable than a calendar",
         points: [
-          "Cervical mucus becoming clear, stretchy and slippery in the days before ovulation — the most useful free sign.",
-          "Ovulation predictor kits, which detect the LH surge a day or so before. welliva moves this cycle's dates from a positive test, and learns your own timing once two cycles have one. With PCOS these tests can read positive without ovulation, so there a positive is a hint, not a date.",
+          "Cervical mucus becoming clear, stretchy and slippery in the days before ovulation — the most useful free sign. welliva marks a clear, stretchy day you log as fertile, whatever its estimate says, and never moves a date for it.",
+          "Ovulation predictor kits, which detect the LH surge a day or so before. welliva dates this cycle from your first positive (the start of the surge), moves your dates later after a run of negatives past its estimate, and learns your own timing once two cycles have a positive. With PCOS these tests can read positive without ovulation, so there a test is a hint, not a date.",
           "Basal body temperature, which rises slightly after ovulation — it confirms, rather than predicts.",
           "A mild one-sided ache mid-cycle, for some people. Suggestive, not definitive.",
         ],
@@ -904,6 +922,41 @@ const ARTICLES: CycleArticle[] = [
       },
     ],
     seeAlso: ["how-it-works", "irregular-cycles", "contraception"],
+  },
+  {
+    id: "temperature",
+    group: "context",
+    title: "Tracking your temperature",
+    blurb: "What a temperature rise can confirm, and what it can't.",
+    icon: "thermometer-outline",
+    minutes: 3,
+    sections: [
+      {
+        heading: "What it shows",
+        body: [
+          "After ovulation, progesterone lifts your resting temperature by a few tenths of a degree and holds it there until your period. So a rise that lasts tells you, after the fact, that you ovulated, and roughly when.",
+          "Temperature confirms ovulation after it happens; it can't predict it. By the time the rise shows, the most fertile days have passed. It is not birth control, and a chart is not a contraceptive method on its own.",
+        ],
+      },
+      {
+        heading: "How welliva reads it",
+        points: [
+          `A rise counts when ${HIGH_DAYS} days in a row are all higher than the highest of the ${COVER_READINGS} readings before them, and the last of them is at least ${RISE_MIN_C} °C above it.`,
+          `It needs ${COVER_READINGS} readings in the ${COVER_LOOKBACK_DAYS} days before the rise. With fewer, it says nothing rather than guess.`,
+          "Ovulation is taken as the day before the first higher day.",
+          "A confirmed rise moves this cycle's dates, and from two cycles it teaches welliva your own second half. That works with PCOS too, where ovulation tests can mislead.",
+        ],
+      },
+      {
+        heading: "Taking it well",
+        points: [
+          "On waking, before you get up, talk or drink anything.",
+          "At about the same time each day, with the same thermometer. One that shows two decimals helps.",
+          "Illness, alcohol, a short or broken night, travel and shift work all throw it off. Skip a day rather than log one you know is off.",
+        ],
+      },
+    ],
+    seeAlso: ["ovulation", "tracking-well"],
   },
   {
     id: "contraception",
@@ -930,7 +983,8 @@ const ARTICLES: CycleArticle[] = [
       {
         heading: "What welliva does when you say you use one",
         body: [
-          "Tell welliva you use hormonal contraception, in setup or in cycle settings, and it logs your bleeding and stops predicting it: no next-period window, no fertile window, no reminders built on either. Bleeding that lasts more than seven days is still flagged as worth raising, because that is worth mentioning on any method.",
+          `Tell welliva you use hormonal contraception, in setup or in cycle settings, and it logs your bleeding and stops predicting it: no next-period window, no fertile window, no reminders built on either. Bleeding that lasts more than ${MAX_NORMAL_BLEED_DAYS} days is still flagged as worth raising, because that is worth mentioning on any method.`,
+          "On the combined pill, if you say so, welliva shows one thing more: when your next bleed is likely, counted from your pack. It is a pack schedule, not a period, so nothing else comes with it. If a bleed the pack expected doesn't come and there's any chance you could be pregnant, a test can tell you.",
           "When you stop, change the answer to No. Your predictions then start fresh, the same way they would after a birth. Nothing in welliva is, or replaces, contraception.",
         ],
       },
@@ -1092,22 +1146,29 @@ const ARTICLES: CycleArticle[] = [
   },
 ];
 
-/** Every page, by id. */
+/** Every page, by id — including any not yet shown (see SHOWN). */
 export const CYCLE_LIBRARY: Record<CycleArticleId, CycleArticle> = Object.fromEntries(
   ARTICLES.map((a) => [a.id, a]),
 ) as Record<CycleArticleId, CycleArticle>;
 
+/**
+ * The pages she can open. The temperature page waits with the feature it
+ * describes (./bbt TEMPERATURE_LOGGING): a page about a row she can't log
+ * would be a promise the app doesn't keep.
+ */
+const SHOWN: readonly CycleArticle[] = ARTICLES.filter((a) => a.id !== "temperature" || TEMPERATURE_LOGGING);
+
 /** Reading order, as the library screen lists them. */
-export const CYCLE_ARTICLES: readonly CycleArticle[] = ARTICLES;
+export const CYCLE_ARTICLES: readonly CycleArticle[] = SHOWN;
 
 export function articlesInGroup(group: CycleArticleGroup): CycleArticle[] {
-  return ARTICLES.filter((a) => a.group === group);
+  return SHOWN.filter((a) => a.group === group);
 }
 
-/** An unknown id (a stale deep link, a typo in a route) reads as nothing. */
+/** An unknown id (a stale deep link, a typo in a route) — or a page not shown yet — reads as nothing. */
 export function findArticle(id: string | undefined): CycleArticle | null {
   if (!id) return null;
-  return (CYCLE_LIBRARY as Record<string, CycleArticle | undefined>)[id] ?? null;
+  return SHOWN.find((a) => a.id === id) ?? null;
 }
 
 /* ─────────────────────── where a page gets offered ───────────────────────

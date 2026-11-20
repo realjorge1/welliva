@@ -27,6 +27,7 @@ import {
   type IntakePoint,
 } from "./hungry";
 import { timingPatterns, weightPattern, type CyclePattern, type WeighInPoint } from "./patterns";
+import { pillForecast, type PillForecast } from "./pill";
 import { reliefAsk, reliefRecalls, type ReliefAsk, type ReliefRecall } from "./relief";
 import { comingUp, UPCOMING_HEADS_UP_DAYS, type ComingUp, type LifeMoment } from "./upcoming";
 import { noisyWeightDates, waterMoment, type WaterMoment } from "./water";
@@ -74,6 +75,12 @@ export interface CycleView {
    * Every surface reads this, never `settings.showFertileWindow` on its own.
    */
   showFertile: boolean;
+  /**
+   * She logged clear, stretchy discharge TODAY, with the fertile window on:
+   * today counts as fertile whatever the estimate says (owner, 2026-11-20 —
+   * the cautious direction). It never moves a date.
+   */
+  fertileNow: boolean;
   /** "Yesterday's cramps: what helped most?" — today's one question, or null. */
   reliefAsk: ReliefAsk | null;
   /** What has helped her most, per symptom, once her answers meet the standard. */
@@ -107,6 +114,8 @@ export interface CycleView {
   receipt: string | null;
   /** "Test daily from Thu 14 Nov until you get a positive." — inside the fertile box (./nextDates). */
   testingLine: string | null;
+  /** On the combined pill: the next bleed from her pack schedule (./pill). Null otherwise. */
+  pill: PillForecast | null;
 }
 
 export function computeView(
@@ -196,6 +205,7 @@ export function computeView(
         : null,
     todayLog: days[today],
     showFertile: fertileWindowAllowed(settings.showFertileWindow, mode),
+    fertileNow: fertileWindowAllowed(settings.showFertileWindow, mode) && days[today]?.discharge === "clear_stretchy",
     reliefAsk: reliefAsk({ days, today, mode, enabled: settings.enabled }),
     relief,
     comingUp: upcoming,
@@ -221,11 +231,15 @@ export function computeView(
           today,
         })
       : null,
-    signs: on && (mode === "normal" || mode === "postpartum") ? signPatterns(cycles, days, prediction, settings.showFertileWindow) : [],
+    signs:
+      on && (mode === "normal" || mode === "postpartum")
+        ? signPatterns(cycles, days, prediction, settings.showFertileWindow, !!profile.conditions?.includes("pcos"))
+        : [],
     receipt: on ? startReceipt({ episodes: periods, days, settings, profile, today }) : null,
     testingLine: on
       ? testingStartLine({ prediction, days, showFertile: fertileWindowAllowed(settings.showFertileWindow, mode), today })
       : null,
+    pill: on ? pillForecast({ episodes: periods, settings, mode, today }) : null,
   };
 }
 
@@ -235,8 +249,9 @@ function signPatterns(
   days: CycleData["days"],
   prediction: Prediction | null,
   showFertile: boolean,
+  pcos: boolean,
 ): CyclePattern[] {
-  const luteal = prediction?.lutealDays ?? lutealFor(cycles, days).days;
+  const luteal = prediction?.lutealDays ?? lutealFor(cycles, days, pcos).days;
   return [
     twingePattern(cycles, days, luteal, showFertile),
     showFertile ? dischargePattern(cycles, days, luteal) : null,

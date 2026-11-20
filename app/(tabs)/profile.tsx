@@ -382,7 +382,9 @@ export default function ProfileScreen() {
     const weightChanged = Math.abs(next.weightKg - (currentWeightKg ?? 0)) > 0.05;
     // Log first: updateUserBio re-fits diet + workouts and can take a beat, and
     // a weigh-in the user typed shouldn't be lost if that leg throws.
-    if (weightChanged) await logBodyMeasurement(makeWeighIn(next.weightKg));
+    // Explicit: "this is my weight" — the trend restarts from it, and the
+    // numbers are set by updateUserBio below rather than by the trend.
+    if (weightChanged) await logBodyMeasurement(makeWeighIn(next.weightKg, { explicit: true }));
     await updateUserBio({
       age: next.age,
       heightCm: next.heightCm,

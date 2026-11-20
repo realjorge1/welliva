@@ -141,4 +141,10 @@ export interface BodyLogEntry {
   weightKg: number;
   waistCm?: number;
   notes?: string;
+  /**
+   * Typed on the Profile as "this is my weight" — not a scale reading. The
+   * weight trend restarts from it (services/nutrition/weightTrend) rather than
+   * smoothing it in, because she corrected the number on purpose.
+   */
+  explicit?: boolean;
 }

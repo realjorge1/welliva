@@ -31,7 +31,7 @@ import {
 import { loadCheckins } from "@/services/gozlin/GozlinMemoryStore";
 import { readEntryValence } from "@/services/gozlin/mind";
 import { getFoodLogRange } from "@/services/nutrition/foodLogStore";
-import { hasRecordedIntake } from "@/services/nutrition/recordedIntake";
+import { wholeDayIntake } from "@/services/nutrition/dayStatus";
 import { loadRoughDays, type RoughDay } from "@/services/smart/roughDay";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
@@ -127,7 +127,8 @@ export function useLateContext(): LateContext | null {
   const today = cycle?.today;
   const { workoutLog } = useWorkout();
   const { dietHistory } = useNutrition();
-  const { bodyLogs } = useProfile();
+  const { bodyLogs, nutritionTargets } = useProfile();
+  const intakeTarget = nutritionTargets?.calories ?? null;
   const late = (view?.status.lateBy ?? 0) > 0;
   const [mind, setMind] = useState<MindPoint[]>([]);
   const [events, setEvents] = useState<LifeSpan[]>([]);
@@ -162,16 +163,16 @@ export function useLateContext(): LateContext | null {
             signals: {
               mind,
               workouts: workoutLog.map((w) => ({ date: w.date, minutes: w.durationMinutes ?? null })),
-              // Recorded days only: a closed day with nothing logged is unknown, not 0 kcal.
-              intake: dietHistory
-                .filter(hasRecordedIntake)
-                .map((e) => ({ date: e.date, kcal: e.consumedCalories ?? 0 })),
+              // WHOLE days only (said so, or inferred — services/nutrition/
+              // dayStatus): an unlogged day is unknown, not 0 kcal, and a
+              // one-snack day must not read as "you ate less this cycle".
+              intake: wholeDayIntake(dietHistory, intakeTarget),
               weighIns: bodyLogs.map((b) => ({ date: b.date, kg: b.weightKg })),
               events,
             },
           })
         : null,
-    [late, view, today, mind, workoutLog, dietHistory, bodyLogs, events],
+    [late, view, today, mind, workoutLog, dietHistory, bodyLogs, events, intakeTarget],
   );
 }
 

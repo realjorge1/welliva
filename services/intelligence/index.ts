@@ -39,7 +39,10 @@ export type {
   InsightType,
 } from "./CoachInsightEngine";
 
+export { dietFitLabel, GOOD_FIT_MIN, STRONG_FIT_MIN } from "./dietFitLabel";
+export type { DietFitLabel } from "./dietFitLabel";
 export {
+  alternativeDifference,
   computeConsistency,
   computeWeeklySummary,
   findMealAlternative,
@@ -47,6 +50,8 @@ export {
   hasSmartSwap,
   learnMealTimes,
   rankMealSwaps,
+  slotBudget,
+  swapServings,
 } from "./NutritionInsightEngine";
 export type {
   ConsistencyScore,

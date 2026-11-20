@@ -79,6 +79,10 @@ const PREDICTION: CyclePredictionLike = {
   cycleLength: 29,
   fertileStart: "2026-12-02",
   fertileEnd: "2026-12-07",
+  // The period after next, as services/cycle/predict projects it (2026-11-20).
+  afterNext: { earliest: "2026-12-15", likely: "2026-12-19", latest: "2026-12-23" },
+  overdue: null,
+  fertileKnown: true,
 };
 
 describe("cycle → calendar", () => {

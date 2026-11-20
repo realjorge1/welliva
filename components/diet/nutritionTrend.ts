@@ -71,7 +71,11 @@ export function buildNutritionTrend(
   /** kcal that date's own target moved by, if any (services/nutrition/dayTargets). */
   calorieDeltaOn: (date: string) => number = () => 0,
 ): NutritionTrend {
-  const rows = buildMacroMatrix(history, today, days).filter((r) => r.date !== today);
+  // Whole days only (said so, or inferred): a one-snack day plotted at 12% of
+  // target reads as a day of near-starvation, which it wasn't.
+  const rows = buildMacroMatrix(history, today, days, targets?.calories).filter(
+    (r) => r.date !== today && r.counted,
+  );
   let max = 0;
   const out: TrendDay[] = rows.map((r) => {
     const amount: Record<TrendKey, number | null> = {

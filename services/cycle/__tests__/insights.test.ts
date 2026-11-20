@@ -19,8 +19,9 @@ const cyclesOf = (episodes: PeriodEpisode[]) => buildCycles(episodes, settings()
 
 describe("doctor notes", () => {
   it("needs two long cycles, not one, before it says anything", () => {
+    // FIGO 2018 since 2026-11-20: long means over 38 days (it was over 35).
     const one = doctorNotes({
-      cycles: cyclesOf(history("2026-01-05", [28, 38, 28, 29])),
+      cycles: cyclesOf(history("2026-01-05", [28, 40, 28, 29])),
       episodes: [],
       today: TODAY,
       mode: "normal",
@@ -28,14 +29,14 @@ describe("doctor notes", () => {
     expect(one.map((n) => n.id)).not.toContain("long_cycles");
 
     const two = doctorNotes({
-      cycles: cyclesOf(history("2026-01-05", [28, 38, 28, 39])),
+      cycles: cyclesOf(history("2026-01-05", [28, 40, 28, 41])),
       episodes: [],
       today: TODAY,
       mode: "normal",
     });
     const note = two.find((n) => n.id === "long_cycles")!;
     expect(note.body).toContain("2 of your last 4 cycles");
-    expect(note.body).toContain("38, 39 days");
+    expect(note.body).toContain("40, 41 days");
     expect(note.body).toMatch(/worth mentioning to a doctor/);
   });
 
@@ -49,7 +50,7 @@ describe("doctor notes", () => {
     expect(notes.map((n) => n.id)).toContain("short_cycles");
   });
 
-  it("flags a period that lasted more than 7 days — only when she ended it herself", () => {
+  it("flags a period that lasted more than 8 days (FIGO 2018) — only when she ended it herself", () => {
     const logged = doctorNotes({
       cycles: [],
       episodes: [period("2026-09-01", 9)],

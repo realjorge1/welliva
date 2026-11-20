@@ -23,8 +23,14 @@ import {
   CONTRACEPTION_HINT,
   CONTRACEPTION_OPTIONS,
   CONTRACEPTION_QUESTION,
+  DEFAULT_PACK_DAYS,
   HORMONAL_LINE,
+  METHOD_OPTIONS,
+  METHOD_QUESTION,
+  PACK_OPTIONS,
+  PILL_LINE,
   type ContraceptionAnswer,
+  type ContraceptionMethod,
 } from "@/services/cycle";
 import { useSyncStatus } from "@/services/sync/useSyncStatus";
 import { Ionicons } from "@expo/vector-icons";
@@ -57,6 +63,9 @@ function CycleSetupBody() {
   const [contraception, setContraception] = useState<ContraceptionAnswer | null>(
     cycle.settings.contraception?.answer ?? null,
   );
+  // "Which one?", only after a yes (services/cycle/pill).
+  const [method, setMethod] = useState<ContraceptionMethod | null>(cycle.settings.contraception?.method ?? null);
+  const [packDays, setPackDays] = useState<number>(cycle.settings.contraception?.packDays ?? DEFAULT_PACK_DAYS);
   const [saving, setSaving] = useState(false);
 
   const canNext = unsureStart || !!lastStart;
@@ -69,6 +78,8 @@ function CycleSetupBody() {
         usualCycleDays: cycleDays,
         usualPeriodDays: periodDays,
         contraception,
+        method: contraception === "hormonal" ? method : null,
+        packDays,
       });
       // /cycle is a (tabs) destination now, not a pushed screen, so it is
       // SWITCHED to rather than replaced onto the stack — the same two steps
@@ -195,9 +206,34 @@ function CycleSetupBody() {
               />
             </View>
             {contraception === "hormonal" ? (
-              <AppText variant="footnote" color="secondary" style={styles.methodNote}>
-                {HORMONAL_LINE}
-              </AppText>
+              <View style={styles.methodNote}>
+                <AppText variant="footnote" weight="600">
+                  {METHOD_QUESTION}
+                </AppText>
+                <View style={styles.methodChips}>
+                  <ChipGrid<ContraceptionMethod>
+                    options={METHOD_OPTIONS}
+                    selected={(v) => method === v}
+                    onToggle={(v) => setMethod((cur) => (cur === v ? null : v))}
+                    tone={palette.period}
+                    size="sm"
+                  />
+                </View>
+                {method === "combined_pill" ? (
+                  <View style={styles.methodChips}>
+                    <ChipGrid<"28" | "91">
+                      options={PACK_OPTIONS}
+                      selected={(v) => packDays === Number(v)}
+                      onToggle={(v) => setPackDays(Number(v))}
+                      tone={palette.period}
+                      size="sm"
+                    />
+                  </View>
+                ) : null}
+                <AppText variant="footnote" color="secondary" style={styles.methodNote}>
+                  {method === "combined_pill" ? PILL_LINE : HORMONAL_LINE}
+                </AppText>
+              </View>
             ) : null}
           </Card>
 

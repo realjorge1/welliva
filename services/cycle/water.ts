@@ -33,7 +33,7 @@ import {
   type CyclePattern,
   type WeighInPoint,
 } from "./patterns";
-import type { CycleMode, CycleRecord, CycleToday, Prediction } from "./predict";
+import { givenWindow, type CycleMode, type CycleRecord, type CycleToday, type Prediction } from "./predict";
 
 /** The rise can still be water on these days of the period ("gone by day 4" is typical). */
 export const WATER_PERIOD_DAYS = 4;
@@ -101,9 +101,11 @@ export function waterMoment(input: {
       base = ended ? weightBaseSpan(ended.start, start) : null;
       riseFrom = weightPreSpan(start).from;
     } else {
-      riseFrom = addDays(p.earliest, -WEIGHT_PRE_DAYS);
+      // The window she was given: late, the rise began before it, not before "any day now".
+      const given = givenWindow(p);
+      riseFrom = addDays(given.earliest, -WEIGHT_PRE_DAYS);
       if (latest.date < riseFrom) return null;
-      base = weightBaseSpan(start, p.likely);
+      base = weightBaseSpan(start, given.likely);
     }
   } else {
     riseFrom = weightPreSpan(start).from;
@@ -164,7 +166,7 @@ export function noisyWeightDates(input: {
     add(from, to);
   }
   // And the run-up to the next one, from when the rise could begin.
-  if (status.predicting && p && !status.inPeriod) add(addDays(p.earliest, -WEIGHT_PRE_DAYS), today);
+  if (status.predicting && p && !status.inPeriod) add(addDays(givenWindow(p).earliest, -WEIGHT_PRE_DAYS), today);
   return [...days].sort();
 }
 

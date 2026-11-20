@@ -47,6 +47,7 @@ import {
   preferredCuisine,
 } from "./mealRules";
 import { mainSlotPool, type PoolDish } from "./mealVariety";
+import { fitMeals } from "./portionSolver";
 
 export type MainSlot = "breakfast" | "lunch" | "dinner";
 export const MAIN_SLOTS: readonly MainSlot[] = ["breakfast", "lunch", "dinner"];
@@ -435,7 +436,16 @@ export function buildMenuDays(input: BuildMenuInput): Record<string, MenuDayPick
       });
     });
 
-    days[date] = picks;
+    // Size the day as a whole (nutrition/portionSolver): a picked dish arrives
+    // at its authored size and the generated meals were sized around different
+    // mains, so the servings are solved again over what the day now holds.
+    // Names never change. No extras here: the generated snacks already carry
+    // any the plan needed.
+    const fitted = fitMeals(
+      picks.map((p) => p.meal),
+      targets,
+    ).meals;
+    days[date] = picks.map((p, i) => ({ ...p, meal: fitted[i]! }));
   }
   return days;
 }

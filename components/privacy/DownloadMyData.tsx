@@ -89,6 +89,7 @@ export function DownloadMyData({ style }: { style?: StyleProp<ViewStyle> }) {
         ],
         moods: stored.moods,
         cycle: cycleData,
+        targets: stored.targets,
         coach: stored.coach,
       });
       const bytes = buildDocx("Your welliva data", blocks);

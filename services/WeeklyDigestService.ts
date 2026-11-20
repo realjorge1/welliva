@@ -35,6 +35,8 @@
  * do or do not receive. The caller checks `hasPaidAccess()` before building one.
  */
 import { weekKeyOf } from "@/health-os/platform/clock";
+import { countsAsDay } from "./nutrition/dayStatus";
+import { hasRecordedIntake } from "./nutrition/recordedIntake";
 
 /** One week's worth of the numbers this digest reads. */
 export interface DigestWeek {
@@ -71,11 +73,20 @@ export interface WeeklyDigestInput {
     date: string;
     consumedCalories?: number;
     consumedProteinG?: number;
+    consumedCarbsG?: number;
+    consumedFatG?: number;
+    mealsConsumed?: number;
+    totalMeals?: number;
+    /** How much of the day was logged (services/nutrition/dayStatus). */
+    loggedness?: "none" | "partial" | "complete" | "inferred";
+    targetCalories?: number;
   }[];
   /** Completed sessions, one row per workout. */
   workoutLog: readonly { date: string }[];
   /** Weigh-ins. */
   bodyLogs: readonly { date: string; weightKg: number }[];
+  /** Her calorie target, to judge days closed before day status was recorded. */
+  targetKcal?: number | null;
 }
 
 /** Shift a `YYYY-MM-DD` by whole days without touching the local clock. */
@@ -101,15 +112,25 @@ export function summariseWeek(
   const diet = input.dietHistory.filter((d) => days.has(d.date));
   const weighIns = input.bodyLogs.filter((b) => days.has(b.date)).sort((a, b) => a.date.localeCompare(b.date));
 
+  // "Logged" counts days she actually logged food on: day-close writes a row
+  // for every planned day, so a row alone said she logged a day she didn't.
+  // The averages read WHOLE days only (said so, or inferred — dayStatus), so
+  // a one-snack day can't drag a week's average to a number she never ate.
+  const whole = diet.filter((d) => countsAsDay(d, input.targetKcal));
+  // A row carrying totals that are ALL zero is the day-close's "nothing was
+  // logged" row; a row with no totals at all predates totals and still counts.
+  const hasTotals = (d: (typeof diet)[number]) =>
+    [d.consumedCalories, d.consumedProteinG, d.consumedCarbsG, d.consumedFatG].some((v) => typeof v === "number");
+  const logged = diet.filter((d) => !hasTotals(d) || hasRecordedIntake(d));
   return {
     weekStart,
-    daysLogged: new Set(diet.map((d) => d.date)).size,
+    daysLogged: new Set(logged.map((d) => d.date)).size,
     workouts: input.workoutLog.filter((w) => days.has(w.date)).length,
     avgCalories: mean(
-      diet.map((d) => d.consumedCalories).filter((n): n is number => typeof n === "number" && n > 0),
+      whole.map((d) => d.consumedCalories).filter((n): n is number => typeof n === "number" && n > 0),
     ),
     avgProteinG: mean(
-      diet.map((d) => d.consumedProteinG).filter((n): n is number => typeof n === "number" && n > 0),
+      whole.map((d) => d.consumedProteinG).filter((n): n is number => typeof n === "number" && n > 0),
     ),
     weightKg: weighIns.length > 0 ? weighIns[weighIns.length - 1].weightKg : null,
   };

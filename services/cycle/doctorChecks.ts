@@ -23,7 +23,7 @@
  */
 
 import { addDays, daysBetween } from "./dates";
-import { liveEpisodes, resolveEnd } from "./episodes";
+import { resolveEnd, splitEpisodes } from "./episodes";
 import { ovulationFor, type CycleMode, type CycleRecord, type Prediction } from "./predict";
 import type { CycleDayLog, CycleDays, PeriodEpisode } from "./types";
 
@@ -76,7 +76,8 @@ export function completedPeriods(
   since: string | null = null,
 ): PeriodSpan[] {
   const out: PeriodSpan[] = [];
-  for (const e of liveEpisodes(episodes)) {
+  // Periods only: a stray is bleeding between periods (./episodes splitEpisodes).
+  for (const e of splitEpisodes(episodes).periods) {
     if (since && e.start < since) continue;
     const r = resolveEnd(e, today, typicalBleed);
     if (r.ongoing || r.end > today) continue;
@@ -190,17 +191,41 @@ export interface BetweenPeriods {
 }
 
 /**
+ * The days a stray episode (./episodes splitEpisodes) says she bled: its first
+ * day always, and the rest of its span only when she ended it herself. A
+ * guessed end is not evidence of bleeding — the old code closed a one-day
+ * mid-cycle flow at her typical period length.
+ */
+export function strayBleedDays(
+  episodes: readonly PeriodEpisode[],
+  since: string | null = null,
+): Set<string> {
+  const out = new Set<string>();
+  for (const s of splitEpisodes(episodes).strays) {
+    if (since && s.start < since) continue;
+    out.add(s.start);
+    if (s.end && !s.endEstimated) {
+      for (let d = addDays(s.start, 1); d <= s.end; d = addDays(d, 1)) out.add(d);
+    }
+  }
+  return out;
+}
+
+/**
  * Bleeding logged between periods in her last completed cycles. A day counts
- * when it has any flow, sits more than BETWEEN_MARGIN_DAYS after the period
- * that opened its cycle and more than that before the next one, and is NOT
- * within OVULATION_SPOTTING_DAYS of the cycle's estimated ovulation (the next
- * start less the luteal length the prediction uses).
+ * when it has any flow (or a stray episode covers it: `strayDays`), sits more
+ * than BETWEEN_MARGIN_DAYS after the period that opened its cycle and more
+ * than that before the next one, and is NOT SPOTTING within
+ * OVULATION_SPOTTING_DAYS of the cycle's estimated ovulation (the next start
+ * less the luteal length the prediction uses). Only spotting is left out
+ * there: that is the common thing, and it is what the note says it ignores.
  */
 export function betweenPeriods(
   cycles: readonly CycleRecord[],
   spans: readonly PeriodSpan[],
   days: CycleDays,
   lutealDays: number,
+  strayDays: ReadonlySet<string> = new Set(),
 ): BetweenPeriods | null {
   const endOf = new Map(spans.map((p) => [p.start, p.end]));
   const recent = cycles.filter((c) => c.status === "counted").slice(-BETWEEN_WINDOW);
@@ -213,7 +238,9 @@ export function betweenPeriods(
     const ovulation = addDays(c.nextStart, -lutealDays);
     const found: string[] = [];
     for (let d = addDays(periodEnd, BETWEEN_MARGIN_DAYS + 1); daysBetween(d, c.nextStart) > BETWEEN_MARGIN_DAYS; d = addDays(d, 1)) {
-      if (!days[d]?.flow || nearOvulation(d, ovulation)) continue;
+      const flow = days[d]?.flow;
+      if (!flow && !strayDays.has(d)) continue;
+      if (flow === "spotting" && nearOvulation(d, ovulation)) continue;
       found.push(d);
     }
     if (found.length) {

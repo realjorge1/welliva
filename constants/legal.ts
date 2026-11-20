@@ -80,11 +80,18 @@ export const DATA_DELETION_URL = `${LEGAL_SITE_URL}/data-deletion/`;
  * on the phone (synced to no account; other apps allowed to read the calendar
  * can see them). The forecast now also shapes a training-hour note and a hot
  * day's water goal, on the phone. Voice logging is gone (it was never built).
+ * 7 (20 November 2026, owner: "yes" to switching temperature on): the cycle log
+ * can now hold a resting temperature on waking (fertile-window users only) and,
+ * after a "yes" to hormonal contraception, which kind (the combined pill and its
+ * pack length, or another method). The disclaimer says a temperature rise
+ * confirms ovulation after the fact and never predicts it, and that on the
+ * combined pill the next bleed is shown from the pack schedule. v6 had already
+ * reached users, so this one re-gates.
  */
-export const LEGAL_VERSION = 6;
+export const LEGAL_VERSION = 7;
 
 /** Shown in each document header. Update alongside LEGAL_VERSION. */
-export const LEGAL_LAST_UPDATED = "15 November 2026";
+export const LEGAL_LAST_UPDATED = "20 November 2026";
 
 /** Minimum age to hold an account (the onboarding age field enforces it too). */
 export const MINIMUM_AGE = 13;
@@ -165,7 +172,7 @@ const PRIVACY: LegalDoc = {
         "Food: dietary style, cuisine preference, meals per day, allergies and foods you dislike",
         "Health context: medical conditions (including pregnancy and trimester, diabetes, kidney, liver, thyroid, digestive and hormonal conditions), injuries or pain areas, and medications or medication categories",
         "Your logs: meals and foods eaten, water, workouts and sessions completed (and, if you answer, whether anything hurt afterwards and where), body measurements and weigh-ins, habits, streaks, and mood/energy/sleep check-ins",
-        "Your cycle log, only if you switch cycle tracking on: the dates your periods start and end, flow, symptoms you note (such as cramps or headache), whether cramps kept you from school, work or plans, mood and energy, how long your cycle usually is, ovulation-test results and discharge if you turn on the fertile-window estimate, whether you use hormonal contraception (if you choose to say), what you said helped a symptom, and whether you asked welliva to plan for a hungrier week. Cycle tracking is off until you enable it",
+        "Your cycle log, only if you switch cycle tracking on: the dates your periods start and end, flow, symptoms you note (such as cramps or headache), whether cramps kept you from school, work or plans, mood and energy, how long your cycle usually is, ovulation-test results, discharge and your resting temperature on waking if you turn on the fertile-window estimate, whether you use hormonal contraception and, if so, whether it is the combined pill and how long its pack is (if you choose to say), what you said helped a symptom, and whether you asked welliva to plan for a hungrier week. Cycle tracking is off until you enable it",
         "Photos, if you add them: a profile picture, progress photos, and meal photos you ask the coach to analyse",
         "Messages you send to the AI coach",
       ],
@@ -190,7 +197,7 @@ const PRIVACY: LegalDoc = {
         "To create your nutrition targets, meal plan and training plan — this is the service you asked for (performance of a contract)",
         "To keep you safe: allergies, conditions, injuries and medications are used to filter foods and exercises out of your plan, and an area you say hurt after a workout is rested in your plan for two weeks",
         "To point out, on your phone, things in your own logs that may be worth raising with a doctor, such as weight falling without trying, eating less than the least welliva would plan for you, low moods on most days for two weeks, or the same spot hurting after workouts. These are never a diagnosis",
-        "To track your cycle, estimate when your next period is likely and, on days you log cramps or heavy flow, ease your workout; and to line your cycle up, on your phone, against your own weight, food, sleep, training, mood and trips, so welliva can explain what it sees and, if you ask it to, plan your calories around it — only if you switch cycle tracking on",
+        "To track your cycle, estimate when your next period (or, on the combined pill, your next bleed) is likely and, on days you log cramps or heavy flow, ease your workout; and to line your cycle up, on your phone, against your own weight, food, sleep, training, mood and trips, so welliva can explain what it sees and, if you ask it to, plan your calories around it — only if you switch cycle tracking on",
         "To sync your account across your devices and restore it if you change phone",
         "To send reminders you have enabled",
         "To keep the service secure and to diagnose faults",
@@ -451,7 +458,8 @@ const DISCLAIMER: LegalDoc = {
       heading: "Cycle tracking and the fertile window",
       body: [
         "Period and fertile-window predictions are statistical estimates drawn from the dates you log, and cycles vary from month to month. The fertile-window estimate is not birth control: never rely on it to prevent a pregnancy, and it does not protect against sexually transmitted infections. If you want to avoid or plan a pregnancy, talk to a clinician about methods that suit you.",
-        "If you tell welliva you use hormonal contraception, it logs your bleeding and does not predict it, because those bleeds follow your method rather than a natural cycle. Nothing in welliva replaces using your contraception as directed.",
+        "If you log your resting temperature, a sustained rise can confirm that you have ovulated, after the fact. It cannot predict ovulation, and illness, alcohol, a short or broken night, travel and shift work can all throw it off. A temperature chart is not birth control either.",
+        "If you tell welliva you use hormonal contraception, it logs your bleeding and does not predict it, because those bleeds follow your method rather than a natural cycle. On the combined pill, if you say so, it shows when your next bleed is likely from your pack schedule: a schedule, not a forecast of your body. Nothing in welliva replaces using your contraception as directed.",
       ],
     },
     {

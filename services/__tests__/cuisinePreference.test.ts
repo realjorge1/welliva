@@ -147,10 +147,15 @@ describe("the meals a user is served", () => {
   });
 
   it("give a 4-meal user the two snacks their plan promises", () => {
+    // Changed deliberately 2026-11-20: a day may now carry up to two EXTRA
+    // snacks when the planned dishes can't reach her calories and protein
+    // (nutrition/portionSolver). The two her plan promises are still there.
     const b = bio({ mealsPerDay: 4 });
     const targets = calculateNutritionTargets(b);
     for (const date of dates) {
-      expect(generateDietPlan(b, targets, date)!.schedule.snacks).toHaveLength(2);
+      const snacks = generateDietPlan(b, targets, date)!.schedule.snacks;
+      expect(snacks.length).toBeGreaterThanOrEqual(2);
+      expect(snacks.length).toBeLessThanOrEqual(4);
     }
   });
 });

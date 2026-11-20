@@ -24,8 +24,8 @@ describe("the dial", () => {
     const today = "2026-09-30";
     const view = computeView({ settings: s, periods: regular, days: {} }, { today, profile: {} });
     const m = dialModel({ episodes: regular, view, today, showFertile: true });
-    expect(m.arcs.find((a) => a.kind === "fertile")).toEqual({ kind: "fertile", from: 10, to: 16 });
-    expect(m.ovulation).toBe(15);
+    expect(m.arcs.find((a) => a.kind === "fertile")).toEqual({ kind: "fertile", from: 11, to: 17 });
+    expect(m.ovulation).toBe(16);
   });
 
   it("shows the rest of an ongoing period as expected, not as logged", () => {
@@ -68,7 +68,7 @@ describe("the calendar", () => {
     expect(paint("2026-09-17").hasLog).toBe(true);
     expect(paint("2026-10-14").period).toBe("predicted");
     expect(paint("2026-11-11").period).toBe("predicted"); // the cycle after
-    expect(paint("2026-09-30").ovulation).toBe(true);
+    expect(paint("2026-10-01").ovulation).toBe(true);
     expect(paint("2026-09-26").fertile).toBe(true);
     expect(paint("2026-10-05").period).toBeNull();
   });

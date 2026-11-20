@@ -25,7 +25,7 @@ export interface MealsListProps extends MealActionHandlers {
   meals: MealListItem[];
 }
 
-export function MealsList({ meals, onToggle, onSwap }: MealsListProps) {
+export function MealsList({ meals, onToggle, onSwap, onPortion }: MealsListProps) {
   const { colors } = useColors();
   if (meals.length === 0) return null;
 
@@ -40,6 +40,7 @@ export function MealsList({ meals, onToggle, onSwap }: MealsListProps) {
           index={i}
           onToggle={onToggle}
           onSwap={onSwap}
+          onPortion={onPortion}
         />
       ))}
 

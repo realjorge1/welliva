@@ -2,15 +2,21 @@
  * DayLogSheet — everything she might note about one day, one tap each.
  *
  * Every tap saves on the spot: there is no Save button to forget, and closing
- * the sheet can't lose anything. Choosing a flow on a day outside any period
- * makes it a period day (spotting doesn't); switching "Period" off on a day in
- * the middle of one ends that period the day before, and the sheet says so
- * before she does it.
+ * the sheet can't lose anything. A flow on a day outside any period starts one
+ * only when it can be one (services/cycle/bleeding): near or after the expected
+ * window, or with nothing to compare against. Too soon after her last period
+ * it is bleeding between periods, said in one line; clearly early, the sheet
+ * asks "Is this the start of your period?" and nothing moves until she answers.
+ * The Period switch always means what it says. Switching it off on a day in
+ * the middle of a period ends that period the day before, and the sheet says
+ * so before she does it.
  */
 import { useCycle } from "@/contexts/CycleContext";
 import { AppText, Button, ChipGrid, Sheet, useColors } from "@/components/ui";
 import { Spacing, alpha } from "@/constants/theme";
 import {
+  BLEED_COPY,
+  bleedPrompt,
   bleedWords,
   daysBetween,
   DISCHARGES,
@@ -21,12 +27,14 @@ import {
   FLOWS,
   FLOW_LABEL,
   formatDay,
-  liveEpisodes,
   MOODS,
   MOOD_LABEL,
+  splitEpisodes,
   spottingNote,
   SYMPTOMS,
   SYMPTOM_LABEL,
+  TEMPERATURE_COPY,
+  TEMPERATURE_LOGGING,
   twingeLines,
   type CycleMood,
   type Discharge,
@@ -38,6 +46,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo } from "react";
 import { Pressable, ScrollView, StyleSheet, Switch, View } from "react-native";
+import { TemperatureInput } from "./TemperatureInput";
 import { useCyclePalette } from "./cycleTheme";
 
 export interface DayLogSheetProps {
@@ -71,16 +80,17 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
   const inPeriod = !!episode;
   const midPeriod = !!episode && episode.start !== d;
   const words = bleedWords(view.mode);
+  const split = useMemo(() => splitEpisodes(data.periods), [data.periods]);
+  /** A bleed that began too soon after her last period to be the next one: bleeding between periods. */
+  const stray = !!episode && split.strays.some((s) => s.id === episode.id);
 
   const subtitle = useMemo(() => {
-    if (episode) return `${words.day} ${daysBetween(episode.start, d) + 1}`;
-    const before = liveEpisodes(data.periods)
-      .filter((e) => e.start <= d)
-      .pop();
+    if (episode && !stray) return `${words.day} ${daysBetween(episode.start, d) + 1}`;
+    const before = split.periods.filter((e) => e.start <= d).pop();
     if (!before) return `No ${words.noun} logged before this day`;
     const n = daysBetween(before.start, d) + 1;
     return view.mode === "hormonal" ? `Day ${n} since your last bleed began` : `Cycle day ${n}`;
-  }, [episode, data.periods, d, words, view.mode]);
+  }, [episode, stray, split, d, words, view.mode]);
 
   const title = d === today ? "Today" : daysBetween(d, today) === 1 ? "Yesterday" : formatDay(d, { weekday: true });
 
@@ -89,6 +99,17 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
   const crampsOn = !!log?.symptoms?.includes("cramps");
   /** A ticked mid-cycle twinge: the calm line near ovulation, and the safety line every time. */
   const twinge = twingeLines({ date: d, log, mode: view.mode, prediction: view.prediction, cycles: view.cycles });
+  /** "Is this the start of your period?", or the line saying why a flow didn't start one (services/cycle/bleeding). */
+  const prompt = bleedPrompt({
+    date: d,
+    days: data.days,
+    episodes: data.periods,
+    prediction: view.prediction,
+    mode: view.mode,
+    today,
+    typicalBleed: view.typicalBleed,
+    covered: inPeriod,
+  });
   /** Spotting right around ovulation is explained here, never counted as a worry. */
   const spotting = spottingNote({
     date: d,
@@ -131,11 +152,13 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
           <View style={styles.flex}>
             <AppText variant="callout">{words.label}</AppText>
             <AppText variant="footnote" color="tertiary">
-              {midPeriod
-                ? `Switching this off ends that ${words.noun} the day before.`
-                : inPeriod
-                  ? `This day is part of a ${words.noun}.`
-                  : "Bleeding today? Switch it on."}
+              {stray
+                ? `Counted as bleeding between ${words.noun}s: it began too soon after your last ${words.noun} to be a new one.`
+                : midPeriod
+                  ? `Switching this off ends that ${words.noun} the day before.`
+                  : inPeriod
+                    ? `This day is part of a ${words.noun}.`
+                    : "Bleeding today? Switch it on."}
             </AppText>
           </View>
           <Switch
@@ -160,6 +183,45 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
               <AppText variant="footnote" color="secondary" style={styles.flex}>
                 {spotting}
               </AppText>
+            </View>
+          ) : null}
+          {/* A flow outside a period that is clearly early: one question, and
+              until she answers, nothing about her periods changes. */}
+          {prompt?.kind === "ask" ? (
+            <View style={[styles.ask, { backgroundColor: palette.wash }]}>
+              <AppText variant="callout" weight="600">
+                {BLEED_COPY.question}
+              </AppText>
+              <AppText variant="footnote" color="tertiary">
+                {BLEED_COPY.hint}
+              </AppText>
+              <Button
+                label={BLEED_COPY.yes}
+                variant="tonal"
+                size="sm"
+                onPress={() => void cycle.answerBleed(d, "period")}
+                style={styles.askButton}
+              />
+              <Button label={BLEED_COPY.no} variant="ghost" size="sm" onPress={() => void cycle.answerBleed(d, "between")} />
+            </View>
+          ) : prompt ? (
+            <View style={styles.recall}>
+              <Ionicons name="information-circle-outline" size={14} color={colors.textTertiary} />
+              <AppText variant="footnote" color="secondary" style={styles.flex}>
+                {prompt.kind === "too-soon" ? BLEED_COPY.tooSoon : BLEED_COPY.answered}
+              </AppText>
+              {prompt.kind === "answered" ? (
+                <Pressable
+                  onPress={() => void cycle.answerBleed(d, "period")}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${BLEED_COPY.changeMind}: start a period from this bleeding`}
+                >
+                  <AppText variant="footnote" weight="600" style={{ color: palette.period }}>
+                    {BLEED_COPY.changeMind}
+                  </AppText>
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
         </Group>
@@ -238,7 +300,7 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
         {view.showFertile ? (
           <Group
             label="Discharge"
-            hint="Optional. Clear, stretchy days usually come before ovulation. It's a check on the estimate, never a date."
+            hint="Optional. A clear, stretchy day is marked fertile, whatever the estimate says. It never moves a date."
           >
             <ChipGrid<Discharge>
               options={DISCHARGE_OPTIONS}
@@ -256,7 +318,7 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
             hint={
               view.pcos
                 ? "With PCOS, these tests can read positive without ovulation, so a positive doesn't move your dates."
-                : "A positive moves this cycle's dates. Positives in two cycles teach me your own timing."
+                : "Your first positive moves this cycle's dates, and a run of negatives past the estimate moves them later. Positives in two cycles teach me your own timing."
             }
           >
             <ChipGrid<OvulationTest>
@@ -265,6 +327,18 @@ export function DayLogSheet({ date, onClose }: DayLogSheetProps) {
               onToggle={(v) => void cycle.logDay(d, { ovulationTest: log?.ovulationTest === v ? null : v })}
               tone={palette.fertile}
               size="sm"
+            />
+          </Group>
+        ) : null}
+
+        {/* Waits for the privacy wording (services/cycle/bbt TEMPERATURE_LOGGING). */}
+        {view.showFertile && TEMPERATURE_LOGGING ? (
+          <Group label={TEMPERATURE_COPY.label} hint={TEMPERATURE_COPY.hint}>
+            <TemperatureInput
+              key={d}
+              valueC={log?.temperatureC ?? null}
+              unit={data.settings.temperatureUnit}
+              onChange={(c) => void cycle.logDay(d, { temperatureC: c })}
             />
           </Group>
         ) : null}
@@ -320,4 +394,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   saved: { marginTop: Spacing.xl, marginBottom: Spacing.md },
+  ask: { marginTop: Spacing.md, padding: Spacing.md, borderRadius: 14, gap: Spacing.xs },
+  askButton: { marginTop: Spacing.sm },
 });

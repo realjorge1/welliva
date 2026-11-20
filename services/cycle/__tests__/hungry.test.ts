@@ -281,8 +281,10 @@ describe("the offer", () => {
   });
 
   it("stays away during a period and once she's late", () => {
-    const bleeding = [...PERIODS, { ...period("2026-10-05"), end: null }];
-    expect(viewOf("2026-10-06", { periods: bleeding }).hungryOffer).toBeNull();
+    // Day 16: a bleed starting sooner than 15 days after the last period is
+    // bleeding between periods (./episodes splitEpisodes), not a period.
+    const bleeding = [...PERIODS, { ...period("2026-10-08"), end: null }];
+    expect(viewOf("2026-10-09", { periods: bleeding }).hungryOffer).toBeNull();
     expect(viewOf("2026-10-30").hungryOffer).toBeNull();
   });
 

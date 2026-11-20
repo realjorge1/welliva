@@ -142,6 +142,18 @@ A fresh install boots at `schema_version = 0` with empty silos → 001 backfills
 at the latest version with no special-casing. New and existing users converge on the
 same code path.
 
+**Live writers (2026-11-20).** Until then 001 was the ONLY writer of
+`nutrition.day.closed` and `body.measurement.logged`, so a fresh install's timeline never
+held a meal day or a weigh-in and the learning model starved. They are now written live
+by `health-os/timeline/writers.ts`: `emitDayClosed` from `ScheduleService.processDayEnd`
+and `emitBodyMeasurement` from `logBodyMeasurement`. Both are idempotent (same payload →
+nothing; changed payload → a supersede-by-append correction of the current head) and
+never throw. A closed day reuses 001's seed (`diet:<date>:dayclosed`), so a re-emit is the
+same event; a weigh-in, which 001 seeded by array position, is matched by date and seeded
+`body:live:<date>`. Migration 005 (`catch-up-learning-days`) replays diet history and
+the weight log for dates the timeline is missing — additive and re-runnable. See
+`docs/nutrition/engine.md` (Fix 2).
+
 ## 6. Retiring a silo (migration 004, deferred & guarded)
 
 Only after the Timeline is the **live write path** (post-foundation milestones) and a

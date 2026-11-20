@@ -324,6 +324,34 @@ export const MERGE_STRATEGIES: Record<string, MergeStrategy> = {
     order: "asc",
     cap: 400,
   },
+  // TargetMove[] (services/nutrition/weightRetarget) — the last 10 times her
+  // calorie/protein target moved by itself (her weight trend, an accepted
+  // offer), each with its sentence. `id` = kind:date:newCalories, so two
+  // phones making the same move make one record; marking it seen bumps
+  // `updatedAt`, so "seen" on the phone wins over "unseen" on the tablet.
+  // Newest first, capped at the writer's MOVES_CAP.
+  "@welliva_target_moves": {
+    kind: "mergeById",
+    idField: "id",
+    tsField: "updatedAt",
+    order: "desc",
+    cap: 10,
+  },
+  // Record<date, { complete, at }> (services/nutrition/dayStatus) — "That's
+  // everything for today". Days union; a date answered on both phones takes
+  // the LATER answer, so an undo (`complete: false`, newer `at`) beats the old
+  // "complete" still on the other phone.
+  "@welliva_day_complete": { kind: "mergeByDate", preferField: "at", capDays: 180 },
+  // TargetOffer[] (services/nutrition/targetOffers) — one record per kind
+  // (pace_guard / learned / activity). Her answer bumps `updatedAt`, so an
+  // offer declined on one phone stays declined on the other.
+  "@welliva_target_offers": {
+    kind: "mergeById",
+    idField: "id",
+    tsField: "updatedAt",
+    order: "desc",
+    cap: 10,
+  },
   // ForgottenUsual[] (services/smart/usualStore) — "Not my usual any more", by
   // usual id. Only ever added to: a forget IS the tombstone, so the two phones'
   // lists union and a usual turned away on one stays away on the other.

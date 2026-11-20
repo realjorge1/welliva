@@ -76,9 +76,9 @@ describe("the receipt", () => {
   });
 
   it("used the dates as they stood, test and all", () => {
-    // A positive test on 12 Oct moved the window to 24–30 Oct, likeliest 27 Oct.
+    // A positive test on 12 Oct moved the window to 23–29 Oct, likeliest 26 Oct.
     const logs = days(day("2026-10-12", { ovulationTest: "positive" }));
-    expect(receipt("2026-10-27", "2026-10-27", { logs })).toMatch(/^Right on the day we said\./);
+    expect(receipt("2026-10-26", "2026-10-26", { logs })).toMatch(/^Right on the day we said\./);
   });
 
   it("only where a cycle is predicted: never on hormonal contraception or for the first period after a birth", () => {
@@ -127,9 +127,9 @@ describe("when to start testing", () => {
   const tested = days(day("2026-09-10", { ovulationTest: "negative" }));
 
   it("from the window's earliest edge, less the luteal length and 3 days", () => {
-    // Earliest 18 Oct − 17 days = 1 Oct.
+    // Earliest 18 Oct − 16 days (13 + 3) = 2 Oct.
     expect(testingStartLine({ prediction: p(tested), days: tested, showFertile: true, today: "2026-09-26" })).toBe(
-      `Test daily from ${WEEKDAY("2026-10-01")} until you get a positive.`,
+      `Test daily from ${WEEKDAY("2026-10-02")} until you get a positive.`,
     );
   });
 
@@ -147,6 +147,6 @@ describe("when to start testing", () => {
   it("stops at a positive this cycle, and after the estimated ovulation", () => {
     const pos = days(day("2026-10-05", { ovulationTest: "positive" }));
     expect(testingStartLine({ prediction: p(pos, "2026-10-06"), days: pos, showFertile: true, today: "2026-10-06" })).toBeNull();
-    expect(testingStartLine({ prediction: p(tested, "2026-10-09"), days: tested, showFertile: true, today: "2026-10-09" })).toBeNull();
+    expect(testingStartLine({ prediction: p(tested, "2026-10-10"), days: tested, showFertile: true, today: "2026-10-10" })).toBeNull();
   });
 });

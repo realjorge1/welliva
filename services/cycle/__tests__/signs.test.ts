@@ -114,14 +114,16 @@ describe("discharge: a check on the estimate, never an input", () => {
 });
 
 describe("discharge in the export", () => {
-  it("has its own column, at the end", async () => {
-    const { cycleCsv } = await import("../exportData");
+  it("has its own column, after the ones before it (later columns are appended after it)", async () => {
+    const { cycleCsv, CSV_COLUMNS } = await import("../exportData");
     const csv = cycleCsv({
       settings: settings({ showFertileWindow: true }),
       periods: [],
       days: logs(["2026-07-12", { discharge: "clear_stretchy" }]),
     }).split("\n");
-    expect(csv[0].split(",").pop()).toBe("discharge");
-    expect(csv[1].split(",").pop()).toBe("Clear and stretchy");
+    const at = CSV_COLUMNS.indexOf("discharge");
+    expect(at).toBe(10);
+    expect(csv[0].split(",")[at]).toBe("discharge");
+    expect(csv[1].split(",")[at]).toBe("Clear and stretchy");
   });
 });

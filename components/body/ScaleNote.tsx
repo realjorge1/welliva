@@ -18,7 +18,7 @@ import { useCycleOptional } from "@/contexts/CycleContext";
 import { useCycleHidden } from "@/contexts/CycleLockContext";
 import { scaleJump, type ScaleDayIntake } from "@/services/body/scaleJump";
 import { maintenanceTdee } from "@/services/NutritionService";
-import { hasRecordedIntake } from "@/services/nutrition/recordedIntake";
+import { countsAsDay } from "@/services/nutrition/dayStatus";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
@@ -34,10 +34,11 @@ const GIVE_UP_MS = 2500;
  */
 export function ScaleNoteAfterWeighIn({ armed, onDone }: { armed: boolean; onDone: () => void }) {
   const { colors } = useColors();
-  const { bodyLogs, userBio } = useProfile();
+  const { bodyLogs, userBio, nutritionTargets } = useProfile();
   const { dietHistory } = useNutrition();
   const { workoutLog } = useWorkout();
   const { currentDate } = useSystem();
+  const intakeTarget = nutritionTargets?.calories ?? null;
 
   // The cycle tracker's own note about this reading wins (and it says nothing
   // while "Lock my cycle" is shut, so neither does this check of it).
@@ -52,9 +53,11 @@ export function ScaleNoteAfterWeighIn({ armed, onDone }: { armed: boolean; onDon
 
   const jump = useMemo(() => {
     if (!armed || !userBio) return null;
+    // WHOLE days only (services/nutrition/dayStatus): "this jump is water, not
+    // fat" needs to know what she ate, and a one-snack day doesn't say that.
     const intake: Record<string, ScaleDayIntake> = {};
     for (const e of dietHistory) {
-      if (hasRecordedIntake(e)) intake[e.date] = { kcal: e.consumedCalories ?? 0, carbsG: e.consumedCarbsG ?? 0 };
+      if (countsAsDay(e, intakeTarget)) intake[e.date] = { kcal: e.consumedCalories ?? 0, carbsG: e.consumedCarbsG ?? 0 };
     }
     return scaleJump({
       weighIns: (bodyLogs ?? []).map((b) => ({ date: b.date, kg: b.weightKg })),
@@ -63,7 +66,7 @@ export function ScaleNoteAfterWeighIn({ armed, onDone }: { armed: boolean; onDon
       workoutDates: workoutLog.map((w) => w.date),
       today: currentDate,
     });
-  }, [armed, userBio, dietHistory, bodyLogs, workoutLog, currentDate]);
+  }, [armed, userBio, dietHistory, bodyLogs, workoutLog, currentDate, intakeTarget]);
 
   const [settled, setSettled] = useState(false);
   const open = armed && settled && !cycleSpeaks && !!jump;

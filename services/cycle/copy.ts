@@ -8,9 +8,11 @@
  * window, and the fertile window is always called an estimate.
  */
 
+import { MIN_BACKTEST } from "./backtest";
 import { HORMONAL_LINE } from "./contraception";
-import { formatDay, formatRange } from "./dates";
-import type { CycleMode, Prediction } from "./predict";
+import { pillLine } from "./pill";
+import { daysBetween, formatDay, formatRange } from "./dates";
+import { WIDE_WINDOW_DAYS, type CycleMode, type Prediction } from "./predict";
 import type { CycleView } from "./view";
 
 export interface CycleHeadline {
@@ -55,6 +57,9 @@ export const PHASE_NAMES = {
 } as const;
 
 export function phaseLabel(view: Pick<CycleView, "status">, showFertile: boolean): string | null {
+  // Every day the window covers is called the fertile window, wide or not —
+  // the cautious direction; the phase underneath follows the best estimate.
+  if (showFertile && view.status.inFertileWindow) return "Fertile window (estimate)";
   switch (view.status.phase) {
     case "period":
       return "Period";
@@ -90,12 +95,21 @@ export function cycleHeadline(view: CycleView, showFertile: boolean): CycleHeadl
     return { eyebrow: "Cycle", title: "Paused during pregnancy", detail: "Your history is kept safe here." };
   }
   if (s.mode === "hormonal") {
+    const pill = view.pill;
     if (s.inPeriod && s.periodDay !== null && !s.periodStale) {
       return {
         eyebrow: "Bleeding logged",
         title: `Day ${s.periodDay}`,
-        detail: "Logging only. I don't predict bleeding on hormonal contraception.",
+        detail: pill
+          ? "Your next bleed is shown from your pack schedule."
+          : "Logging only. I don't predict bleeding on hormonal contraception.",
       };
+    }
+    // The combined pill: one forecast, from the pack — never "your period" (./pill).
+    if (pill) {
+      return pill.missed
+        ? { eyebrow: "Cycle", title: "No bleed logged yet", detail: pillLine(pill) }
+        : { eyebrow: "Cycle", title: `Next bleed likely ${formatRange(pill.earliest, pill.latest)}`, detail: "From your pack schedule." };
     }
     return { eyebrow: "Cycle", title: "Logging only", detail: HORMONAL_LINE };
   }
@@ -158,11 +172,19 @@ export function cycleHeadline(view: CycleView, showFertile: boolean): CycleHeadl
  * late and hungry-week lines) speaks with THESE words, so no surface sounds
  * surer than the cycle screen does.
  */
-export type ConfidenceWord = "Fairly sure" | "Still learning" | "Varies for you" | "From your test";
+export type ConfidenceWord =
+  | "Fairly sure"
+  | "Still learning"
+  | "Varies for you"
+  | "From your test"
+  | "From your tests"
+  | "From your temperature";
 
 export function confidenceWord(p: Prediction): ConfidenceWord {
-  // A window a positive test dated this cycle is not the calendar's guess.
-  if (p.fromTest) return "From your test";
+  // A window this cycle's own signs dated is not the calendar's guess.
+  if (p.testBasis === "positive" || p.fromTest) return "From your test";
+  if (p.testBasis === "negatives") return "From your tests";
+  if (p.testBasis === "temperature") return "From your temperature";
   switch (p.confidence) {
     case "confident":
       return "Fairly sure";
@@ -186,8 +208,38 @@ export function glanceConfidence(view: Pick<CycleView, "status" | "prediction">)
 }
 
 /** How sure the prediction is, and why — the line that makes it trustworthy. */
-export function confidenceLine(p: Prediction): string {
+/** What dated this cycle besides the calendar, in one sentence — or null. */
+export function testBasisLine(p: Prediction): string | null {
   if (p.fromTest) return `Updated from your ovulation test on ${formatDay(p.fromTest, { weekday: true })}.`;
+  if (p.testBasis === "negatives") return NEGATIVES_LINE;
+  // Names no ovulation date: this line shows with the fertile window off too.
+  if (p.testBasis === "temperature") return "Updated from your temperature: its rise confirmed ovulation this cycle.";
+  return null;
+}
+
+/**
+ * Why the fertile window is as wide as it is, when that needs saying — or
+ * null. Never "safe days": a wide window says the edges are uncertain, not
+ * that the days outside it are.
+ */
+export function fertileWindowNote(p: Prediction): string | null {
+  if (p.testBasis) return null;
+  const days = daysBetween(p.fertileStart, p.fertileEnd) + 1;
+  if (p.basedOn === 0) return "A rough window from what you told me. It narrows as you log your periods.";
+  if (days > WIDE_WINDOW_DAYS) return "Wide because your cycles vary. Ovulation tests narrow it.";
+  return null;
+}
+
+/** Clear, stretchy discharge logged today (./view fertileNow): the cautious reading, no date moved. */
+export const FERTILE_NOW_LINE =
+  "You logged clear, stretchy discharge today, so today counts as fertile, whatever the estimate says.";
+
+/** A run of negative tests moved this cycle's dates later (./predict negativesNotBefore). */
+export const NEGATIVES_LINE = "Your tests haven't shown a surge yet, so I've moved your dates back.";
+
+export function confidenceLine(p: Prediction): string {
+  const basis = testBasisLine(p);
+  if (basis) return basis;
   const n = p.basedOn;
   switch (p.confidence) {
     case "told":
@@ -204,6 +256,17 @@ export function confidenceLine(p: Prediction): string {
       return `Your cycles vary (${lo}–${hi} days), so the window is wider.`;
     }
   }
+}
+
+/**
+ * "5 of your last 6 forecasts landed inside the window." — what ./backtest
+ * counted, exactly: her recent completed cycles, each forecast re-run as it
+ * stood the day after that period began. Null below MIN_BACKTEST.
+ */
+export function calibrationLine(p: Prediction): string | null {
+  const c = p.calibration;
+  if (!c || c.n < MIN_BACKTEST) return null;
+  return `${c.hits} of your last ${c.n} forecasts landed inside the window.`;
 }
 
 /** "Likely 26–30 Oct · most likely Tue 28 Oct". */

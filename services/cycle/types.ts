@@ -20,6 +20,7 @@
  * Values are stable storage strings: ADD new ones, never rename.
  */
 
+import { normalizeTemperatureC } from "./bbt";
 import { isIsoDate } from "./dates";
 
 export const FLOWS = ["spotting", "light", "medium", "heavy"] as const;
@@ -148,6 +149,21 @@ export interface CycleDayLog {
   stoppedDay?: true;
   /** Only offered with the fertile window on. A check on the ovulation estimate, never an input. */
   discharge?: Discharge;
+  /**
+   * Her answer to "Is this the start of your period?" (./bleeding): "between"
+   * = "No, bleeding between periods". Kept on the FIRST day of the run of
+   * bleeding it answers, and only beside a flow. On the day rather than in
+   * settings so it survives two phones: days merge one by one, settings as a
+   * whole object.
+   */
+  bleedAnswer?: "between";
+  /**
+   * Resting (basal) body temperature on waking, in °C, 34–42, kept to 0.05
+   * (./bbt). Only offered with the fertile window on, and only once the
+   * privacy wording for it is published (bbt TEMPERATURE_LOGGING). A sustained
+   * rise CONFIRMS ovulation after the fact.
+   */
+  temperatureC?: number;
   updatedAt: string;
 }
 
@@ -172,8 +188,20 @@ export type GapNote = "long" | "pause";
 export const CONTRACEPTION_ANSWERS = ["hormonal", "none", "unsaid"] as const;
 export type ContraceptionAnswer = (typeof CONTRACEPTION_ANSWERS)[number];
 
+/**
+ * "Which one?", after a "yes" (2026-11-20, ./pill): the combined pill, whose
+ * bleed follows the pack and gets a pack-schedule forecast, or another method,
+ * which stays log-only.
+ */
+export const CONTRACEPTION_METHODS = ["combined_pill", "other"] as const;
+export type ContraceptionMethod = (typeof CONTRACEPTION_METHODS)[number];
+
 export interface Contraception {
   answer: ContraceptionAnswer;
+  /** Which method, when she said which. Only ever beside a "hormonal" answer. */
+  method?: ContraceptionMethod;
+  /** The combined pill's pack length: 28, or 91 for an extended pack. Only beside the pill. */
+  packDays?: number;
   /** The day she gave this answer. */
   since: string;
   /**
@@ -240,6 +268,8 @@ export interface CycleSettings {
    * what stops it coming back forever. Newest last.
    */
   gozlinAskDays: string[];
+  /** How a logged temperature is shown and typed (./bbt). Always STORED in °C. */
+  temperatureUnit: "C" | "F";
   updatedAt: string;
 }
 
@@ -275,6 +305,7 @@ export const DEFAULT_CYCLE_SETTINGS: CycleSettings = {
   offerDismissed: false,
   gozlinAskDismissed: false,
   gozlinAskDays: [],
+  temperatureUnit: "C",
   updatedAt: "",
 };
 
@@ -302,16 +333,24 @@ function oneOf<T extends string>(v: unknown, allowed: readonly T[]): T | undefin
   return typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : undefined;
 }
 
-/** An answer without a valid day is no answer: it couldn't say where her history restarts. */
+/**
+ * An answer without a valid day is no answer: it couldn't say where her
+ * history restarts. A method is kept only beside a "hormonal" answer, and a
+ * pack length only beside the combined pill, and only one it can be.
+ */
 function normalizeContraception(raw: unknown): Contraception | null {
   if (!isObject(raw)) return null;
   const answer = oneOf(raw.answer, CONTRACEPTION_ANSWERS);
   if (!answer || !isIsoDate(raw.since)) return null;
-  return {
+  const out: Contraception = {
     answer,
     since: raw.since,
     restartFrom: isIsoDate(raw.restartFrom) ? raw.restartFrom : null,
   };
+  const method = answer === "hormonal" ? oneOf(raw.method, CONTRACEPTION_METHODS) : undefined;
+  if (method) out.method = method;
+  if (method === "combined_pill" && (raw.packDays === 28 || raw.packDays === 91)) out.packDays = raw.packDays;
+  return out;
 }
 
 export function normalizeSettings(raw: unknown): CycleSettings {
@@ -364,6 +403,7 @@ export function normalizeSettings(raw: unknown): CycleSettings {
     offerDismissed: bool(raw.offerDismissed, d.offerDismissed),
     gozlinAskDismissed: bool(raw.gozlinAskDismissed, d.gozlinAskDismissed),
     gozlinAskDays,
+    temperatureUnit: raw.temperatureUnit === "F" ? "F" : "C",
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
   };
 }
@@ -412,6 +452,10 @@ export function normalizeDayLog(date: string, raw: unknown): CycleDayLog | null 
   if (relief.length) log.relief = relief;
   // "Kept me from my day" is about the cramps: without them it says nothing.
   if (raw.stoppedDay === true && symptoms.includes("cramps")) log.stoppedDay = true;
+  // "Not a period" is about the bleeding: without a flow it says nothing.
+  if (raw.bleedAnswer === "between" && flow) log.bleedAnswer = "between";
+  const temperature = normalizeTemperatureC(raw.temperatureC);
+  if (temperature !== null) log.temperatureC = temperature;
   return log;
 }
 
@@ -453,6 +497,8 @@ export function isEmptyDayLog(log: CycleDayLog | undefined | null): boolean {
     !log.energy &&
     !log.ovulationTest &&
     !log.stoppedDay &&
-    !log.discharge
+    !log.discharge &&
+    !log.bleedAnswer &&
+    log.temperatureC === undefined
   );
 }

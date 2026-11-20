@@ -43,17 +43,37 @@ export function isIsoDate(v: unknown): v is string {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
 }
 
+/**
+ * Remembered conversions. The engine walks the same few hundred days many times
+ * for one screen (the forecast re-runs itself against her past periods, the
+ * doctor checks walk every cycle), and parsing a date string is most of that
+ * cost. Both maps hold pure answers, so a hit is always right; they are
+ * emptied when they grow past DAY_MEMO_LIMIT so they can never grow unbounded.
+ */
+const DAY_MEMO_LIMIT = 20_000;
+const numberOfDay = new Map<string, number>();
+const dayOfNumber = new Map<number, string>();
+
 /** Whole days since 1970-01-01 for a calendar day. NaN for a malformed string. */
 export function dayNumber(iso: string): number {
+  const known = numberOfDay.get(iso);
+  if (known !== undefined) return known;
   const m = ISO.exec(iso);
-  if (!m) return NaN;
-  return Math.round(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / DAY_MS);
+  const n = m ? Math.round(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / DAY_MS) : NaN;
+  if (numberOfDay.size >= DAY_MEMO_LIMIT) numberOfDay.clear();
+  numberOfDay.set(iso, n);
+  return n;
 }
 
 /** The calendar day `n` whole days after 1970-01-01. */
 export function fromDayNumber(n: number): string {
+  const known = dayOfNumber.get(n);
+  if (known !== undefined) return known;
   const dt = new Date(n * DAY_MS);
-  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+  const iso = `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+  if (dayOfNumber.size >= DAY_MEMO_LIMIT) dayOfNumber.clear();
+  dayOfNumber.set(n, iso);
+  return iso;
 }
 
 /** `iso` moved by `n` days (negative moves back). */

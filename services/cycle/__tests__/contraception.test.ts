@@ -142,7 +142,8 @@ describe("logging only", () => {
     const onMethod = view(data(hormonal, [...short, period("2026-07-20", 9)])).allNotes;
     expect(onMethod.map((n) => n.id)).toEqual(["long_bleeding"]);
     expect(onMethod[0].title).toBe("A long bleed");
-    expect(onMethod[0].body).toContain("more than 7 days");
+    // FIGO 2018 since 2026-11-20: more than 8 days (it was 7).
+    expect(onMethod[0].body).toContain("more than 8 days");
     expect(onMethod[0].body).not.toMatch(/\bperiod\b/);
     // 80 days without bleeding is no "missed period" on a method.
     expect(view(data(hormonal, [period("2026-07-27")])).allNotes.map((n) => n.id)).not.toContain("missed");
@@ -279,7 +280,9 @@ describe("what leaves the phone, and where it is kept", () => {
 
   it("exports the answer with everything else", () => {
     const csv = cycleCsv(data(settings(method("hormonal", "2026-09-01"))));
-    expect(csv.split("\n")[0]).toBe("type,date,end,flow,symptoms,mood,energy,ovulation_test,detail,kept_from_day,discharge");
+    expect(csv.split("\n")[0]).toBe(
+      "type,date,end,flow,symptoms,mood,energy,ovulation_test,detail,kept_from_day,discharge,bleeding_answer,temperature_c",
+    );
     expect(csv).toContain("contraception,2026-09-01,,,,,,,hormonal contraception: yes");
   });
 
@@ -303,8 +306,8 @@ describe("the words match the behaviour", () => {
   it("the reading page says what a 'yes' does, with the threshold the notes use", () => {
     expect(page).toContain("logs your bleeding and stops predicting it");
     expect(page).toContain("no fertile window");
-    // ./flags raises a long bleed past 7 days, on any method.
-    expect(page).toContain("more than seven days");
+    // ./flags raises a long bleed past 8 days (FIGO 2018, since 2026-11-20), on any method.
+    expect(page).toContain("more than 8 days");
     expect(page).toContain("Nothing in welliva is, or replaces, contraception");
   });
 

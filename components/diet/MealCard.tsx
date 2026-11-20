@@ -40,7 +40,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { MealCheckbox } from "./MealCheckbox";
 import { CARD_SPRING, mealEnter, mealExit, mealLayout } from "./mealAnimations";
-import type { MealActionHandlers, MealListItem } from "./types";
+import { servingsLabel, type MealActionHandlers, type MealListItem } from "./types";
 
 const ACTION_W = 92;
 const OPEN_X = -ACTION_W;
@@ -72,7 +72,7 @@ export interface MealCardProps extends MealActionHandlers {
   index: number;
 }
 
-export function MealCard({ item, index, onToggle, onSwap }: MealCardProps) {
+export function MealCard({ item, index, onToggle, onSwap, onPortion }: MealCardProps) {
   const { colors } = useColors();
   const tone = toneFor(item.mealType);
   const completed = item.completed;
@@ -204,6 +204,29 @@ export function MealCard({ item, index, onToggle, onSwap }: MealCardProps) {
                 >
                   {slot.toUpperCase()}
                 </Mono>
+                {/* Planned servings ("1½×"), when the plan sized the dish. */}
+                {!completed && item.servings != null && item.servings !== 1 ? (
+                  <Mono size={11} tracking={0.4} color={colors.textTertiary}>
+                    {servingsLabel(item.servings)}
+                  </Mono>
+                ) : null}
+                {/* Eaten: how much, one tap to change ("I had half"). */}
+                {completed && onPortion ? (
+                  <Pressable
+                    onPress={() => onPortion(item.mealType, item.snackIndex)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Portion eaten: ${
+                      (item.portion ?? 1) === 1 ? "as planned" : servingsLabel(item.portion ?? 1)
+                    }. Change how much you had`}
+                    style={[styles.portionPill, { borderColor: alpha(tone, 0.5) }]}
+                  >
+                    <Mono size={11} tracking={0.4} color={tone}>
+                      {servingsLabel(item.portion ?? 1)}
+                    </Mono>
+                    <Ionicons name="chevron-down" size={10} color={tone} />
+                  </Pressable>
+                ) : null}
                 {item.smartSwap && !completed && (
                   <View style={[styles.smartHint, { borderColor: alpha(colors.primary, 0.45) }]}>
                     <AILogoIcon size={10} />
@@ -316,6 +339,15 @@ const styles = StyleSheet.create({
   body: { flex: 1, minWidth: 0 },
   labelRow: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
   slot: { flexShrink: 1 },
+  portionPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+  },
   smartHint: {
     flexDirection: "row",
     alignItems: "center",

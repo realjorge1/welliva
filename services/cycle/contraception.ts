@@ -25,7 +25,8 @@
  */
 
 import { daysBetween, formatDay, minDate } from "./dates";
-import type { Contraception, ContraceptionAnswer } from "./types";
+import { DEFAULT_PACK_DAYS, PILL_LINE } from "./pill";
+import type { Contraception, ContraceptionAnswer, ContraceptionMethod } from "./types";
 
 /** A "yes" taken back in fewer days than this restarts nothing. See the header. */
 export const CORRECTION_DAYS = 3;
@@ -66,13 +67,33 @@ export function answerContraception(
   if (prev?.answer === "hormonal" && daysBetween(prev.since, today) >= CORRECTION_DAYS) {
     restartFrom = bleedStart ? minDate(bleedStart, today) : today;
   }
+  // Which method belongs to a "yes" only: changing the answer drops it.
   return { answer, since: today, restartFrom };
+}
+
+/**
+ * "Which one?" — the follow-up to a "yes" (./pill). Changes nothing about where
+ * her history counts from: she is on a method either way. Returns `prev` when
+ * nothing changed, and nothing at all unless she said yes.
+ */
+export function answerMethod(
+  prev: Contraception | null,
+  method: ContraceptionMethod,
+  packDays: number = DEFAULT_PACK_DAYS,
+): Contraception | null {
+  if (!prev || prev.answer !== "hormonal") return prev;
+  const pack = method === "combined_pill" ? (packDays === 91 ? 91 : 28) : undefined;
+  if (prev.method === method && prev.packDays === pack) return prev;
+  const next: Contraception = { ...prev, method };
+  if (pack) next.packDays = pack;
+  else delete next.packDays;
+  return next;
 }
 
 /** What her answer is doing right now, for under the question in settings. Null: nothing to add. */
 export function contraceptionNote(c: Contraception | null): string | null {
   if (!c) return null;
-  if (c.answer === "hormonal") return HORMONAL_LINE;
+  if (c.answer === "hormonal") return c.method === "combined_pill" ? PILL_LINE : HORMONAL_LINE;
   if (c.restartFrom) {
     return `Predictions start fresh from ${formatDay(c.restartFrom)}. Bleeds before that were on a method, so they're kept but not counted.`;
   }
@@ -85,7 +106,9 @@ export function contraceptionForDoctor(c: Contraception | null): string | null {
   const noted = formatDay(c.since, { year: true });
   switch (c.answer) {
     case "hormonal":
-      return `Hormonal contraception: yes (noted in welliva on ${noted}). Bleeding on it is logged, not predicted.`;
+      return c.method === "combined_pill"
+        ? `Hormonal contraception: yes, the combined pill, ${c.packDays ?? DEFAULT_PACK_DAYS}-day pack (noted in welliva on ${noted}). Bleeds are logged; the next is shown from the pack schedule only.`
+        : `Hormonal contraception: yes${c.method === "other" ? ", a method other than the combined pill" : ""} (noted in welliva on ${noted}). Bleeding on it is logged, not predicted.`;
     case "none":
       return c.restartFrom
         ? `Hormonal contraception: stopped (noted in welliva on ${noted}). Cycle figures count from ${formatDay(c.restartFrom, { year: true })}.`

@@ -18,9 +18,12 @@
  * content genuinely is around half a kilo. That is precisely why naive
  * week-over-week deltas mislead users, and why the filter beats them.
  *
- * MISSING DAYS NEED NO SPECIAL HANDLING — skip the update step and the predict
- * step still runs. That matters enormously for real users, who log
- * inconsistently, and it's the main reason a filter beats a regression here.
+ * MISSING DAYS: a day with no weigh-in skips the update step and the predict
+ * step still runs. A day with no KNOWN intake (unlogged, or only partly) moves
+ * the weight by nothing and widens its uncertainty (Q_UNKNOWN_INTAKE) — never
+ * "she ate her burn", which is what the first version silently assumed. That
+ * matters enormously for real users, who log inconsistently, and it's the main
+ * reason a filter beats a regression here.
  */
 
 import type { KalmanState } from "./types";
@@ -36,6 +39,18 @@ const Q_WEIGHT = 0.01;
  * error we're correcting. ~4 lets it move ~2 kcal/day, ~60 kcal over a month.
  */
 const Q_TDEE = 4;
+
+/**
+ * Extra weight uncertainty for a day whose intake is UNKNOWN (kg²/day,
+ * σ ≈ 0.15 kg). The predict step can't move the weight by an intake it never
+ * saw, and the old code silently assumed she ate exactly her burn — so a week
+ * unlogged read as a week at maintenance, and any change the scale showed got
+ * pinned on her metabolism. Instead the weight simply becomes less certain:
+ * ±0.15 kg a day is about ±1,150 kcal of unknown intake, the real spread of a
+ * day nobody wrote down. The next weigh-in then corrects the weight more and
+ * the burn less, which is the honest split.
+ */
+export const Q_UNKNOWN_INTAKE = 0.15 * 0.15;
 
 /** Observation noise: daily scale reading variance (kg²). σ = 0.5 kg. */
 const R_SCALE = 0.25;
@@ -100,8 +115,10 @@ export function step(
     w += (intakeKcal - e) / KCAL_PER_KG;
   }
 
-  // P ← F P Fᵀ + Q, with F = [[1, f], [0, 1]]
-  const n00 = p00 + f * p10 + f * p01 + f * f * p11 + Q_WEIGHT;
+  // P ← F P Fᵀ + Q, with F = [[1, f], [0, 1]]. An unknown-intake day adds
+  // its own weight noise rather than an assumed intake (Q_UNKNOWN_INTAKE).
+  const n00 =
+    p00 + f * p10 + f * p01 + f * f * p11 + Q_WEIGHT + (intakeKcal === null ? Q_UNKNOWN_INTAKE : 0);
   const n01 = p01 + f * p11;
   const n10 = p10 + f * p11;
   const n11 = p11 + Q_TDEE;
@@ -183,6 +200,9 @@ export function read(state: KalmanState): TdeeReading {
  * This helper exists so the distinction is enforced at the call site rather than
  * left to whoever writes the copy.
  */
+// The production path to targets is services/nutrition/adaptiveTargets, which
+// blends this with the formula by certainty, clamps it and asks her first;
+// this raw gate stays as the model-level rule its tests pin.
 export function tdeeForTargets(state: KalmanState, mifflinFallback: number): number {
   const r = read(state);
   return r.confident ? r.learnedTdee : mifflinFallback;
@@ -202,11 +222,19 @@ export function tdeeDisclosure(
   if (Math.abs(diff) < 75) return null; // not different enough to be worth saying
   // Weigh-ins, not weeks: `observations` counts scale readings, so dividing by
   // 7 told someone who weighs weekly, 14 readings in, they'd been tracked for 2
-  // weeks. And no "so I've been aiming at it": targets are still built from the
-  // signup formula (tdeeForTargets has no caller), so claiming otherwise was untrue.
+  // weeks.
+  //
+  // The last sentence has to be true whether or not she has accepted the
+  // number. Since 2026-11-20 a confident estimate can become her target — but
+  // only through a one-tap offer she answers (services/nutrition/
+  // adaptiveTargets), so the true thing to say is exactly that. "Still start
+  // from the signup estimate" stopped being true the moment she taps yes.
+  // And "going by what you've logged": the figure blends her body and her
+  // logging habits, so it is never stated as her metabolism alone.
   return (
     `Across ${r.observations} weigh-ins and what you've logged eating, your ` +
     `maintenance looks closer to ${r.learnedTdee} than the ${mifflinEstimate} I ` +
-    `estimated at signup. Your daily targets still start from that signup estimate.`
+    `estimated at signup, going by what you've logged. I only change your daily ` +
+    `targets to match if you say yes.`
   );
 }

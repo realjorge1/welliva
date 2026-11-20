@@ -29,6 +29,7 @@ import { reconcileTargetsVersion } from "../../services/nutrition/TargetsVersion
 import {
   KEYS,
   currentWeekStart,
+  readJSON,
   todayDate,
   writeJSON,
   writeString,
@@ -51,6 +52,19 @@ import {
 import { resolveTrainingPrefs, spacedDays } from "../../services/training";
 import { describeAdaptations } from "../../services/WorkoutGenerator";
 import { track } from "../../services/telemetry";
+import { loadNoisyWeightDates } from "../../services/cycle/noisyWeightDays";
+import { emitBodyMeasurement } from "../../health-os/timeline/writers";
+import { refitPlansToTargets } from "../../services/nutrition/retargetPlans";
+import {
+  answerOffer,
+  loadOffers,
+  saveOffer,
+  type TargetOffer,
+} from "../../services/nutrition/targetOffers";
+import { makeMove, planWeightFollow, recordMove } from "../../services/nutrition/weightRetarget";
+
+/** Background failures log once (never warn): the numbers are an enhancement here. */
+let followWeightLogged = false;
 
 interface Params {
   userBio: UserBio | null;
@@ -411,13 +425,100 @@ export function useProfileState({
     });
   }, []);
 
+  /**
+   * New numbers that did NOT come from her editing the profile (her weight
+   * trend, an offer she accepted): store them and refit the plans the gentle
+   * way — never touching a meal she has already eaten (retargetPlans).
+   */
+  const applyTargetsChange = useCallback(
+    async (nextBio: UserBio, targets: NutritionTargets) => {
+      setUserBio(nextBio);
+      setNutritionTargets(targets);
+      await writeJSON(KEYS.USER_BIO, nextBio);
+      await refitPlansToTargets(nextBio, targets, todayDate());
+      await refreshTodayDiet();
+    },
+    [setUserBio, setNutritionTargets, refreshTodayDiet],
+  );
+
+  /**
+   * Her numbers follow her weight TREND (services/nutrition/weightRetarget):
+   * only a real move is applied, each one with its own once-shown sentence,
+   * and losing fast for three weeks stages one calm offer to ease up. Reads
+   * the bio from storage, not the closure, so a weigh-in moments after an edit
+   * is judged against the edit.
+   */
+  const followWeight = useCallback(
+    async (logs: BodyLogEntry[]) => {
+      try {
+        const bio = await readJSON<UserBio | null>(KEYS.USER_BIO, null);
+        if (!bio) return;
+        const goals = await readJSON<UserGoals | null>(KEYS.USER_GOALS, null);
+        const today = todayDate();
+        const plan = planWeightFollow({
+          bio,
+          goalWeightKg: goals?.targetWeightKg,
+          readings: logs.map((l) => ({ date: l.date, kg: l.weightKg, explicit: l.explicit })),
+          noisyDates: await loadNoisyWeightDates(today),
+          offers: await loadOffers(),
+          today,
+          now: new Date(),
+        });
+        if (plan.decision && plan.move) {
+          await recordMove(plan.move);
+          await applyTargetsChange(plan.decision.nextBio, plan.decision.after);
+        }
+        if (plan.offer) await saveOffer(plan.offer);
+      } catch (e) {
+        if (!followWeightLogged) {
+          followWeightLogged = true;
+          console.log("followWeight: numbers left as they were", e);
+        }
+      }
+    },
+    [applyTargetsChange],
+  );
+
+  /**
+   * Her answer to a one-tap offer (pace guard, learned burn, activity level).
+   * Accepting writes the one field the offer names, then the same gentle refit
+   * and a once-shown record of the move; declining is remembered either way.
+   */
+  const answerTargetOffer = useCallback(
+    async (offer: TargetOffer, accept: boolean) => {
+      await answerOffer(offer.id, accept ? "accepted" : "declined");
+      if (!accept) return;
+      const bio = await readJSON<UserBio | null>(KEYS.USER_BIO, null);
+      if (!bio) return;
+      const nextBio: UserBio = { ...bio, ...offer.change };
+      const before = calculateNutritionTargets(bio);
+      const after = calculateNutritionTargets(nextBio);
+      const kind = offer.id === "learned" ? "learned" : offer.id === "activity" ? "activity" : "pace_guard";
+      const sentence =
+        `You chose the new numbers: ${before.calories.toLocaleString()} → ` +
+        `${after.calories.toLocaleString()} kcal. ${offer.message}`;
+      await recordMove({ ...makeMove(kind, todayDate(), before, after, sentence, new Date()), seen: true });
+      await applyTargetsChange(nextBio, after);
+    },
+    [applyTargetsChange],
+  );
+
   /** Record a weigh-in (one entry per day; re-logging today overwrites). */
-  const logBodyMeasurement = useCallback(async (entry: BodyLogEntry) => {
-    const next = await addBodyLog(entry);
-    setBodyLogs(next);
-    // A weigh-in keeps the day — only when it IS today's (checked inside).
-    void creditCommitment(entry.date);
-  }, []);
+  const logBodyMeasurement = useCallback(
+    async (entry: BodyLogEntry) => {
+      const next = await addBodyLog(entry);
+      setBodyLogs(next);
+      // The learning model's input: the weigh-in, on the timeline (one per
+      // date; a re-weigh corrects it). Never throws.
+      void emitBodyMeasurement(entry);
+      // A weigh-in keeps the day — only when it IS today's (checked inside).
+      void creditCommitment(entry.date);
+      // An explicit Profile edit sets the numbers itself (updateUserBio); a
+      // scale reading lets her numbers follow the trend.
+      if (!entry.explicit) void followWeight(next);
+    },
+    [followWeight],
+  );
 
   /** Set the target body weight the Transformation Forecast aims at. */
   const setTargetWeight = useCallback(
@@ -440,5 +541,7 @@ export function useProfileState({
     updateGoals,
     logBodyMeasurement,
     setTargetWeight,
+    followWeight,
+    answerTargetOffer,
   };
 }

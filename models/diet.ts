@@ -50,6 +50,19 @@ export interface ScheduledMeal {
   cuisine?: "Nigerian" | "Asian" | "Western" | "Mediterranean" | "Universal";
   isConsumed: boolean;
   consumedAt?: string; // ISO timestamp
+  /**
+   * How many servings of the authored dish this plan serves (½ to 2). Absent =
+   * 1. The macro ranges above are ALREADY scaled by it (services/nutrition/
+   * portionSolver); the name is never changed, because a meal's identity is
+   * slot + name. Shown as "1½ ×" where the meal is listed.
+   */
+  servings?: number;
+  /**
+   * How much of the planned meal she says she ate, once ticked (0.5 = half).
+   * Absent = 1, as planned. Mirrors the intake ledger's line, which is the
+   * record the day's calories are counted from (IntakeLedger.portion).
+   */
+  portionEaten?: number;
 }
 
 /**
@@ -147,6 +160,16 @@ export interface DietHistoryEntry {
   // of consumed snack times that day. Absent for meals not eaten or for days
   // logged before this was added; consumers must tolerate absence.
   mealTimes?: Partial<Record<MealType, number>>;
+  /**
+   * How much of the day was logged, judged at close (services/nutrition/
+   * dayStatus): "complete" (she said so), "inferred" (3 meals or 70% of her
+   * target), "partial", or "none". Absent on days closed before 2026-11-20;
+   * those are inferred on read. Averages and trends count only complete and
+   * inferred days.
+   */
+  loggedness?: "none" | "partial" | "complete" | "inferred";
+  /** The calorie target the day was judged against, kcal. */
+  targetCalories?: number;
 }
 
 /**

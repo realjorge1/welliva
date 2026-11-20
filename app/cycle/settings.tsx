@@ -42,14 +42,25 @@ import {
   CONTRACEPTION_QUESTION,
   contraceptionNote,
   cycleCsv,
+  DEFAULT_PACK_DAYS,
   doctorSummary,
+  METHOD_OPTIONS,
+  METHOD_QUESTION,
+  PACK_OPTIONS,
+  TEMPERATURE_LOGGING,
   type ContraceptionAnswer,
+  type ContraceptionMethod,
 } from "@/services/cycle";
 import { useSyncStatus } from "@/services/sync/useSyncStatus";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import { Pressable, Share, StyleSheet, Switch, View } from "react-native";
+
+const TEMPERATURE_UNIT_OPTIONS: { value: "C" | "F"; label: string }[] = [
+  { value: "C", label: "°C" },
+  { value: "F", label: "°F" },
+];
 
 /** Behind "Lock my cycle" when it's on (components/cycle/CycleLockGate). */
 export default function CycleSettingsScreen() {
@@ -143,6 +154,24 @@ function CycleSettingsBody() {
               />
             }
           />
+          {/* Waits for the privacy wording (services/cycle/bbt TEMPERATURE_LOGGING). */}
+          {TEMPERATURE_LOGGING && settings.showFertileWindow && !hormonal ? (
+            <ListRow
+              icon="thermometer"
+              tone={palette.fertile}
+              title="Temperature in"
+              subtitle="How you type and see it. It's kept the same way either way."
+              right={
+                <ChipGrid<"C" | "F">
+                  options={TEMPERATURE_UNIT_OPTIONS}
+                  selected={(v) => settings.temperatureUnit === v}
+                  onToggle={(v) => void cycle.updateSettings({ temperatureUnit: v })}
+                  tone={palette.fertile}
+                  size="sm"
+                />
+              }
+            />
+          ) : null}
         </ListGroup>
 
         <Card padding="lg" style={styles.lengths}>
@@ -157,6 +186,30 @@ function CycleSettingsBody() {
             tone={palette.period}
             size="sm"
           />
+          {/* "Which one?" — only after a yes. The combined pill gets a pack-schedule forecast (services/cycle/pill). */}
+          {settings.contraception?.answer === "hormonal" ? (
+            <View style={styles.methodFollowUp}>
+              <AppText variant="footnote" weight="600">
+                {METHOD_QUESTION}
+              </AppText>
+              <ChipGrid<ContraceptionMethod>
+                options={METHOD_OPTIONS}
+                selected={(v) => settings.contraception?.method === v}
+                onToggle={(v) => void cycle.setContraceptionMethod(v, settings.contraception?.packDays)}
+                tone={palette.period}
+                size="sm"
+              />
+              {settings.contraception?.method === "combined_pill" ? (
+                <ChipGrid<"28" | "91">
+                  options={PACK_OPTIONS}
+                  selected={(v) => (settings.contraception?.packDays ?? DEFAULT_PACK_DAYS) === Number(v)}
+                  onToggle={(v) => void cycle.setContraceptionMethod("combined_pill", Number(v))}
+                  tone={palette.period}
+                  size="sm"
+                />
+              ) : null}
+            </View>
+          ) : null}
           {methodNote ? (
             <AppText variant="footnote" color="secondary" style={styles.methodNote}>
               {methodNote}
@@ -470,6 +523,7 @@ const styles = StyleSheet.create({
   lengthsHint: { marginTop: 2, marginBottom: Spacing.sm },
   lengthRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md, paddingVertical: Spacing.sm },
   methodNote: { marginTop: Spacing.md },
+  methodFollowUp: { marginTop: Spacing.md, gap: Spacing.sm },
   footnote: { marginTop: Spacing.sm, marginLeft: Spacing.xs },
 });
 

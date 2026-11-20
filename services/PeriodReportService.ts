@@ -30,6 +30,7 @@ import {
 } from "../models/mealPlan";
 import type { BodyLogEntry } from "../models/workout";
 import { KEYS, readJSON, writeJSON } from "./OfflineStorage";
+import { countsAsDay } from "./nutrition/dayStatus";
 
 const SLOTS: MealType[] = ["breakfast", "lunch", "dinner", "snack"];
 
@@ -131,11 +132,16 @@ export function buildPeriodReport(input: BuildReportInput): PeriodReport {
   }
 
   // --- Nutrition averages -------------------------------------------------
+  // Whole days only (said so, or inferred — services/nutrition/dayStatus): an
+  // unlogged day is unknown, not 0 kcal, and a one-snack day is not a day.
   const withMacros = dates
     .map((d) => byDate.get(d))
     .filter(
       (e): e is DietHistoryEntry =>
-        !!e && e.totalMeals > 0 && e.consumedCalories !== undefined,
+        !!e &&
+        e.totalMeals > 0 &&
+        e.consumedCalories !== undefined &&
+        countsAsDay(e, input.targets?.calories ?? period.baseline.targetCalories ?? null),
     );
 
   const avgConsumed = {

@@ -25,7 +25,7 @@ import { readEntryValence } from "@/services/gozlin/mind";
 import { calorieFloor } from "@/services/NutritionService";
 import type { IntakeRecord } from "@/services/nutrition/IntakeLedger";
 import { getFoodLogRange } from "@/services/nutrition/foodLogStore";
-import { hasRecordedIntake } from "@/services/nutrition/recordedIntake";
+import { countsAsDay } from "@/services/nutrition/dayStatus";
 import { KEYS, readJSON } from "@/services/OfflineStorage";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useState } from "react";
@@ -65,9 +65,10 @@ const toMoods = (list: readonly { date: string; valence?: number; mood?: number 
 
 export function HealthNotes({ style }: { style?: StyleProp<ViewStyle> }) {
   const { colors } = useColors();
-  const { bodyLogs, userBio, userGoals } = useProfile();
+  const { bodyLogs, userBio, userGoals, nutritionTargets } = useProfile();
   const { dietHistory } = useNutrition();
   const { currentDate } = useSystem();
+  const intakeTarget = nutritionTargets?.calories ?? null;
 
   const [moods, setMoods] = useState<Mood[]>([]);
   const [pain, setPain] = useState<PainMemory[]>([]);
@@ -101,8 +102,10 @@ export function HealthNotes({ style }: { style?: StyleProp<ViewStyle> }) {
 
   const notes = useMemo<HealthNote[]>(() => {
     if (!userBio || !dismissed) return [];
+    // WHOLE days only (services/nutrition/dayStatus): a one-snack day must
+    // never read as "eating under your floor" in a note meant for a doctor.
     const intake: Record<string, number> = {};
-    for (const e of dietHistory) if (hasRecordedIntake(e)) intake[e.date] = e.consumedCalories ?? 0;
+    for (const e of dietHistory) if (countsAsDay(e, intakeTarget)) intake[e.date] = e.consumedCalories ?? 0;
     const all = healthNotes({
       today: currentDate,
       bio: userBio,
@@ -115,7 +118,7 @@ export function HealthNotes({ style }: { style?: StyleProp<ViewStyle> }) {
       pain,
     });
     return visibleNotes(all, dismissed, currentDate);
-  }, [userBio, userGoals?.targetWeightKg, bodyLogs, dietHistory, slots, moods, pain, dismissed, currentDate]);
+  }, [userBio, userGoals?.targetWeightKg, bodyLogs, dietHistory, slots, moods, pain, dismissed, currentDate, intakeTarget]);
 
   if (!notes.length) return null;
 

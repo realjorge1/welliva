@@ -33,7 +33,8 @@
  */
 
 import { addDays, formatRange } from "./dates";
-import type { CycleToday, Prediction } from "./predict";
+import type { PillForecast } from "./pill";
+import { givenWindow, type CycleToday, type Prediction } from "./predict";
 import type { CycleSettings } from "./types";
 import { nextTripOverlap, TRIP_REMINDER_DAYS, type LifeMoment } from "./upcoming";
 
@@ -60,7 +61,12 @@ export function reminderCopy(
   kind: CycleReminderKind,
   discreet: boolean,
   prediction: Prediction | null,
+  /** On the combined pill the check-in asks about a bleed, never a period (./pill). */
+  bleed = false,
 ): { title: string; body: string } {
+  if (bleed && !discreet && kind === "checkin") {
+    return { title: "Has your bleed started?", body: "Answer below to log it. No need to open the app." };
+  }
   if (kind === "trip") {
     return { title: "A heads-up for your trip", body: "Something to plan around. Open welliva to see." };
   }
@@ -77,7 +83,7 @@ export function reminderCopy(
       return {
         title: "Period likely soon",
         body: prediction
-          ? `Likely ${formatRange(prediction.earliest, prediction.latest)}. Worth having what you need with you.`
+          ? `Likely ${formatRange(givenWindow(prediction).earliest, givenWindow(prediction).latest)}. Worth having what you need with you.`
           : "It's likely in the next few days.",
       };
     case "checkin":
@@ -97,27 +103,42 @@ export function planCycleReminders(input: {
   now: Date;
   /** Her trips and events (./lifeMoments). Absent: no trip reminder. */
   moments?: readonly LifeMoment[];
+  /** On the combined pill: the bleed her pack schedule expects (./pill). */
+  pill?: PillForecast | null;
 }): PlannedReminder[] {
   const { settings, status, prediction, now } = input;
   if (!settings.enabled || !settings.remindersOn) return [];
-  // Logging-only modes have nothing to remind about: no likely day to check in
-  // after, and no usual length to ask "has it ended?" against.
-  if (status.mode === "pregnancy" || status.mode === "menopause" || status.mode === "hormonal") return [];
 
   const out: PlannedReminder[] = [];
-  const push = (kind: CycleReminderKind, at: Date) => {
+  const push = (kind: CycleReminderKind, at: Date, bleed = false) => {
     if (at.getTime() <= now.getTime()) return;
-    out.push({ id: CYCLE_REMINDER_ID(kind), kind, at, ...reminderCopy(kind, settings.discreet, prediction) });
+    out.push({ id: CYCLE_REMINDER_ID(kind), kind, at, ...reminderCopy(kind, settings.discreet, prediction, bleed) });
   };
+
+  // The combined pill: only the one "has it started?", once, the morning after
+  // the pack's window — no heads-up, no trip, no "has it ended?" (./pill).
+  if (status.mode === "hormonal") {
+    const pill = input.pill;
+    if (pill && !pill.missed && !status.inPeriod) push("checkin", atLocal(addDays(pill.latest, 1), 9), true);
+    return out;
+  }
+  // The other logging-only modes have nothing to remind about: no likely day to
+  // check in after, and no usual length to ask "has it ended?" against.
+  if (status.mode === "pregnancy" || status.mode === "menopause") return [];
 
   const trip = nextTripOverlap({ prediction, status, moments: input.moments ?? [] });
   const tripDay = trip ? addDays(trip.start, -TRIP_REMINDER_DAYS) : null;
 
   if (status.predicting && prediction && !status.inPeriod) {
+    // Against the window she was GIVEN (./predict givenWindow): once she is
+    // late the forecast rolls forward every day, and a check-in timed off it
+    // would be laid again each morning, a day later, and never fire. Timed off
+    // the given window, the one check-in has already had its morning.
+    const given = givenWindow(prediction);
     // Two cycle reminders on one morning is one too many; the trip's is the specific one.
-    const headsUpDay = addDays(prediction.earliest, -2);
+    const headsUpDay = addDays(given.earliest, -2);
     if (headsUpDay !== tripDay) push("headsup", atLocal(headsUpDay, 9));
-    push("checkin", atLocal(addDays(prediction.likely, 1), 9));
+    push("checkin", atLocal(addDays(given.likely, 1), 9));
   }
   if (status.inPeriod && status.periodOpen && !status.periodStale && status.expectedEnd) {
     push("ended", atLocal(addDays(status.expectedEnd, 1), 19));

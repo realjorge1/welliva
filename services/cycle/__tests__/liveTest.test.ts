@@ -49,20 +49,20 @@ describe("a positive test this cycle", () => {
     expect(p.fromTest).toBe("2026-10-06");
     expect(p.ovulation).toBe("2026-10-07");
     expect(p.likely).toBe(addDays("2026-10-07", DEFAULT_LUTEAL_DAYS));
-    // On the textbook 14, the luteal phase's own 11–16 day spread: ±3.
+    // On the textbook 13, the luteal phase's own 11–16 day spread: ±3.
     expect(p.halfWidth).toBe(TEST_HALF_WIDTH.default);
-    expect([p.earliest, p.latest]).toEqual(["2026-10-18", "2026-10-24"]);
+    expect([p.earliest, p.latest]).toEqual(["2026-10-17", "2026-10-23"]);
   });
 
   it("a late ovulation moves the period later, and the fertile window with it", () => {
     const p = predict(input(days(positive("2026-10-12"))))!;
     expect(p.ovulation).toBe("2026-10-13");
-    expect(p.likely).toBe("2026-10-27");
-    expect([p.earliest, p.latest]).toEqual(["2026-10-24", "2026-10-30"]);
+    expect(p.likely).toBe("2026-10-26");
+    expect([p.earliest, p.latest]).toEqual(["2026-10-23", "2026-10-29"]);
     expect([p.fertileStart, p.fertileEnd]).toEqual(["2026-10-08", "2026-10-14"]);
     // The dial's circle is this cycle's expected length, so the top is still the likely start.
     const s = todayStatus(input(days(positive("2026-10-12"))), p);
-    expect(s.ringDays).toBe(daysBetween(LAST_START, "2026-10-27"));
+    expect(s.ringDays).toBe(daysBetween(LAST_START, "2026-10-26"));
     // Her usual length still spaces the cycles after this one.
     expect(p.cycleLength).toBe(28);
   });
@@ -82,9 +82,10 @@ describe("a positive test this cycle", () => {
     expect(p.halfWidth).toBe(TEST_HALF_WIDTH.personal);
   });
 
-  it("uses the same anchor as the luteal learning: the last positive in the cycle", () => {
+  it("uses the same anchor as the luteal learning: the FIRST positive of the surge (2026-11-20; was the last)", () => {
     const p = predict(input(days(positive("2026-10-05"), positive("2026-10-06"))))!;
-    expect(p.fromTest).toBe("2026-10-06");
+    expect(p.fromTest).toBe("2026-10-05");
+    expect(p.ovulation).toBe("2026-10-06");
   });
 
   it("ignores a test before day 6 of the cycle: too early to be this cycle's surge", () => {
@@ -112,11 +113,11 @@ describe("a positive test this cycle", () => {
   });
 
   it("a late period now counts from the new window", () => {
-    // Ovulation on day 8 puts the window at 11–17 Oct; on the 20th she's 3 days past it.
+    // Ovulation on day 8 puts the window at 10–16 Oct; on the 20th she's 4 days past it.
     const logs = days(positive("2026-09-29"));
     const late = input(logs, undefined, "2026-10-20");
     const s = todayStatus(late, predict(late));
-    expect(s.lateBy).toBe(3);
+    expect(s.lateBy).toBe(4);
     expect(s.phase).toBe("late");
     // The calendar alone would still be inside its window.
     const plain = input({}, undefined, "2026-10-20");

@@ -21,8 +21,10 @@
  * exists, the log is device-only.
  */
 
-import { readString, remove, writeJSON } from "../OfflineStorage";
+import { readString, remove, todayDate, writeJSON } from "../OfflineStorage";
 import { addDays } from "./dates";
+import { normalizeEpisodes } from "./episodes";
+import { typicalPeriodLength } from "./predict";
 import {
   isEmptyDayLog,
   normalizeDays,
@@ -76,7 +78,7 @@ function parse(raw: string | null, fallback: unknown): unknown {
   }
 }
 
-export async function loadCycleData(): Promise<CycleData> {
+export async function loadCycleData(today: string = todayDate()): Promise<CycleData> {
   const [ls, lp, ld, ss, sp, sd] = await Promise.all([
     readString(CYCLE_LOCAL_KEYS.settings),
     readString(CYCLE_LOCAL_KEYS.periods),
@@ -106,11 +108,42 @@ export async function loadCycleData(): Promise<CycleData> {
   await Promise.all(leftovers.map((k) => remove(k)));
 
   const normalized = normalizeSettings(parse(local ? ls : ss, null));
+  const settings = { ...normalized, backupOn: !local };
+  const periods = await tidyPeriods(normalizePeriods(parse(local ? lp : sp, [])), settings, today);
   return {
-    settings: { ...normalized, backupOn: !local },
-    periods: normalizePeriods(parse(local ? lp : sp, [])),
+    settings,
+    periods,
     days: normalizeDays(parse(local ? ld : sd, {})),
   };
+}
+
+/** Stable text of a period list, whatever order it was stored in. */
+function canonical(list: readonly PeriodEpisode[]): string {
+  return JSON.stringify([...list].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
+}
+
+/**
+ * Put the period list into its one canonical shape on every load — which is
+ * also every read after a sync adopted another phone's copy — and write it back
+ * ONLY when that changed something. The same period logged on two phones
+ * arrives as two episodes with two ids (the merge is by id), and until
+ * normalizeEpisodes folds them it reads as a 0-day "cycle".
+ *
+ * Two phones can't ping-pong over it: normalizeEpisodes keeps the earlier start,
+ * then the lower id, so both phones fold the same duplicate into the same
+ * survivor and the same tombstone; the merge then only picks the later stamp of
+ * identical contents, and the next load finds nothing to change.
+ */
+async function tidyPeriods(list: PeriodEpisode[], settings: CycleSettings, today: string): Promise<PeriodEpisode[]> {
+  if (!list.length) return list;
+  const tidy = normalizeEpisodes(list, today, typicalPeriodLength(list, settings).days, new Date().toISOString());
+  if (canonical(tidy) === canonical(list)) return list;
+  // Written the way the provider writes periods: by stamp, then id.
+  const ordered = [...tidy].sort((a, b) =>
+    a.updatedAt !== b.updatedAt ? (a.updatedAt < b.updatedAt ? -1 : 1) : a.id < b.id ? -1 : 1,
+  );
+  await savePeriods(ordered, settings.backupOn);
+  return ordered;
 }
 
 /** Drop day logs past retention, and cleared days past their tombstone window. */

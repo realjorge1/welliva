@@ -48,6 +48,65 @@ export function liveEpisodes(list: readonly PeriodEpisode[]): PeriodEpisode[] {
     );
 }
 
+/**
+ * Shorter than this start-to-start is not a cycle. A bleed that starts this
+ * soon after a period began is bleeding between periods (or one period logged
+ * twice), never the start of the next one (./predict, ./bleeding).
+ */
+export const MIN_COUNTED_CYCLE = 15;
+
+export interface EpisodeSplit {
+  /** The episodes that are periods, oldest first. Every reader that means "a period" uses these. */
+  periods: PeriodEpisode[];
+  /**
+   * Episodes that start fewer than MIN_COUNTED_CYCLE days after the previous
+   * PERIOD began: bleeding between periods, whatever opened them (a mid-cycle
+   * flow written as a period by builds before 2026-11-20, or a "Period started"
+   * tap). Kept in her log as she wrote it; read as between-period bleeding.
+   */
+  strays: PeriodEpisode[];
+}
+
+/**
+ * Periods and strays, DERIVED on every read: nothing is rewritten, so data
+ * synced from an older build reads correctly without a migration.
+ *
+ * Two live episodes whose starts are within CONTINUATION_GAP_DAYS + 1 days of
+ * each other are ONE period (the same period logged on two phones, before
+ * normalizeEpisodes has tidied the list): the earlier start, and the later of
+ * the two ends.
+ */
+export function splitEpisodes(list: readonly PeriodEpisode[]): EpisodeSplit {
+  const periods: PeriodEpisode[] = [];
+  const strays: PeriodEpisode[] = [];
+  for (const ep of liveEpisodes(list)) {
+    const prev = periods[periods.length - 1];
+    if (prev) {
+      const apart = daysBetween(prev.start, ep.start);
+      if (apart <= CONTINUATION_GAP_DAYS + 1) {
+        const end = prev.end === null || ep.end === null ? null : prev.end > ep.end ? prev.end : ep.end;
+        if (end !== prev.end) {
+          const merged: PeriodEpisode = { ...prev, end };
+          if (!end) delete merged.endEstimated;
+          periods[periods.length - 1] = merged;
+        }
+        continue;
+      }
+      if (apart < MIN_COUNTED_CYCLE) {
+        strays.push(ep);
+        continue;
+      }
+    }
+    periods.push(ep);
+  }
+  return { periods, strays };
+}
+
+/** Is `ep` one of the strays (bleeding between periods) in `list`? */
+export function isStray(list: readonly PeriodEpisode[], ep: PeriodEpisode): boolean {
+  return splitEpisodes(list).strays.some((s) => s.id === ep.id);
+}
+
 export interface ResolvedEnd {
   /** The last day of the period, inclusive. */
   end: string;

@@ -26,7 +26,9 @@ import { AppState } from "react-native";
 
 import { lifeContext, memory, runDailyLearning, signalsCoordinator } from "../../health-os";
 import { loadNoisyWeightDates } from "../../services/cycle/noisyWeightDays";
-import { maintenanceTdee } from "../../services/NutritionService";
+import { calculateNutritionTargets, maintenanceTdee } from "../../services/NutritionService";
+import { stageLearnedOffer } from "../../services/nutrition/adaptiveTargets";
+import { stageActivityOffer } from "../../services/nutrition/activityCalibration";
 import type { NutritionTargets } from "../../models/nutrition";
 import type { PlanState } from "../../models/planState";
 import type { UserBio, UserGoals } from "../../models/user";
@@ -115,11 +117,18 @@ export function useDayChange({
         // `nutrition.day.closed` event for it to judge against.
         if (userBio) {
           try {
-            await runDailyLearning({
+            const learned = await runDailyLearning({
               mifflinTdee: maintenanceTdee(userBio),
               weightKg: userBio.weightKg,
               noisyWeightDates: await loadNoisyWeightDates(today),
+              targetKcal: calculateNutritionTargets(userBio).calories,
             });
+            // Once it has earned it, the model's number becomes a one-tap
+            // offer (never a silent change) — services/nutrition/adaptiveTargets.
+            await stageLearnedOffer(userBio, learned, today);
+            // Her logged training vs her stated activity level — one step,
+            // one tap, and silent once the model above is confident.
+            await stageActivityOffer(userBio, today);
           } catch {
             // Learning is an enhancement, never a gate: a failure here must not
             // strand the rest of the rollover (diet regeneration, hydration

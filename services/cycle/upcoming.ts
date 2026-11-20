@@ -37,13 +37,9 @@ export const UPCOMING_HORIZON_DAYS = 60;
 export const UPCOMING_HEADS_UP_DAYS = 3;
 /** The one phone reminder fires this many days before a trip starts (owner's decision). */
 export const TRIP_REMINDER_DAYS = 2;
-/**
- * The period after next is less certain than the next: two cycles' spreads add
- * up, so its window is √2 wider than the next one's.
- */
-export const SECOND_WINDOW_WIDEN = Math.SQRT2;
-/** The widest window ./predict ever gives. */
-const MAX_HALF_WIDTH = 10;
+// The period after next is less certain than the next: its window is the
+// prediction's own `afterNext` (one more cycle of her spread, ./predict
+// projectAhead), the same one the phone calendar's rough mark uses.
 
 /** The life events it reads. Stable storage strings, from Life Context. */
 export const MOMENT_KINDS = ["travel", "vacation", "holiday", "wedding", "competition", "exam_period"] as const;
@@ -104,13 +100,10 @@ interface PeriodWindow {
   latest: string;
 }
 
+/** The next period's window, and the one after it as the prediction projects it (./predict afterNext). */
 function windowsOf(p: Prediction): PeriodWindow[] {
-  const half = Math.min(MAX_HALF_WIDTH, Math.round(p.halfWidth * SECOND_WINDOW_WIDEN));
-  const likely = addDays(p.likely, p.cycleLength);
-  return [
-    { which: "next", earliest: p.earliest, likely: p.likely, latest: p.latest },
-    { which: "after", earliest: addDays(likely, -half), likely, latest: addDays(likely, half) },
-  ];
+  const next: PeriodWindow = { which: "next", earliest: p.earliest, likely: p.likely, latest: p.latest };
+  return p.afterNext ? [next, { which: "after", ...p.afterNext }] : [next];
 }
 
 interface Overlap {

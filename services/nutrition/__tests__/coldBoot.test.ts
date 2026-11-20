@@ -261,6 +261,42 @@ describe("every way a day can be served", () => {
     expect((await getTodayDiet()).source).toBe("weekly");
   });
 
+  it("2026-11-20: servings, a portion and a rewrite — nothing she ate is lost", async () => {
+    // A 1½× lunch (the solver sized it), eaten at HALF of that, then the day
+    // is rewritten under the tick (a regenerate / sync adopt), then relaunch.
+    const lunch = { ...meal("Jollof Rice with Chicken", 500), mealType: "lunch" as const };
+    const sized: ScheduledMeal = {
+      ...lunch,
+      servings: 1.5,
+      calories: { min: 750, max: 750 },
+      proteinG: { min: 60, max: 60 },
+    };
+    await saveDaySchedule(day({ lunch: sized }));
+    await markMealConsumed(TODAY, "lunch", undefined, 0.5);
+
+    // The rewrite: same dish (identity is slot + name), tick and portion gone.
+    await saveDaySchedule(day({ lunch: { ...sized, isConsumed: false } }));
+    const { schedule, totals } = await coldBoot();
+
+    expect(ticked(schedule, "lunch")).toBe(true);
+    expect(schedule!.lunch!.portionEaten).toBe(0.5);
+    expect(schedule!.lunch!.servings).toBe(1.5);
+    expect(totals.calories).toBe(375); // 750 planned × ½ eaten
+    expect(totals.proteinG).toBe(30);
+  });
+
+  it("2026-11-20: a day marked complete is closed as complete by the overnight sweep", async () => {
+    const yesterday = shift(-1);
+    await saveDaySchedule({ ...day({ breakfast: meal("Oats & berries", 420) }), date: yesterday });
+    await markMealConsumed(yesterday, "breakfast");
+    const { setDayComplete } = await import("../dayStatus");
+    await setDayComplete(yesterday, true);
+    await sweepClosedDays(TODAY);
+    const { getDietHistory } = await import("../../ScheduleService");
+    const row = (await getDietHistory()).find((h) => h.date === yesterday);
+    expect(row?.loggedness).toBe("complete");
+  });
+
   it("a day closed by the overnight sweep still reports its intake", async () => {
     const yesterday = shift(-1);
     await saveDaySchedule({

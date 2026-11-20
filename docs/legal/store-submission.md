@@ -109,6 +109,11 @@ rides inside it. What to check when you next open the form:
 - *Purposes* stay **App functionality**; add **Personalization** only if you want
   the lighter-session feature counted separately (not required).
 - *Deletion*: the in-app "Delete all cycle data" and account deletion both erase it.
+- **Resting temperature and "which pill" (policy v7, 20 November 2026).** The
+  cycle log can now hold a temperature on waking (fertile-window users only) and,
+  after a "yes" to hormonal contraception, whether it's the combined pill and its
+  pack length. Both are still *Health info* (user-entered, optional, synced with
+  the log, erased with it): no new row, no new purpose. Neither reaches the coach.
 - **Sharing.** The cycle day, predicted next period and today's log leave the
   phone for the AI coach ONLY when the user switches on "Let Gozlin see your
   cycle" (off by default). Anthropic is a service provider processing on our

@@ -1,12 +1,15 @@
 /**
  * services/cycle/flags.ts — "worth mentioning to a doctor", never a diagnosis.
  *
- * The thresholds are the ones agreed with the owner (2026-10-15), drawn from the
- * standard clinical descriptions of a typical cycle:
+ * ONE STANDARD, FIGO 2018, held in ./standards (the owner's choice,
+ * 2026-11-20; before that, length and bleeding used 21–35 and 7 days while
+ * regularity used FIGO):
  *
- *   · cycles under 21 days, or over 35 — flagged only when it happens in TWO of
- *     the last six cycles. One odd month is a month, not a pattern.
- *   · bleeding for more than 7 days, in any of the last three periods she ended
+ *   · cycles under 24 days, or over 38 (21 and 45 under the age of 20) —
+ *     flagged only when it happens in TWO of the last six cycles. One odd month
+ *     is a month, not a pattern. A long gap she hasn't answered about counts
+ *     toward "long" as if it were one real cycle, and the note says so.
+ *   · bleeding for more than 8 days, in any of the last three bleeds she ended
  *     herself (an assumed end is never evidence)
  *   · big month-to-month swings: shortest-to-longest spread across her recent
  *     cycles beyond 7 days (ages 26–41) or 9 days (other ages) — the FIGO 2018
@@ -51,8 +54,10 @@ import {
   heavyPeriods,
   ofTheRecent,
   ofYourLast,
+  strayBleedDays,
 } from "./doctorChecks";
-import { liveEpisodes } from "./episodes";
+import { liveEpisodes, splitEpisodes } from "./episodes";
+import { cycleRangeFor, MAX_NORMAL_BLEED_DAYS, regularityLimit } from "./standards";
 import {
   lutealFor,
   POPULATION_PERIOD_DAYS,
@@ -98,10 +103,9 @@ export interface NotesInput {
   since?: string | null;
 }
 
-/** FIGO 2018: a regular cycle varies by ≤7 days at 26–41, ≤9 days otherwise. */
-export function regularityLimit(age: number | null | undefined): number {
-  return age != null && age >= 26 && age <= 41 ? 7 : 9;
-}
+// The thresholds live in ./standards (one medical standard, FIGO 2018); this
+// re-export keeps the name where older readers look for it.
+export { regularityLimit } from "./standards";
 
 /** No period this long, outside pregnancy, postpartum and menopause, is worth raising. ./late quotes it. */
 export const MISSED_AFTER_DAYS = 90;
@@ -120,43 +124,65 @@ export function doctorNotes(input: NotesInput): DoctorNote[] {
   const recent = hormonal ? [] : cycles.filter((c) => c.status === "counted").slice(-STATS_WINDOW);
   const m = recent.length;
 
-  const short = recent.filter((c) => c.length < 21);
+  // One standard (./standards): FIGO 2018's 24–38 days, or 21–45 under 20.
+  const range = cycleRangeFor(input.profile?.age);
+  const short = recent.filter((c) => c.length < range.min);
   if (short.length >= 2) {
     notes.push({
       id: "short_cycles",
       title: "Some short cycles",
-      body: `${short.length} of your last ${m} cycles were shorter than 21 days (${list(
+      body: `${short.length} of your last ${m} cycles were shorter than ${range.min} days (${list(
         short.map((c) => c.length),
       )} days). That's worth mentioning to a doctor. It often has a simple explanation, and they can tell you.`,
       signature: short.map((c) => c.start).join(","),
     });
   }
 
-  const long = recent.filter((c) => c.length > 35);
+  // A long gap she hasn't answered about stays out of the forecast (one skipped
+  // log would distort it), but here it counts as if it were one real cycle — or
+  // a real shift to long cycles would never reach this note. Said so.
+  const longPool = hormonal
+    ? []
+    : cycles.filter((c) => c.status === "counted" || c.status === "gap").slice(-STATS_WINDOW);
+  const long = longPool.filter((c) => c.length > range.max);
   if (long.length >= 2) {
+    const unsure = long.filter((c) => c.status === "gap" || c.assumedLong).length;
+    const asIf =
+      unsure === 0
+        ? ""
+        : unsure === 1
+          ? " That includes a long gap you haven't told me about, counted as if that was one real cycle."
+          : ` That includes ${unsure} long gaps you haven't told me about, each counted as if it was one real cycle.`;
     notes.push({
       id: "long_cycles",
       title: "Some long cycles",
-      body: `${long.length} of your last ${m} cycles were longer than 35 days (${list(
+      body: `${long.length} of your last ${longPool.length} cycles were longer than ${range.max} days (${list(
         long.map((c) => c.length),
-      )} days). That's worth mentioning to a doctor. It's common, and it's worth knowing why.`,
+      )} days).${asIf} That's worth mentioning to a doctor. It's common, and it's worth knowing why.`,
       signature: long.map((c) => c.start).join(","),
     });
   }
 
-  const ended = liveEpisodes(input.episodes)
+  // How LONG she bled, so every bleed she ended herself counts — a stray
+  // (bleeding between periods, ./episodes splitEpisodes) included. Only the
+  // wording knows the difference.
+  const { periods, strays } = splitEpisodes(input.episodes);
+  const ended = [...periods, ...strays]
     .filter((e) => e.end && !e.endEstimated)
+    .sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0))
     .slice(-3);
-  const longBleeds = ended.filter((e) => daysBetween(e.start, e.end as string) + 1 > 7);
+  const longBleeds = ended.filter((e) => daysBetween(e.start, e.end as string) + 1 > MAX_NORMAL_BLEED_DAYS);
   if (longBleeds.length) {
     const latest = longBleeds[longBleeds.length - 1];
     const days = daysBetween(latest.start, latest.end as string) + 1;
+    const between = strays.some((s) => s.id === latest.id);
+    const what = hormonal ? "Your bleed" : between ? "Bleeding" : "Your period";
     notes.push({
       id: "long_bleeding",
-      title: hormonal ? "A long bleed" : "A long period",
+      title: hormonal || between ? "A long bleed" : "A long period",
       body: hormonal
-        ? `Your bleed from ${formatDay(latest.start)} lasted ${days} days. Bleeding for more than 7 days is worth mentioning to a doctor, or to whoever prescribes your contraception.`
-        : `Your period from ${formatDay(latest.start)} lasted ${days} days. Bleeding for more than 7 days is worth mentioning to a doctor.`,
+        ? `${what} from ${formatDay(latest.start)} lasted ${days} days. Bleeding for more than ${MAX_NORMAL_BLEED_DAYS} days is worth mentioning to a doctor, or to whoever prescribes your contraception.`
+        : `${what} from ${formatDay(latest.start)} lasted ${days} days. Bleeding for more than ${MAX_NORMAL_BLEED_DAYS} days is worth mentioning to a doctor.`,
       signature: longBleeds.map((e) => `${e.start}:${e.end}`).join(","),
     });
   }
@@ -181,8 +207,10 @@ export function doctorNotes(input: NotesInput): DoctorNote[] {
     }
   }
 
+  const last = periods.length ? periods[periods.length - 1] : null;
+  // With menopause on the profile ANY bleeding is the event, stray or not.
   const live = liveEpisodes(input.episodes);
-  const last = live.length ? live[live.length - 1] : null;
+  const lastBleed = live.length ? live[live.length - 1] : null;
 
   if (mode === "normal" && last) {
     // An unended period this old is a forgotten tap, so it counts from its start too.
@@ -259,7 +287,13 @@ export function doctorNotes(input: NotesInput): DoctorNote[] {
   // between bleeds is common, and in the logging-only life stages.
   const between =
     mode === "normal" || mode === "postpartum"
-      ? betweenPeriods(cycles, spans, days, lutealFor(cycles, days).days)
+      ? betweenPeriods(
+          cycles,
+          spans,
+          days,
+          lutealFor(cycles, days, !!input.profile?.conditions?.includes("pcos")).days,
+          strayBleedDays(input.episodes, input.since ?? null),
+        )
       : null;
   if (between) {
     notes.push({
@@ -272,27 +306,43 @@ export function doctorNotes(input: NotesInput): DoctorNote[] {
     });
   }
 
-  if (mode === "menopause" && last && daysBetween(last.start, today) <= 60) {
+  if (mode === "menopause" && lastBleed && daysBetween(lastBleed.start, today) <= 60) {
     notes.push({
       id: "menopause_bleeding",
       title: "Bleeding with menopause on your profile",
       body: "If it's been a year or more since your last period, any bleeding after that is worth getting checked by a doctor soon, not just at your next routine visit.",
-      signature: last.start,
+      signature: lastBleed.start,
     });
   }
 
   return notes;
 }
 
-/** The notes she hasn't dismissed, or whose evidence has changed since she did. */
+/**
+ * The notes she hasn't dismissed, or whose evidence has GROWN since she did. A
+ * signature is a comma-joined list of the evidence behind a note; a note whose
+ * evidence is all among what she dismissed stays dismissed — so when fewer of
+ * her cycles qualify (the move to FIGO 2018 on 2026-11-20, say), a note she
+ * closed never comes back for no reason, and a new long cycle still brings it back.
+ */
 export function visibleNotes(
   notes: readonly DoctorNote[],
   settings: Pick<CycleSettings, "dismissedFlags">,
 ): DoctorNote[] {
-  return notes.filter((n) => settings.dismissedFlags[n.id] !== n.signature);
+  return notes.filter((n) => {
+    const dismissed = settings.dismissedFlags[n.id];
+    if (dismissed === undefined) return true;
+    if (dismissed === n.signature) return false;
+    const seen = new Set(dismissed.split(","));
+    return !n.signature.split(",").every((t) => seen.has(t));
+  });
 }
 
-/** Gaps that look like a missed log — asked about, never averaged in. */
+/**
+ * Gaps that look like a missed log, still waiting on her answer: the ones kept
+ * out of the average, and the ones counted because they make a pattern
+ * (`assumedLong`) — so she can always say she missed a log or was on a break.
+ */
 export function gapQuestions(cycles: readonly CycleRecord[]): CycleRecord[] {
-  return cycles.filter((c) => c.status === "gap");
+  return cycles.filter((c) => c.status === "gap" || c.assumedLong);
 }
